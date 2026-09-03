@@ -13,6 +13,7 @@ import "strings"
 // is to reveal message shapes nobody anticipated. The report therefore carries
 // a review notice, and Dan reviews it before sharing.
 func MaskProse(s string) string {
+	s = maskQuotedSpans(s)
 	fields := strings.Fields(s)
 	for i, tok := range fields {
 		fields[i] = maskToken(tok)
@@ -35,6 +36,39 @@ func MaskComponent(s string) string {
 		return "<addr>"
 	}
 	return s
+}
+
+// maskQuotedSpans replaces every double-quoted span -- quotes included --
+// with a single "<q>" placeholder before the message is split into words. A
+// per-token quote check alone only replaces the words touching the quote
+// marks, leaving the words between them -- the actual content -- untouched,
+// which defeats the rule's intent of keeping quoted strings out of the
+// report. An unterminated quote masks to the end of the string, the
+// conservative direction, matching readQuoted in internal/logfmt/fields.go,
+// which already consumes the remainder on an unterminated quote.
+//
+// Deliberately scoped to double quotes: a single quote is an English
+// contraction far more often than the start of a quoted phrase, and treating
+// it as a span opener would erase the rest of the line from the first
+// apostrophe onward. maskToken's existing per-token check still catches a
+// lone single quote.
+func maskQuotedSpans(s string) string {
+	var b strings.Builder
+	for {
+		start := strings.IndexByte(s, '"')
+		if start < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:start])
+		b.WriteString("<q>")
+		rest := s[start+1:]
+		end := strings.IndexByte(rest, '"')
+		if end < 0 {
+			return b.String()
+		}
+		s = rest[end+1:]
+	}
 }
 
 func maskToken(t string) string {
