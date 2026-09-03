@@ -206,6 +206,26 @@ func TestUIHookBuilderMapsFields(t *testing.T) {
 	}
 }
 
+// UIHookBuilder shares its dedup cache (dedupCache) with ReportedBuilder: a
+// repeated RPC value across two spans must land in a single cache entry
+// rather than being cloned per span.
+func TestUIHookBuilderDedupsRepeatedValues(t *testing.T) {
+	in := uiLineWith("2026-09-04T09:15:00.000000+10:00", "apply_complete", 1, true) + "\n" +
+		uiLineWith("2026-09-04T09:15:01.000000+10:00", "apply_complete", 2, true) + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, in, &b)
+	got := b.Spans()
+	if len(got) != 2 {
+		t.Fatalf("got %d spans, want 2", len(got))
+	}
+	if got[0].RPC != "create" || got[1].RPC != "create" {
+		t.Fatalf("RPC = %q, %q, want both %q", got[0].RPC, got[1].RPC, "create")
+	}
+	if n := len(b.kept); n != 3 { // RPC "create", Provider "aws", ResourceType "aws_instance"
+		t.Errorf("dedup cache holds %d entries, want 3", n)
+	}
+}
+
 // Retained ResourceType/Provider/RPC strings must not alias the scanner's
 // per-line buffer, exactly as ReportedBuilder.retain guarantees, and must
 // survive the scanner reusing its buffers for later lines.

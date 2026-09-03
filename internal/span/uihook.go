@@ -52,7 +52,7 @@ func isCompletionType(t string) bool {
 // logfmt.Sink and can be passed to logfmt.Scan directly.
 type UIHookBuilder struct {
 	spans     []Span
-	kept      map[string]string // dedup cache for retained ResourceType/Provider/RPC strings, as ReportedBuilder.retain
+	kept      dedupCache // dedup cache for retained ResourceType/Provider/RPC strings, shared with ReportedBuilder
 	malformed uint64
 
 	base     time.Time // first parseable @timestamp seen, any line
@@ -63,27 +63,6 @@ type UIHookBuilder struct {
 // structured lines, delivered via Structured, but every sink passed to
 // logfmt.Scan must satisfy Sink.
 func (b *UIHookBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {}
-
-// retain returns a copy of s that does not alias the scanner's per-line
-// buffer, deduplicated exactly as ReportedBuilder.retain does: ResourceType,
-// Provider and RPC are drawn from a tiny vocabulary, so caching makes
-// retained allocation proportional to distinct values rather than to spans.
-func (b *UIHookBuilder) retain(s string) string {
-	if s == "" {
-		return ""
-	}
-	if got, ok := b.kept[s]; ok {
-		return got
-	}
-	c := strings.Clone(s)
-	if len(b.kept) < maxDistinctValues {
-		if b.kept == nil {
-			b.kept = make(map[string]string)
-		}
-		b.kept[c] = c
-	}
-	return c
-}
 
 // relativeMs parses ts as RFC3339Nano -- the format Terraform's
 // structured-output stream uses -- and returns its offset in milliseconds
@@ -155,9 +134,9 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		EndMs:        endMs,
 		DurationMs:   durationMs,
 		StartClamped: clamped,
-		RPC:          b.retain(ul.Hook.Action),
-		Provider:     b.retain(ul.Hook.Resource.ImpliedProvider),
-		ResourceType: b.retain(ul.Hook.Resource.ResourceType),
+		RPC:          b.kept.retain(ul.Hook.Action),
+		Provider:     b.kept.retain(ul.Hook.Resource.ImpliedProvider),
+		ResourceType: b.kept.retain(ul.Hook.Resource.ResourceType),
 		Address:      strings.Clone(ul.Hook.Resource.Addr),
 		Fidelity:     FidelityUIReported,
 	})
