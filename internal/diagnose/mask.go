@@ -45,7 +45,12 @@ func MaskComponent(s string) string {
 // which defeats the rule's intent of keeping quoted strings out of the
 // report. An unterminated quote masks to the end of the string, the
 // conservative direction, matching readQuoted in internal/logfmt/fields.go,
-// which already consumes the remainder on an unterminated quote.
+// which already consumes the remainder on an unterminated quote -- and, like
+// readQuoted, a backslash inside a span escapes the following byte, so an
+// escaped quote never terminates the span. Without that, each escaped quote
+// is treated as an independent delimiter and the text between two of them --
+// exactly what a nested-JSON provider response body is full of -- is wrongly
+// classified as outside any span and written straight through.
 //
 // Deliberately scoped to double quotes: a single quote is an English
 // contraction far more often than the start of a quoted phrase, and treating
@@ -62,12 +67,22 @@ func maskQuotedSpans(s string) string {
 		}
 		b.WriteString(s[:start])
 		b.WriteString("<q>")
-		rest := s[start+1:]
-		end := strings.IndexByte(rest, '"')
-		if end < 0 {
+		closed := false
+		i := start + 1
+		for ; i < len(s); i++ {
+			if s[i] == '\\' {
+				i++
+				continue
+			}
+			if s[i] == '"' {
+				closed = true
+				break
+			}
+		}
+		if !closed {
 			return b.String()
 		}
-		s = rest[end+1:]
+		s = s[i+1:]
 	}
 }
 
