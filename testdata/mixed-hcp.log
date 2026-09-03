@@ -1,0 +1,13 @@
+# SYNTHESISED to model an HCP Terraform raw run log (hclog interleaved with plan output). Not from a real run.
+2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=2634bc46-bb66-3d22-528d-d2eaf8165f52 tf_resource_type=aws_subnet tf_rpc=PlanResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=12 @module=sdk.proto
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+  # aws_subnet.example will be created
+  + resource "aws_subnet" "example" {
+      + id = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+2022-12-15T00:16:21.000Z [TRACE] statemgr.Filesystem: unlocking terraform.tfstate using fcntl flock

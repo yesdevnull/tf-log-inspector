@@ -1,0 +1,6 @@
+# source: https://github.com/hashicorp/terraform-provider-aws/issues/36974 (verbatim; values were redacted by the reporter, shape is real)
+2024-02-13T12:11:28.330+0100 [DEBUG] provider.terraform-provider-aws_v5.5.0_x5: HTTP Response Received: @module=aws aws.operation=UpdateProject
+  http.response.body=
+  | {"__type":"Inva*************tion","message":"Caller is an end user and not allowed to mutate system tags."}
+   http.response.header.x_amzn_requestid=1d77924f-****3ca61 tf_provider_addr=registry.terraform.io/hashicorp/aws
+2024-02-13T12:11:28.331+0100 [TRACE] provider.terraform-provider-aws_v5.5.0_x5: Received downstream response: diagnostic_warning_count=0 tf_proto_version=5.3 tf_rpc=ApplyResourceChange tf_req_duration_ms=10710 @module=sdk.proto

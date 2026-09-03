@@ -1,0 +1,9 @@
+# source: https://gist.github.com/Nilsils/7c0e60d4d200f81f3f9a0a66a9fe37ee (verbatim)
+2026-08-29T10:34:43.123+0200 [INFO]  Terraform version: 1.16.0
+2026-08-29T10:34:43.124+0200 [DEBUG] using github.com/hashicorp/go-tfe v1.108.0
+2026-08-29T10:34:43.124+0200 [INFO]  CLI command args: []string{"version"}
+Terraform v1.16.0
+on linux_amd64
+2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete
+2026-08-29T10:34:43.151+0200 [TRACE] building graph for terraform dependencies
+2026-08-29T10:34:43.220+0200 [TRACE] statemgr.Filesystem: unlocking terraform.tfstate using fcntl flock
