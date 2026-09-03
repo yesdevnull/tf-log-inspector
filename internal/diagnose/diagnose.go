@@ -317,7 +317,7 @@ func (r Report) Render(w io.Writer) error {
 		structured := r.Stats.PhysicalLines > 0 &&
 			float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
 		if structured {
-			fmt.Fprintf(b, "  This is a structured-output (terraform.ui JSON) log.\n")
+			fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON).\n")
 			fmt.Fprintf(b, "  It carries per-resource timings, which this version\n")
 			fmt.Fprintf(b, "  does not yet parse. Structured output is info level\n")
 			fmt.Fprintf(b, "  only, so it never contains provider RPC entries. For\n")

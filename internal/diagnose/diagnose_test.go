@@ -317,7 +317,7 @@ func TestReportExplainsPredominantlyStructuredLog(t *testing.T) {
 		t.Fatal("TierUsable = true for a structured-output log")
 	}
 	out := render(t, r)
-	if !strings.Contains(out, "structured-output (terraform.ui JSON) log") {
+	if !strings.Contains(out, "structured output (terraform.ui JSON)") {
 		t.Errorf("report does not explain the structured-output log:\n%s", out)
 	}
 	if strings.Contains(out, "no provider RPC entries") {
