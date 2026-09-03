@@ -1,5 +1,7 @@
 package logfmt
 
+import "strings"
+
 // OverflowID is returned once the id space is exhausted. Component
 // cardinality is driven by log content -- Terraform core uses resource
 // addresses as message prefixes -- so exhaustion is reachable on a large plan
@@ -32,9 +34,16 @@ func (i *Interner) Intern(s string) uint16 {
 		i.overflow++
 		return OverflowID
 	}
+	// s is a substring of the caller's per-line buffer -- Sink.Entry's
+	// strings are valid only for the duration of the call -- so retaining it
+	// uncloned would pin the whole source line alive for as long as this id
+	// is interned. Clone once, on first insertion, the same pattern used by
+	// span.ReportedBuilder.retain, span.Sniffer.trackRequestID and
+	// diagnose.Collector.bumpFieldKey for the same hazard.
 	id := uint16(len(i.strs))
-	i.strs = append(i.strs, s)
-	i.ids[s] = id
+	c := strings.Clone(s)
+	i.strs = append(i.strs, c)
+	i.ids[c] = id
 	return id
 }
 

@@ -180,3 +180,45 @@ func TestMaskComponent(t *testing.T) {
 		t.Errorf("MaskComponent kept-case failed: %q", got)
 	}
 }
+
+// --- Fix 1: splitComponent accepts any whitespace-free byte sequence, so
+// MaskComponent is the only remaining guard against a high-entropy or
+// oversized token masquerading as a component name.
+
+func TestMaskComponentMasksOverlongComponent(t *testing.T) {
+	// The exact leak line from the HCP capture: an agent working directory
+	// carrying a run id, longer than logfmt.MaxKeyLen (64 bytes).
+	leak := "/home/tfc-agent/.tfc-agent/component/terraform/runs/run-SECRET123/config"
+	if len(leak) <= 64 {
+		t.Fatalf("test fixture is only %d bytes, must exceed MaxKeyLen to exercise the length cap", len(leak))
+	}
+	got := MaskComponent(leak)
+	if got != "<other>" {
+		t.Errorf("MaskComponent(overlong leak line) = %q, want <other>", got)
+	}
+	if strings.Contains(got, "SECRET123") || strings.Contains(got, "run-") {
+		t.Errorf("MaskComponent(overlong leak line) = %q, still resembles the path", got)
+	}
+}
+
+func TestMaskComponentMasksForbiddenCharset(t *testing.T) {
+	for _, in := range []string{
+		`component"withquote`,
+		`component[0]`,
+		`~/home/component`,
+	} {
+		if got := MaskComponent(in); got != "<other>" {
+			t.Errorf("MaskComponent(%q) = %q, want <other>", in, got)
+		}
+	}
+}
+
+func TestMaskComponentKeepsGenuinePathShapedNames(t *testing.T) {
+	// backend/local and dag/walk are genuine Terraform core component names.
+	// Keeping "/" unmasked is deliberate: it is what makes them survive.
+	for _, in := range []string{"backend/local", "dag/walk"} {
+		if got := MaskComponent(in); got != in {
+			t.Errorf("MaskComponent(%q) = %q, want it kept unmasked", in, got)
+		}
+	}
+}

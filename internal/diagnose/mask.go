@@ -2,7 +2,11 @@
 // contents.
 package diagnose
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+)
 
 // MaskProse replaces the parts of a message that carry content -- quoted
 // strings, filesystem paths, resource addresses and long identifiers -- with
@@ -21,12 +25,21 @@ func MaskProse(s string) string {
 	return strings.Join(fields, " ")
 }
 
-// MaskComponent masks a component name that looks like a resource address.
-// Terraform core writes messages prefixed with the address of the resource
-// being worked on, so component names are content too.
+// MaskComponent masks a component name that looks like a resource address, is
+// too long to plausibly be a genuine component name, or contains a character
+// no real Terraform component uses. splitComponent (internal/logfmt/header.go)
+// accepts any whitespace-free byte sequence before the first colon -- unlike a
+// field key, a component name carries no charset guarantee of its own -- so
+// this is the component equivalent of logfmt.ValidKey's length cap, applied
+// after the fact rather than during parsing so a withheld shape can still be
+// counted. "/" is deliberately allowed through: "backend/local" and
+// "dag/walk" are genuine Terraform component names.
 func MaskComponent(s string) string {
 	if s == "" {
 		return s
+	}
+	if len(s) > logfmt.MaxKeyLen || strings.ContainsAny(s, `"[]~`) {
+		return "<other>"
 	}
 	if strings.HasPrefix(s, "provider.") {
 		// Plugin binary names carry no customer content.

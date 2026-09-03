@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -71,7 +70,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	var builder span.ReportedBuilder
 
 	started := time.Now()
-	stats, err := logfmt.Scan(bufio.NewReaderSize(f, 1<<20), &comps, collector, sniffer, &builder)
+	// Scan wraps r in its own 256KB bufio.Reader (internal/logfmt/scan.go), so
+	// wrapping f again here would only add a second, redundant buffer.
+	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", path, err)
 	}
@@ -80,13 +81,25 @@ func run(args []string, stdout, stderr io.Writer) error {
 	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), collector, &comps, elapsed)
 
 	w := stdout
+	var out *os.File
 	if *outPath != "" {
-		out, err := os.Create(*outPath)
+		out, err = os.Create(*outPath)
 		if err != nil {
 			return fmt.Errorf("creating %s: %w", *outPath, err)
 		}
-		defer out.Close()
 		w = out
 	}
-	return report.Render(w)
+
+	renderErr := report.Render(w)
+	if out == nil {
+		return renderErr
+	}
+	// Check Close's error too: an ENOSPC or similar surfacing only at close
+	// would otherwise silently truncate the one artefact meant to leave the
+	// machine. A Render error takes priority -- Close is still attempted, but
+	// its error is only returned when Render itself succeeded.
+	if closeErr := out.Close(); closeErr != nil && renderErr == nil {
+		return fmt.Errorf("closing %s: %w", *outPath, closeErr)
+	}
+	return renderErr
 }

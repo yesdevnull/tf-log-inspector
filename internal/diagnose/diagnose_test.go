@@ -273,6 +273,156 @@ func TestReportRelabelsDurationFieldsAsResponseOnly(t *testing.T) {
 	}
 }
 
+// --- Final fix wave, Fix 1: COMPONENTS obeys both disclosure invariants. ---
+//
+// splitComponent (internal/logfmt/header.go) accepts any whitespace-free
+// byte sequence before the first colon, so a component name carries no
+// charset guarantee of its own the way a field key does. Two things must
+// hold: components are disclosed only when they recur (the same rule field
+// keys and templates already follow), and MaskComponent masks anything that
+// is too long or carries a character no real component name uses.
+
+func TestReportWithholdsComponentSeenOnce(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] diagnose_test_component: a message\n"
+	r := build(t, in)
+	out := render(t, r)
+	if strings.Contains(out, "diagnose_test_component") {
+		t.Errorf("component seen once was printed:\n%s", out)
+	}
+	if r.WithheldComponents != 1 {
+		t.Errorf("WithheldComponents = %d, want 1", r.WithheldComponents)
+	}
+	if !strings.Contains(out, "1 component shapes seen only once (withheld)") {
+		t.Errorf("report missing withheld component count:\n%s", out)
+	}
+}
+
+func TestReportPrintsComponentSeenOnTwoEntries(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] backend/local: doing work\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] backend/local: doing more work\n" +
+		"2022-12-15T00:16:21.000Z [TRACE] dag/walk: visiting a vertex\n" +
+		"2022-12-15T00:16:21.100Z [TRACE] dag/walk: visiting another vertex\n"
+	out := render(t, build(t, in))
+	// backend/local and dag/walk are genuine Terraform component names, and
+	// "/" is deliberately kept unmasked -- they must survive verbatim.
+	if !strings.Contains(out, "backend/local") {
+		t.Errorf("recurring component backend/local missing from report:\n%s", out)
+	}
+	if !strings.Contains(out, "dag/walk") {
+		t.Errorf("recurring component dag/walk missing from report:\n%s", out)
+	}
+}
+
+func TestReportMasksRecurringOverlongComponent(t *testing.T) {
+	// Two distinct secrets, both longer than logfmt.MaxKeyLen, so masking
+	// (not withholding) is what must catch this -- both mask to the same
+	// "<other>" bucket, which is what lets it recur and print.
+	in := "2026-01-01T00:00:00.000Z [ERROR] /home/tfc-agent/.tfc-agent/component/terraform/runs/run-SECRET123/config: plugin crashed\n" +
+		"2026-01-01T00:00:01.000Z [ERROR] /home/tfc-agent/.tfc-agent/component/terraform/runs/run-DIFFERENTSECRET999/config: plugin crashed\n"
+	out := render(t, build(t, in))
+	if strings.Contains(out, "SECRET123") || strings.Contains(out, "DIFFERENTSECRET999") || strings.Contains(out, "tfc-agent") {
+		t.Fatalf("report leaked an overlong component:\n%s", out)
+	}
+	if !strings.Contains(out, "<other>") {
+		t.Errorf("report does not show the masked bucket for a recurring overlong component:\n%s", out)
+	}
+}
+
+func TestReportExactLeakLineYieldsNothingResemblingThePath(t *testing.T) {
+	// The exact reproduction from the review report.
+	in := "2026-01-01T00:00:00.000Z [ERROR] /home/tfc-agent/.tfc-agent/component/terraform/runs/run-SECRET123/config: plugin crashed\n"
+	out := render(t, build(t, in))
+	for _, leak := range []string{"SECRET123", "tfc-agent", "run-", "component/terraform"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("report leaked %q:\n%s", leak, out)
+		}
+	}
+}
+
+// --- Final fix wave, Fix 2: the byte count is honestly labelled. ---
+
+func TestReportLabelsContinuationBytesHonestly(t *testing.T) {
+	// testdata/multiline-body.log is 100% well-formed hclog, yet almost 40%
+	// of it is continuation lines -- calling that "non-hclog" was the bug.
+	in := "2024-02-13T12:11:28.330+0100 [DEBUG] provider.aws: HTTP Response Received: @module=aws\n" +
+		"  http.response.body=\n" +
+		`  | {"a":"b"}` + "\n" +
+		"2024-02-13T12:11:28.331+0100 [TRACE] provider.aws: Received downstream response: tf_rpc=ApplyResourceChange tf_req_duration_ms=10710\n"
+	out := render(t, build(t, in))
+	if !strings.Contains(out, "continuation bytes") {
+		t.Errorf("report does not label the figure as continuation bytes:\n%s", out)
+	}
+	if strings.Contains(out, "non-hclog bytes") {
+		t.Errorf("report still uses the inaccurate non-hclog bytes label:\n%s", out)
+	}
+}
+
+// --- Final fix wave, Fix 3: EXTRACTION discloses the header-lines-only caveat. ---
+
+func TestReportNotesUnparsedContinuationLines(t *testing.T) {
+	// tf_req_id sits on a continuation line here and so is never counted --
+	// the report must say so and give the count, not stay silent about it.
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: multiline start\n" +
+		"  continuation carrying tf_req_id=abc123, never parsed\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5\n"
+	r := build(t, in)
+	if r.Stats.ContinuationLines != 1 {
+		t.Fatalf("ContinuationLines = %d, want 1", r.Stats.ContinuationLines)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "continuation lines not parsed for fields") {
+		t.Errorf("report missing the continuation-lines caveat:\n%s", out)
+	}
+	if !strings.Contains(out, "1 (fields are read from header lines only") {
+		t.Errorf("report does not give the unparsed continuation line count:\n%s", out)
+	}
+}
+
+// --- Final fix wave, Fix 5: DistinctComps does not overcount the pre-seeded "" slot. ---
+
+func TestReportDistinctCompsExcludesUnusedNoneSlot(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: msg one\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] b: msg two\n"
+	r := build(t, in)
+	if r.DistinctComps != 2 {
+		t.Errorf("DistinctComps = %d, want 2 (no entry actually lacked a component)", r.DistinctComps)
+	}
+}
+
+func TestReportDistinctCompsCountsAGenuineNoneComponent(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: msg one\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] no component prefix on this line at all\n"
+	r := build(t, in)
+	if r.DistinctComps != 2 {
+		t.Errorf("DistinctComps = %d, want 2 (component a, plus a genuine (none))", r.DistinctComps)
+	}
+}
+
+// --- Final fix wave, Fix 6: total span time is labelled as a sum that can overlap. ---
+
+func TestReportLabelsTotalSpanTimeAsSumWithOverlaps(t *testing.T) {
+	in := `2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5000` + "\n"
+	out := render(t, build(t, in))
+	if !strings.Contains(out, "total span time (sum, overlaps)") {
+		t.Errorf("report does not caveat total span time as a sum that can overlap:\n%s", out)
+	}
+}
+
+// --- Final fix wave, Fix 7: an empty section reads as "none", not silence. ---
+
+func TestReportRendersNoneForEmptySections(t *testing.T) {
+	r := build(t, "")
+	out := render(t, r)
+	for _, section := range []string{"LEVELS", "COMPONENTS", "FIELD KEYS", "MESSAGE TEMPLATES"} {
+		if !strings.Contains(out, section) {
+			t.Fatalf("report missing %s section:\n%s", section, out)
+		}
+	}
+	if got := strings.Count(out, "\n  none\n"); got != 4 {
+		t.Errorf("report renders %d empty sections as \"none\", want 4:\n%s", got, out)
+	}
+}
+
 // --- Review round 1: field keys must not pin their source message. ---
 //
 // bufio.Reader.ReadString (internal/logfmt/scan.go) builds its result via a

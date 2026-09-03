@@ -138,23 +138,24 @@ func template(msg string, f logfmt.Fields) string {
 
 // Report is the finished diagnostic summary.
 type Report struct {
-	Stats             logfmt.Stats
-	Caps              span.Capabilities
-	Tier              span.Fidelity
-	TierUsable        bool
-	SpanCount         int
-	ClampedSpans      int
-	SlowestMs         uint32
-	TotalSpanMs       uint64
-	Elapsed           time.Duration
-	TopFieldKeys      []Template // keys seen on two or more entries, sorted, capped
-	WithheldFieldKeys uint64     // distinct keys withheld for appearing on only one entry
-	TopComponents     []Template
-	TopTemplates      []Template // shapes seen on two or more entries, sorted, capped
-	WithheldTemplates uint64     // distinct shapes withheld for appearing only once
-	DistinctComps     int
-	InternOverflow    uint64
-	DroppedKeys       uint64
+	Stats              logfmt.Stats
+	Caps               span.Capabilities
+	Tier               span.Fidelity
+	TierUsable         bool
+	SpanCount          int
+	ClampedSpans       int
+	SlowestMs          uint32
+	TotalSpanMs        uint64
+	Elapsed            time.Duration
+	TopFieldKeys       []Template // keys seen on two or more entries, sorted, capped
+	WithheldFieldKeys  uint64     // distinct keys withheld for appearing on only one entry
+	TopComponents      []Template // component shapes seen on two or more entries, sorted, capped
+	WithheldComponents uint64     // distinct component shapes withheld for appearing on only one entry
+	TopTemplates       []Template // shapes seen on two or more entries, sorted, capped
+	WithheldTemplates  uint64     // distinct shapes withheld for appearing only once
+	DistinctComps      int
+	InternOverflow     uint64
+	DroppedKeys        uint64
 
 	fieldKeys     map[string]uint64 // every distinct key seen, unfiltered -- unexported so a future caller cannot range over the singletons Amendment 1 withholds
 	templateCount map[string]uint64
@@ -164,24 +165,37 @@ type Report struct {
 func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
 	tier, usable := caps.BestFidelity()
 	topFieldKeys, withheldFieldKeys := recurringTopN(c.fieldKeys, maxFieldKeys)
+	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
 	topTemplates, withheldTemplates := recurringTopN(c.templates, maxTemplates)
+
+	// comps.Len() always includes the Interner's pre-seeded "" at id 0 (see
+	// Interner.init), whether or not any line actually lacked a component --
+	// so it overcounts by one unless a "(none)" component was genuinely seen.
+	// c.compCount[""] records that case: it is only populated when an entry's
+	// masked component was empty.
+	distinctComps := comps.Len()
+	if _, sawNone := c.compCount[""]; !sawNone && distinctComps > 0 {
+		distinctComps--
+	}
+
 	r := Report{
-		Stats:             st,
-		Caps:              caps,
-		Tier:              tier,
-		TierUsable:        usable,
-		SpanCount:         len(spans),
-		Elapsed:           elapsed,
-		TopFieldKeys:      topFieldKeys,
-		WithheldFieldKeys: withheldFieldKeys,
-		TopComponents:     topN(c.compCount, maxTemplates),
-		TopTemplates:      topTemplates,
-		WithheldTemplates: withheldTemplates,
-		DistinctComps:     comps.Len(),
-		InternOverflow:    comps.Overflowed(),
-		DroppedKeys:       c.dropped,
-		fieldKeys:         c.fieldKeys,
-		templateCount:     c.templates,
+		Stats:              st,
+		Caps:               caps,
+		Tier:               tier,
+		TierUsable:         usable,
+		SpanCount:          len(spans),
+		Elapsed:            elapsed,
+		TopFieldKeys:       topFieldKeys,
+		WithheldFieldKeys:  withheldFieldKeys,
+		TopComponents:      topComponents,
+		WithheldComponents: withheldComponents,
+		TopTemplates:       topTemplates,
+		WithheldTemplates:  withheldTemplates,
+		DistinctComps:      distinctComps,
+		InternOverflow:     comps.Overflowed(),
+		DroppedKeys:        c.dropped,
+		fieldKeys:          c.fieldKeys,
+		templateCount:      c.templates,
 	}
 	for _, s := range spans {
 		r.TotalSpanMs += uint64(s.DurationMs)
@@ -247,7 +261,8 @@ func (r Report) Render(w io.Writer) error {
 			100*float64(r.Stats.UntimestampedLines)/float64(r.Stats.PhysicalLines))
 	}
 	if r.Stats.Bytes > 0 {
-		fmt.Fprintf(b, "  non-hclog bytes      %d (%.1f%% of file)\n",
+		fmt.Fprintf(b, "  continuation bytes (wrapped values + interleaved output)\n")
+		fmt.Fprintf(b, "                       %d (%.1f%% of file)\n",
 			r.Stats.ContinuationBytes,
 			100*float64(r.Stats.ContinuationBytes)/float64(r.Stats.Bytes))
 	}
@@ -263,10 +278,15 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "\n")
 
 	fmt.Fprintf(b, "LEVELS\n")
+	sawLevel := false
 	for l := logfmt.LevelUnknown; l <= logfmt.LevelError; l++ {
 		if n := r.Stats.ByLevel[l]; n > 0 {
 			fmt.Fprintf(b, "  %-8s %d\n", l, n)
+			sawLevel = true
 		}
+	}
+	if !sawLevel {
+		fmt.Fprintf(b, "  none\n")
 	}
 	fmt.Fprintf(b, "\n")
 
@@ -289,12 +309,14 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "  %-25s %d\n", "correlated req ids", r.Caps.CorrelatedReqIDs)
 	fmt.Fprintf(b, "  %-25s %d\n", "provider entries", r.Caps.ProviderEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "core vertex lines", r.Caps.CoreVertexLines)
-	fmt.Fprintf(b, "  %-25s %d\n\n", "core GRPC lines", r.Caps.CoreGRPCLines)
+	fmt.Fprintf(b, "  %-25s %d\n", "core GRPC lines", r.Caps.CoreGRPCLines)
+	fmt.Fprintf(b, "  %-25s %d (fields are read from header lines only -- tier above may be conservative)\n\n",
+		"continuation lines not parsed for fields", r.Stats.ContinuationLines)
 
 	fmt.Fprintf(b, "SPANS\n")
 	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)
 	fmt.Fprintf(b, "  slowest span         %d ms\n", r.SlowestMs)
-	fmt.Fprintf(b, "  total span time      %d ms\n", r.TotalSpanMs)
+	fmt.Fprintf(b, "  total span time (sum, overlaps) %d ms\n", r.TotalSpanMs)
 	fmt.Fprintf(b, "  starts clamped       %d\n\n", r.ClampedSpans)
 
 	if r.Stats.BackwardsTimestamps > 0 || r.InternOverflow > 0 || r.DroppedKeys > 0 || r.Stats.LinesSaturated > 0 {
@@ -305,7 +327,7 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  line-count saturated %d\n\n", r.Stats.LinesSaturated)
 	}
 
-	fmt.Fprintf(b, "COMPONENTS (%d distinct, top %d)\n", r.DistinctComps, len(r.TopComponents))
+	fmt.Fprintf(b, "COMPONENTS (%d distinct, recurring only, top %d)\n", r.DistinctComps, len(r.TopComponents))
 	for _, t := range r.TopComponents {
 		name := t.Text
 		if name == "" {
@@ -313,11 +335,20 @@ func (r Report) Render(w io.Writer) error {
 		}
 		fmt.Fprintf(b, "  %8d  %s\n", t.Count, name)
 	}
+	if len(r.TopComponents) == 0 {
+		fmt.Fprintf(b, "  none\n")
+	}
+	if r.WithheldComponents > 0 {
+		fmt.Fprintf(b, "  %d component shapes seen only once (withheld)\n", r.WithheldComponents)
+	}
 	fmt.Fprintf(b, "\n")
 
 	fmt.Fprintf(b, "FIELD KEYS (recurring only, top %d)\n", len(r.TopFieldKeys))
 	for _, t := range r.TopFieldKeys {
 		fmt.Fprintf(b, "  %8d  %s\n", t.Count, t.Text)
+	}
+	if len(r.TopFieldKeys) == 0 {
+		fmt.Fprintf(b, "  none\n")
 	}
 	if r.WithheldFieldKeys > 0 {
 		fmt.Fprintf(b, "  %d key shapes seen only once (withheld)\n", r.WithheldFieldKeys)
@@ -327,6 +358,9 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "MESSAGE TEMPLATES (content masked, recurring only, top %d)\n", len(r.TopTemplates))
 	for _, t := range r.TopTemplates {
 		fmt.Fprintf(b, "  %8d  %s\n", t.Count, t.Text)
+	}
+	if len(r.TopTemplates) == 0 {
+		fmt.Fprintf(b, "  none\n")
 	}
 	if r.WithheldTemplates > 0 {
 		fmt.Fprintf(b, "  %d message shapes seen only once (withheld)\n", r.WithheldTemplates)
