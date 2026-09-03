@@ -6,7 +6,7 @@
 
 **Architecture:** A single streaming pass over the file parses each physical line into a logical `Entry` (a timestamped line plus its continuation lines), pushing each to a set of `Sink`s. **Structured fields are parsed from the header line only** — never from continuation lines — and are never retained, so memory stays flat regardless of file size. One sink accumulates diagnostic counters; another builds spans from `tf_req_duration_ms`. No TUI, no mmap, no external dependencies.
 
-**Tech Stack:** Go 1.27.1, standard library only. No third-party modules in phase 1.
+**Tech Stack:** Go 1.25, standard library only. No third-party modules in phase 1.
 
 **Spec:** `docs/superpowers/specs/2026-09-03-tf-log-inspector-design.md`
 
@@ -15,7 +15,7 @@
 ## Global Constraints
 
 - **Module path:** `github.com/yesdevnull/tf-log-inspector`. Binary name `tfli`, so the command package must be `cmd/tfli`.
-- **Go version:** `go 1.27` in `go.mod`.
+- **Go version:** `go 1.25` in `go.mod`.
 - **Zero external dependencies in phase 1.** Standard library only.
 - **Australian/British English** in all prose, comments and user-facing output.
 - **Test output must be pristine.** Expected error paths are asserted, not printed.

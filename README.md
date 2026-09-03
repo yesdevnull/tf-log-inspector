@@ -4,6 +4,8 @@ Find where a slow Terraform plan spent its time.
 
 ## Install
 
+Requires Go 1.25 or later. No third-party dependencies.
+
     go install github.com/yesdevnull/tf-log-inspector/cmd/tfli@latest
 
 ## Getting a log
