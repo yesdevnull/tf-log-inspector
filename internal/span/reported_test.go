@@ -1,6 +1,7 @@
 package span
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -131,5 +132,76 @@ func TestReportedBuilderRecordsEntryOrdinal(t *testing.T) {
 	}
 	if got[0].Entry != 1 {
 		t.Errorf("Entry = %d, want 1", got[0].Entry)
+	}
+}
+
+// Retained strings must not pin the scanner's per-line buffers: a repeated
+// value should be deduplicated into a single cache entry rather than cloned
+// once per span.
+func TestReportedBuilderDedupsRepeatedValues(t *testing.T) {
+	in := `2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5` + "\n" +
+		`2022-12-15T00:16:20.900Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=6` + "\n"
+	var b ReportedBuilder
+	scanInto(t, in, &b)
+	got := b.Spans()
+	if len(got) != 2 {
+		t.Fatalf("got %d spans, want 2", len(got))
+	}
+	if got[0].RPC != "ReadResource" || got[1].RPC != "ReadResource" {
+		t.Fatalf("RPC = %q, %q, want both %q", got[0].RPC, got[1].RPC, "ReadResource")
+	}
+	if n := len(b.kept); n != 1 {
+		t.Errorf("dedup cache holds %d entries, want 1", n)
+	}
+}
+
+// A retained string must survive the scanner reusing its per-line buffers for
+// later lines. Without cloning, an earlier span's Provider would end up
+// reading back as a later line's value once the scan completes.
+func TestReportedBuilderRetainsAcrossScan(t *testing.T) {
+	var sb strings.Builder
+	var want []string
+	for i := 0; i < 50; i++ {
+		v := fmt.Sprintf("registry.terraform.io/hashicorp/provider-%03d-abcdefghijklmnopqrstuvwxyz", i)
+		want = append(want, v)
+		fmt.Fprintf(&sb, "2022-12-15T00:16:%02d.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_provider_addr=%s tf_req_duration_ms=%d\n", i, v, i)
+	}
+	var b ReportedBuilder
+	scanInto(t, sb.String(), &b)
+	got := b.Spans()
+	if len(got) != len(want) {
+		t.Fatalf("got %d spans, want %d", len(got), len(want))
+	}
+	for i, s := range got {
+		if s.Provider != want[i] {
+			t.Errorf("span %d Provider = %q, want %q", i, s.Provider, want[i])
+		}
+	}
+}
+
+// Past the dedup cap, values are still cloned individually and returned
+// intact: correctness must not depend on the cache holding every value.
+func TestReportedBuilderPastCapStillCorrect(t *testing.T) {
+	var sb strings.Builder
+	n := maxDistinctValues + 5
+	want := make([]string, n)
+	for i := 0; i < n; i++ {
+		v := fmt.Sprintf("registry.terraform.io/hashicorp/provider-%05d", i)
+		want[i] = v
+		fmt.Fprintf(&sb, "2022-12-15T00:16:20.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_provider_addr=%s tf_req_duration_ms=1\n", v)
+	}
+	var b ReportedBuilder
+	scanInto(t, sb.String(), &b)
+	got := b.Spans()
+	if len(got) != n {
+		t.Fatalf("got %d spans, want %d", len(got), n)
+	}
+	for i, s := range got {
+		if s.Provider != want[i] {
+			t.Fatalf("span %d Provider = %q, want %q", i, s.Provider, want[i])
+		}
+	}
+	if len(b.kept) != maxDistinctValues {
+		t.Errorf("dedup cache holds %d entries, want %d (capped)", len(b.kept), maxDistinctValues)
 	}
 }

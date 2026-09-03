@@ -12,11 +12,40 @@ import (
 // measurement of the call.
 const responseMarker = "Received downstream response"
 
+// maxDistinctValues bounds the dedup cache so a pathological log cannot grow
+// it without limit. Past the cap, values are cloned individually: correctness
+// never depends on the cap, only memory efficiency does.
+const maxDistinctValues = 4096
+
 // ReportedBuilder is the tier 1 span builder. It reads durations directly off
 // response entries rather than inferring them, so its spans are exact.
 // It satisfies logfmt.Sink.
 type ReportedBuilder struct {
 	spans []Span
+	kept  map[string]string // dedup cache for retained RPC/Provider/ResourceType strings
+}
+
+// retain returns a copy of s that does not alias the scanner's per-line
+// buffer. Sink.Entry's strings are valid only for the duration of the call,
+// and a retained string would otherwise pin its whole source line -- RPC,
+// Provider and ResourceType are drawn from a tiny vocabulary, so deduplicating
+// makes retained allocation proportional to distinct values rather than to
+// spans.
+func (b *ReportedBuilder) retain(s string) string {
+	if s == "" {
+		return ""
+	}
+	if got, ok := b.kept[s]; ok {
+		return got
+	}
+	c := strings.Clone(s)
+	if len(b.kept) < maxDistinctValues {
+		if b.kept == nil {
+			b.kept = make(map[string]string)
+		}
+		b.kept[c] = c
+	}
+	return c
 }
 
 // Entry implements logfmt.Sink.
@@ -52,9 +81,9 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 		EndMs:        e.TSms,
 		DurationMs:   ms,
 		StartClamped: clamped,
-		RPC:          rpc,
-		Provider:     provider,
-		ResourceType: resType,
+		RPC:          b.retain(rpc),
+		Provider:     b.retain(provider),
+		ResourceType: b.retain(resType),
 		Fidelity:     FidelityReported,
 	})
 }
