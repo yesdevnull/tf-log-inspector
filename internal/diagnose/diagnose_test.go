@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -89,7 +90,7 @@ func TestReportNeverLeaksResourceAddresses(t *testing.T) {
 func TestReportCountsFieldKeys(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5\n" +
 		"2022-12-15T00:16:20.900Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=9\n"
-	if got := build(t, in).FieldKeys["tf_req_duration_ms"]; got != 2 {
+	if got := build(t, in).fieldKeys["tf_req_duration_ms"]; got != 2 {
 		t.Errorf("tf_req_duration_ms count = %d, want 2", got)
 	}
 }
@@ -192,7 +193,7 @@ func TestReportFieldKeyRepeatedWithinEntryNotPromoted(t *testing.T) {
 	// promote itself into the printed set.
 	in := "2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_rpc=ReadResource tf_req_duration_ms=5\n"
 	r := build(t, in)
-	if got := r.FieldKeys["tf_rpc"]; got != 1 {
+	if got := r.fieldKeys["tf_rpc"]; got != 1 {
 		t.Errorf("tf_rpc count = %d, want 1 (repetition within one entry must not double count)", got)
 	}
 	out := render(t, r)
@@ -269,5 +270,79 @@ func TestReportRelabelsDurationFieldsAsResponseOnly(t *testing.T) {
 	}
 	if strings.Contains(out, "\n  duration fields") {
 		t.Errorf("report still uses the old, inaccurate duration fields label:\n%s", out)
+	}
+}
+
+// --- Review round 1: field keys must not pin their source message. ---
+//
+// bufio.Reader.ReadString (internal/logfmt/scan.go) builds its result via a
+// fresh strings.Builder on every call, and StripANSI's returned string goes
+// through a `string(scratch)` conversion, which always copies -- so in this
+// codebase msg is never a slice of a buffer any later entry can overwrite.
+// A test that drives many entries with distinct long values and checks
+// their content survives (the style TestReportedBuilderRetainsAcrossScan in
+// internal/span uses) therefore cannot distinguish cloned from uncloned
+// keys here: it passes either way, and was confirmed to do so against the
+// unfixed fieldKeys map before this test was written. The actual hazard is
+// span, not corruption: retaining any substring of msg keeps msg's whole
+// backing array -- up to 64KB, MaxHeaderMsg -- reachable for as long as the
+// key lives, and that is what a stored key's address must be checked
+// against directly.
+
+// withinBackingArray reports whether sub's data pointer falls inside whole's
+// backing array, i.e. whether retaining sub would keep the whole of whole
+// reachable. This mirrors the pointer comparison the reviewer used to find
+// the original bug.
+func withinBackingArray(sub, whole string) bool {
+	if len(whole) == 0 {
+		return false
+	}
+	start := uintptr(unsafe.Pointer(unsafe.StringData(whole)))
+	end := start + uintptr(len(whole))
+	p := uintptr(unsafe.Pointer(unsafe.StringData(sub)))
+	return p >= start && p < end
+}
+
+// TestFieldKeyDoesNotPinItsSourceMessage proves a key entering fieldKeys
+// does not retain any part of the message it was parsed from. msg is built
+// large (over 4KB) so the failure, if reintroduced, is unambiguous: a key
+// sharing memory with it would otherwise pin all 4KB+ for a 6-byte key.
+func TestFieldKeyDoesNotPinItsSourceMessage(t *testing.T) {
+	msg := "Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5 padding=" + strings.Repeat("x", 4000)
+	f := logfmt.ParseFields(msg, nil)
+
+	var comps logfmt.Interner
+	c := NewCollector(&comps)
+	c.Entry(0, logfmt.Entry{}, msg, f)
+
+	for key := range c.fieldKeys {
+		if withinBackingArray(key, msg) {
+			t.Errorf("fieldKeys key %q shares backing memory with its source message -- retaining it pins the whole message alive", key)
+		}
+	}
+}
+
+// TestTemplateDoesNotPinItsSourceMessage is the template-map audit the
+// review asked for. template() always routes msg's prose through
+// MaskProse, whose first step (maskQuotedSpans) unconditionally builds its
+// result via strings.Builder -- even when there is nothing to mask -- so
+// the returned prose is never a slice of msg regardless of field count.
+// This is checked directly across the field-count cases that matter: zero
+// fields (prose is the entire return value, the case
+// strings.Join(fields,"") on a single-element slice could otherwise alias),
+// one field, and several fields.
+func TestTemplateDoesNotPinItsSourceMessage(t *testing.T) {
+	long := strings.Repeat("x", 4000)
+	cases := []string{
+		"a plain message with no fields at all " + long,
+		"a message with one field padding=" + long,
+		"a message with two fields tf_rpc=ReadResource padding=" + long,
+	}
+	for _, msg := range cases {
+		f := logfmt.ParseFields(msg, nil)
+		got := template(msg, f)
+		if withinBackingArray(got, msg) {
+			t.Errorf("template(%q, ...) = %q shares backing memory with msg -- it would pin the whole message alive", msg, got)
+		}
 	}
 }

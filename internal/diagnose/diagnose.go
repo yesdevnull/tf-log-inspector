@@ -87,8 +87,28 @@ func (c *Collector) bumpFieldKeys(f logfmt.Fields) {
 			continue
 		}
 		c.entrySeen = append(c.entrySeen, fl.Key)
-		c.bump(c.fieldKeys, fl.Key)
+		c.bumpFieldKey(fl.Key)
 	}
+}
+
+// bumpFieldKey increments fieldKeys[key], refusing new keys once the map is
+// full. Field.Key aliases logfmt's per-call msg buffer -- Sink.Entry
+// documents both msg and f as valid only for the duration of the call, and
+// the underlying bufio buffer is reused as the scan continues -- so a key
+// entering the map for the first time is cloned, once, rather than on every
+// occurrence. This is the same dedup-on-first-insert pattern already used in
+// span.Sniffer.trackRequestID and span.ReportedBuilder.retain for the same
+// hazard.
+func (c *Collector) bumpFieldKey(key string) {
+	if _, ok := c.fieldKeys[key]; ok {
+		c.fieldKeys[key]++
+		return
+	}
+	if len(c.fieldKeys) >= maxDistinct {
+		c.dropped++
+		return
+	}
+	c.fieldKeys[strings.Clone(key)] = 1
 }
 
 // template renders a message with prose masked and every field value replaced
@@ -127,9 +147,8 @@ type Report struct {
 	SlowestMs         uint32
 	TotalSpanMs       uint64
 	Elapsed           time.Duration
-	FieldKeys         map[string]uint64 // every distinct key seen, unfiltered
-	TopFieldKeys      []Template        // keys seen on two or more entries, sorted, capped
-	WithheldFieldKeys uint64            // distinct keys withheld for appearing on only one entry
+	TopFieldKeys      []Template // keys seen on two or more entries, sorted, capped
+	WithheldFieldKeys uint64     // distinct keys withheld for appearing on only one entry
 	TopComponents     []Template
 	TopTemplates      []Template // shapes seen on two or more entries, sorted, capped
 	WithheldTemplates uint64     // distinct shapes withheld for appearing only once
@@ -137,6 +156,7 @@ type Report struct {
 	InternOverflow    uint64
 	DroppedKeys       uint64
 
+	fieldKeys     map[string]uint64 // every distinct key seen, unfiltered -- unexported so a future caller cannot range over the singletons Amendment 1 withholds
 	templateCount map[string]uint64
 }
 
@@ -152,7 +172,6 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, c *Collec
 		TierUsable:        usable,
 		SpanCount:         len(spans),
 		Elapsed:           elapsed,
-		FieldKeys:         c.fieldKeys,
 		TopFieldKeys:      topFieldKeys,
 		WithheldFieldKeys: withheldFieldKeys,
 		TopComponents:     topN(c.compCount, maxTemplates),
@@ -161,6 +180,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, c *Collec
 		DistinctComps:     comps.Len(),
 		InternOverflow:    comps.Overflowed(),
 		DroppedKeys:       c.dropped,
+		fieldKeys:         c.fieldKeys,
 		templateCount:     c.templates,
 	}
 	for _, s := range spans {
