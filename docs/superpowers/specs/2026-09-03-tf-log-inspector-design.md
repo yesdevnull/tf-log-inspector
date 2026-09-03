@@ -45,6 +45,58 @@ These shaped the design more than any feature request.
 The blind-development constraint is why `--diagnose` (below) exists and is
 built before the TUI.
 
+## The input is an HCP Terraform raw run log
+
+All target workspace runs execute in **HCP Terraform**, not locally. This is
+the single most important fact about the input, and it was established late
+enough to invalidate an earlier assumption in this document.
+
+**A locally captured `TF_LOG_PATH` is useless for this tool's primary purpose.**
+When a workspace uses a remote execution backend, the local CLI only
+orchestrates a run over the HCP API; no provider plugin process starts locally,
+so the local log contains no provider RPC entries and there is nothing to
+profile. The sampled gist log has exactly this shape.
+
+TRACE output must therefore be produced *on the runner* and retrieved from the
+run:
+
+- **Per-run** — on a new run, expand *Additional Planning Options* and toggle
+  **Enable Debug Logging**. Applies to that run only. Available in all HCP
+  Terraform tiers and Terraform Enterprise v202502-2 or later.
+- **Persistent** — add a workspace **environment** variable `TF_LOG` = `TRACE`.
+  Applies to all subsequent runs until removed. HCP Terraform `export`s
+  workspace environment variables into the shell before running Terraform.
+
+The resulting log is retrieved from the run UI via **View raw log**.
+
+### What this implies for the parser
+
+The retrieved artefact is the runner's combined output, not a clean hclog
+stream. It contains at least three interleaved kinds of content:
+
+1. hclog TRACE/DEBUG entries — the material this tool profiles.
+2. Terraform's ordinary human-readable plan output — resource diffs, the
+   `Plan: N to add…` summary.
+3. HCP Terraform's own harness output around the Terraform invocation.
+
+**The parser must treat arbitrary non-hclog content as ordinary, not
+exceptional.** It is preserved and displayed in the raw view, ignored for span
+extraction, and never causes a parse failure.
+
+One known imprecision, recorded rather than over-engineered: an untimestamped
+line is currently treated as a continuation of the preceding entry, which is
+correct for wrapped diagnostics but will also absorb blocks of plan output into
+whatever entry precedes them. This affects only how the raw view groups lines —
+span extraction reads solely from timestamped `Received downstream response`
+entries — so it is cosmetic, not a correctness risk. If it proves ugly in
+practice, the fix is to break continuation runs longer than a threshold into
+their own `(output)` block.
+
+**Unconfirmed:** whether the raw log carries ANSI escape sequences. It likely
+does, since it is captured terminal output. `--diagnose` reports whether any
+are present, and the parser strips them if so. This is flagged rather than
+assumed.
+
 ## Verified log format facts
 
 These were read from the upstream source, not assumed. Everything else in this
@@ -327,7 +379,11 @@ foundation.
 
 ## `--diagnose`
 
-A non-interactive mode that exists because of the blind-development constraint.
+A non-interactive mode that exists because of the blind-development constraint,
+and the first thing built. It is the only channel through which facts about
+real logs reach development, so it is a first-class feature rather than a
+debugging aid.
+
 It parses a log and prints **structural facts only**:
 
 - Which tier the sniffer selected, and why.
@@ -343,6 +399,9 @@ It parses a log and prints **structural facts only**:
   that decides whether view `3` ships.
 - Observed line count, mean line length, and parse throughput, to replace the
   capacity-planning guesses with measurements.
+- The proportion of content that is **not** hclog — plan output and harness
+  output — since an HCP raw run log is a mixed artefact.
+- Whether **ANSI escape sequences** are present.
 
 This output is what Dan pastes back to close the feedback loop without ever
 transferring log content.
@@ -516,18 +575,19 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
 
 ## Open questions
 
-1. **Where the plan actually executes.** This is the question that most
-   threatens the primary use case. If the target workflow uses a remote
-   execution backend — Terraform Cloud, Terraform Enterprise, or any runner
-   that executes the plan elsewhere — then a locally-captured `TF_LOG` contains
-   only the CLI's orchestration of a remote run and **no provider RPC entries
-   at all**. Every timing feature in this design depends on provider entries.
-   The sampled gist log is exactly this shape for a different reason (builtin
-   provider, no plugin launched), which is what surfaced the risk.
+1. **Whether an HCP Terraform raw run log actually contains provider RPC
+   entries.** Execution location is now settled — runs happen on HCP Terraform
+   runners, and TRACE is enabled there by workspace variable or the per-run
+   debug toggle. Providers execute on the runner, so its log *should* contain
+   `tf_req_duration_ms` entries. That is a strong expectation, not a verified
+   fact: it depends on HCP capturing the Terraform process's stderr into the
+   retrievable run log rather than discarding or separating it.
 
-   If the plans in question run remotely, the log that matters is the one
-   produced on the runner, and obtaining it is a prerequisite to this tool
-   being useful at all. **This must be confirmed before phase 2.**
+   **The check:** enable debug logging on one run, retrieve the raw log, and
+   `grep -c tf_req_duration_ms`. A non-zero count confirms the entire premise
+   of the tool. A zero count means the timing data is not reachable from
+   outside the runner, and the project needs rethinking rather than
+   implementing. **This gates phase 2.**
 2. **How reliable address correlation is under real concurrency.** The
    mechanism is confirmed to exist — core logs addresses, and logs its own side
    of each RPC. What is unknown is the *ambiguity rate* when many resources of
