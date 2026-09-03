@@ -19,14 +19,25 @@ func (f Fields) Get(key string) (string, bool) {
 	return "", false
 }
 
+// MaxKeyLen bounds the length of a field key. Measured across every real
+// log this project was built against (the four testdata fixtures, a
+// 1278-line gist capture, and the AWS provider issue captures), the longest
+// key actually produced is "http.response.header.x_amzn_requestid" at 37
+// bytes. 64 gives comfortable headroom above that measured maximum while
+// still bounding the worst case for a high-entropy blob that happens to
+// satisfy the charset (the charset alone cannot distinguish a base64url
+// token from a genuine key; see fields_test.go and the Task 3 report).
+const MaxKeyLen = 64
+
 // ValidKey reports whether s has the shape of an hclog field key:
-// an optional "@", then an identifier of letters, digits, "_", "." and "-".
+// an optional "@", then an identifier of letters, digits, "_", "." and "-",
+// at most MaxKeyLen bytes long.
 //
 // This is the disclosure guarantee for field keys. Log content that merely
 // happens to contain "=" -- a JSON body, a quoted CLI argument, a base64 blob
 // -- must never be recorded as a key, because keys are printed verbatim.
 func ValidKey(s string) bool {
-	if s == "" {
+	if s == "" || len(s) > MaxKeyLen {
 		return false
 	}
 	if s[0] == '@' {

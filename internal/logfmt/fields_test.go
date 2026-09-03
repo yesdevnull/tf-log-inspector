@@ -1,6 +1,9 @@
 package logfmt
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseFieldsUnorderedLookup(t *testing.T) {
 	f := ParseFields(`tf_req_id=abc tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_req_duration_ms=5 @module=sdk.proto`, nil)
@@ -116,6 +119,50 @@ func TestValidKey(t *testing.T) {
 		if ValidKey(s) {
 			t.Errorf("ValidKey(%q) = true, want false", s)
 		}
+	}
+}
+
+// The longest key any real log this project was built against produces is
+// "http.response.header.x_amzn_requestid" at 37 bytes. It must still be
+// accepted after the length cap is added.
+func TestValidKeyLongestRealKeyStillAccepted(t *testing.T) {
+	key := "http.response.header.x_amzn_requestid"
+	if len(key) != 37 {
+		t.Fatalf("test fixture key is %d bytes, want 37", len(key))
+	}
+	if !ValidKey(key) {
+		t.Errorf("ValidKey(%q) = false, want true", key)
+	}
+}
+
+func TestValidKeyLengthBoundary(t *testing.T) {
+	at64 := strings.Repeat("a", 64)
+	if !ValidKey(at64) {
+		t.Errorf("ValidKey(64-byte key) = false, want true")
+	}
+	at65 := strings.Repeat("a", 65)
+	if ValidKey(at65) {
+		t.Errorf("ValidKey(65-byte key) = true, want false")
+	}
+}
+
+// A long base64url-shaped token that happens to satisfy the key charset
+// (letters only, here) must still be discarded when it exceeds MaxKeyLen --
+// this is asserted against ParseFields, not just ValidKey, because
+// ParseFields is what the diagnose report actually consumes.
+func TestParseFieldsRejectsOverlongKeyShapedToken(t *testing.T) {
+	blob := strings.Repeat("A", 80)
+	f := ParseFields(blob+`=c3VwZXJzZWNyZXQ tf_rpc=ReadResource`, nil)
+	if _, ok := f.Get(blob); ok {
+		t.Errorf("ParseFields recorded an overlong token as a key")
+	}
+	for _, fl := range f {
+		if len(fl.Key) > MaxKeyLen {
+			t.Errorf("ParseFields recorded a key longer than MaxKeyLen: %q (%d bytes)", fl.Key, len(fl.Key))
+		}
+	}
+	if got, _ := f.Get("tf_rpc"); got != "ReadResource" {
+		t.Errorf("ParseFields(%q): real field lost, tf_rpc = %q", blob, got)
 	}
 }
 
