@@ -319,8 +319,11 @@ func (r Report) Render(w io.Writer) error {
 		if structured {
 			fmt.Fprintf(b, "  This is a structured-output (terraform.ui JSON) log.\n")
 			fmt.Fprintf(b, "  It carries per-resource timings, which this version\n")
-			fmt.Fprintf(b, "  does not yet parse. For provider RPC timings, enable\n")
-			fmt.Fprintf(b, "  debug logging on the HCP run.\n")
+			fmt.Fprintf(b, "  does not yet parse. Structured output is info level\n")
+			fmt.Fprintf(b, "  only, so it never contains provider RPC entries. For\n")
+			fmt.Fprintf(b, "  those, enable debug logging on the run: the log then\n")
+			fmt.Fprintf(b, "  arrives as text rather than JSON, which this tool does\n")
+			fmt.Fprintf(b, "  parse.\n")
 		} else {
 			fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
 			fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
