@@ -38,6 +38,26 @@ func TestRunReportsNonHclogContent(t *testing.T) {
 	}
 }
 
+// The structured-output fixture must report structured lines and the
+// structured-specific EXTRACTION guidance, and must never disclose the
+// fixture's resource address.
+func TestRunReportsStructuredOutputLog(t *testing.T) {
+	var sb strings.Builder
+	if err := run([]string{"--diagnose", filepath.Join("..", "..", "testdata", "structured-ui.log")}, &sb, io.Discard); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	out := sb.String()
+	if !strings.Contains(out, "structured lines     5") {
+		t.Errorf("report missing structured line count:\n%s", out)
+	}
+	if !strings.Contains(out, "structured-output (terraform.ui JSON) log") {
+		t.Errorf("report missing structured-output guidance:\n%s", out)
+	}
+	if strings.Contains(out, `module.module_name["key"].data.local_file.thing`) {
+		t.Fatalf("report leaked the fixture's resource address:\n%s", out)
+	}
+}
+
 func TestRunReportsMissingFileClearly(t *testing.T) {
 	var sb strings.Builder
 	err := run([]string{"--diagnose", "no-such-file.log"}, &sb, io.Discard)

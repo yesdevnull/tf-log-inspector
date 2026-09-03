@@ -72,6 +72,21 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 
 			h := ParseHeader(text)
 			switch {
+			case IsStructuredLine(text):
+				// A structured-output line is its own logical entry, closed
+				// immediately rather than left open for the next line to
+				// continue. Its content is a disclosure risk -- the message
+				// carries full resource and module addresses -- so it is
+				// counted without ever being read, exactly like the
+				// non-hclog content handled below.
+				flush()
+				st.StructuredLines++
+				st.UntimestampedLines++
+				cur = Entry{Off: off, Len: raw, Lines: 1}
+				curMsg = ""
+				open = true
+				flush()
+
 			case h.HasTS:
 				flush()
 				if !haveBase {

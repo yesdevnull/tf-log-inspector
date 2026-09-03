@@ -314,6 +314,97 @@ func TestScanLongContinuationRunsThreshold(t *testing.T) {
 	}
 }
 
+// Structured-output detection: Terraform's machine-readable UI JSON stream
+// (one JSON object per line) must be recognised, counted, and never fused
+// with the hclog text around it.
+
+const structuredVersionLine = `{"@level":"info","@message":"Terraform 1.14.9","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.113402+10:00","terraform":"1.14.9","type":"version","ui":"1.2"}`
+
+const structuredHookLine = `{"@level":"info","@message":"module.module_name[\"key\"].data.local_file.thing: Refreshing...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.556000+10:00","hook":{"resource":{"addr":"module.module_name[\"key\"].data.local_file.thing","module":"module.module_name[\"key\"]","resource":"data.local_file.thing","implied_provider":"local","resource_type":"local_file","resource_name":"thing","resource_key":null},"action":"read"},"type":"apply_start"}`
+
+// A file of N structured lines must yield N entries, not collapse into one
+// the way the real bug report did.
+func TestScanStructuredLinesEachBecomeOwnEntry(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n" + structuredVersionLine + "\n"
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(c.entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(c.entries))
+	}
+	for i, e := range c.entries {
+		if e.Timestamped {
+			t.Errorf("entry %d Timestamped = true, want false", i)
+		}
+		if e.Level != LevelUnknown {
+			t.Errorf("entry %d Level = %v, want LevelUnknown", i, e.Level)
+		}
+	}
+	if st.StructuredLines != 3 {
+		t.Errorf("StructuredLines = %d, want 3", st.StructuredLines)
+	}
+}
+
+// The test that matters most: a structured line's content -- which carries
+// full resource and module addresses -- must never reach a sink.
+func TestScanStructuredLineContentNeverReachesSink(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
+	var comps Interner
+	var c collector
+	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	const addr = `module.module_name["key"].data.local_file.thing`
+	for i, msg := range c.msgs {
+		if msg != "" {
+			t.Errorf("entry %d msg = %q, want empty", i, msg)
+		}
+		if strings.Contains(msg, addr) {
+			t.Errorf("entry %d msg leaked the resource address", i)
+		}
+	}
+}
+
+func TestScanCountsStructuredLinesInMixedFile(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
+		structuredVersionLine + "\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] a: two\n" +
+		structuredHookLine + "\n"
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if st.StructuredLines != 2 {
+		t.Errorf("StructuredLines = %d, want 2", st.StructuredLines)
+	}
+	if len(c.entries) != 4 {
+		t.Fatalf("got %d entries, want 4", len(c.entries))
+	}
+}
+
+// Detection must fail toward under-counting: a line that starts with '{' but
+// lacks the "@level"/"@timestamp" signature (e.g. a JSON fragment surfacing
+// in plan output) is left for the existing continuation/default handling,
+// not counted as structured output.
+func TestScanJSONFragmentWithoutSignatureNotCountedStructured(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
+		`{"resource_changes":[]}` + "\n"
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if st.StructuredLines != 0 {
+		t.Errorf("StructuredLines = %d, want 0", st.StructuredLines)
+	}
+}
+
 func TestScanRealFixtures(t *testing.T) {
 	cases := []struct {
 		file           string
@@ -324,6 +415,7 @@ func TestScanRealFixtures(t *testing.T) {
 		{"../../testdata/core-only.log", 6, false},
 		{"../../testdata/multiline-body.log", 2, false},
 		{"../../testdata/mixed-hcp.log", 2, false},
+		{"../../testdata/structured-ui.log", 6, false},
 	}
 	for _, c := range cases {
 		f, err := os.Open(c.file)

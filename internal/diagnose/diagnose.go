@@ -19,6 +19,19 @@ const (
 	// maxDistinct caps how many distinct keys any map retains, so a
 	// high-cardinality log cannot grow them without bound.
 	maxDistinct = 4096
+
+	// structuredMajority is the share of physical lines that must be
+	// detected structured-output (terraform.ui JSON) lines before
+	// EXTRACTION's "no provider entries" guidance is swapped for guidance
+	// specific to structured output. HCP Terraform's structured-output
+	// setting emits nothing but JSON lines, so a log produced that way sits
+	// close to 100% here; a bare majority is used rather than a threshold
+	// nearer 100% so a log that is genuinely structured output but carries a
+	// few interleaved hclog lines (e.g. a startup banner emitted before the
+	// mode switches) still gets the more useful diagnosis, while a log that
+	// merely has a handful of stray JSON lines mixed through an otherwise
+	// ordinary hclog file does not.
+	structuredMajority = 0.5
 )
 
 // Template is a message shape with its content masked.
@@ -259,6 +272,9 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  untimestamped lines  %d (%.1f%% of lines)\n",
 			r.Stats.UntimestampedLines,
 			100*float64(r.Stats.UntimestampedLines)/float64(r.Stats.PhysicalLines))
+		fmt.Fprintf(b, "  structured lines     %d (%.1f%% of lines)\n",
+			r.Stats.StructuredLines,
+			100*float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines))
 	}
 	if r.Stats.Bytes > 0 {
 		fmt.Fprintf(b, "  continuation bytes (wrapped values + interleaved output)\n")
@@ -298,9 +314,18 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  %-25s %s\n", "selected tier", r.Tier)
 	} else {
 		fmt.Fprintf(b, "  %-25s NONE USABLE\n", "selected tier")
-		fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
-		fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
-		fmt.Fprintf(b, "  enable debug logging on the run and use its raw log.\n")
+		structured := r.Stats.PhysicalLines > 0 &&
+			float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
+		if structured {
+			fmt.Fprintf(b, "  This is a structured-output (terraform.ui JSON) log.\n")
+			fmt.Fprintf(b, "  It carries per-resource timings, which this version\n")
+			fmt.Fprintf(b, "  does not yet parse. For provider RPC timings, enable\n")
+			fmt.Fprintf(b, "  debug logging on the HCP run.\n")
+		} else {
+			fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
+			fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
+			fmt.Fprintf(b, "  enable debug logging on the run and use its raw log.\n")
+		}
 	}
 	fmt.Fprintf(b, "  %-25s %d\n", "response entries", r.Caps.ResponseEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "request entries", r.Caps.RequestEntries)

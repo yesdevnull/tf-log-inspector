@@ -273,6 +273,75 @@ func TestReportRelabelsDurationFieldsAsResponseOnly(t *testing.T) {
 	}
 }
 
+// --- Structured-output (terraform.ui JSON) detection and reporting. ---
+
+const structuredVersionLine = `{"@level":"info","@message":"Terraform 1.14.9","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.113402+10:00","terraform":"1.14.9","type":"version","ui":"1.2"}`
+
+const structuredHookLine = `{"@level":"info","@message":"module.module_name[\"key\"].data.local_file.thing: Refreshing...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.556000+10:00","hook":{"resource":{"addr":"module.module_name[\"key\"].data.local_file.thing","module":"module.module_name[\"key\"]","resource":"data.local_file.thing","implied_provider":"local","resource_type":"local_file","resource_name":"thing","resource_key":null},"action":"read"},"type":"apply_start"}`
+
+func TestReportShowsStructuredLineCountInSize(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
+	out := render(t, build(t, in))
+	if !strings.Contains(out, "structured lines     2 (100.0% of lines)") {
+		t.Errorf("report missing structured line count in SIZE:\n%s", out)
+	}
+}
+
+// The test that matters most: a structured line's resource address must
+// appear nowhere in the rendered report -- not in a field, not in a
+// template, not anywhere else.
+func TestReportNeverLeaksStructuredLineContent(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
+	out := render(t, build(t, in))
+	const addr = `module.module_name["key"].data.local_file.thing`
+	if strings.Contains(out, addr) {
+		t.Fatalf("report leaked the structured-line resource address:\n%s", out)
+	}
+	if strings.Contains(out, "Refreshing") || strings.Contains(out, "local_file") {
+		t.Fatalf("report leaked structured-line content:\n%s", out)
+	}
+}
+
+// A predominantly structured log has no hclog provider entries to profile,
+// but the reason and the remedy differ from an ordinary core-only log, so
+// EXTRACTION's guidance must say so specifically.
+func TestReportExplainsPredominantlyStructuredLog(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 9; i++ {
+		sb.WriteString(structuredVersionLine)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete\n")
+	r := build(t, sb.String())
+	if r.TierUsable {
+		t.Fatal("TierUsable = true for a structured-output log")
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "structured-output (terraform.ui JSON) log") {
+		t.Errorf("report does not explain the structured-output log:\n%s", out)
+	}
+	if strings.Contains(out, "no provider RPC entries") {
+		t.Errorf("report still shows the generic no-provider-entries guidance for a structured log:\n%s", out)
+	}
+}
+
+// A core-only hclog log with no structured lines at all must keep the
+// original guidance -- the new wording is specific to structured output.
+func TestReportKeepsOriginalGuidanceForNonStructuredCoreOnlyLog(t *testing.T) {
+	in := "2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete\n"
+	r := build(t, in)
+	if r.TierUsable {
+		t.Fatal("TierUsable = true for a core-only log")
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "no provider RPC") {
+		t.Errorf("report does not give the original no-provider-entries guidance:\n%s", out)
+	}
+	if strings.Contains(out, "structured-output (terraform.ui JSON) log") {
+		t.Errorf("report wrongly shows structured-output guidance for a non-structured log:\n%s", out)
+	}
+}
+
 // --- Final fix wave, Fix 1: COMPONENTS obeys both disclosure invariants. ---
 //
 // splitComponent (internal/logfmt/header.go) accepts any whitespace-free

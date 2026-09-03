@@ -33,6 +33,7 @@ type Stats struct {
 	ContinuationLines    uint64
 	ContinuationBytes    uint64
 	UntimestampedLines   uint64 // every physical line with no timestamp
+	StructuredLines      uint64 // lines detected as Terraform's UI JSON stream
 	LongContinuationRuns uint64 // runs longer than longRun lines
 	BackwardsTimestamps  uint64
 	LinesSaturated       uint64
