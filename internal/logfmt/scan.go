@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Sink receives each entry as it is parsed. ord is the entry's zero-based
@@ -96,7 +97,21 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 					Timestamped: true,
 				}
 				if len(h.Msg) > maxHeaderMsg {
-					curMsg = h.Msg[:maxHeaderMsg]
+					m := h.Msg[:maxHeaderMsg]
+					// A byte-index cut can land inside a multi-byte rune.
+					// Back off to the last whole rune so a truncated message
+					// is never invalid UTF-8. DecodeLastRuneInString reports
+					// (RuneError, 1) for a bad encoding; a genuine U+FFFD
+					// decodes with size 3, so the size test distinguishes
+					// them.
+					for len(m) > 0 {
+						r, size := utf8.DecodeLastRuneInString(m)
+						if r != utf8.RuneError || size > 1 {
+							break
+						}
+						m = m[:len(m)-1]
+					}
+					curMsg = m
 				} else {
 					curMsg = h.Msg
 				}

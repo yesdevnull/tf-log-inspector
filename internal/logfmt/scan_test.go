@@ -1,9 +1,11 @@
 package logfmt
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 type collector struct {
@@ -219,6 +221,96 @@ func TestScanCRLFAndNoTrailingNewline(t *testing.T) {
 	}
 	if c.msgs[1] != "two" {
 		t.Errorf("last message = %q, want two", c.msgs[1])
+	}
+}
+
+// maxHeaderMsg truncation is a byte-index cut and must not split a
+// multi-byte rune. The euro sign here is placed so its first byte falls at
+// byte maxHeaderMsg-1 of the padded prefix, putting the truncation boundary
+// squarely inside the rune.
+func TestScanHeaderMsgTruncationPreservesValidUTF8(t *testing.T) {
+	pad := strings.Repeat("a", maxHeaderMsg-1)
+	msg := pad + "€" + strings.Repeat("b", 100)
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: " + msg + "\n"
+
+	var comps Interner
+	var c collector
+	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(c.msgs[0]) > maxHeaderMsg {
+		t.Errorf("msg length = %d, want <= %d", len(c.msgs[0]), maxHeaderMsg)
+	}
+	if !utf8.ValidString(c.msgs[0]) {
+		t.Errorf("truncated msg is not valid UTF-8: %q", c.msgs[0])
+	}
+}
+
+// Entry.Lines is a uint16 and must saturate rather than wrap. Len is a
+// uint32 and does not saturate, so it must still account for every byte of
+// every continuation line, including those beyond the point Lines pins.
+func TestScanEntryLinesSaturates(t *testing.T) {
+	header := "2022-12-15T00:16:20.800Z [TRACE] a: first\n"
+	const contLine = "c\n"
+	const contLines = 66000 // comfortably past math.MaxUint16 continuation lines
+
+	var b strings.Builder
+	b.WriteString(header)
+	for i := 0; i < contLines; i++ {
+		b.WriteString(contLine)
+	}
+	in := b.String()
+
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(c.entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(c.entries))
+	}
+	if c.entries[0].Lines != math.MaxUint16 {
+		t.Errorf("Lines = %d, want %d (saturated)", c.entries[0].Lines, uint16(math.MaxUint16))
+	}
+	if st.LinesSaturated == 0 {
+		t.Error("LinesSaturated = 0, want non-zero")
+	}
+	wantLen := uint32(len(header) + contLines*len(contLine))
+	if c.entries[0].Len != wantLen {
+		t.Errorf("Len = %d, want %d -- Len must not saturate even though Lines does", c.entries[0].Len, wantLen)
+	}
+}
+
+// LongContinuationRuns must trigger only once a run exceeds longRun lines,
+// not merely reach it.
+func TestScanLongContinuationRunsThreshold(t *testing.T) {
+	atThreshold := "2022-12-15T00:16:20.800Z [TRACE] a: short\n" +
+		strings.Repeat("cont\n", longRun) +
+		"2022-12-15T00:16:20.900Z [TRACE] a: next\n"
+
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(atThreshold), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if st.LongContinuationRuns != 0 {
+		t.Errorf("LongContinuationRuns = %d, want 0 for a run of exactly longRun lines", st.LongContinuationRuns)
+	}
+
+	overThreshold := "2022-12-15T00:16:20.800Z [TRACE] a: short\n" +
+		strings.Repeat("cont\n", longRun+1) +
+		"2022-12-15T00:16:20.900Z [TRACE] a: next\n"
+
+	var comps2 Interner
+	var c2 collector
+	st2, err := Scan(strings.NewReader(overThreshold), &comps2, &c2)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if st2.LongContinuationRuns != 1 {
+		t.Errorf("LongContinuationRuns = %d, want 1 for a run of longRun+1 lines", st2.LongContinuationRuns)
 	}
 }
 
