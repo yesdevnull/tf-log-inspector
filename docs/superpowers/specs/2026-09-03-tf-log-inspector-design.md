@@ -184,19 +184,31 @@ parsing completes.
 
 ## Data model
 
+The indexed unit is a **logical entry**, not a physical line. A single log
+entry frequently spans several physical lines: in the sampled real log, **239
+of 1,278 lines (19%) were continuation lines carrying no timestamp or level**.
+Multi-line entries are therefore the normal case, not an edge case.
+
+Indexing physical lines would break both halves of the tool — filtering by
+level would strip continuation lines away from their parent entry, and jumping
+from a span to its log lines would land on a fragment. An entry's byte range
+covers all of its lines.
+
 ```go
-// Line is one physical log line, located in the mmap'd buffer.
-type Line struct {
-    Off   uint64 // byte offset into the mapped file
-    Len   uint32
-    TSms  uint32 // milliseconds since the first line's timestamp
+// Entry is one logical log entry — a timestamped line plus any continuation
+// lines that follow it — located in the mmap'd buffer.
+type Entry struct {
+    Off   uint64 // byte offset of the entry's first line
+    Len   uint32 // bytes covering ALL lines of the entry
+    TSms  uint32 // milliseconds since the first entry's timestamp
     Level uint8  // TRACE/DEBUG/INFO/WARN/ERROR
-    Sub   uint16 // interned subsystem id
+    Comp  uint16 // interned component (see below)
+    Lines uint16 // physical line count, for rendering
 }
 
 // Span is one provider operation with a measured duration.
 type Span struct {
-    StartLine, EndLine uint32 // indices into []Line
+    StartEntry, EndEntry uint32 // indices into []Entry
     StartMs, EndMs     uint32
     RPC, Provider      uint16 // interned
     ResourceType       uint32 // interned; observed, from tf_resource_type
@@ -211,11 +223,27 @@ never traces the line and span slices — they are two large pointer-free
 allocations it walks past. Strings live in a small intern table; distinct
 providers, RPC names and resource types number in the thousands at most.
 
-**Sizing.** A 1GB log at roughly 200 bytes per line is about 5 million lines.
-`Line` is 24 bytes padded, so the line index costs roughly 120MB resident, plus
-OS-managed mmap pages that are evictable under memory pressure. Expect well
-under 200MB RSS for a 1GB log. If that proves too high the lever is to index
-only timestamped lines, but this should be measured before being optimised.
+**Component facets.** Terraform core writes messages that *begin* with a
+component prefix — `terraform.contextPlugins:`, `statemgr.Filesystem:`,
+`ProviderTransformer:` — which is textually indistinguishable from an hclog
+named logger such as `provider.terraform-provider-aws_v4.46.0_x5:`. Core's root
+logger is unnamed, so there is no way to tell them apart from the text, and no
+reason to try: both identify the component that emitted the entry. The parser
+treats the token before the first `:` as `Comp` in either case, and that is
+what the facet pane lists. Provider entries remain identifiable by their
+`provider.` prefix.
+
+**Sizing.** The sampled real log averaged **102 bytes per line**, half my
+earlier estimate. At that rate a 1GB log is roughly 10 million physical lines;
+at 19% continuations, about 8 million logical entries. `Entry` is 24 bytes
+padded, so the index costs roughly **190MB resident**, plus OS-managed mmap
+pages that are evictable under memory pressure.
+
+That is higher than the earlier 120MB figure and worth watching, though TRACE
+logs containing large state dumps will skew the average line longer and the
+entry count lower. If it proves too high, the lever is to drop `Lines` and
+derive it at render time. This should be measured, not pre-optimised — phase 1
+reports the real figures.
 
 ## Span extraction
 
@@ -290,8 +318,12 @@ foundation.
 - **Non-monotonic timestamps** across concurrent goroutines: clamped, never
   producing a negative duration. This is an expected condition and is counted
   in the diagnostic report rather than warned about per-occurrence.
-- **Lines with no parseable timestamp** (multi-line panics, raw dumps): attach
-  to the preceding line's timestamp.
+- **Core-only logs.** A log may contain no provider RPC entries at all — the
+  sampled gist log had zero, because it exercised the builtin `terraform_data`
+  resource and launched no plugin process. Remote-execution backends produce
+  the same shape locally. The tool must present this as a clear, explained
+  state ("no provider RPC data in this log"), not as an empty ranked list that
+  looks like a bug.
 
 ## `--diagnose`
 
@@ -434,7 +466,7 @@ rules as tested behaviour. No PTY, no timing, no flakes, no library required.
 
 | Layer | Proves |
 |-------|--------|
-| `hclog` parser | Line → `Line` for all level/timestamp/subsystem/field shapes |
+| `hclog` parser | Lines → `Entry`, incl. multi-line entries, both offset formats, absent component |
 | `SpanBuilder` ×4 | Each tier produces correct spans from its fixture |
 | Tier sniffer | Selects the highest tier a given log supports |
 | `diagnose` | Correct counts; value stripping leaks no values |
@@ -484,22 +516,34 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
 
 ## Open questions
 
-1. **How reliable address correlation is under real concurrency.** The
+1. **Where the plan actually executes.** This is the question that most
+   threatens the primary use case. If the target workflow uses a remote
+   execution backend — Terraform Cloud, Terraform Enterprise, or any runner
+   that executes the plan elsewhere — then a locally-captured `TF_LOG` contains
+   only the CLI's orchestration of a remote run and **no provider RPC entries
+   at all**. Every timing feature in this design depends on provider entries.
+   The sampled gist log is exactly this shape for a different reason (builtin
+   provider, no plugin launched), which is what surfaced the risk.
+
+   If the plans in question run remotely, the log that matters is the one
+   produced on the runner, and obtaining it is a prerequisite to this tool
+   being useful at all. **This must be confirmed before phase 2.**
+2. **How reliable address correlation is under real concurrency.** The
    mechanism is confirmed to exist — core logs addresses, and logs its own side
    of each RPC. What is unknown is the *ambiguity rate* when many resources of
    the same type are planned in parallel, which is exactly the case in a large
    plan. If most spans come back `Ambiguous`, view `3` is not worth its
    complexity and should be cut. **`--diagnose` must report the confidence
    distribution**, and that number decides whether the view ships.
-2. **Whether tier 2 pairing is available.** `"Sending request downstream"`
+3. **Whether tier 2 pairing is available.** `"Sending request downstream"`
    lines were absent from the public samples inspected. Phase 1 confirms
    whether real logs contain them.
-3. **Which tier real logs actually support.** Tier 1 is expected to be the
+4. **Which tier real logs actually support.** Tier 1 is expected to be the
    normal case, but providers not built on `terraform-plugin-go` will not emit
    `tf_req_duration_ms`. Phase 1 measures the proportion of spans by tier.
-4. **`TF_LOG_CORE` versus `TF_LOG_PROVIDER` splitting.** Terraform can route
+5. **`TF_LOG_CORE` versus `TF_LOG_PROVIDER` splitting.** Terraform can route
    core and provider logs at different levels, and address correlation requires
    both in one file. Whether Dan's CI captures both determines whether view `3`
    is reachable at all in the environment that matters.
-5. **Real-world line rate.** The 200 bytes/line sizing estimate is a guess used
+6. **Real-world line rate.** The 102 bytes/line figure comes from one small public log and is used
    for capacity planning. Phase 1 reports the true figure.
