@@ -302,6 +302,53 @@ func TestReportNeverLeaksStructuredLineContent(t *testing.T) {
 	}
 }
 
+// completionHookLine is a completion-bearing UI-hook line -- the kind
+// span.UIHookBuilder turns into a span -- carrying the address
+// module.m["key"].data.local_file.thing, distinct from structuredHookLine's
+// address so the two tests cannot pass on stale state from each other.
+const completionHookLine = `{"@level":"info","@message":"module.m[\"key\"].data.local_file.thing: Refresh complete after 0s [id=abc]","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.601000+10:00","hook":{"resource":{"addr":"module.m[\"key\"].data.local_file.thing","module":"module.m[\"key\"]","resource":"data.local_file.thing","implied_provider":"local","resource_type":"local_file","resource_name":"thing","resource_key":null},"action":"read","id_key":"id","id_value":"abc","elapsed_seconds":0},"type":"apply_complete"}`
+
+// The property that matters most for this task: adding span.UIHookBuilder as
+// a StructuredSink alongside the Collector must not let a structured line's
+// content reach the Collector by some other path. The Collector deliberately
+// does not implement logfmt.StructuredSink, so this checks its internal
+// maps directly, not just the rendered text, and specifically the address
+// that span.UIHookBuilder itself now reads from the very same line.
+func TestUIHookBuilderPresenceDoesNotLeakIntoCollector(t *testing.T) {
+	const addr = `module.m["key"].data.local_file.thing`
+	in := completionHookLine + "\n"
+
+	var comps logfmt.Interner
+	c := NewCollector(&comps)
+	var ui span.UIHookBuilder
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, c, &ui); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	// Sanity check: the builder this test is guarding against did receive
+	// the line and did build a span from it, so the negative assertions
+	// below are not vacuous.
+	if got := ui.Spans(); len(got) != 1 || got[0].Address != addr {
+		t.Fatalf("UIHookBuilder did not build the expected span: %+v", got)
+	}
+
+	for key := range c.fieldKeys {
+		if strings.Contains(key, addr) {
+			t.Errorf("address reached a field key: %q", key)
+		}
+	}
+	for tmpl := range c.templates {
+		if strings.Contains(tmpl, addr) {
+			t.Errorf("address reached a template: %q", tmpl)
+		}
+	}
+	for comp := range c.compCount {
+		if strings.Contains(comp, addr) {
+			t.Errorf("address reached a component: %q", comp)
+		}
+	}
+}
+
 // A predominantly structured log has no hclog provider entries to profile,
 // but the reason and the remedy differ from an ordinary core-only log, so
 // EXTRACTION's guidance must say so specifically.

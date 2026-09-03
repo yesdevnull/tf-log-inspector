@@ -8,6 +8,13 @@ type Fidelity uint8
 const (
 	// FidelityReported means the provider logged its own duration.
 	FidelityReported Fidelity = iota
+	// FidelityUIReported means Terraform's structured-output UI hook stream
+	// logged its own per-resource duration. It ranks below FidelityReported:
+	// an RPC-level measurement is finer-grained than a per-resource one. In
+	// practice the two never coexist in one log, because HCP's structured
+	// output is info level only -- enabling debug logging to get RPC-level
+	// evidence replaces the JSON stream with hclog text.
+	FidelityUIReported
 	// FidelityPaired means request and response lines were correlated by id.
 	FidelityPaired
 	// FidelitySequential means calls were paired within one plugin stream.
@@ -20,6 +27,8 @@ func (f Fidelity) String() string {
 	switch f {
 	case FidelityReported:
 		return "reported"
+	case FidelityUIReported:
+		return "ui-reported"
 	case FidelityPaired:
 		return "paired"
 	case FidelitySequential:
@@ -47,5 +56,10 @@ type Span struct {
 	RPC          string
 	Provider     string
 	ResourceType string
-	Fidelity     Fidelity
+	// Address is the Terraform resource address (e.g.
+	// module.m["key"].aws_instance.foo). It is populated only for spans
+	// built from Terraform's structured-output UI hook stream, where the
+	// address is the only per-resource identifier available.
+	Address  string
+	Fidelity Fidelity
 }

@@ -17,6 +17,16 @@ type Sink interface {
 	Entry(ord uint32, e Entry, msg string, f Fields)
 }
 
+// StructuredSink is implemented by sinks that need the raw text of a
+// structured-output line. A sink that does not implement it never sees that
+// text, which is what keeps the diagnostic report's disclosure guarantee
+// true by construction: the report's collector deliberately does not
+// implement this interface. line is valid only for the duration of the
+// call, the same contract as msg in Sink.Entry.
+type StructuredSink interface {
+	Structured(ord uint32, e Entry, line string)
+}
+
 // Scan reads r in a single pass, assembling logical entries and pushing each
 // to every sink. Memory use is independent of input size: only the header
 // line's message is retained, and only until the entry is flushed.
@@ -77,15 +87,23 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 				// immediately rather than left open for the next line to
 				// continue. Its content is a disclosure risk -- the message
 				// carries full resource and module addresses -- so it is
-				// counted without ever being read, exactly like the
-				// non-hclog content handled below.
+				// counted without ever reaching an ordinary Sink, exactly
+				// like the non-hclog content handled below. A sink that
+				// opts in via StructuredSink still receives the raw line,
+				// for span extraction.
 				flush()
 				st.StructuredLines++
 				st.UntimestampedLines++
+				entryOrd := ord
 				cur = Entry{Off: off, Len: raw, Lines: 1}
 				curMsg = ""
 				open = true
 				flush()
+				for _, s := range sinks {
+					if ss, ok := s.(StructuredSink); ok {
+						ss.Structured(entryOrd, cur, text)
+					}
+				}
 
 			case h.HasTS:
 				flush()

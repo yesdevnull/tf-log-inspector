@@ -405,6 +405,77 @@ func TestScanJSONFragmentWithoutSignatureNotCountedStructured(t *testing.T) {
 	}
 }
 
+// structuredCollector records every StructuredSink.Structured call, so tests
+// can assert on the raw line text an opted-in sink receives. It also
+// implements Sink (as a no-op) purely so it can be passed to Scan alongside
+// other sinks -- real StructuredSink implementations, such as
+// span.UIHookBuilder, do the same.
+type structuredCollector struct {
+	ords  []uint32
+	lines []string
+}
+
+func (c *structuredCollector) Entry(ord uint32, e Entry, msg string, f Fields) {}
+
+func (c *structuredCollector) Structured(ord uint32, e Entry, line string) {
+	c.ords = append(c.ords, ord)
+	c.lines = append(c.lines, line)
+}
+
+// A sink that opts into StructuredSink must receive the structured line's raw
+// text and the same ordinal the entry was flushed with -- the ordinary Sink
+// channel still sees only an empty message, so the two channels must agree
+// on ordinal numbering.
+func TestScanStructuredSinkReceivesRawLine(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
+	var comps Interner
+	var c collector
+	var sc structuredCollector
+	if _, err := Scan(strings.NewReader(in), &comps, &c, &sc); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(sc.lines) != 2 {
+		t.Fatalf("got %d Structured calls, want 2", len(sc.lines))
+	}
+	if sc.lines[0] != structuredVersionLine {
+		t.Errorf("line 0 = %q, want %q", sc.lines[0], structuredVersionLine)
+	}
+	if sc.lines[1] != structuredHookLine {
+		t.Errorf("line 1 = %q, want %q", sc.lines[1], structuredHookLine)
+	}
+	if sc.ords[0] != c.ords[0] || sc.ords[1] != c.ords[1] {
+		t.Errorf("Structured ordinals %v do not match Entry ordinals %v", sc.ords, c.ords)
+	}
+	// The ordinary Sink channel must still see nothing of the content.
+	if c.msgs[0] != "" || c.msgs[1] != "" {
+		t.Errorf("ordinary sink saw non-empty message: %q, %q", c.msgs[0], c.msgs[1])
+	}
+}
+
+// A sink that does not implement StructuredSink -- the normal case, and the
+// diagnose Collector's case in particular -- must not be affected by a
+// structured line's presence in the file: entry count and ordinals are
+// unchanged from before this channel existed.
+func TestScanStructuredLinesDoNotAffectOrdinarySinkOrdinals(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
+		structuredHookLine + "\n" +
+		"2022-12-15T00:16:20.900Z [TRACE] a: two\n"
+	var comps Interner
+	var c collector
+	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	want := []uint32{0, 1, 2}
+	if len(c.ords) != len(want) {
+		t.Fatalf("got %d ordinals, want %d", len(c.ords), len(want))
+	}
+	for i, o := range want {
+		if c.ords[i] != o {
+			t.Errorf("ordinal %d = %d, want %d", i, c.ords[i], o)
+		}
+	}
+}
+
 func TestScanRealFixtures(t *testing.T) {
 	cases := []struct {
 		file           string

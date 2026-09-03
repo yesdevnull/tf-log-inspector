@@ -142,6 +142,70 @@ func TestSnifferInferredRequiresMultipleProviderEntries(t *testing.T) {
 	}
 }
 
+// sniffWith scans in through a fresh Sniffer alongside extra sinks (such as a
+// UIHookBuilder), returning the Sniffer's report.
+func sniffWith(t *testing.T, in string, extra ...logfmt.Sink) Capabilities {
+	t.Helper()
+	var comps logfmt.Interner
+	s := NewSniffer(&comps)
+	sinks := append([]logfmt.Sink{s}, extra...)
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, sinks...); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	return s.Report()
+}
+
+const sniffUIRefreshComplete = `{"@level":"info","@message":"module.m[\"key\"].data.local_file.thing: Refresh complete after 0s [id=abc]","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.601000+10:00","hook":{"resource":{"addr":"module.m[\"key\"].data.local_file.thing","module":"module.m[\"key\"]","resource":"data.local_file.thing","implied_provider":"local","resource_type":"local_file","resource_name":"thing","resource_key":null},"action":"read","id_key":"id","id_value":"abc","elapsed_seconds":0},"type":"apply_complete"}`
+
+const sniffUIProgress = `{"@level":"info","@timestamp":"2026-09-04T09:15:03.000000+10:00","hook":{"resource":{"addr":"aws_instance.example","module":"","resource":"aws_instance.example","implied_provider":"aws","resource_type":"aws_instance","resource_name":"example","resource_key":null},"action":"create","elapsed_seconds":1.2},"type":"apply_progress"}`
+
+// TestSnifferCountsUIHookCompletions checks that a completion-bearing
+// structured-output line is counted, and that apply_progress -- which also
+// carries elapsed_seconds but is not a completion -- is not.
+func TestSnifferCountsUIHookCompletions(t *testing.T) {
+	c := sniffWith(t, sniffUIRefreshComplete+"\n"+sniffUIProgress+"\n")
+	if c.UIHookCompletions != 1 {
+		t.Errorf("UIHookCompletions = %d, want 1", c.UIHookCompletions)
+	}
+}
+
+// TestSnifferBestFidelityUIReportedWhenNoRPCEvidence checks that a
+// structured-output-only log (no hclog RPC evidence at all) reports
+// FidelityUIReported as usable.
+func TestSnifferBestFidelityUIReportedWhenNoRPCEvidence(t *testing.T) {
+	c := sniffWith(t, sniffUIRefreshComplete+"\n")
+	if f, ok := c.BestFidelity(); !ok || f != FidelityUIReported {
+		t.Errorf("BestFidelity = %v, %v; want ui-reported, true", f, ok)
+	}
+}
+
+// TestSnifferBestFidelityPrefersRPCOverUIHook checks that RPC-level
+// evidence outranks UI-hook evidence when both are present, because an
+// RPC-level measurement is finer-grained than a per-resource one.
+func TestSnifferBestFidelityPrefersRPCOverUIHook(t *testing.T) {
+	in := `2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_req_id=abc tf_rpc=ReadResource tf_req_duration_ms=5` + "\n" +
+		sniffUIRefreshComplete + "\n"
+	c := sniffWith(t, in)
+	if c.UIHookCompletions != 1 {
+		t.Errorf("UIHookCompletions = %d, want 1", c.UIHookCompletions)
+	}
+	if f, ok := c.BestFidelity(); !ok || f != FidelityReported {
+		t.Errorf("BestFidelity = %v, %v; want reported (RPC evidence outranks UI-hook evidence), true", f, ok)
+	}
+}
+
+// A structured line with no hook (e.g. type:"version") must not count.
+func TestSnifferUIHookRequiresHookResource(t *testing.T) {
+	const versionLine = `{"@level":"info","@message":"Terraform 1.14.9","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.113402+10:00","terraform":"1.14.9","type":"version","ui":"1.2"}`
+	c := sniffWith(t, versionLine+"\n")
+	if c.UIHookCompletions != 0 {
+		t.Errorf("UIHookCompletions = %d, want 0", c.UIHookCompletions)
+	}
+	if _, ok := c.BestFidelity(); ok {
+		t.Error("BestFidelity reported a usable tier for a version-only structured log")
+	}
+}
+
 // TestSnifferCorrelationCapBounded checks that request-id correlation stays
 // bounded on a log with more distinct ids than maxTrackedReqIDs: memory use
 // must not grow without limit, and ids past the cap must simply not

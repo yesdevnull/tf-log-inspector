@@ -1,6 +1,7 @@
 package span
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
@@ -19,22 +20,30 @@ const maxTrackedReqIDs = 4096
 // It answers "what could this log support", which is a different question from
 // "what spans were built", and is the core of the diagnostic report.
 type Capabilities struct {
-	ResponseEntries  uint64 // "Received downstream response" entries
-	RequestEntries   uint64 // "Sending request downstream" entries
-	DurationFields   uint64 // response entries carrying tf_req_duration_ms
-	ReqIDFields      uint64 // entries carrying tf_req_id
-	CorrelatedReqIDs uint64 // response entries whose tf_req_id was also seen on a request entry
-	ProviderEntries  uint64 // entries whose component starts with "provider."
-	CoreVertexLines  uint64 // core graph-walk lines naming a resource address
-	CoreGRPCLines    uint64 // core "GRPCProvider: <RPC>" lines
+	ResponseEntries   uint64 // "Received downstream response" entries
+	RequestEntries    uint64 // "Sending request downstream" entries
+	DurationFields    uint64 // response entries carrying tf_req_duration_ms
+	ReqIDFields       uint64 // entries carrying tf_req_id
+	CorrelatedReqIDs  uint64 // response entries whose tf_req_id was also seen on a request entry
+	ProviderEntries   uint64 // entries whose component starts with "provider."
+	CoreVertexLines   uint64 // core graph-walk lines naming a resource address
+	CoreGRPCLines     uint64 // core "GRPCProvider: <RPC>" lines
+	UIHookCompletions uint64 // structured-output completion-bearing hook lines, UIHookBuilder's precondition
 }
 
 // BestFidelity reports the highest-fidelity tier this log can support, and
-// whether any tier is usable at all.
+// whether any tier is usable at all. UIHookCompletions ranks below
+// DurationFields (RPC-level evidence is finer-grained than per-resource
+// evidence) but above every other tier: in practice the two never coexist in
+// one log, because HCP's structured output is info level only and enabling
+// debug logging to get RPC-level evidence replaces the JSON stream with
+// hclog text.
 func (c Capabilities) BestFidelity() (Fidelity, bool) {
 	switch {
 	case c.DurationFields > 0:
 		return FidelityReported, true
+	case c.UIHookCompletions > 0:
+		return FidelityUIReported, true
 	case c.CorrelatedReqIDs > 0:
 		return FidelityPaired, true
 	case c.RequestEntries > 0 && c.ResponseEntries > 0:
@@ -122,6 +131,27 @@ func (s *Sniffer) trackRequestID(id string) {
 		s.reqIDs = make(map[string]struct{})
 	}
 	s.reqIDs[strings.Clone(id)] = struct{}{}
+}
+
+// Structured implements logfmt.StructuredSink. It counts completion-bearing
+// UI-hook lines carrying a resource -- exactly UIHookBuilder's precondition
+// for building a span -- without retaining anything from the line itself.
+// A line that fails to decode, or decodes but is not a completion-bearing
+// hook line, is silently not counted: UIHookBuilder is the place that counts
+// malformed lines, since Capabilities only answers "what could this log
+// support".
+func (s *Sniffer) Structured(ord uint32, e logfmt.Entry, line string) {
+	var ul uiLine
+	if err := json.Unmarshal([]byte(line), &ul); err != nil {
+		return
+	}
+	if !isCompletionType(ul.Type) {
+		return
+	}
+	if ul.Hook == nil || ul.Hook.Resource == nil {
+		return
+	}
+	s.caps.UIHookCompletions++
 }
 
 // Report returns the accumulated capabilities.
