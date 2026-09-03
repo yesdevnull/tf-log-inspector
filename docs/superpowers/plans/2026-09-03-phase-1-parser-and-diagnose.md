@@ -83,8 +83,8 @@ go -C /Users/dan/Code/tf-log-inspector mod init github.com/yesdevnull/tf-log-ins
 
 ```
 # source: https://github.com/hashicorp/terraform-provider-aws/issues/28364 (verbatim)
-2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=2634bc46-bb66-3d22-528d-d2eaf8165f52 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange diagnostic_error_count=1 diagnostic_warning_count=0 tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5 @module=sdk.proto timestamp=2022-12-15T00:16:20.799Z
-2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=1 tf_req_id=6bf5c123-55fb-d840-bbf4-d84f472bd996 tf_resource_type=aws_internet_gateway tf_rpc=ApplyResourceChange diagnostic_error_count=1 @module=sdk.proto diagnostic_warning_count=0 tf_proto_version=5.3 timestamp=2022-12-15T00:16:20.799Z
+2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=2634bc46-bb66-3d22-528d-d2eaf8165f52 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange diagnostic_error_count=1 diagnostic_warning_count=0 tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5 @caller=github.com/hashicorp/terraform-plugin-go@v0.14.2/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2022-12-15T00:16:20.799Z
+2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=1 tf_req_id=6bf5c123-55fb-d840-bbf4-d84f472bd996 tf_resource_type=aws_internet_gateway tf_rpc=ApplyResourceChange diagnostic_error_count=1 @module=sdk.proto diagnostic_warning_count=0 tf_proto_version=5.3 @caller=github.com/hashicorp/terraform-plugin-go@v0.14.2/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 timestamp=2022-12-15T00:16:20.799Z
 ```
 
 `testdata/core-only.log` — verbatim from the cited gist, including a real continuation pair (`Terraform v1.16.0` / `on linux_amd64` are genuine untimestamped CLI output following a timestamped line):
@@ -105,11 +105,12 @@ on linux_amd64
 
 ```
 # source: https://github.com/hashicorp/terraform-provider-aws/issues/36974 (verbatim; values were redacted by the reporter, shape is real)
-2024-02-13T12:11:28.330+0100 [DEBUG] provider.terraform-provider-aws_v5.5.0_x5: HTTP Response Received: @module=aws aws.operation=UpdateProject
+2024-02-13T12:11:28.330+0100 [DEBUG] provider.terraform-provider-aws_v5.5.0_x5: HTTP Response Received: @module=aws aws.operation=UpdateProject aws.sdk=aws-sdk-go
   http.response.body=
   | {"__type":"Inva*************tion","message":"Caller is an end user and not allowed to mutate system tags."}
-   http.response.header.x_amzn_requestid=1d77924f-****3ca61 tf_provider_addr=registry.terraform.io/hashicorp/aws
-2024-02-13T12:11:28.331+0100 [TRACE] provider.terraform-provider-aws_v5.5.0_x5: Received downstream response: diagnostic_warning_count=0 tf_proto_version=5.3 tf_rpc=ApplyResourceChange tf_req_duration_ms=10710 @module=sdk.proto
+   http.response.header.x_amzn_requestid=1d77924f-****3ca61 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_mux_provider="*schema.GRPCProviderServer" aws.service=CodeBuild http.response.header.date="Tue, 13 Feb 2024 11:11:17 GMT" tf_req_id=3544216***966 @caller=github.com/hashicorp/aws-sdk-go-base/v2/awsv1shim/v2@v2.0.0-beta.31/logger.go:144 aws.region=us-east-1 http.duration=10705 http.response.header.content_type=application/x-amz-json-1.1 http.response_content_length=107 http.status_code=400 tf_resource_type=aws_codebuild_project tf_rpc=ApplyResourceChange timestamp="2024-02-13T12:11:28.330+0100"
+2024-02-13T12:11:28.331+0100 [TRACE] provider.terraform-provider-aws_v5.5.0_x5: Called downstream: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=3544***7966 @caller=github.com/hashicorp/terraform-plugin-sdk/v2@v2.26.1/helper/schema/resource.go:848 @module=sdk.helper_schema tf_mux_provider="*schema.GRPCProviderServer" tf_resource_type=aws_codebuild_project tf_rpc=ApplyResourceChange timestamp="2024-02-13T12:11:28.330+0100"
+2024-02-13T12:11:28.331+0100 [TRACE] provider.terraform-provider-aws_v5.5.0_x5: Received downstream response: diagnostic_warning_count=0 tf_proto_version=5.3 @caller=github.com/hashicorp/terraform-plugin-go@v0.15.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 tf_req_duration_ms=10710 tf_resource_type=aws_codebuild_project diagnostic_error_count=1 tf_rpc=ApplyResourceChange tf_provider_addr=registry.terraform.io/hashicorp/aws @module=sdk.proto tf_req_id=35442***66 timestamp="2024-02-13T12:11:28.331+0100"
 ```
 
 `testdata/mixed-hcp.log` — **synthesised**, and labelled as such, because no public HCP raw run log was available. It models hclog interleaved with plan output.
