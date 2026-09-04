@@ -149,6 +149,24 @@ func template(msg string, f logfmt.Fields) string {
 	return prose + " " + strings.Join(keys, " ")
 }
 
+// ResourceRow is one row of the SLOWEST RESOURCES table: a single UI-hook
+// span with its address masked, but its resource type -- a public provider
+// schema name such as "aws_instance", never customer data -- left visible.
+type ResourceRow struct {
+	DurationMs   uint32
+	Action       string
+	ResourceType string
+	MaskedAddr   string
+}
+
+// ResourceTypeTotal is one row of the BY RESOURCE TYPE rollup: total
+// duration and count for one resource type, with no addresses at all.
+type ResourceTypeTotal struct {
+	ResourceType string
+	TotalMs      uint64
+	Count        uint64
+}
+
 // Report is the finished diagnostic summary.
 type Report struct {
 	Stats              logfmt.Stats
@@ -170,12 +188,33 @@ type Report struct {
 	InternOverflow     uint64
 	DroppedKeys        uint64
 
+	// UI-hook figures. These describe span.UIHookBuilder's spans, which sit
+	// on their own timeline (see the doc comment on span.Span.StartMs) and
+	// so are never summed with the RPC-tier figures above.
+	UISpanCount      int
+	UISlowestMs      uint32
+	UITotalSpanMs    uint64
+	UIClampedSpans   int
+	UIWallClockMs    uint64              // derived from the UI-hook spans' own EndMs offsets; 0 if there are none
+	SlowestResources []ResourceRow       // ranked by duration descending, top 10
+	ByResourceType   []ResourceTypeTotal // ranked by total duration descending, top 10
+	UIActionCounts   []Template          // action -> count, ranked by count descending
+
 	fieldKeys     map[string]uint64 // every distinct key seen, unfiltered -- unexported so a future caller cannot range over the singletons Amendment 1 withholds
 	templateCount map[string]uint64
 }
 
-// Build assembles a Report from a completed scan.
-func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
+// maxResourceRows caps SLOWEST RESOURCES and BY RESOURCE TYPE at their top N,
+// per the diagnostic report's design: enough to see shape and rank, not a
+// full listing.
+const maxResourceRows = 10
+
+// Build assembles a Report from a completed scan. spans are span.
+// ReportedBuilder's RPC-tier spans; uiSpans are span.UIHookBuilder's
+// UI-hook spans. The two are reported separately and never merged: they sit
+// on different timelines (see span.Span's StartMs/EndMs doc comment), so
+// concatenating and sorting them together would silently misorder them.
+func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span, c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
 	tier, usable := caps.BestFidelity()
 	topFieldKeys, withheldFieldKeys := recurringTopN(c.fieldKeys, maxFieldKeys)
 	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
@@ -219,6 +258,79 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, c *Collec
 			r.ClampedSpans++
 		}
 	}
+
+	r.UISpanCount = len(uiSpans)
+	rows := make([]ResourceRow, 0, len(uiSpans))
+	typeTotals := map[string]*ResourceTypeTotal{}
+	actionCounts := map[string]uint64{}
+	for _, s := range uiSpans {
+		r.UITotalSpanMs += uint64(s.DurationMs)
+		if s.DurationMs > r.UISlowestMs {
+			r.UISlowestMs = s.DurationMs
+		}
+		if s.StartClamped {
+			r.UIClampedSpans++
+		}
+		if uint64(s.EndMs) > r.UIWallClockMs {
+			r.UIWallClockMs = uint64(s.EndMs)
+		}
+
+		rows = append(rows, ResourceRow{
+			DurationMs:   s.DurationMs,
+			Action:       s.RPC,
+			ResourceType: s.ResourceType,
+			MaskedAddr:   MaskProse(s.Address),
+		})
+
+		rt, ok := typeTotals[s.ResourceType]
+		if !ok {
+			rt = &ResourceTypeTotal{ResourceType: s.ResourceType}
+			typeTotals[s.ResourceType] = rt
+		}
+		rt.TotalMs += uint64(s.DurationMs)
+		rt.Count++
+
+		actionCounts[s.RPC]++
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].DurationMs != rows[j].DurationMs {
+			return rows[i].DurationMs > rows[j].DurationMs
+		}
+		return rows[i].MaskedAddr < rows[j].MaskedAddr
+	})
+	if len(rows) > maxResourceRows {
+		rows = rows[:maxResourceRows]
+	}
+	r.SlowestResources = rows
+
+	typeRows := make([]ResourceTypeTotal, 0, len(typeTotals))
+	for _, rt := range typeTotals {
+		typeRows = append(typeRows, *rt)
+	}
+	sort.Slice(typeRows, func(i, j int) bool {
+		if typeRows[i].TotalMs != typeRows[j].TotalMs {
+			return typeRows[i].TotalMs > typeRows[j].TotalMs
+		}
+		return typeRows[i].ResourceType < typeRows[j].ResourceType
+	})
+	if len(typeRows) > maxResourceRows {
+		typeRows = typeRows[:maxResourceRows]
+	}
+	r.ByResourceType = typeRows
+
+	actions := make([]Template, 0, len(actionCounts))
+	for action, n := range actionCounts {
+		actions = append(actions, Template{Text: action, Count: n})
+	}
+	sort.Slice(actions, func(i, j int) bool {
+		if actions[i].Count != actions[j].Count {
+			return actions[i].Count > actions[j].Count
+		}
+		return actions[i].Text < actions[j].Text
+	})
+	r.UIActionCounts = actions
+
 	return r
 }
 
@@ -284,8 +396,18 @@ func (r Report) Render(w io.Writer) error {
 	}
 	fmt.Fprintf(b, "  long output blocks   %d\n", r.Stats.LongContinuationRuns)
 	fmt.Fprintf(b, "  ANSI escapes         %v\n", r.Stats.SawANSI)
-	if !r.Stats.FirstTS.IsZero() {
+	switch {
+	case !r.Stats.FirstTS.IsZero():
 		fmt.Fprintf(b, "  log wall-clock       %.1fs\n", r.Stats.LastTS.Sub(r.Stats.FirstTS).Seconds())
+	case r.UISpanCount > 0:
+		// Structured-output lines carry no scanner-visible timestamp (see
+		// span.Span's StartMs/EndMs doc comment), so Stats.FirstTS/LastTS
+		// stay zero for a pure UI-hook log. The UI-hook spans' own EndMs
+		// offsets are the only clock available, so the figure is derived
+		// from them and labelled as such rather than left silently absent.
+		fmt.Fprintf(b, "  log wall-clock       %.1fs (derived from UI-hook resource timings)\n", float64(r.UIWallClockMs)/1000)
+	default:
+		fmt.Fprintf(b, "  log wall-clock       unavailable\n")
 	}
 	if r.Elapsed > 0 {
 		fmt.Fprintf(b, "  parse throughput     %.0f MB/s (%s)\n",
@@ -318,12 +440,12 @@ func (r Report) Render(w io.Writer) error {
 			float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
 		if structured {
 			fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON).\n")
-			fmt.Fprintf(b, "  It carries per-resource timings, which this version\n")
-			fmt.Fprintf(b, "  does not yet parse. Structured output is info level\n")
-			fmt.Fprintf(b, "  only, so it never contains provider RPC entries. For\n")
-			fmt.Fprintf(b, "  those, enable debug logging on the run: the log then\n")
-			fmt.Fprintf(b, "  arrives as text rather than JSON, which this tool does\n")
-			fmt.Fprintf(b, "  parse.\n")
+			fmt.Fprintf(b, "  Structured output gives per-resource timings, which this\n")
+			fmt.Fprintf(b, "  tool parses into the SLOWEST RESOURCES section below when\n")
+			fmt.Fprintf(b, "  present. It is info level only, though, so it never\n")
+			fmt.Fprintf(b, "  contains provider RPC timings. For those, enable\n")
+			fmt.Fprintf(b, "  debug logging on the run: the log then arrives as text\n")
+			fmt.Fprintf(b, "  rather than JSON, with RPC detail this tool also parses.\n")
 		} else {
 			fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
 			fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
@@ -345,7 +467,39 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)
 	fmt.Fprintf(b, "  slowest span         %d ms\n", r.SlowestMs)
 	fmt.Fprintf(b, "  total span time (sum, overlaps) %d ms\n", r.TotalSpanMs)
-	fmt.Fprintf(b, "  starts clamped       %d\n\n", r.ClampedSpans)
+	fmt.Fprintf(b, "  starts clamped       %d\n", r.ClampedSpans)
+	// UI-hook spans sit on a different timeline from the RPC spans above
+	// (see span.Span's StartMs/EndMs doc comment) and are reported
+	// separately rather than folded into the figures above.
+	fmt.Fprintf(b, "  UI-hook spans built  %d\n", r.UISpanCount)
+	fmt.Fprintf(b, "  UI-hook total time (sum, overlaps) %d ms\n", r.UITotalSpanMs)
+	fmt.Fprintf(b, "  UI-hook starts clamped %d\n", r.UIClampedSpans)
+	if len(r.UIActionCounts) > 0 {
+		fmt.Fprintf(b, "  UI-hook actions     ")
+		for _, a := range r.UIActionCounts {
+			fmt.Fprintf(b, "  %s %d", a.Text, a.Count)
+		}
+		fmt.Fprintf(b, "\n")
+	}
+	fmt.Fprintf(b, "\n")
+
+	// SLOWEST RESOURCES and BY RESOURCE TYPE are rendered only when there
+	// are UI-hook spans to show -- an empty "none" section here would be
+	// noise on the far more common RPC-tier log.
+	if r.UISpanCount > 0 {
+		fmt.Fprintf(b, "SLOWEST RESOURCES (addresses masked, top %d)\n", len(r.SlowestResources))
+		for _, row := range r.SlowestResources {
+			fmt.Fprintf(b, "  %8.1fs  %-8s %-24s %s\n",
+				float64(row.DurationMs)/1000, row.Action, row.ResourceType, row.MaskedAddr)
+		}
+		fmt.Fprintf(b, "\n")
+
+		fmt.Fprintf(b, "BY RESOURCE TYPE (top %d)\n", len(r.ByResourceType))
+		for _, t := range r.ByResourceType {
+			fmt.Fprintf(b, "  %8.1fs  %6d  %s\n", float64(t.TotalMs)/1000, t.Count, t.ResourceType)
+		}
+		fmt.Fprintf(b, "\n")
+	}
 
 	if r.Stats.BackwardsTimestamps > 0 || r.InternOverflow > 0 || r.DroppedKeys > 0 || r.Stats.LinesSaturated > 0 {
 		fmt.Fprintf(b, "ANOMALIES\n")

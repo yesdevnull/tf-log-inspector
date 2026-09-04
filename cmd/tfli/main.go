@@ -68,17 +68,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	collector := diagnose.NewCollector(&comps)
 	sniffer := span.NewSniffer(&comps)
 	var builder span.ReportedBuilder
+	// UIHookBuilder costs nothing extra on an hclog log: it implements
+	// logfmt.StructuredSink, so Scan only ever calls it for structured-output
+	// lines, of which an hclog log has none.
+	var uiBuilder span.UIHookBuilder
 
 	started := time.Now()
 	// Scan wraps r in its own 256KB bufio.Reader (internal/logfmt/scan.go), so
 	// wrapping f again here would only add a second, redundant buffer.
-	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder)
+	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder, &uiBuilder)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", path, err)
 	}
 	elapsed := time.Since(started)
 
-	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), collector, &comps, elapsed)
+	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(), collector, &comps, elapsed)
 
 	w := stdout
 	var out *os.File

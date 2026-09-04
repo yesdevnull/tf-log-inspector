@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,11 +17,12 @@ func build(t *testing.T, in string) Report {
 	c := NewCollector(&comps)
 	sn := span.NewSniffer(&comps)
 	var b span.ReportedBuilder
-	st, err := logfmt.Scan(strings.NewReader(in), &comps, c, sn, &b)
+	var ui span.UIHookBuilder
+	st, err := logfmt.Scan(strings.NewReader(in), &comps, c, sn, &b, &ui)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	return Build(st, sn.Report(), b.Spans(), c, &comps, 5*time.Millisecond)
+	return Build(st, sn.Report(), b.Spans(), ui.Spans(), c, &comps, 5*time.Millisecond)
 }
 
 func render(t *testing.T, r Report) string {
@@ -597,6 +599,151 @@ func TestFieldKeyDoesNotPinItsSourceMessage(t *testing.T) {
 // fields (prose is the entire return value, the case
 // strings.Join(fields,"") on a single-element slice could otherwise alias),
 // one field, and several fields.
+// --- Task 2: SLOWEST RESOURCES, BY RESOURCE TYPE, actions, and the SPANS/
+// EXTRACTION/wall-clock updates that come with wiring span.UIHookBuilder
+// into the report. ---
+
+const (
+	uiAddrLocalFile   = `module.m["key"].data.local_file.thing`
+	uiAddrInstanceOne = `aws_instance.example`
+	uiAddrInstanceTwo = `aws_instance.other`
+)
+
+// uiHookLine builds a minimal completion-bearing UI-hook line, mirroring
+// span.uiLineWith in internal/span/uihook_test.go -- duplicated rather than
+// exported, since a test-only helper is not worth widening span's public
+// surface for.
+func uiHookLine(ts, addr, resourceType, provider, action string, elapsedSeconds float64) string {
+	return fmt.Sprintf(`{"@level":"info","@timestamp":%q,"hook":{"resource":{"addr":%q,"module":"","resource":%q,"implied_provider":%q,"resource_type":%q,"resource_name":"x","resource_key":null},"action":%q,"elapsed_seconds":%v},"type":"apply_complete"}`,
+		ts, addr, addr, provider, resourceType, action, elapsedSeconds)
+}
+
+// threeResourceUIHookLog carries one local_file read (0ms -- must still
+// count) and two aws_instance creates of different durations, so ranking,
+// per-type rollup and action counting all have something real to check.
+func threeResourceUIHookLog() string {
+	return uiHookLine("2026-09-04T09:15:00.000000+10:00", uiAddrLocalFile, "local_file", "local", "read", 0) + "\n" +
+		uiHookLine("2026-09-04T09:15:01.000000+10:00", uiAddrInstanceOne, "aws_instance", "aws", "create", 2.5) + "\n" +
+		uiHookLine("2026-09-04T09:15:02.000000+10:00", uiAddrInstanceTwo, "aws_instance", "aws", "create", 8.2) + "\n"
+}
+
+func TestReportSlowestResourcesRankedWithMaskedAddresses(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	if len(r.SlowestResources) != 3 {
+		t.Fatalf("SlowestResources has %d rows, want 3", len(r.SlowestResources))
+	}
+	if r.SlowestResources[0].DurationMs != 8200 || r.SlowestResources[1].DurationMs != 2500 || r.SlowestResources[2].DurationMs != 0 {
+		t.Fatalf("SlowestResources not ranked by duration descending: %+v", r.SlowestResources)
+	}
+	if r.SlowestResources[0].ResourceType != "aws_instance" {
+		t.Errorf("ResourceType = %q, want aws_instance", r.SlowestResources[0].ResourceType)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "SLOWEST RESOURCES") {
+		t.Fatalf("report missing SLOWEST RESOURCES section:\n%s", out)
+	}
+	if !strings.Contains(out, "aws_instance") || !strings.Contains(out, "local_file") {
+		t.Errorf("report does not show unmasked resource types:\n%s", out)
+	}
+	for _, addr := range []string{uiAddrLocalFile, uiAddrInstanceOne, uiAddrInstanceTwo} {
+		if strings.Contains(out, addr) {
+			t.Errorf("report leaked an unmasked resource address %q:\n%s", addr, out)
+		}
+	}
+}
+
+func TestReportByResourceTypeTotals(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	byType := map[string]ResourceTypeTotal{}
+	for _, row := range r.ByResourceType {
+		byType[row.ResourceType] = row
+	}
+	if got := byType["aws_instance"]; got.TotalMs != 10700 || got.Count != 2 {
+		t.Errorf("aws_instance rollup = %+v, want TotalMs 10700, Count 2", got)
+	}
+	if got := byType["local_file"]; got.TotalMs != 0 || got.Count != 1 {
+		t.Errorf("local_file rollup = %+v, want TotalMs 0, Count 1", got)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "BY RESOURCE TYPE") {
+		t.Fatalf("report missing BY RESOURCE TYPE section:\n%s", out)
+	}
+	for _, addr := range []string{uiAddrLocalFile, uiAddrInstanceOne, uiAddrInstanceTwo} {
+		if strings.Contains(out, addr) {
+			t.Errorf("BY RESOURCE TYPE leaked an address %q:\n%s", addr, out)
+		}
+	}
+}
+
+func TestReportUIHookActionsLine(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	if !strings.Contains(out, "read 1") || !strings.Contains(out, "create 2") {
+		t.Errorf("report missing action counts:\n%s", out)
+	}
+}
+
+func TestReportHclogLogHasNoUIHookSections(t *testing.T) {
+	in := `2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5000` + "\n"
+	out := render(t, build(t, in))
+	for _, section := range []string{"SLOWEST RESOURCES", "BY RESOURCE TYPE"} {
+		if strings.Contains(out, section) {
+			t.Errorf("hclog-only report wrongly renders %s:\n%s", section, out)
+		}
+	}
+}
+
+// A pure UI-hook log has no RPC-level (tier 1) spans at all: the two span
+// sets are never merged onto one timeline, so the RPC "spans built" figure
+// must stay zero even though UI-hook spans exist.
+func TestReportStructuredLogHasNoRPCSpansBuilt(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	if r.SpanCount != 0 {
+		t.Errorf("SpanCount (RPC spans) = %d, want 0 for a pure UI-hook log", r.SpanCount)
+	}
+	if r.UISpanCount != 3 {
+		t.Errorf("UISpanCount = %d, want 3", r.UISpanCount)
+	}
+}
+
+func TestReportExtractionGuidanceReflectsThatUIHooksAreParsed(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 9; i++ {
+		sb.WriteString(structuredVersionLine)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete\n")
+	out := render(t, build(t, sb.String()))
+	if strings.Contains(out, "does not yet parse") {
+		t.Errorf("report still uses the stale does-not-yet-parse wording:\n%s", out)
+	}
+	if !strings.Contains(out, "per-resource timings") {
+		t.Errorf("report does not mention per-resource timings:\n%s", out)
+	}
+	if !strings.Contains(out, "debug logging") {
+		t.Errorf("report does not mention enabling debug logging:\n%s", out)
+	}
+}
+
+func TestReportDerivesWallClockFromUIHookSpansWhenNoHclogTimestamps(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	if !strings.Contains(out, "log wall-clock") {
+		t.Fatalf("report missing log wall-clock line:\n%s", out)
+	}
+	if strings.Contains(out, "log wall-clock       unavailable") {
+		t.Errorf("report says wall-clock unavailable when UI-hook spans can derive it:\n%s", out)
+	}
+}
+
+func TestReportWallClockUnavailableWhenNeitherSourceExists(t *testing.T) {
+	out := render(t, build(t, ""))
+	if !strings.Contains(out, "log wall-clock") {
+		t.Fatalf("report missing log wall-clock line:\n%s", out)
+	}
+	if !strings.Contains(out, "unavailable") {
+		t.Errorf("report does not plainly state wall-clock is unavailable:\n%s", out)
+	}
+}
+
 func TestTemplateDoesNotPinItsSourceMessage(t *testing.T) {
 	long := strings.Repeat("x", 4000)
 	cases := []string{
