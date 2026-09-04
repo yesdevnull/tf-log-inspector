@@ -226,3 +226,55 @@ func TestReportedBuilderExactBaseStartIsNotClamped(t *testing.T) {
 		t.Error("StartClamped = true, want false: the start is exactly the base, not clamped")
 	}
 }
+
+// scanIntoWithComps is scanInto plus the interner the builder needs to resolve
+// a component, which is what the provider-address fallback reads.
+func scanIntoWithComps(t *testing.T, in string, b *ReportedBuilder) {
+	t.Helper()
+	var comps logfmt.Interner
+	b.Comps = &comps
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, b); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+}
+
+// An SDKv2 provider served without ProviderAddr reports the bare string
+// "provider" as its tf_provider_addr -- measured on
+// terraform-provider-github v6.3.1 across 1,104 lines of a real HCP log, and
+// fixed upstream only in v6.13.0. Left alone, two such providers in one plan
+// would collapse into a single rollup row and attribute one's time to the
+// other. The component names the plugin binary unambiguously, so it stands in.
+func TestReportedBuilderFallsBackToComponentForBareProviderAddr(t *testing.T) {
+	in := `2026-09-04T12:53:23.000+1000 [TRACE] provider.terraform-provider-github_v6.3.1: Received downstream response: tf_rpc=ReadResource tf_provider_addr=provider tf_req_duration_ms=1500` + "\n"
+	var b ReportedBuilder
+	scanIntoWithComps(t, in, &b)
+	got := b.Spans()
+	if len(got) != 1 {
+		t.Fatalf("got %d spans, want 1", len(got))
+	}
+	if got[0].Provider != "provider.terraform-provider-github_v6.3.1" {
+		t.Errorf("Provider = %q, want the component to stand in for the bare address", got[0].Provider)
+	}
+}
+
+// A real registry address must never be replaced. The fallback exists for the
+// one useless value, not as a general preference for the component.
+func TestReportedBuilderKeepsRealProviderAddr(t *testing.T) {
+	in := `2026-09-04T12:53:23.000+1000 [TRACE] provider.terraform-provider-azurerm_v4.81.0_x5: Received downstream response: tf_rpc=ReadResource tf_provider_addr=registry.terraform.io/hashicorp/azurerm tf_req_duration_ms=1500` + "\n"
+	var b ReportedBuilder
+	scanIntoWithComps(t, in, &b)
+	if got := b.Spans(); got[0].Provider != "registry.terraform.io/hashicorp/azurerm" {
+		t.Errorf("Provider = %q, want the address unchanged", got[0].Provider)
+	}
+}
+
+// The zero-value builder must keep working: Comps is optional, and without it
+// the fallback is simply unavailable rather than a nil dereference.
+func TestReportedBuilderWithoutInternerLeavesBareAddrAlone(t *testing.T) {
+	in := `2026-09-04T12:53:23.000+1000 [TRACE] provider.terraform-provider-github_v6.3.1: Received downstream response: tf_rpc=ReadResource tf_provider_addr=provider tf_req_duration_ms=1500` + "\n"
+	var b ReportedBuilder
+	scanInto(t, in, &b)
+	if got := b.Spans(); got[0].Provider != "provider" {
+		t.Errorf("Provider = %q, want the raw value when no interner is set", got[0].Provider)
+	}
+}

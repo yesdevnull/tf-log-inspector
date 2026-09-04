@@ -56,6 +56,11 @@ func Load(path string) (*Log, error) {
 	idx := &entryIndex{}
 	sniffer := span.NewSniffer(comps)
 	var rb span.ReportedBuilder
+	// Enable the bare-tf_provider_addr fallback. This is set only here, on
+	// the --profile path: --diagnose's report is masked for sharing and does
+	// not render provider addresses, so giving it a component-derived value
+	// would change a disclosure surface for no benefit.
+	rb.Comps = comps
 	var ub span.UIHookBuilder
 
 	stats, err := logfmt.Scan(bytes.NewReader(data), comps, idx, sniffer, &rb, &ub)

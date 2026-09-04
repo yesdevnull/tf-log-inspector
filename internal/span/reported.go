@@ -50,8 +50,46 @@ func (c *dedupCache) retain(s string) string {
 // response entries rather than inferring them, so its spans are exact.
 // It satisfies logfmt.Sink.
 type ReportedBuilder struct {
+	// Comps is optional. When set, it enables the fallback described on
+	// bareProviderAddr; when nil the raw tf_provider_addr is used as-is, so
+	// a zero-value builder stays usable.
+	Comps *logfmt.Interner
+
 	spans []Span
 	kept  dedupCache // dedup cache for retained RPC/Provider/ResourceType strings
+}
+
+// bareProviderAddr is what terraform-plugin-sdk reports for tf_provider_addr
+// when a provider is served without a ProviderAddr in its ServeOpts. Measured
+// on terraform-provider-github v6.3.1 across 1,104 lines of a real HCP log;
+// the provider fixed it in v6.13.0 by setting ProviderAddr explicitly.
+//
+// The value is not merely ugly. Every provider that omits ProviderAddr
+// reports the same string, so two of them in one plan would collapse into a
+// single rollup row and attribute one provider's time to the other. The
+// component -- "provider.terraform-provider-github_v6.3.1" -- names the
+// plugin binary unambiguously, so it stands in. The component is used
+// verbatim rather than parsed into a registry address: the binary's name does
+// not reliably yield its namespace, and inventing one would be a guess
+// presented as a measurement.
+const bareProviderAddr = "provider"
+
+// componentPrefix marks a component that names a provider plugin. The
+// fallback is restricted to these so a core component can never be mistaken
+// for a provider address.
+const componentPrefix = "provider."
+
+// providerAddr resolves the provider address for an entry, substituting the
+// component when the log carries only the useless bare string.
+func (b *ReportedBuilder) providerAddr(addr string, e logfmt.Entry) string {
+	if addr != bareProviderAddr || b.Comps == nil {
+		return addr
+	}
+	comp := b.Comps.Lookup(e.Comp)
+	if !strings.HasPrefix(comp, componentPrefix) {
+		return addr
+	}
+	return comp
 }
 
 // Entry implements logfmt.Sink.
@@ -76,6 +114,7 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 
 	rpc, _ := f.Get("tf_rpc")
 	provider, _ := f.Get("tf_provider_addr")
+	provider = b.providerAddr(provider, e)
 	resType, ok := f.Get("tf_resource_type")
 	if !ok {
 		resType, _ = f.Get("tf_data_source_type")
