@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
 func TestRunDiagnoseOnFixture(t *testing.T) {
@@ -80,6 +82,34 @@ func TestRunReportsMissingFileClearly(t *testing.T) {
 // model.Load, by way of the load error a missing file surfaces. That error
 // is model.Load's, not the old "--diagnose or --profile" usage message this
 // test replaces.
+// A bare invocation (no --diagnose or --profile) now opens the TUI rather
+// than erroring. runProfile and runTUI are structurally identical up to a
+// missing-file error (both call model.Load and return its error verbatim),
+// so a test that only checks the error text cannot tell the two apart --
+// it would pass unchanged if the default case dispatched to runProfile
+// instead. Substituting runTUIFunc, the seam runTUI calls in place of
+// tui.Run, is what actually distinguishes them: tui.Run needs a terminal
+// and cannot run under go test, so this stub stands in for it.
+func TestRunWithNoModeReachesTheTUIPath(t *testing.T) {
+	original := runTUIFunc
+	t.Cleanup(func() { runTUIFunc = original })
+
+	var gotPath string
+	runTUIFunc = func(l *model.Log, path string) error {
+		gotPath = path
+		return nil
+	}
+
+	var sb strings.Builder
+	logPath := filepath.Join("..", "..", "testdata", "provider-rpc.log")
+	if err := run([]string{logPath}, &sb, io.Discard); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if gotPath != logPath {
+		t.Errorf("runTUIFunc called with path %q, want %q", gotPath, logPath)
+	}
+}
+
 func TestRunWithNoModeOpensTheTUIPath(t *testing.T) {
 	var sb strings.Builder
 	err := run([]string{"no-such-file.log"}, &sb, io.Discard)

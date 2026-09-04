@@ -144,6 +144,11 @@ func runProfile(path, outPath string, stdout io.Writer) error {
 	})
 }
 
+// runTUIFunc is the seam a test substitutes to confirm the TUI path was
+// actually reached, since tui.Run itself needs a real terminal and cannot
+// run under go test.
+var runTUIFunc = tui.Run
+
 // runTUI loads path and opens the full-screen interface. It has no --diagnose
 // or --profile equivalent flag: passing neither is what selects it.
 func runTUI(path string) error {
@@ -151,5 +156,5 @@ func runTUI(path string) error {
 	if err != nil {
 		return err
 	}
-	return tui.Run(l, path)
+	return runTUIFunc(l, path)
 }
