@@ -710,13 +710,33 @@ which is only possible because HCP delivers protocol lines un-nested.
    *reliable* is open question 2, still unmeasured because tier 3 is not
    built.
 
-8. **What a TRACE capture costs in structured output.** The debug-toggle run
-   carried 1,311 `terraform.ui` lines alongside its debug text. The TRACE run
-   carried **zero**, so the per-resource UI-hook view was lost exactly where
-   the RPC view was gained. Whether that is inherent to raising `TF_LOG`, or
-   an artefact of how this particular run was captured, is not established —
-   and it matters, because the two views answer different questions. Worth
-   settling before the TUI assumes both are available from one log.
+8. **What a TRACE capture costs in structured output. CONFIRMED,
+   2026-09-04: the whole of it.** Checked directly against the raw logs:
+   normal and debug runs carry `terraform.ui` markers, the TRACE run carries
+   none. The mechanism is not established — only the effect.
+
+   | capture | `terraform.ui` | provider RPC |
+   |---|---|---|
+   | normal | yes | no |
+   | debug toggle | yes | no (TRACE only) |
+   | `TF_LOG=TRACE` | **no** | yes |
+
+   So no single capture yet yields both views, and they answer different
+   questions: which *resources* were slow, versus which *calls* were slow.
+
+   **The untried combination is the debug toggle plus
+   `TF_LOG_SDK_PROTO=TRACE`.** Every TRACE capture so far raised the root
+   level; that variable raises only the protocol subsystem, which is the one
+   carrying `tf_req_duration_ms`. If the debug toggle preserves the
+   `terraform.ui` stream while the subsystem supplies the RPC entries, one
+   log serves both tiers. One run settles it.
+
+   **If it does not work,** the TUI shows whichever tier its log supports and
+   the capture is chosen by the question being asked. It must not merge two
+   logs to synthesise both views: they come from different runs, so resource
+   timings from one would be correlated against RPC timings from another —
+   plausible-looking and wrong. Rejected explicitly so it is not
+   rediscovered as an idea.
 6. **Real-world line rate.** ~~The 102 bytes/line figure comes from one small
    public log and is used for capacity planning.~~ **Answered, 2026-09-04:**
    828 bytes/line mean on a real 17.9 MB debug log (21,557 physical lines,
