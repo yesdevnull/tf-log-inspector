@@ -62,6 +62,17 @@ func (m *Model) jumpToSpan(idx int) {
 	if entry >= len(m.log.Entries) {
 		return
 	}
+	// The raw log renders from m.raw.top DOWNWARD through the active filter
+	// (see renderRawLog), so jumping to an entry the filter hides shows
+	// either nothing or whatever visible entry happens to come next -- a
+	// different call's lines entirely -- and the pane looks exactly as it
+	// would have had the jump worked. The filter is the user's own, so it is
+	// left standing and the refusal is reported in the footer instead: Esc
+	// clears it, and Enter then lands where it was asked to.
+	if !entryVisible(m.filter(), componentProviders(m.log.RPCSpans, m.log.Entries), m.log.Entries[entry]) {
+		m.blockedJump = true
+		return
+	}
 	m.view = ViewRawLog
 	m.raw.top = entry
 	m.selected = 0
@@ -162,8 +173,11 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 // multi-line entry such as an HTTP body dump appears whole rather than as a
 // fragment; an entry that would not fit inside the remaining height is left
 // for the next page rather than cut apart, unless it is the very first
-// entry considered, in which case it is shown in full regardless (better to
-// overflow the pane than show nothing for the one entry the user jumped to).
+// entry considered, which is always begun. That exception is what makes an
+// entry taller than the whole pane render its head rather than nothing at
+// all: it is the one entry the user jumped to, and its lines are cut to h by
+// whichever pane composes them (joinPanes, or renderPanes' single-pane
+// branch) rather than being allowed to push the caveat off the frame.
 func (m Model) renderRawLog(w, h int) string {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
@@ -187,6 +201,16 @@ func (m Model) renderRawLog(w, h int) string {
 		if len(lines) >= h {
 			break
 		}
+	}
+	if len(lines) == 0 {
+		// An empty pane is the same pane a parse failure or the wrong file
+		// would produce, so it says which it is. The raw log's top entry is
+		// clamped inside the log (scrollRawLog), so with no filter active
+		// the only way to render nothing is a log with no entries at all.
+		if m.filterActive() {
+			return clipWidth(noMatchNote, w)
+		}
+		return clipWidth("this log has no entries", w)
 	}
 	return strings.Join(lines, "\n")
 }

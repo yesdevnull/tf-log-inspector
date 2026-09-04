@@ -644,3 +644,97 @@ func TestEntryVisibleMatchesAComponentlessEntryAgainstTheNoneFacet(t *testing.T)
 		t.Errorf("an entry with no provider survived a filter asking for one provider's traffic")
 	}
 }
+
+// The raw log rendered nothing at all when the filter hid every entry from
+// the top of the pane down -- an empty pane that looks exactly like a parse
+// failure or the wrong file, in the one view whose whole content is the
+// file's own bytes.
+//
+// The top entry is moved off the fixture's UNKNOWN-level comment header
+// first, so that selecting UNKNOWN leaves nothing visible below it: at the
+// top of the log that header is itself a match and the pane is not empty.
+func TestTheRawLogSaysWhenAFilterHasHiddenEverything(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.TopEntry() != 1 {
+		t.Fatalf("TopEntry = %d, want 1 -- the UNKNOWN comment header must be above the pane", m.TopEntry())
+	}
+	m = moveFacetCursorTo(t, m, dimLevel, "UNKNOWN")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	out := m.renderRawLog(200, 40)
+	for _, want := range []string{"nothing matches the filter", "Esc"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("an emptied raw log does not say %q, so it looks like a parse failure: %q", want, out)
+		}
+	}
+}
+
+// The same emptiness with no filter to blame is a log with no entries at
+// all -- the raw log's top entry is clamped inside the log, so there is no
+// other way to reach it -- and saying "nothing matches the filter" there
+// would send the user after a filter that was never set.
+func TestAnEmptyRawLogWithNoFilterDoesNotBlameAFilter(t *testing.T) {
+	m := New(&model.Log{}, "x.log")
+	out := m.renderRawLog(80, 10)
+	if !strings.Contains(out, "no entries") {
+		t.Errorf("a log with no entries renders %q, which says nothing about why the pane is empty", out)
+	}
+	if strings.Contains(out, "filter") {
+		t.Errorf("an unfiltered empty raw log blames a filter that was never set: %q", out)
+	}
+}
+
+// Enter on the slow call the user came to investigate must not land them on
+// a blank pane or on some other call's lines further down the log. The raw
+// log renders from its top entry DOWNWARD through the active filter, so a
+// jump to an entry the filter hides is indistinguishable from a jump that
+// worked -- and the filter that hides it is invisible from the calls table.
+//
+// A level facet is what can do this: the level dimension narrows entries and
+// not spans (see levelFacet), so the call stays in the table while its own
+// log entry disappears. provider-rpc.log's calls close on TRACE entries and
+// its comment header is UNKNOWN, so selecting UNKNOWN hides every call's
+// entry while leaving both calls on screen to press Enter over.
+func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = moveFacetCursorTo(t, m, dimLevel, "UNKNOWN")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}) // hand the keyboard back to the list
+	if m.Focus() != PaneList {
+		t.Fatalf("focus = %v, want the list so Enter is handled", m.Focus())
+	}
+	if len(m.rows()) == 0 {
+		t.Fatal("fixture assumption changed: the level facet emptied the calls table, so Enter has no row to act on")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ActiveView() != ViewCalls {
+		t.Errorf("Enter jumped into a raw log the filter has emptied, view = %v", m.ActiveView())
+	}
+	if !strings.Contains(m.footer(), "hidden by the active filter") {
+		t.Errorf("footer = %q, want it to report the refused jump", m.footer())
+	}
+
+	// The report describes that one keypress under that one filter, so the
+	// next key must clear it rather than leave it standing over a table the
+	// user has since moved through.
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if strings.Contains(m.footer(), "hidden by the active filter") {
+		t.Errorf("footer = %q, want the key hints back once the selection has moved", m.footer())
+	}
+}
+
+// The first visible entry is begun whatever its height: it is the one entry
+// the user jumped to, and an entry taller than the pane must render its head
+// rather than leave the pane blank. The pane row that composes it is what
+// holds the result to h lines (joinPanes, or renderPanes' single-pane
+// branch), so this is the difference between showing something and showing
+// nothing at all.
+func TestTheRawLogRendersTheHeadOfAnEntryTallerThanThePane(t *testing.T) {
+	m := update(t, New(tallEntryLog(40), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	out := m.renderRawLog(200, 5)
+	if !strings.Contains(out, "HTTP Response Received") {
+		t.Errorf("an entry taller than the pane rendered nothing at all: %q", out)
+	}
+}

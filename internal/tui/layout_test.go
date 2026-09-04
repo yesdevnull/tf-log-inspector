@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -557,5 +558,136 @@ func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	}
 	if !strings.Contains(line, "…") {
 		t.Errorf("RPC detail line %q is not marked as clipped, so it reads as a complete name", line)
+	}
+}
+
+// A ranked table narrowed to twelve rows looks exactly like a log that only
+// ever had twelve calls in it, and nothing else on screen says otherwise. So
+// while a filter is active the header reports the matching count against the
+// whole log's; with no filter it must read as the plain count it always did,
+// since "2 of 2" on every frame is noise that says nothing.
+func TestHeaderReportsFilteredCountsOnlyWhileAFilterIsActive(t *testing.T) {
+	const unfiltered = "tfli -- x.log -- 2 RPC spans, 0 UI spans"
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	if got := header(&m); got != unfiltered {
+		t.Fatalf("fixture assumption changed: unfiltered header = %q, want %q", got, unfiltered)
+	}
+
+	// The provider dimension's first value is aws (values tie on count, so
+	// they order by value ascending), which carries one of the two spans.
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if want := "tfli -- x.log -- 1 of 2 RPC spans, 0 of 0 UI spans"; header(&m) != want {
+		t.Errorf("header under an active filter = %q, want %q -- nothing on screen says the rankings are narrowed", header(&m), want)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := header(&m); got != unfiltered {
+		t.Errorf("header after Esc = %q, want the unfiltered %q", got, unfiltered)
+	}
+}
+
+// At a height that dropped the footer, '/' captured every keystroke with
+// ZERO on-screen indication: the query invisible, 'q' no longer quitting,
+// and "pattern not found" unable to be reported at all -- exactly the trap
+// the Ctrl+C handling in handleSearchKey exists to escape. The footer is the
+// only channel that state has, so it is budgeted ahead of the caveat and
+// composed onto the end of an already-trimmed frame.
+//
+// The measurement is the LAST line, not merely that the prompt appears
+// somewhere: a prompt trimmed away is invisible, and a prompt anywhere but
+// the footer is not where the user is looking.
+func TestTheSearchPromptSurvivesAShortTerminal(t *testing.T) {
+	base := New(testLog(t, "provider-rpc.log"), "x.log")
+	for _, h := range []int{12, 11, 10, 9, 7, 6, 5, 3, 2} {
+		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: h})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+
+		lines := strings.Split(m.View(), "\n")
+		if len(lines) > h {
+			t.Errorf("height %d: View() is %d lines", h, len(lines))
+		}
+		if got := lines[len(lines)-1]; got != "/zz" {
+			t.Errorf("height %d: last line is %q, want the search prompt %q -- '/' has taken the keyboard with nothing on screen to say so:\n%s", h, got, "/zz", m.View())
+		}
+	}
+}
+
+// The caveat gives way to the footer rather than the other way round, but it
+// gives way by degrees: the full text where it fits, one whole sentence
+// where it does not, and nothing at all only once even one line would cost
+// the footer. A caveat cut off mid-sentence would read as a rendering fault
+// rather than as a warning deliberately shortened, so the short form is a
+// rewrite and not the first line of the long one.
+func TestTheCaveatShortensBeforeItCostsTheFooter(t *testing.T) {
+	base := New(testLog(t, "provider-rpc.log"), "x.log")
+	for _, c := range []struct {
+		h                 int
+		wantFull, wantAny bool
+	}{
+		{40, true, true},
+		{11, true, true},
+		{10, false, true},
+		{7, false, true},
+		{6, false, false},
+	} {
+		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: c.h})
+		view := m.View()
+		if got := strings.Contains(view, "one workspace planned in 24.1s"); got != c.wantFull {
+			t.Errorf("height %d: full caveat present = %v, want %v:\n%s", c.h, got, c.wantFull, view)
+		}
+		if got := strings.Contains(view, "under logging"); got != c.wantAny {
+			t.Errorf("height %d: some caveat present = %v, want %v:\n%s", c.h, got, c.wantAny, view)
+		}
+		if !strings.Contains(view, "q quit") {
+			t.Errorf("height %d: the footer was dropped for the caveat:\n%s", c.h, view)
+		}
+	}
+}
+
+// tallEntryLog builds a log whose single entry runs to n physical lines --
+// the shape a provider's HTTP body dump takes in a real capture, and the one
+// entry the raw log renders whatever its height (see renderRawLog). Every
+// fixture in testdata is shorter than a pane, so none of them can tell a
+// clamped pane row from an unclamped one.
+func tallEntryLog(n int) *model.Log {
+	var b strings.Builder
+	b.WriteString("2026-09-04T10:00:00.000+1000 [TRACE] provider: HTTP Response Received\n")
+	for i := 1; i < n; i++ {
+		fmt.Fprintf(&b, "  http.response.body= body line %03d\n", i)
+	}
+	data := []byte(b.String())
+	return &model.Log{
+		Data:    data,
+		Entries: []logfmt.Entry{{Off: 0, Len: uint32(len(data)), Lines: uint16(n), Timestamped: true}},
+	}
+}
+
+// Below detailInlineWidth the centre pane is the whole row, with no
+// joinPanes beneath it to hold it to the pane height. An entry taller than
+// the pane then pushed the caveat out of View's frame entirely, which
+// contradicts View's own account of what it always shows -- and it takes a
+// realistic entry to do it, not a pathological one: one measured API
+// response accounted for 49% of a 30MB log.
+func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
+	const h = 24
+	m := update(t, New(tallEntryLog(60), "x.log"), tea.WindowSizeMsg{Width: detailInlineWidth - 1, Height: h})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+
+	view := m.View()
+	if strings.Contains(view, "SPAN DETAIL") {
+		t.Fatalf("width %d still draws the detail pane, so this is not the single-pane branch:\n%s", detailInlineWidth-1, view)
+	}
+	if n := len(strings.Split(view, "\n")); n != h {
+		t.Errorf("View() is %d lines at height %d", n, h)
+	}
+	if !strings.Contains(view, "Durations here are measured under logging") {
+		t.Errorf("a tall raw-log entry pushed the caveat out of the frame:\n%s", view)
+	}
+	if !strings.Contains(view, "q quit") {
+		t.Errorf("a tall raw-log entry pushed the footer out of the frame:\n%s", view)
 	}
 }

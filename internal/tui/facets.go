@@ -153,6 +153,24 @@ func (m *Model) toggleSelectedFacetValue() {
 	m.invalidateRows()
 }
 
+// filterActive reports whether any facet value is selected anywhere, which
+// is what several panes need in order to tell "the filter hid everything"
+// apart from "there was nothing here to begin with" -- two states that
+// render byte-identically without it.
+//
+// It checks the inner maps rather than trusting the outer one to be empty:
+// deselecting a dimension's last value already deletes the dimension (see
+// toggleSelectedFacetValue), and this must stay true whatever a later
+// caller does with the map.
+func (m Model) filterActive() bool {
+	for _, values := range m.selectedFacets {
+		if len(values) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // clearFilters deselects every facet value, restoring every view to the
 // unfiltered log. Esc is bound to this per the spec's key table.
 func (m *Model) clearFilters() {

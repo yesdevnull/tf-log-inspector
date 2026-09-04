@@ -194,21 +194,86 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 	return rows
 }
 
+// noMatchNote is what a pane says when the active filter has left it with
+// nothing to show. Without it an empty pane is byte-identical to one caused
+// by a parse failure or by opening the wrong file, and a reader who cannot
+// tell those apart draws a wrong conclusion from a tool whose whole job is
+// reporting numbers accurately. It names Esc because Esc is what clears the
+// filter, and it is short enough (42 columns) to survive the narrowest
+// centre pane any supported width produces.
+const noMatchNote = "nothing matches the filter -- Esc clears it"
+
+// noRowsNote is the same honesty for a view that has no rows to show with no
+// filter to blame: the providers and calls views of a log carrying UI-hook
+// spans only, say, where the answer really does live in another view.
+const noRowsNote = "this view has no rows for this log"
+
 // renderList renders the current view's rows as a table at most w columns
 // wide and h lines tall, with the row at Selected() highlighted and the
 // window scrolled just far enough to keep it visible.
+//
+// A log with no spans of either tier gets capture guidance in place of the
+// table: an empty table there is the most likely FIRST-RUN result -- a
+// capture taken without TF_LOG_PROVIDER=TRACE -- and four empty panes say
+// nothing about how to take a usable one. --diagnose already answers this
+// question, so the guidance is its wording rather than a second phrasing of
+// the same advice.
 func (m *Model) renderList(w, h int) string {
+	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
+		return clipLines(clipEachWidth(captureGuidance, w), h)
+	}
+	empty := noRowsNote
+	if m.filterActive() {
+		empty = noMatchNote
+	}
 	switch m.view {
 	case ViewProviders:
-		return renderTable(nil, providerColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
+		return renderTable(nil, providerColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 	case ViewTypes:
 		preamble := typesPreamble(m.filter().SpansMatching(m.log.UISpans))
-		return renderTable(preamble, typeColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
+		return renderTable(preamble, typeColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 	case ViewCalls:
-		return renderTable(nil, callColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
+		return renderTable(nil, callColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 	default:
 		return ""
 	}
+}
+
+// captureGuidance is what the centre pane shows for a log with no spans at
+// all: what such a log is missing, how to capture one that is not, and how
+// to check this file's structure. Every sentence is internal/diagnose's --
+// the EXTRACTION section's "nothing to profile" line, writeRPCCaptureHint's
+// two-gates explanation, and the HCP capture instruction from tfli's own
+// usage text -- rewrapped to 40 columns, which is narrower than the centre
+// pane at any supported terminal width.
+var captureGuidance = []string{
+	"This log contains no provider RPC",
+	"entries, so there is nothing to profile.",
+	"",
+	"Provider RPC entries are emitted only at",
+	"TRACE, so debug logging alone will not",
+	"produce them. Two levels gate them: what",
+	"the provider writes, and what Terraform",
+	"keeps. Set both TF_LOG_PROVIDER=TRACE",
+	"and TF_LOG_SDK_PROTO=TRACE, or raise",
+	"everything with TF_LOG=TRACE.",
+	"",
+	"For an HCP Terraform workspace, enable",
+	"debug logging on a run and download its",
+	"raw log.",
+	"",
+	"Run tfli --diagnose on this file to",
+	"check its structure.",
+}
+
+// clipEachWidth clips every line of a block to w columns and joins them, the
+// shape a pane's content takes.
+func clipEachWidth(lines []string, w int) string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = clipWidth(line, w)
+	}
+	return strings.Join(out, "\n")
 }
 
 // typesPreamble states the UI-hook resolution caveat above the types table,
@@ -257,7 +322,12 @@ func typesPreamble(uiSpans []span.Span) []string {
 // ("resource type") is told apart by its head even where the column's
 // values are told apart by their tails, so it end-clips while they
 // front-clip. See headerKinds.
-func renderTable(preamble []string, cols []column, data []row, selected int, focused bool, w, h int) string {
+//
+// emptyNote is rendered in place of the data rows when there are none. A
+// table of a preamble and a header with nothing beneath it reads as a
+// rendering that failed rather than as a filter that matched nothing, and
+// those are the two situations a reader most needs told apart.
+func renderTable(preamble []string, cols []column, data []row, emptyNote string, selected int, focused bool, w, h int) string {
 	widths := fitColumnWidths(cols, columnWidths(cols, data), w)
 	kinds := columnKinds(cols)
 
@@ -267,6 +337,9 @@ func renderTable(preamble []string, cols []column, data []row, selected int, foc
 	}
 	lines = append(lines, clipWidth(formatRow(headerCells(cols), headerKinds(cols), widths), w))
 
+	if len(data) == 0 {
+		lines = append(lines, clipWidth(emptyNote, w))
+	}
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)
 	for i := top; i < top+visible; i++ {

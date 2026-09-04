@@ -107,6 +107,13 @@ type Model struct {
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
 
+	// blockedJump records that the last Enter refused to jump because the
+	// active filter hides the target entry (see jumpToSpan). It is a
+	// derivation of one keypress and the filter it was pressed under, so
+	// Update drops it on the NEXT keypress rather than letting it stand over
+	// a table the user has since moved through.
+	blockedJump bool
+
 	// showFacetOverlay is whether the facet pane is open as an overlay, in
 	// place of the list and detail panes, below the width it would otherwise
 	// show inline at. It is only ever set below that width (see
@@ -191,6 +198,10 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// A blocked jump describes the Enter that was just refused, so it
+		// lasts exactly until the next key: any other key moves the
+		// selection, the filter or the view out from under it.
+		m.blockedJump = false
 		// While a search query is being typed, every key is text for the
 		// query rather than a command -- including keys bound elsewhere,
 		// such as "j" or "q" -- so this is handled before anything else.

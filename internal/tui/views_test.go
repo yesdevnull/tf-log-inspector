@@ -269,7 +269,7 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 	}
 	data := []row{{cells: []string{"registry.terraform.io/hashicorp/aws", "1"}, spanIdx: -1}}
 
-	lines := strings.Split(renderTable(nil, cols, data, -1, true, 12, 10), "\n")
+	lines := strings.Split(renderTable(nil, cols, data, "", -1, true, 12, 10), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want a header and one data row:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
@@ -303,5 +303,78 @@ func TestValueClipsMeasureDisplayColumns(t *testing.T) {
 		if n := lipgloss.Width(c.got); n > c.want {
 			t.Errorf("%s returned %q, %d columns wide, want at most %d", c.name, c.got, n, c.want)
 		}
+	}
+}
+
+// A table narrowed to nothing renders as a preamble and a header with
+// nothing beneath them, which is byte-identical to a parse failure or to
+// having opened the wrong file. In a profiling tool a reader who cannot tell
+// those apart draws a wrong conclusion, so the pane says which it is and
+// names the key that undoes it.
+//
+// The assertion is made against the centre pane alone: the facet pane and
+// the detail pane are unaffected by an empty table and would satisfy nothing
+// here, while the footer's own key hints already name Esc.
+func TestTheTableSaysWhenAFilterHasEmptiedIt(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = moveFacetCursorTo(t, m, dimType, "google_compute_instance")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.rows()); got != 0 {
+		t.Fatalf("fixture assumption changed: aws AND google_compute_instance left %d rows, want 0", got)
+	}
+
+	centre := centrePaneOf(m.View())
+	for _, want := range []string{"nothing matches the filter", "Esc"} {
+		if !strings.Contains(centre, want) {
+			t.Errorf("an emptied table does not say %q, so it looks like a parse failure:\n%s", want, centre)
+		}
+	}
+}
+
+// The same emptiness with NO filter to blame must not accuse one: the
+// providers view of a log carrying UI-hook spans only really does have
+// nothing to rank, and telling the user to press Esc there sends them after
+// a filter that was never set.
+func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if len(m.log.RPCSpans) != 0 || len(m.log.UISpans) == 0 {
+		t.Fatalf("fixture assumption changed: %d RPC and %d UI spans, want a UI-only log", len(m.log.RPCSpans), len(m.log.UISpans))
+	}
+	centre := centrePaneOf(m.View())
+	if !strings.Contains(centre, "this view has no rows for this log") {
+		t.Errorf("the providers view of a UI-only log says nothing about being empty:\n%s", centre)
+	}
+	if strings.Contains(centre, "nothing matches the filter") {
+		t.Errorf("an unfiltered empty view blames a filter that was never set:\n%s", centre)
+	}
+}
+
+// core-only.log is the most likely FIRST-RUN result: a capture taken without
+// TF_LOG_PROVIDER=TRACE. Four empty panes and "0 RPC spans, 0 UI spans" say
+// nothing about how to take a usable capture, where --diagnose has always
+// answered exactly this. The interface reuses that wording rather than
+// inventing a second phrasing of the same advice.
+func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
+	m := update(t, New(testLog(t, "core-only.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if len(m.log.RPCSpans) != 0 || len(m.log.UISpans) != 0 {
+		t.Fatalf("fixture assumption changed: %d RPC and %d UI spans, want none of either", len(m.log.RPCSpans), len(m.log.UISpans))
+	}
+
+	centre := centrePaneOf(m.View())
+	for _, want := range []string{
+		"nothing to profile",    // internal/diagnose's EXTRACTION verdict
+		"TF_LOG_PROVIDER=TRACE", // both gates, from writeRPCCaptureHint
+		"TF_LOG_SDK_PROTO=TRACE",
+		"debug logging on a run", // the HCP capture instruction
+		"tfli --diagnose",        // how to check this file's structure
+	} {
+		if !strings.Contains(centre, want) {
+			t.Errorf("capture guidance missing %q:\n%s", want, centre)
+		}
+	}
+	if strings.Contains(centre, "total  calls  max") {
+		t.Errorf("an empty providers table was rendered instead of the guidance:\n%s", centre)
 	}
 }

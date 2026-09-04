@@ -145,38 +145,88 @@ const (
 
 // View composes the three-pane layout: facets left, list centre, detail
 // right, degrading by width per the design spec's width-degradation rules.
-// The header naming the file and the observer-effect caveat are always
-// shown in full, regardless of how the panes below them degrade.
+// The header naming the file and the footer are always shown; the
+// observer-effect caveat gives way between them when the terminal is too
+// short for all three (see loggingCaveat).
 //
 // The result is exactly h lines with no trailing newline, and never more.
 // bubbletea's renderer keeps only the LAST h lines of what View returns --
 // it cannot scroll the cursor back into the terminal's scrollback buffer --
 // so a view even one line too tall loses its topmost line off the top of
 // the screen, and the topmost line here is the header naming the open file.
+//
+// The footer is composed onto the END of an already-trimmed frame rather
+// than trimmed along with everything else, because a frame trimmed from
+// the bottom takes the footer first. The footer is the only channel the
+// search prompt, the "pattern not found" report and the quit hint have: at
+// a height that dropped it, '/' captured every keystroke with nothing on
+// screen to say so -- the query invisible, 'q' no longer quitting -- which
+// is the trap the Ctrl+C handling in handleSearchKey exists to escape.
 func (m *Model) View() string {
 	w, h := m.paneWidth(), m.height
 	if h <= 0 {
 		h = defaultHeight
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", clipWidth(header(m), w))
-	paneH := paneHeight(h)
-	b.WriteString(m.renderPanes(w, paneH))
-	b.WriteString("\n\n")
-	writeLoggingCaveat(&b, w)
-	fmt.Fprintf(&b, "\n%s", clipWidth(m.footer(), w))
-
-	lines := strings.Split(b.String(), "\n")
-	if len(lines) > h {
-		lines = lines[:h]
+	head := clipWidth(header(m), w)
+	// One line of terminal is the header's: it names the file the reader is
+	// looking at, and a frame that showed only key hints could belong to any
+	// file at all.
+	if h == 1 {
+		return head
 	}
-	return strings.Join(lines, "\n")
+
+	caveat := loggingCaveat(h)
+	lines := []string{head, ""}
+	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat))), "\n")...)
+	if len(caveat) > 0 {
+		lines = append(lines, "")
+		for _, line := range caveat {
+			lines = append(lines, clipWidth(line, w))
+		}
+	}
+	lines = append(lines, "")
+
+	if len(lines) > h-1 {
+		lines = lines[:h-1]
+	}
+	return strings.Join(append(lines, clipWidth(m.footer(), w)), "\n")
 }
 
 // header names the file and its span counts.
+//
+// While a filter is active it reports the matching count against the whole
+// log's -- "12 of 3184 RPC spans" -- because every other number on screen
+// is then a filtered number, and a ranked table holding twelve rows looks
+// exactly like a log that only ever had twelve calls in it. With no filter
+// active it reads as the plain count it always did: there is nothing to
+// compare against, and "3184 of 3184" would be noise on every frame.
+//
+// A level-only selection narrows the raw log rather than the spans (see
+// levelFacet), so its counts read "3184 of 3184" -- which is the honest
+// answer to "what is this filter doing to the rankings", not a rounding of
+// it.
 func header(m *Model) string {
-	return fmt.Sprintf("tfli -- %s -- %d RPC spans, %d UI spans", m.name, len(m.log.RPCSpans), len(m.log.UISpans))
+	rpc, ui := len(m.log.RPCSpans), len(m.log.UISpans)
+	if !m.filterActive() {
+		return fmt.Sprintf("tfli -- %s -- %d RPC spans, %d UI spans", m.name, rpc, ui)
+	}
+	f := m.filter()
+	return fmt.Sprintf("tfli -- %s -- %d of %d RPC spans, %d of %d UI spans",
+		m.name, countMatching(f, m.log.RPCSpans), rpc, countMatching(f, m.log.UISpans), ui)
+}
+
+// countMatching counts the spans passing f. It exists rather than a call to
+// Filter.SpansMatching because the header is rebuilt on every frame and
+// SpansMatching materialises a slice: on a real capture that is thousands
+// of spans copied per keystroke, for two numbers.
+func countMatching(f model.Filter, spans []span.Span) int {
+	n := 0
+	for _, s := range spans {
+		if f.MatchSpan(s) {
+			n++
+		}
+	}
+	return n
 }
 
 // footer is the line beneath the panes. It is the search prompt while a
@@ -186,11 +236,17 @@ func header(m *Model) string {
 // otherwise looks exactly like a search that matched the entry already on
 // screen. Otherwise it is the key hints.
 //
-// Both states belong to the raw log, the only view '/' searches, so both
-// are shown only there: a miss reported over the calls table would describe
-// a search whose result is not on screen.
+// Both search states belong to the raw log, the only view '/' searches, so
+// both are shown only there: a miss reported over the calls table would
+// describe a search whose result is not on screen.
+//
+// A blocked jump is reported wherever it happened, which is never the raw
+// log: jumpToSpan refuses the jump precisely so the view does NOT change,
+// leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer() string {
 	switch {
+	case m.blockedJump:
+		return jumpBlockedNote
 	case m.view != ViewRawLog:
 		return footerKeys()
 	case m.raw.searching:
@@ -202,6 +258,13 @@ func (m *Model) footer() string {
 	}
 }
 
+// jumpBlockedNote is what the footer says when Enter refused to jump to a
+// call's log entry because the active filter hides it. Landing on a blank
+// pane, or on some other call's lines further down the log, is
+// indistinguishable from a jump that worked, so the refusal is stated and
+// the key that lifts it is named.
+const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears it"
+
 // footerKeys is the key-binding hint line shown beneath the panes. It is 62
 // runes, comfortably inside the narrowest supported width (70): "q quit" was
 // the tail of a longer version of this line and was the first thing clipped
@@ -210,22 +273,31 @@ func footerKeys() string {
 	return "⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit"
 }
 
-// paneHeight is how many lines the pane row itself gets once the header (2
-// lines, including its trailing blank), the caveat (writeLoggingCaveatLines
-// lines) and its surrounding blank lines, and the footer (1 line) are taken
-// out of the total height h. It never goes below 1: a terminal too short to
-// show everything still shows something rather than an empty pane, and View
-// then trims the surplus off the BOTTOM, keeping the header and the pane row
-// rather than whatever happened to fit last.
-func paneHeight(h int) int {
-	fixed := 2 + 1 + writeLoggingCaveatLines + 1 + 1
-	if paneH := h - fixed; paneH > 0 {
+// frameFixedLines is what a frame spends on everything but the pane row and
+// the caveat block: the header, the blank line beneath it, the blank line
+// above the footer, and the footer itself.
+const frameFixedLines = 4
+
+// paneHeight is how many lines the pane row itself gets in a frame h lines
+// tall carrying caveatLines lines of caveat. The caveat block costs one line
+// more than its text, for the blank line above it, and costs nothing at all
+// when there is no caveat to separate.
+//
+// It never goes below 1: a terminal too short to show everything still shows
+// something rather than an empty pane, and View then trims the surplus out
+// from ABOVE its footer.
+func paneHeight(h, caveatLines int) int {
+	block := 0
+	if caveatLines > 0 {
+		block = caveatLines + 1
+	}
+	if paneH := h - frameFixedLines - block; paneH > 0 {
 		return paneH
 	}
 	return 1
 }
 
-// writeLoggingCaveat states that every duration this interface renders was
+// fullLoggingCaveat states that every duration this interface renders was
 // measured under logging. Terraform re-logs each line of a provider's stderr
 // through its own logger, so a provider that dumps HTTP bodies at DEBUG pays
 // that cost per line: four captures of one workspace measured 24.1s with no
@@ -235,22 +307,41 @@ func paneHeight(h int) int {
 // rendered duration rather than living only in documentation. Its longest
 // line is 59 runes, so it already fits at the narrowest supported width
 // (70) without needing to be shortened further.
-func writeLoggingCaveat(b *strings.Builder, w int) {
-	for _, line := range []string{
-		"Durations here are measured under logging, which is not",
-		"free: one workspace planned in 24.1s unlogged and 522.2s",
-		"with debug plus provider TRACE. Rankings hold, since every",
-		"span paid the same cost, but absolute times do not transfer",
-		"to an unlogged run.",
-	} {
-		fmt.Fprintf(b, "%s\n", clipWidth(line, w))
-	}
+var fullLoggingCaveat = []string{
+	"Durations here are measured under logging, which is not",
+	"free: one workspace planned in 24.1s unlogged and 522.2s",
+	"with debug plus provider TRACE. Rankings hold, since every",
+	"span paid the same cost, but absolute times do not transfer",
+	"to an unlogged run.",
 }
 
-// writeLoggingCaveatLines is the number of lines writeLoggingCaveat always
-// emits, so paneHeight can budget for it without the two ever drifting out
-// of sync.
-const writeLoggingCaveatLines = 5
+// shortLoggingCaveat is the same warning in one whole sentence, for a frame
+// with no room for the full text. It is a rewrite rather than the first line
+// of fullLoggingCaveat, because a caveat cut off mid-sentence reads as a
+// rendering fault rather than as a warning that was deliberately shortened.
+const shortLoggingCaveat = "Durations measured under logging: only rankings transfer."
+
+// loggingCaveat is the caveat's lines for a frame h lines tall: the full
+// text where it fits, one sentence where it does not, and nothing at all
+// below the height where even one line would cost the footer.
+//
+// The footer is budgeted ahead of the caveat, not after it. The caveat is a
+// fixed warning a reader can take in once; the footer carries live state --
+// the search query being typed, the miss report, and the reminder that 'q'
+// quits -- that exists nowhere else on screen, so it is the one line that
+// must survive a short terminal.
+func loggingCaveat(h int) []string {
+	// Each bound is frameFixedLines, plus one line for the pane row, plus
+	// the caveat block: the caveat's own lines and the blank above them.
+	switch {
+	case h >= frameFixedLines+1+len(fullLoggingCaveat)+1:
+		return fullLoggingCaveat
+	case h >= frameFixedLines+1+1+1:
+		return []string{shortLoggingCaveat}
+	default:
+		return nil
+	}
+}
 
 // renderPanes composes the pane row for width w and height h, applying the
 // spec's width degradation:
@@ -283,8 +374,28 @@ func (m *Model) renderPanes(w, h int) string {
 			pane{m.renderDetail(detailW, h), detailW},
 		)
 	default:
-		return m.renderCentre(w, h)
+		// The centre pane is the whole row here, with no joinPanes beneath
+		// it to hold it to h lines. renderRawLog renders its first visible
+		// entry from the top down whatever that entry's height -- a
+		// provider's multi-line HTTP body dump is the realistic case -- so
+		// without this clamp that overflow pushes the caveat out of View's
+		// frame, on the one layout that has no other pane to absorb it.
+		return clipLines(m.renderCentre(w, h), h)
 	}
+}
+
+// clipLines truncates s to at most h lines, the same bound joinPanes applies
+// to every pane it composes. It is the single-pane equivalent: a pane row is
+// h lines tall however many lines the pane inside it produced.
+func clipLines(s string, h int) string {
+	if h <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= h {
+		return s
+	}
+	return strings.Join(lines[:h], "\n")
 }
 
 // paneWidth is the width the pane row is composed at: the terminal's own
