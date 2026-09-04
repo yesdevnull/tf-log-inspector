@@ -553,7 +553,10 @@ anything is built on top of it.
    is the smallest thing that fully serves the primary use case.
 4. **Timeline (view 5)** with swimlanes and stall annotation.
 5. **Address attribution and view 3** — *conditional on phase 1's confidence
-   numbers*. Cut it if ambiguity is high.
+   numbers*. Cut it if ambiguity is high. Now conditional on a second thing
+   as well: core addressing requires core at TRACE, which appears to suppress
+   the `terraform.ui` stream, so shipping view 3 may mean the resource view
+   and the address view can never appear in one session. See open question 8.
 6. **`terraform plan -json` parser** as a second input format.
 
 Phases 3 and 4 deliver the primary use case without depending on the one piece
@@ -755,6 +758,34 @@ which is only possible because HCP delivers protocol lines un-nested.
    *core* at TRACE that suppressed it, and one log can serve both tiers. If
    it does not, the suppression has another cause and the one-view-per-
    capture constraint is real.
+
+   **The trade-off is three-way, not two-way.** Terraform core logs through
+   the global logger, whose level is `TF_LOG` (`globalLogLevel`), so
+   `TF_LOG=TRACE` raises core as well as providers while
+   `TF_LOG=DEBUG` + `TF_LOG_PROVIDER=TRACE` does not. Core at TRACE is what
+   produces the 9,336 vertex lines and 6,537 GRPC lines — the raw material
+   for attributing an RPC back to a resource address, which is view 3 and
+   open question 2.
+
+   | capture | `terraform.ui` | provider RPC | core addressing |
+   |---|---|---|---|
+   | debug toggle | yes (measured) | no (measured) | no (measured) |
+   | `TF_LOG=TRACE` | no (measured) | yes (measured) | yes (measured) |
+   | `DEBUG` + `TF_LOG_PROVIDER`/`TF_LOG_SDK_PROTO` at TRACE | predicted yes | predicted yes | no |
+
+   **If the core-TRACE hypothesis holds, per-resource timings and address
+   attribution are mutually exclusive.** Provider RPC timing can be added to
+   either, but no capture yields all three. That is a hard constraint on the
+   TUI: view 3 and the UI-hook resource view can never be rendered from the
+   same log however the interface is arranged, and it gives phase 5 a second
+   reason to be cut beyond the ambiguity rate it was already conditional on.
+
+   **A precedence trap, worth recording because it is inverted between the
+   two.** `globalLogLevel` reads `TF_LOG` first and falls back to
+   `TF_LOG_CORE`; `providerLogLevel` reads `TF_LOG_PROVIDER` first and falls
+   back to `TF_LOG`. So `TF_LOG=DEBUG TF_LOG_CORE=TRACE` does **not** raise
+   core — `TF_LOG` wins. Holding providers down while raising core requires
+   leaving `TF_LOG` unset and setting both subsystem variables.
 
    **If it does not work,** the TUI shows whichever tier its log supports and
    the capture is chosen by the question being asked. It must not merge two
