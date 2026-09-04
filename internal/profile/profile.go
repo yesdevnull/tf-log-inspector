@@ -25,6 +25,31 @@ import (
 // see shape and rank, not a full listing.
 const maxRows = 20
 
+// typeColWidth and actionColWidth are the fixed widths given to a resource
+// type / RPC name column and a UI-hook action column respectively. Both are
+// truncated to these widths before formatting -- see truncate -- so a name
+// wider than its column can never shunt every column after it out of
+// alignment.
+const (
+	typeColWidth   = 24
+	actionColWidth = 8
+)
+
+// truncate ellipsizes s to at most n bytes so a fixed-width column can never
+// overflow into the columns that follow it. A %-Ns verb only pads a short
+// string; it never shortens a long one, and real provider type names run
+// well past any width this report could reasonably use -- for example
+// azuread_application_federated_identity_credential.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n <= 3 {
+		return s[:n]
+	}
+	return s[:n-3] + "..."
+}
+
 // Render writes a profile report for l to w.
 func Render(w io.Writer, l *model.Log) error {
 	b := &strings.Builder{}
@@ -81,11 +106,16 @@ func writeResourceTypeJoin(b *strings.Builder, rpcSpans, uiSpans []span.Span) {
 		fmt.Fprintf(b, "  UI-hook figures are sums of measurements rounded to\n")
 		fmt.Fprintf(b, "  whole seconds, +/- 1s each.\n")
 	}
-	fmt.Fprintf(b, "  %-24s %8s %8s %8s %8s %8s\n",
-		"resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
+	// The numeric columns are 9 wide, not 8: "RPC calls" and "RPC total" are
+	// themselves 9-character labels, and a %9s header narrower than its own
+	// label would overrun into the columns after it -- the same hazard
+	// truncate guards the resource-type column against, just on the header
+	// row instead of the data.
+	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n",
+		typeColWidth, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
 	for _, r := range rows {
-		fmt.Fprintf(b, "  %-24s %8d %8s %8d %8s %8s\n",
-			r.ResourceType, r.UIResources, formatMs(r.UITotalMs),
+		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n",
+			typeColWidth, truncate(r.ResourceType, typeColWidth), r.UIResources, formatMs(r.UITotalMs),
 			r.RPCCalls, formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs)))
 	}
 	fmt.Fprintf(b, "\n")
@@ -129,8 +159,9 @@ func writeSlowestCalls(b *strings.Builder, rpcSpans []span.Span) {
 		fmt.Fprintf(b, "SLOWEST CALLS\n")
 	}
 	for _, s := range rows {
-		fmt.Fprintf(b, "  %8s  %-24s %-24s %s\n",
-			formatMs(uint64(s.DurationMs)), s.RPC, s.ResourceType, s.Provider)
+		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
+			formatMs(uint64(s.DurationMs)), typeColWidth, truncate(s.RPC, typeColWidth),
+			typeColWidth, truncate(s.ResourceType, typeColWidth), s.Provider)
 	}
 	fmt.Fprintf(b, "\n")
 }
@@ -161,8 +192,9 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 	fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n")
 	fmt.Fprintf(b, "  neighbouring rows are not reliably ordered.\n")
 	for _, s := range rows {
-		fmt.Fprintf(b, "  %8s  %-8s %-24s %s\n",
-			formatMs(uint64(s.DurationMs)), s.RPC, s.ResourceType, s.Address)
+		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
+			formatMs(uint64(s.DurationMs)), actionColWidth, truncate(s.RPC, actionColWidth),
+			typeColWidth, truncate(s.ResourceType, typeColWidth), s.Address)
 	}
 	fmt.Fprintf(b, "\n")
 }

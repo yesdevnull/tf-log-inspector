@@ -73,22 +73,44 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 // by sweeping start and end events. It is the headline number for whether a
 // plan was slow because of work or because of waiting: summed span time
 // divided by wall clock gives the average, and this gives the ceiling.
+//
+// Events at the same instant are ordered by priority, not just by delta: a
+// genuine handover -- one span's end coinciding with a different span's
+// start -- must retire before the new start is counted (peakEndPriority
+// before peakStartPriority), or two adjacent, non-overlapping spans would
+// double-count that instant. But a zero-duration span's own end coincides
+// with its own start at the same instant, and if that end retired first --
+// as an ordinary end always should -- the pair would always net to zero and
+// the span would never register as concurrent with anything, even sitting
+// squarely inside a window where other spans are running. So a zero-duration
+// span's end is given its own, lowest priority: it retires only after every
+// start at that instant, including its own, has been counted.
 func PeakConcurrency(spans []span.Span) int {
+	const (
+		peakEndPriority     = 0 // end of a span whose StartMs != EndMs: a genuine handover
+		peakStartPriority   = 1
+		peakZeroEndPriority = 2 // end of a span whose StartMs == EndMs: retire only after counted
+	)
 	type event struct {
-		at    uint32
-		delta int
+		at       uint32
+		priority int
+		delta    int
 	}
 	events := make([]event, 0, len(spans)*2)
 	for _, s := range spans {
-		events = append(events, event{s.StartMs, 1}, event{s.EndMs, -1})
+		endPriority := peakEndPriority
+		if s.StartMs == s.EndMs {
+			endPriority = peakZeroEndPriority
+		}
+		events = append(events,
+			event{at: s.StartMs, priority: peakStartPriority, delta: 1},
+			event{at: s.EndMs, priority: endPriority, delta: -1})
 	}
 	sort.Slice(events, func(i, j int) bool {
 		if events[i].at != events[j].at {
 			return events[i].at < events[j].at
 		}
-		// Ends before starts at the same instant: a span ending exactly as
-		// another begins is a handover, not overlap.
-		return events[i].delta < events[j].delta
+		return events[i].priority < events[j].priority
 	})
 	var cur, peak int
 	for _, e := range events {

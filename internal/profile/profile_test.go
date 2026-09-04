@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func render(t *testing.T, path string) string {
@@ -72,4 +73,70 @@ func TestReportSaysSoWhenThereAreNoSpans(t *testing.T) {
 	if !strings.Contains(out, "no spans") {
 		t.Errorf("report does not explain an empty result:\n%s", out)
 	}
+}
+
+func TestTruncateLeavesShortStringsAlone(t *testing.T) {
+	if got := truncate("aws_instance", 24); got != "aws_instance" {
+		t.Errorf("truncate = %q, want unchanged", got)
+	}
+}
+
+func TestTruncateEllipsizesLongStrings(t *testing.T) {
+	long := "azuread_application_federated_identity_credential"
+	got := truncate(long, 24)
+	if len(got) != 24 {
+		t.Errorf("truncate(%q, 24) = %q (len %d), want len 24", long, got, len(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Errorf("truncate(%q, 24) = %q, want it to end with an ellipsis", long, got)
+	}
+}
+
+// A resource type wider than its column must not shunt the columns that
+// follow it out of alignment: every rendered row of the table, including the
+// header, must come out the same length.
+func TestReportKeepsColumnsAlignedWithLongResourceType(t *testing.T) {
+	l := &model.Log{
+		RPCSpans: []span.Span{
+			{
+				DurationMs:   100,
+				RPC:          "PlanResourceChange",
+				Provider:     "registry.terraform.io/hashicorp/azuread",
+				ResourceType: "azuread_application_federated_identity_credential",
+			},
+			{
+				DurationMs:   50,
+				RPC:          "ApplyResourceChange",
+				Provider:     "registry.terraform.io/hashicorp/aws",
+				ResourceType: "aws_instance",
+			},
+		},
+	}
+	var sb strings.Builder
+	if err := Render(&sb, l); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	rows := tableRows(t, sb.String(), "BY RESOURCE TYPE")
+	want := len(rows[0])
+	for i, row := range rows {
+		if len(row) != want {
+			t.Errorf("row %d length = %d, want %d (header's length):\n%s", i, len(row), want, sb.String())
+		}
+	}
+}
+
+// tableRows returns the lines directly under a section header, up to the
+// first blank line -- the column header row plus every data row.
+func tableRows(t *testing.T, out, header string) []string {
+	t.Helper()
+	idx := strings.Index(out, header+"\n")
+	if idx < 0 {
+		t.Fatalf("section %q not found in:\n%s", header, out)
+	}
+	rest := out[idx+len(header)+1:]
+	end := strings.Index(rest, "\n\n")
+	if end < 0 {
+		end = len(rest)
+	}
+	return strings.Split(strings.TrimRight(rest[:end], "\n"), "\n")
 }

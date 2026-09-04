@@ -102,3 +102,28 @@ func TestPeakConcurrencyHandoverBoundary(t *testing.T) {
 		t.Errorf("PeakConcurrency = %d, want 1 (handover not overlap)", got)
 	}
 }
+
+// A zero-duration span's own start and end land on the same instant. If that
+// end were treated like an ordinary end -- retiring before the instant's
+// starts are counted, as a genuine handover must -- the pair would always net
+// to zero and the span would never register as concurrent with anything, even
+// nested inside two spans that are both still running. PackLanes' greedy
+// interval colouring is a correct lower bound on true concurrency at some
+// instant, so its lane count and PeakConcurrency must agree here.
+func TestPeakConcurrencyCountsNestedZeroDurationSpan(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 1000, span.FidelityReported),
+		timed(200, 800, span.FidelityReported),
+		timed(500, 500, span.FidelityReported), // zero-duration, nested inside both
+	}
+	lanes, err := PackLanes(spans)
+	if err != nil {
+		t.Fatalf("PackLanes: %v", err)
+	}
+	if got, want := PeakConcurrency(spans), len(lanes); got != want {
+		t.Errorf("PeakConcurrency = %d, want %d (PackLanes' lane count)", got, want)
+	}
+	if got := PeakConcurrency(spans); got != 3 {
+		t.Errorf("PeakConcurrency = %d, want 3", got)
+	}
+}
