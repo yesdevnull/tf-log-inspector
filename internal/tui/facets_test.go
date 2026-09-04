@@ -182,7 +182,7 @@ func TestFacetPaneKeepsRPCNamesDistinctAtOneHundredColumns(t *testing.T) {
 			{Value: "ApplyResourceChange", Count: 1284},
 		}},
 	}}
-	w := facetPaneWidth(m.facets, 100) // sized exactly as renderPanes sizes it at width 100
+	w := facetPaneWidth(facetNaturalWidth(m.facets), 100) // sized exactly as renderPanes sizes it at width 100
 	lines := strings.Split(m.renderFacets(w, 20), "\n")
 	if len(lines) != 5 {
 		t.Fatalf("got %d facet lines, want two headers and three values:\n%s", len(lines), strings.Join(lines, "\n"))

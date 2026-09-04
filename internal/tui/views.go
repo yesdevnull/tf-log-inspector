@@ -86,14 +86,15 @@ var callColumns = []column{
 }
 
 // rows returns the current view's rows, restricted to the active facet
-// filter. ViewRawLog is not a rollup and has no rows of its own -- Task 5
-// renders it directly from m.log.Entries -- so it returns nil here.
+// filter. ViewRawLog is not a rollup and has no rows of its own -- it
+// renders directly from m.log.Entries -- so it returns nil here.
 //
 // The result is cached on m (see invalidateRows) so repeated calls between
 // filter or view changes -- moveSelection calling RowCount() on every
 // arrow-key press, or a render calling rows() again after RowCount already
 // did -- reuse it rather than redoing a full RollupBy/JoinByResourceType/sort
-// each time.
+// each time. Every caller must reach this through a pointer, or it fills a
+// cache on a copy that is immediately discarded.
 func (m *Model) rows() []row {
 	if m.rowsCached {
 		return m.rowsCache
@@ -195,7 +196,7 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 // renderList renders the current view's rows as a table at most w runes
 // wide and h lines tall, with the row at Selected() highlighted and the
 // window scrolled just far enough to keep it visible.
-func (m Model) renderList(w, h int) string {
+func (m *Model) renderList(w, h int) string {
 	switch m.view {
 	case ViewProviders:
 		return renderTable(nil, providerColumns, m.rows(), m.selected, w, h)

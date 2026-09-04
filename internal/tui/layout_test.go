@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -363,8 +365,8 @@ func centrePaneOf(view string) string {
 // exported from layout.go, since nothing outside a test needs a pane width
 // in isolation from actually rendering into it.
 func layoutCentreWidth(m Model, w int) int {
-	facetW := facetPaneWidth(m.facets, w)
-	detailW := detailPaneWidth(m.log.RPCSpans, w)
+	facetW := facetPaneWidth(m.facetPaneNatural, w)
+	detailW := detailPaneWidth(m.detailPaneNatural, w)
 	return w - facetW - detailW - 2*len([]rune(paneSep))
 }
 
@@ -375,10 +377,64 @@ func layoutCentreWidth(m Model, w int) int {
 // cut off, a pane too narrow to label itself.
 func TestDetailPaneFitsItsPlaceholderAtTheNarrowestSupportedWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
-	if got := detailPaneWidth(m.log.RPCSpans, detailInlineWidth); got < minDetailPaneWidth {
+	if got := detailPaneWidth(m.detailPaneNatural, detailInlineWidth); got < minDetailPaneWidth {
 		t.Errorf("detail pane is %d columns at width %d, below its own minimum of %d", got, detailInlineWidth, minDetailPaneWidth)
 	}
 	if !strings.Contains(m.View(), "(no call selected)") {
 		t.Errorf("detail pane placeholder is cut off at %d columns:\n%s", detailInlineWidth, m.View())
 	}
+}
+
+// Both side panes are sized from data that cannot change after New -- the
+// log's RPC spans, and the facets built from them -- so the measurement
+// belongs at load rather than in every frame: measuring the detail pane
+// formats every RPC span in the log, and measuring the facet pane walks
+// every value of every dimension, of which the resource type dimension
+// alone runs to hundreds on a real capture.
+//
+// The stored measurements are checked against the functions that produce
+// them, and then the render is checked to consult the measurement rather
+// than the data: with the spans and facets taken away behind it, a pane
+// that re-measured per frame would collapse to its minimum width and move
+// the separators.
+func TestSidePaneWidthsAreMeasuredAtLoad(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if got, want := m.facetPaneNatural, facetNaturalWidth(m.facets); got != want {
+		t.Errorf("facetPaneNatural = %d, want %d", got, want)
+	}
+	if got, want := m.detailPaneNatural, detailNaturalWidth(m.log.RPCSpans); got != want {
+		t.Errorf("detailPaneNatural = %d, want %d", got, want)
+	}
+
+	before := paneSepColumns(t, m.View())
+	m.log, m.facets = &model.Log{}, nil
+	m.invalidateRows()
+	if got := paneSepColumns(t, m.View()); !slices.Equal(got, before) {
+		t.Errorf("pane separators moved to columns %v from %v -- a pane re-measured itself from the data at render time", got, before)
+	}
+}
+
+// paneSepColumns reports which display columns the pane separators sit in,
+// which is what the two side panes' widths determine. It reads the first
+// pane row of a composed view; every row has its separators in the same
+// columns (TestEveryPaneRowIsTheSameDisplayWidth).
+func paneSepColumns(t *testing.T, view string) []int {
+	t.Helper()
+	for _, line := range strings.Split(view, "\n") {
+		if !strings.Contains(line, paneSep) {
+			continue
+		}
+		var cols []int
+		for at, col := 0, 0; at < len(line); {
+			if strings.HasPrefix(line[at:], paneSep) {
+				cols = append(cols, col)
+			}
+			r := []rune(line[at:])[0]
+			at += len(string(r))
+			col += lipgloss.Width(string(r))
+		}
+		return cols
+	}
+	t.Fatalf("view has no pane row:\n%s", view)
+	return nil
 }

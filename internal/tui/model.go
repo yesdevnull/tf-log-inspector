@@ -72,13 +72,28 @@ type Model struct {
 	// up/down/j/k move when the facet pane has focus.
 	facetCursor facetCursor
 
-	// rowsCache memoises rows() for the current view and filter. Recomputing
-	// on every call would redo a full RollupBy/JoinByResourceType/sort on
-	// every arrow-key press and, once View is wired into renderList, on
-	// every render too. Anything that can change what rows() returns --
+	// rowsCache memoises rows() for the current view and filter, so the
+	// several callers a single keystroke has -- the RowCount that clamps
+	// the selection, then the centre table and the detail pane of the
+	// render that follows -- share one full RollupBy/JoinByResourceType/
+	// sort rather than each paying for its own. Every method that can serve
+	// or fill it takes a POINTER receiver, so they all address the one
+	// Model bubbletea holds (see Run) instead of caching into a copy that
+	// is then discarded. Anything that can change what rows() returns --
 	// the view, the filter -- must invalidate this via invalidateRows.
 	rowsCache  []row
 	rowsCached bool
+
+	// facetPaneNatural and detailPaneNatural are how wide each side pane
+	// would have to be to show its widest line in full. Both are functions
+	// of data that never changes after New -- the log's RPC spans, and the
+	// facets built from them -- so both are measured there rather than per
+	// frame: measuring the detail pane means formatting every span in the
+	// log, which on a real capture is thousands of lines built and thrown
+	// away for every keystroke. Only the terminal-relative clamp
+	// (capPaneWidth) depends on the current width, and that is O(1).
+	facetPaneNatural  int
+	detailPaneNatural int
 
 	// raw is the raw log view's own state: which entry sits at its top, and
 	// any free-text search in progress or last run. See rawlog.go.
@@ -104,7 +119,10 @@ type facetCursor struct {
 // first; Pane's own zero value is PaneFacets, so this is set explicitly
 // rather than left to the zero value.
 func New(l *model.Log, path string) Model {
-	return Model{log: l, name: filepath.Base(path), pane: PaneList, facets: model.FacetsForSpans(l.RPCSpans)}
+	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: model.FacetsForSpans(l.RPCSpans)}
+	m.facetPaneNatural = facetNaturalWidth(m.facets)
+	m.detailPaneNatural = detailNaturalWidth(l.RPCSpans)
+	return m
 }
 
 // Quitting reports whether a quit key has been handled. Tests use this
@@ -134,9 +152,9 @@ func (m Model) Selected() int {
 
 // RowCount reports how many rows the active view holds, so selection has
 // something to clamp against. ViewRawLog has no rollup rows of its own --
-// Task 5 renders it directly from m.log.Entries -- so it is the one view
-// counted separately rather than through rows().
-func (m Model) RowCount() int {
+// it renders directly from m.log.Entries -- so it is the one view counted
+// separately rather than through rows().
+func (m *Model) RowCount() int {
 	if m.view == ViewRawLog {
 		return len(m.log.Entries)
 	}
@@ -149,6 +167,11 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// Update handles one message and returns the model to render next. The
+// receiver is a value, so each message starts from a copy and a test can
+// drive the same model twice without the first run leaking into the second;
+// the RESULT is a pointer, so bubbletea renders and re-updates the very
+// model this returns and the caches on it (see rowsCache) survive.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -157,7 +180,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// such as "j" or "q" -- so this is handled before anything else.
 		if m.raw.searching {
 			m = m.handleSearchKey(msg)
-			return m, nil
+			return &m, nil
 		}
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
 		// happens to render it as " " too, but dispatching on Type is the
@@ -166,12 +189,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pane == PaneFacets {
 				m.toggleSelectedFacetValue()
 			}
-			return m, nil
+			return &m, nil
 		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
-			return m, tea.Quit
+			return &m, tea.Quit
 		case "tab":
 			m.pane = (m.pane + 1) % paneCount
 		case "up", "k":
@@ -233,7 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	}
-	return m, nil
+	return &m, nil
 }
 
 // invalidateRows drops any cached rows so the next call to rows() rebuilds
@@ -274,9 +297,13 @@ func (m *Model) moveSelection(delta int) {
 // caveat that this package's tests pin regardless of that composition.
 
 // Run opens the full-screen interface for l, loaded from path, and blocks
-// until the user quits.
+// until the user quits. It registers a *Model: bubbletea needs only
+// Init/Update/View on whatever it is given, and a pointer is what lets the
+// render path share one model -- and so one rows cache -- with the update
+// that produced it.
 func Run(l *model.Log, path string) error {
-	p := tea.NewProgram(New(l, path), tea.WithAltScreen())
+	m := New(l, path)
+	p := tea.NewProgram(&m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }

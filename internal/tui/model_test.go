@@ -14,11 +14,11 @@ import (
 func update(t *testing.T, m Model, msg tea.Msg) Model {
 	t.Helper()
 	next, _ := m.Update(msg)
-	got, ok := next.(Model)
+	got, ok := next.(*Model)
 	if !ok {
-		t.Fatalf("Update returned %T, want tui.Model", next)
+		t.Fatalf("Update returned %T, want *tui.Model", next)
 	}
-	return got
+	return *got
 }
 
 func testLog(t *testing.T, name string) *model.Log {
@@ -143,4 +143,64 @@ func TestRepeatingTheActiveViewKeyDoesNotResetSelection(t *testing.T) {
 	if m.Selected() != 1 {
 		t.Errorf("Selected = %d after repeating the active view's key, want 1 (unchanged)", m.Selected())
 	}
+}
+
+// The rows cache has to survive the path bubbletea actually drives. Run
+// registers a *Model, so the model Update returns, the render that follows
+// it and the next RowCount all address one Model: a cache filled inside a
+// value receiver's own copy is discarded with that copy, and the rollup is
+// rebuilt for the RowCount that clamps the selection, again for the centre
+// table and again for the detail pane -- three times per arrow-key press --
+// while still passing any test that calls rows() on an addressable local of
+// its own.
+//
+// The cache is observed rather than counted: once rows are cached, swapping
+// the log out from under the model cannot change what the next caller sees.
+// Each test cools the cache by clearing the fields directly rather than
+// through invalidateRows, which refills it as a side effect of clamping the
+// selection.
+func TestRenderFillsTheRowsCacheOnTheModelItRendered(t *testing.T) {
+	live := liveModel(t, "two-providers.log", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	want := live.RowCount()
+	if want == 0 {
+		t.Fatal("fixture has no calls, so a stale count could not be told from a freshly built one")
+	}
+
+	live.rowsCache, live.rowsCached = nil, false
+	_ = live.View()
+	live.log = &model.Log{} // a rebuild would now find no spans at all
+	if got := live.RowCount(); got != want {
+		t.Errorf("RowCount = %d after a render, want the cached %d -- the render cached into a copy", got, want)
+	}
+}
+
+func TestRowCountFillsTheRowsCacheOnTheModelItCounted(t *testing.T) {
+	live := liveModel(t, "two-providers.log", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	live.rowsCache, live.rowsCached = nil, false
+	want := live.RowCount()
+	if want == 0 {
+		t.Fatal("fixture has no calls, so a stale count could not be told from a freshly built one")
+	}
+	live.log = &model.Log{}
+	if got := len(live.rows()); got != want {
+		t.Errorf("rows() returned %d rows after RowCount, want the cached %d -- RowCount counted a copy", got, want)
+	}
+}
+
+// liveModel returns the model bubbletea would hold after keys: New's model
+// registered as a tea.Model, as Run registers it, and then updated once per
+// key through the interface rather than through the concrete type.
+func liveModel(t *testing.T, fixture string, keys ...tea.Msg) *Model {
+	t.Helper()
+	m := New(testLog(t, fixture), "x.log")
+	var prog tea.Model = &m
+	for _, k := range keys {
+		prog, _ = prog.Update(k)
+	}
+	live, ok := prog.(*Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want *tui.Model -- bubbletea would render a different model from the one it updated", prog)
+	}
+	return live
 }

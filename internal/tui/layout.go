@@ -47,16 +47,18 @@ const (
 // logic in an unclipped variant.
 const hugeWidth = 1 << 30
 
-// facetPaneWidth sizes the facets pane to fit every current facet value and
-// its count in full when there is room, the same data-driven-with-a-cap
+// facetNaturalWidth is how wide the facet pane would have to be to show
+// every facet value and its count in full, the same data-driven-with-a-cap
 // approach internal/profile.resourceTypeColWidth uses for its resource-type
-// column. A fixed pane width left every value longer than that width
-// indistinguishable from its siblings and its count gone entirely once
-// clipped -- the spec requires facets to show a count for every value -- so
-// this measures the actual data instead. capPaneWidth keeps it to a quarter
-// of the terminal, so one long value cannot starve the centre pane the way
-// a fixed width once starved the facet pane in the other direction.
-func facetPaneWidth(facets []model.Facet, w int) int {
+// column: a pane width fixed in advance leaves every value longer than it
+// indistinguishable from its siblings and drops the count the spec requires
+// for every value, so this measures the actual data instead.
+//
+// It walks every value of every dimension -- the resource type dimension
+// alone runs to hundreds on a real capture -- and the facets it measures
+// cannot change after New, so it is called there and its result kept on the
+// Model rather than recomputed per frame.
+func facetNaturalWidth(facets []model.Facet) int {
 	width := minFacetPaneWidth
 	for _, f := range facets {
 		if n := len([]rune(facetSectionHeader(f.Name))); n > width {
@@ -69,14 +71,18 @@ func facetPaneWidth(facets []model.Facet, w int) int {
 			}
 		}
 	}
-	return capPaneWidth(width, w, minFacetPaneWidth, maxFacetPaneWidth)
+	return width
 }
 
-// detailPaneWidth sizes the detail pane to fit the widest RPC/provider/
-// duration/address line across every RPC span, not just the currently
-// selected one, so the pane's width does not jump around as the selection
-// changes. Capped the same way facetPaneWidth is, for the same reason.
-func detailPaneWidth(rpcSpans []span.Span, w int) int {
+// detailNaturalWidth is how wide the detail pane would have to be to show
+// the widest RPC/provider/duration/address line across EVERY RPC span, not
+// just the currently selected one, so the pane's width does not jump around
+// as the selection changes.
+//
+// It formats every span in the log, so like facetNaturalWidth it is
+// measured once in New over data that cannot change afterwards, not per
+// frame.
+func detailNaturalWidth(rpcSpans []span.Span) int {
 	width := minDetailPaneWidth
 	for _, s := range rpcSpans {
 		for _, line := range spanDetailLines(s, hugeWidth) {
@@ -85,7 +91,18 @@ func detailPaneWidth(rpcSpans []span.Span, w int) int {
 			}
 		}
 	}
-	return capPaneWidth(width, w, minDetailPaneWidth, maxDetailPaneWidth)
+	return width
+}
+
+// facetPaneWidth and detailPaneWidth turn a natural width measured at load
+// into the width to render at in a terminal w columns wide. Only the
+// terminal-relative clamp belongs per-frame; it is O(1).
+func facetPaneWidth(natural, w int) int {
+	return capPaneWidth(natural, w, minFacetPaneWidth, maxFacetPaneWidth)
+}
+
+func detailPaneWidth(natural, w int) int {
+	return capPaneWidth(natural, w, minDetailPaneWidth, maxDetailPaneWidth)
 }
 
 // capPaneWidth clamps a data-driven side-pane width to at most a quarter of
@@ -135,7 +152,7 @@ const (
 // it cannot scroll the cursor back into the terminal's scrollback buffer --
 // so a view even one line too tall loses its topmost line off the top of
 // the screen, and the topmost line here is the header naming the open file.
-func (m Model) View() string {
+func (m *Model) View() string {
 	w, h := m.width, m.height
 	if w <= 0 {
 		w = defaultWidth
@@ -160,7 +177,7 @@ func (m Model) View() string {
 }
 
 // header names the file and its span counts.
-func header(m Model) string {
+func header(m *Model) string {
 	return fmt.Sprintf("tfli -- %s -- %d RPC spans, %d UI spans", m.name, len(m.log.RPCSpans), len(m.log.UISpans))
 }
 
@@ -223,14 +240,14 @@ const writeLoggingCaveatLines = 5
 //     row when open; otherwise list and detail are shown side by side.
 //   - w < detailInlineWidth: detail collapses too, leaving the list
 //     full-width. The facet overlay still works the same way here.
-func (m Model) renderPanes(w, h int) string {
+func (m *Model) renderPanes(w, h int) string {
 	if w < facetInlineWidth && m.showFacetOverlay {
 		return m.renderFacets(w, h)
 	}
 	switch {
 	case w >= facetInlineWidth:
-		facetW := facetPaneWidth(m.facets, w)
-		detailW := detailPaneWidth(m.log.RPCSpans, w)
+		facetW := facetPaneWidth(m.facetPaneNatural, w)
+		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - facetW - detailW - 2*len([]rune(paneSep))
 		return joinPanes(h,
 			pane{m.renderFacets(facetW, h), facetW},
@@ -238,7 +255,7 @@ func (m Model) renderPanes(w, h int) string {
 			pane{m.renderDetail(detailW, h), detailW},
 		)
 	case w >= detailInlineWidth:
-		detailW := detailPaneWidth(m.log.RPCSpans, w)
+		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - detailW - len([]rune(paneSep))
 		return joinPanes(h,
 			pane{m.renderCentre(listW, h), listW},
@@ -251,9 +268,9 @@ func (m Model) renderPanes(w, h int) string {
 
 // renderCentre renders the centre pane's content for the active view.
 // ViewRawLog is not one of renderList's rollup/call tables -- it renders
-// directly from m.log.Entries via renderRawLog (Task 5) -- so it is
-// dispatched separately here rather than inside renderList itself.
-func (m Model) renderCentre(w, h int) string {
+// directly from m.log.Entries via renderRawLog -- so it is dispatched
+// separately here rather than inside renderList itself.
+func (m *Model) renderCentre(w, h int) string {
 	if m.view == ViewRawLog {
 		return m.renderRawLog(w, h)
 	}
@@ -308,7 +325,7 @@ func joinPanes(h int, panes ...pane) string {
 // span behind the selection -- rows() returns nil for the former and every
 // row's spanIdx is -1 for the latter -- so both fall through to the same
 // honest placeholder rather than showing stale or zero-valued fields.
-func (m Model) renderDetail(w, h int) string {
+func (m *Model) renderDetail(w, h int) string {
 	lines := []string{clipWidth("SPAN DETAIL", w)}
 	rows := m.rows()
 	if m.selected < 0 || m.selected >= len(rows) || rows[m.selected].spanIdx < 0 {
