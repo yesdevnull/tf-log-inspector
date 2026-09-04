@@ -73,3 +73,55 @@ func TestUnknownKeyIsInert(t *testing.T) {
 		t.Error("an unhandled key set quitting")
 	}
 }
+
+func TestNumberKeysSwitchViews(t *testing.T) {
+	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for key, want := range map[rune]View{'1': ViewProviders, '2': ViewTypes, '4': ViewCalls, '6': ViewRawLog} {
+		got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if got.ActiveView() != want {
+			t.Errorf("key %q selected view %v, want %v", key, got.ActiveView(), want)
+		}
+	}
+}
+
+// Views 3 and 5 belong to later phases. Pressing them must do nothing.
+func TestUnimplementedViewKeysAreInert(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	for _, key := range []rune{'3', '5'} {
+		got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if got.ActiveView() != ViewTypes {
+			t.Errorf("key %q changed the view to %v, want it left on ViewTypes", key, got.ActiveView())
+		}
+	}
+}
+
+func TestTabCyclesPaneFocus(t *testing.T) {
+	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	want := []Pane{PaneList, PaneDetail, PaneFacets}
+	for _, w := range want {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.Focus() != w {
+			t.Fatalf("focus = %v, want %v", m.Focus(), w)
+		}
+	}
+}
+
+// Selection must not run past the end of the list or below zero, and it must
+// reset when the view changes, since row 40 of one view is meaningless in
+// another.
+func TestSelectionIsClampedAndResetsOnViewChange(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.Selected() != 0 {
+		t.Errorf("Selected = %d after moving up from the top, want 0", m.Selected())
+	}
+	for i := 0; i < 500; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	if m.Selected() >= m.RowCount() {
+		t.Errorf("Selected = %d, want less than RowCount %d", m.Selected(), m.RowCount())
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	if m.Selected() != 0 {
+		t.Errorf("Selected = %d after a view change, want 0", m.Selected())
+	}
+}

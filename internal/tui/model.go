@@ -13,12 +13,52 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
+// View identifies which of the top-level views the interface is showing.
+// Views 3 (resource addresses) and 5 (timeline) belong to later phases and
+// have no key bound to them yet: ViewCalls and ViewRawLog take the key
+// numbers either side of the gaps they leave.
+type View uint8
+
+const (
+	ViewProviders View = iota // key 1
+	ViewTypes                 // key 2
+	ViewCalls                 // key 4
+	ViewRawLog                // key 6
+)
+
+// viewKeys maps the bound number keys to the view they switch to. Keys "3"
+// and "5" are deliberately absent, so pressing them falls through to no-op
+// rather than an index lookup into unbound state.
+var viewKeys = map[string]View{
+	"1": ViewProviders,
+	"2": ViewTypes,
+	"4": ViewCalls,
+	"6": ViewRawLog,
+}
+
+// Pane identifies which of the interface's three panes has keyboard focus.
+type Pane uint8
+
+const (
+	PaneFacets Pane = iota
+	PaneList
+	PaneDetail
+)
+
+// paneCount is how many values Pane has, so Tab can cycle through them with
+// a single modulo rather than a switch that must be kept in sync by hand.
+const paneCount = PaneDetail + 1
+
 // Model is the bubbletea model for tfli's full-screen interface. It wraps a
 // loaded log; nothing here mutates the log, so a Model can be freely copied
 // the way bubbletea's value-receiver Update requires.
 type Model struct {
 	log  *model.Log
 	name string
+
+	view     View
+	pane     Pane
+	selected int
 
 	width, height int
 	quitting      bool
@@ -38,6 +78,35 @@ func (m Model) Quitting() bool {
 	return m.quitting
 }
 
+// ActiveView reports which top-level view is currently showing. Named
+// ActiveView rather than View to avoid colliding with bubbletea's own View,
+// which renders a string rather than reporting state.
+func (m Model) ActiveView() View {
+	return m.view
+}
+
+// Focus reports which pane currently has keyboard focus.
+func (m Model) Focus() Pane {
+	return m.pane
+}
+
+// Selected reports the index of the highlighted row within the active
+// view's list.
+func (m Model) Selected() int {
+	return m.selected
+}
+
+// RowCount reports how many rows the active view holds, so selection has
+// something to clamp against. Until Task 3 builds the real per-view lists,
+// each view reports the size of the span (or entry) slice it will
+// eventually present.
+func (m Model) RowCount() int {
+	if m.view == ViewRawLog {
+		return len(m.log.Entries)
+	}
+	return len(m.log.RPCSpans)
+}
+
 // Init starts no commands: the model has everything it needs from New, and
 // nothing here depends on bubbletea's runtime to load.
 func (m Model) Init() tea.Cmd {
@@ -51,11 +120,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case "tab":
+			m.pane = (m.pane + 1) % paneCount
+		case "up", "k":
+			m.moveSelection(-1)
+		case "down", "j":
+			m.moveSelection(1)
+		default:
+			// Keys "3" and "5" are not in viewKeys, so pressing them lands
+			// here and does nothing -- they are unbound, not broken.
+			if v, ok := viewKeys[msg.String()]; ok {
+				m.view = v
+				m.selected = 0
+			}
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	}
 	return m, nil
+}
+
+// moveSelection shifts the selected row by delta, clamped to the active
+// view's row range. Row 40 of one view is meaningless in another, so a view
+// switch resets selection separately in Update rather than relying on this
+// clamp to catch it.
+func (m *Model) moveSelection(delta int) {
+	m.selected += delta
+	if max := m.RowCount() - 1; m.selected > max {
+		m.selected = max
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
 }
 
 // View renders the header naming the file and its span counts, followed by
