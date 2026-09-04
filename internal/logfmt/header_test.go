@@ -79,3 +79,82 @@ func TestParseHeaderMultilineValueBodyIsNotAHeader(t *testing.T) {
 		t.Error("HasTS = true, want false for an hclog multi-line value body")
 	}
 }
+
+// Terraform captures a provider's stderr and re-logs each line through its
+// own logger, so the provider's hclog header ends up inside Terraform's
+// message -- two headers on one line. The provider's level is the
+// meaningful one: recording Terraform's wrapper instead hides a provider
+// DEBUG line behind an INFO wrapper, which a level filter would then get
+// wrong. Measured on a real HCP debug log as 901 INFO entries whose
+// providers had said DEBUG.
+func TestParseHeaderPeelsNestedProviderHeader(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [INFO]  provider.terraform-provider-azuread_v3.9.0_x5: 2026-09-04T09:15:03.999+1000 [DEBUG] ==== Begin AzureAD Response ====`)
+	if !h.HasTS {
+		t.Fatal("HasTS = false, want true")
+	}
+	if h.Level != LevelDebug {
+		t.Errorf("Level = %v, want DEBUG from the nested header", h.Level)
+	}
+	if h.Comp != "provider.terraform-provider-azuread_v3.9.0_x5" {
+		t.Errorf("Comp = %q, want the outer provider component", h.Comp)
+	}
+	if h.Msg != "==== Begin AzureAD Response ====" {
+		t.Errorf("Msg = %q, want the nested header stripped", h.Msg)
+	}
+	// The outer timestamp is Terraform's, and every other entry in the log
+	// is ordered by that clock. The nested one comes from a separate
+	// process whose clock may be skewed, so it is read for its level and
+	// then discarded.
+	if h.TS.Second() != 2 {
+		t.Errorf("TS second = %d, want the outer timestamp's 2", h.TS.Second())
+	}
+}
+
+// A nested header need not carry a level of its own.
+func TestParseHeaderPeelsNestedHeaderWithoutLevel(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [INFO]  provider.x: 2026-09-04T09:15:03.999+1000 plain nested message`)
+	if h.Msg != "plain nested message" {
+		t.Errorf("Msg = %q, want the nested timestamp stripped", h.Msg)
+	}
+	if h.Level != LevelInfo {
+		t.Errorf("Level = %v, want the outer INFO retained when the nested header has none", h.Level)
+	}
+}
+
+// Peeling keys off a strictly-formatted timestamp, so ordinary prose that
+// merely opens with a bracketed word or a date-like token is untouched.
+func TestParseHeaderLeavesUnnestedMessagesAlone(t *testing.T) {
+	for _, msg := range []string{
+		"Received downstream response: tf_req_duration_ms=5",
+		"[not-a-level] keeps its bracket",
+		"2026-09-04 09:15:02 is not an hclog timestamp",
+		"GET /subscriptions/x/resourceGroups/y HTTP/1.1",
+	} {
+		h := ParseHeader(`2026-09-04T09:15:02.113+1000 [TRACE] provider.x: ` + msg)
+		if h.Msg != msg {
+			t.Errorf("Msg = %q, want %q unchanged", h.Msg, msg)
+		}
+		if h.Level != LevelTrace {
+			t.Errorf("Level = %v for %q, want the outer TRACE", h.Level, msg)
+		}
+	}
+}
+
+// The Azure SDK prefixes its messages with a bare "[DEBUG] " rather than a
+// full hclog header, and azurerm is the largest component in a real debug
+// log by a wide margin -- 7343 entries. Left in place the prefix is masked
+// as though it were content, so every one of those templates opens with a
+// spurious token. Only recognised level names are peeled; an arbitrary
+// bracketed token is left alone, which the sibling test covers.
+func TestParseHeaderPeelsBareProviderLevelPrefix(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [DEBUG] provider.terraform-provider-azurerm_v4.81.0_x5: [DEBUG] AzureRM Request`)
+	if h.Msg != "AzureRM Request" {
+		t.Errorf("Msg = %q, want the bare level prefix stripped", h.Msg)
+	}
+	if h.Level != LevelDebug {
+		t.Errorf("Level = %v, want DEBUG", h.Level)
+	}
+	if h.Comp != "provider.terraform-provider-azurerm_v4.81.0_x5" {
+		t.Errorf("Comp = %q, want the outer provider component", h.Comp)
+	}
+}

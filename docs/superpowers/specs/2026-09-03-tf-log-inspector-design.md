@@ -612,6 +612,15 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    again. If that is empty, repeat with `TF_LOG=TRACE` to distinguish a
    downstream capture filter from the provider never emitting. Only if *both*
    are empty is the timing data genuinely unreachable from outside the runner.
+
+   One false-negative trap was closed before that test runs. Provider
+   protocol lines are provider stderr, and Terraform re-logs stderr through
+   its own logger, so they can arrive with the provider's hclog header nested
+   inside Terraform's message. The parser matched `"Received downstream
+   response"` as a message prefix, which a nested header displaces, so a
+   successful TRACE capture delivered that way would have reported
+   `response entries 0` and read as a failure. Nested headers are now peeled;
+   verified both ways against a nested TRACE line.
    **This gates phase 2.**
 2. **How reliable address correlation is under real concurrency.** The
    mechanism is confirmed to exist — core logs addresses, and logs its own side
