@@ -595,6 +595,16 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    DEBUG because `RequestIdContext` sets it on three loggers, one of which is
    the provider's own `tflog` logger whose level the provider author chooses.
 
+   **Result, 2026-09-04 (debug run report).** A real debug-enabled HCP run of
+   13,545 entries: `response entries 0`, `request entries 0`,
+   `response duration fields 0`. Not one protocol line survives at DEBUG. The
+   1,270 `tf_req_id` occurrences are almost entirely one message — 1,260 of
+   them are `"Value switched to prior value due to semantic equality logic"`,
+   a terraform-plugin-framework DEBUG log — so the ID is present with nothing
+   to correlate it against. `core vertex lines 0` and `core GRPC lines 0`
+   likewise, so address attribution (open question 2, view 3) is TRACE-gated
+   too.
+
    **The remaining check:** the proto subsystem takes its level from
    `TF_LOG_SDK_PROTO` and is built as its own `hclog.New` logger with its own
    `SetLevel`, so it does not inherit the root SDK level. Keep the debug
@@ -622,5 +632,30 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    core and provider logs at different levels, and address correlation requires
    both in one file. Whether Dan's CI captures both determines whether view `3`
    is reachable at all in the environment that matters.
-6. **Real-world line rate.** The 102 bytes/line figure comes from one small public log and is used
-   for capacity planning. Phase 1 reports the true figure.
+6. **Real-world line rate.** ~~The 102 bytes/line figure comes from one small
+   public log and is used for capacity planning.~~ **Answered, 2026-09-04:**
+   828 bytes/line mean on a real 17.9 MB debug log (21,557 physical lines,
+   13,545 logical entries), and 758 bytes/line on a structured-output log.
+   Eight times the estimate. Parse throughput measured at 81 MB/s on the debug
+   log; the streaming design absorbs the difference, so this revises capacity
+   expectations rather than the architecture.
+
+7. **Resolution of structured-output timings. Answered, 2026-09-04.**
+   `elapsed_seconds` is quantised to whole seconds and carries up to a second
+   of error. `internal/command/views/hook_json.go` rounds *both* endpoints
+   independently before subtracting:
+
+       start:   h.timeNow().Round(time.Second)
+       elapsed: h.timeNow().Round(time.Second).Sub(progress.start)
+
+   So a 0.6 s read reports 0 s or 1 s depending only on where it falls against
+   the second boundary. Confirmed in the field: every one of 237 spans in a
+   real structured log is a whole-second multiple, and 10 of 266 in the debug
+   log report 0 ms.
+
+   **Consequence for the design.** The `ui-reported` tier supports aggregate
+   views — by type, by provider — where independent rounding errors are
+   uncorrelated and wash out across many resources. It does not support
+   ranking individual resources against each other, which is what
+   `SLOWEST RESOURCES` currently invites. Per-resource ranking needs the RPC
+   tiers, and therefore TRACE.

@@ -10,7 +10,7 @@ Requires Go 1.25 or later. No third-party dependencies.
 
 ## Getting a log
 
-`tfli` reads two kinds of timing, from two different logs.
+`tfli` reads two kinds of timing, which need different capture settings.
 
 ### Per-resource timing, from a normal run
 
@@ -37,8 +37,17 @@ resulting lines through is not yet confirmed; if the log comes back without
 `tf_req_duration_ms`, try `TF_LOG=TRACE` before concluding the data is
 unreachable.
 
-Debug logging and structured output are mutually exclusive: enabling debug
-replaces the `terraform.ui` JSON with console text.
+A debug run's raw log contains **both**: the `terraform.ui` JSON and the
+debug text, interleaved. One debug run therefore feeds every tier `tfli`
+supports, so there is no need to choose between the two captures.
+
+### A caveat on structured-output resolution
+
+Terraform rounds both ends of a resource's timing to the nearest second
+before subtracting them (`hook_json.go`: `h.timeNow().Round(time.Second)`),
+so `elapsed_seconds` is always a whole number and each figure carries up to
+a second of error. Type and provider rollups over many resources stay
+meaningful; ranking two individual resources a second apart does not.
 
 For a local plan:
 
