@@ -224,10 +224,20 @@ TUI testable as a pure function.
 
 ### Input handling
 
-The log file is `mmap`ed once. Nothing is copied out of it. Every parsed
-structure refers to bytes by offset into the mapping. This is what makes 1GB
-tractable and is also what makes "jump from a span to its log lines" a seek
-rather than a search.
+~~The log file is `mmap`ed once.~~ **Revised 2026-09-04:** the log file is
+read into a single `[]byte`. Every parsed structure refers to bytes by offset
+into that buffer, so "jump from a span to its log lines" is still a slice
+expression rather than a search.
+
+The `mmap` decision was sized against a 1GB log at 102 bytes per line. Four
+real HCP captures measure **365 to 828 bytes per line** and **17 to 37MB**
+total, so the largest observed log costs 37MB resident plus a ~1MB entry
+index. `mmap` would buy constant residency for a log size that has not
+appeared, at the cost of platform-specific code and build tags in a project
+whose hard constraint is zero third-party dependencies. Reading the file
+whole is the simplest thing that works at the measured sizes; the accessor
+is an interface boundary, so swapping in `ReadAt` or `mmap` later is
+contained if a 1GB log ever turns up.
 
 Parsing runs on a goroutine and reports progress into the bubbletea event loop,
 so the UI is interactive and cancellable while a large file loads. The raw log
@@ -547,7 +557,12 @@ anything is built on top of it.
    distribution and the address-confidence distribution by evidence before
    anything is built on top of them.
 2. **Span extraction and the model layer.** Rollups, facet filtering, lane
-   packing, all as pure functions under test.
+   packing, all as pure functions under test — plus `tfli --profile <log>`,
+   a headless renderer over that model so the phase ships something runnable
+   against real logs. See the revised out-of-scope entry. The cross-tier
+   type join is the first deliverable: both builders populate
+   `Span.ResourceType`, so it needs no address attribution and it is what
+   answers "which resource type cost the most, and what did its RPCs cost".
 3. **TUI: layout C with views 1, 2, 4 and 6** — provider and type rollups, the
    ranked call list, and the raw log view including span-to-log jumping. This
    is the smallest thing that fully serves the primary use case.
@@ -567,8 +582,16 @@ of genuine inference in the design. That ordering is deliberate.
 Deliberately excluded, recorded so they are not rediscovered as omissions:
 
 - **Live tailing.** Logs come from CI artefacts, after the fact.
-- **Headless top-N and JSON/CSV export.** `--diagnose` is the only
-  non-interactive mode. The package boundary keeps these cheap to add later.
+- ~~**Headless top-N and JSON/CSV export.**~~ **Revised 2026-09-04: headless
+  top-N is now phase 2's deliverable**, as `tfli --profile <log>`. JSON/CSV
+  export remains out of scope. Two things changed. Phase 2 as originally
+  scoped shipped nothing runnable — a model layer behind a TUI that does not
+  exist until phase 3 — which leaves it verifiable only against fixtures and
+  not against the real logs that have corrected four assumptions in this
+  document already. And the cross-tier type join now answers a live question
+  (a 247 s `azuread_service_principal` total) that would otherwise wait for
+  the TUI. `--diagnose` stays a structure report: profiling output belongs in
+  its own mode rather than blurring the one whose purpose is safe disclosure.
 - **Run comparison** (`--compare before.log after.log`). Agreed nice-to-have,
   not now.
 - **Compressed input** (`.gz`, `.zst`). Likely wanted eventually since CI
