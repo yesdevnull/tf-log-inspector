@@ -234,9 +234,9 @@ func TestFacetValueLineNeverDropsTheCount(t *testing.T) {
 // than front-clipped like a provider address.
 //
 // The width matters. At a 100-column terminal the facet pane is capped at a
-// quarter of the terminal, 25 runes; the checkbox costs 4 and a four-digit
-// count -- what an apply over a thousand-resource workspace produces --
-// costs 6, leaving 15 for the value. PlanResourceChange and
+// quarter of the terminal, 25 display columns; the checkbox costs 4 and a
+// four-digit count -- what an apply over a thousand-resource workspace
+// produces -- costs 6, leaving 15 for the value. PlanResourceChange and
 // ApplyResourceChange share the 14-character suffix "ResourceChange", so
 // front-clipping both to 15 leaves both reading "…ResourceChange", against
 // counts that such a run makes equal as well. At 120 and 160 columns the

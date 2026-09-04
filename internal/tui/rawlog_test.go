@@ -180,14 +180,19 @@ func TestEnterOnARollupRowIsInert(t *testing.T) {
 }
 
 // '/' opens a synchronous search over the raw log and jumps to the first
-// entry at or after the current position whose bytes contain the query.
+// entry at or after the current position whose text contains the query. The
+// entry AT that position counts, since it is the one on the pane's top line
+// and a query for text the user can already see must find it. Only entries
+// the active filter shows are candidates, and the match is against the same
+// ANSI-stripped text the pane draws rather than the entry's raw bytes.
 //
 // The spec sizes /pattern with n/N as a cancellable goroutine because it was
 // designed against a 1GB log. Real captures measured for this tool are
 // 17-37MB, where a synchronous scan over m.log.Data costs a few tens of
 // milliseconds -- well under a frame -- so the concurrent, cancellable
-// version is deferred until a log turns up large enough to need it. This is
-// the same reasoning phase 2 used to replace mmap with a whole-file read.
+// version is deferred until a log turns up large enough to need it -- the
+// same trade this project makes wherever a simpler synchronous read is fast
+// enough for the log sizes that actually exist.
 func TestSlashSearchJumpsToTheFirstMatch(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})

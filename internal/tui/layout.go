@@ -131,9 +131,14 @@ const paneSep = " │ "
 // paneSepWidth is how many terminal columns paneSep costs a pane row, which
 // is what the width arithmetic in renderPanes has to subtract. It is
 // measured with lipgloss.Width, the same measure every other width in this
-// package uses: a rune count agrees with it only for as long as paneSep
-// stays ASCII-plus-a-narrow-box-drawing-glyph, and the whole package's rule
-// is that display columns are never inferred from rune counts.
+// package uses, so that the subtraction here and the padding in joinPanes
+// can never disagree about one string.
+//
+// The distinction from a rune count is not hypothetical for this string: │
+// (U+2502) is East Asian AMBIGUOUS, so how many columns it occupies is a
+// property of the terminal's configuration rather than of the character.
+// Measuring it once, the same way every rendered line is measured, is what
+// keeps the two in step whatever that measurement turns out to be.
 var paneSepWidth = lipgloss.Width(paneSep)
 
 // defaultWidth and defaultHeight size the view before the first
@@ -147,15 +152,29 @@ const (
 
 // View composes the three-pane layout: facets left, list centre, detail
 // right, degrading by width per the design spec's width-degradation rules.
-// The header naming the file and the footer are always shown; the
-// observer-effect caveat gives way between them when the terminal is too
-// short for all three (see loggingCaveat).
+// The header naming the file is the top line of every frame and the footer
+// the last of every frame two lines or taller; the observer-effect caveat
+// between them is the part that gives way, shortening to one sentence and
+// then dropping out as the terminal loses height (see loggingCaveat).
 //
-// The result is exactly h lines with no trailing newline, and never more.
+// None of the three is exempt from the width clip: at a narrow enough w the
+// header loses the tail of the file name and the caveat is cut mid-sentence,
+// the same as any other line. What they never do is collapse or trade places
+// the way the panes do.
+//
+// The result carries no trailing newline and never exceeds h lines.
 // bubbletea's renderer keeps only the LAST h lines of what View returns --
 // it cannot scroll the cursor back into the terminal's scrollback buffer --
 // so a view even one line too tall loses its topmost line off the top of
 // the screen, and the topmost line here is the header naming the open file.
+//
+// h is a ceiling rather than a target, and the layouts differ on whether
+// they reach it: joinPanes pads every pane it composes out to h, so the two-
+// and three-pane widths fill the frame exactly, while the single-pane
+// layouts -- renderPanes' sub-detailInlineWidth branch and the facet overlay
+// -- clip at h without padding to it and stop wherever their content ran
+// out. A short frame simply leaves blank terminal beneath it, which costs
+// the reader nothing.
 //
 // The footer is composed onto the END of an already-trimmed frame rather
 // than trimmed along with everything else, because a frame trimmed from
@@ -268,9 +287,16 @@ func (m *Model) footer() string {
 const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears it"
 
 // footerKeys is the key-binding hint line shown beneath the panes. It is 62
-// runes, comfortably inside the narrowest supported width (70): "q quit" was
-// the tail of a longer version of this line and was the first thing clipped
-// off at 70 columns, which is the one key a user must never lose sight of.
+// display columns, and like every other line in the frame it is clipped from
+// its END, so its tail is the first thing a narrow terminal takes. "q quit"
+// -- the one key a user must never lose sight of -- sits at that tail, so
+// every binding added to this line pushes it closer to the edge. That is
+// what keeps the line this terse.
+//
+// 62 columns is not a floor anyone is protected by: renderPanes has a layout
+// for widths below detailInlineWidth and the spec defines one, so the
+// interface really does render at 60 columns, where "q quit" is already cut
+// to "q qu". Nothing should budget against 62 as though it were guaranteed.
 func footerKeys() string {
 	return "⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit"
 }
@@ -307,8 +333,9 @@ func paneHeight(h, caveatLines int) int {
 // who mistook these figures for wall-clock truth would be optimising time
 // that does not exist without the log, so the caveat travels with every
 // rendered duration rather than living only in documentation. Its longest
-// line is 59 runes, so it already fits at the narrowest supported width
-// (70) without needing to be shortened further.
+// line is 59 display columns; below that it is clipped mid-sentence like any
+// other line, since no width floor protects it. shortLoggingCaveat is the
+// answer to a frame short of HEIGHT, not of width.
 var fullLoggingCaveat = []string{
 	"Durations here are measured under logging, which is not",
 	"free: one workspace planned in 24.1s unlogged and 522.2s",

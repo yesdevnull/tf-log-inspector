@@ -112,6 +112,14 @@ func (m *Model) scrollRawLog(delta int) {
 // HTTP body dumps -- not just the one line that happened to close a span.
 // A component of 0 means "none" (see logfmt.Entry), so it is never
 // recorded: an entry with no component never resolves to a provider.
+//
+// The mapping assumes a component belongs to ONE provider, which is what
+// Terraform's own naming gives: a component names the plugin process, so
+// every span closing under it is that plugin's. Should two providers' spans
+// ever close on entries sharing a component, the last span walked wins and
+// the earlier provider's lines are attributed to the later one -- a filtered
+// raw log showing some of the wrong provider's entries, not a wrong number
+// anywhere.
 func componentProviders(spans []span.Span, entries []logfmt.Entry) map[uint16]string {
 	out := map[uint16]string{}
 	for _, s := range spans {
@@ -171,13 +179,16 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 // StripANSI's API intends. Each visible
 // entry renders every line Off/Len cover -- including continuations -- so a
 // multi-line entry such as an HTTP body dump appears whole rather than as a
-// fragment; an entry that would not fit inside the remaining height is left
-// for the next page rather than cut apart, unless it is the very first
-// entry considered, which is always begun. That exception is what makes an
-// entry taller than the whole pane render its head rather than nothing at
-// all: it is the one entry the user jumped to, and its lines are cut to h by
-// whichever pane composes them (joinPanes, or renderPanes' single-pane
-// branch) rather than being allowed to push the caveat off the frame.
+// fragment; an entry that would not fit inside the remaining height ends
+// the pane instead of being cut apart, and scrolling on brings it to the top
+// of the pane, where it is begun from its own first line. The exception is
+// the first entry to produce any lines -- the first VISIBLE one, since the
+// filter skips the others without ever measuring them -- which is always
+// begun. That is what makes an entry taller than the whole pane render its
+// head rather than leaving the pane blank: it is the entry at m.raw.top, the
+// one a jump or a search put there, and its lines are cut to h by whichever
+// pane composes them (joinPanes, or renderPanes' single-pane branch) rather
+// than being allowed to push the caveat off the frame.
 func (m Model) renderRawLog(w, h int) string {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
@@ -268,11 +279,13 @@ func (m *Model) searchAgain(direction int) {
 // captures measured for this tool are 17-37MB, where a linear scan costs a
 // few tens of milliseconds -- well under a frame. The concurrent,
 // cancellable version is deferred until a log turns up large enough to need
-// it, the same reasoning phase 2 used to replace mmap with a whole-file
-// read.
+// it -- the same trade this project makes wherever a simpler synchronous
+// read is fast enough for the log sizes that actually exist.
 //
 // It scans from start in the given direction, honouring the same filter
 // renderRawLog does, and moves the raw log's top entry to the first match.
+// Whether start itself counts as a candidate is includeStart's to say; see
+// below.
 // It does not wrap around either end of the log; reaching an end without a
 // match leaves the position unchanged.
 //

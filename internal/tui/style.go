@@ -72,7 +72,7 @@ func padRight(s string, w int) string {
 // package -- a provider address, a resource type, a resource address, a
 // component name -- values distinguished from their siblings by their
 // TAIL, not their head: "registry.terraform.io/hashicorp/azuread" and
-// "…/azurerm" share a 31-character prefix and differ only in the last 7,
+// "…/azurerm" share a 37-character prefix and differ only in the last 2,
 // so an end-clip (clipValueEnd) collapses them to the same text while a
 // leading ellipsis keeps them apart. Prose and message text is the
 // opposite -- distinguished by its head -- and end-clips, as does the one

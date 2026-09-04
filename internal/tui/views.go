@@ -169,8 +169,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 // into rpcSpans itself, never into a filtered subset, so jump-to-log keeps
 // landing on the right span even while a filter narrows the list.
 // It sorts a slice of indices rather than the spans themselves: m.log.RPCSpans
-// must not be mutated, since every other view and any later --profile run
-// over the same Log reads it too.
+// must not be mutated, since every other view reads it too and a sort here
+// would reorder theirs.
 func callRows(rpcSpans []span.Span, f model.Filter) []row {
 	idx := make([]int, 0, len(rpcSpans))
 	for i, s := range rpcSpans {
@@ -422,8 +422,8 @@ func fitColumnWidths(cols []column, natural []int, w int) []int {
 		}
 		if !settledAny {
 			// Every remaining column wants more than an even share: split
-			// what's left evenly, one extra rune to each of the first
-			// remaining%len(pool) columns so the total assigned is exactly
+			// what's left evenly, one extra column to each of the first
+			// remaining%len(pool) of them so the total assigned is exactly
 			// remaining rather than falling short to integer rounding.
 			base, extra := remaining/len(pool), remaining%len(pool)
 			for k, i := range pool {

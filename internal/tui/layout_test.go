@@ -378,8 +378,8 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 	centreWidth := layoutCentreWidth(m, 160)
 	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
 	providerWidth := widths[len(callColumns)-1] // provider is callColumns' last column
-	if providerWidth >= len([]rune(aws)) && providerWidth >= len([]rune(google)) {
-		t.Fatalf("provider column is %d runes wide at 160 columns, wide enough for both addresses whole -- this test no longer exercises clipping", providerWidth)
+	if providerWidth >= lipgloss.Width(aws) && providerWidth >= lipgloss.Width(google) {
+		t.Fatalf("provider column is %d display columns wide at 160 columns, wide enough for both addresses whole -- this test no longer exercises clipping", providerWidth)
 	}
 	awsWant, googleWant := clipValueFront(aws, providerWidth), clipValueFront(google, providerWidth)
 	if awsWant == googleWant {
@@ -400,13 +400,13 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 // (...ResourceChange, ...ResourceConfig, ...ResourceState) that diverge at
 // the HEAD, so the calls view's RPC column must end-clip. Front-clipping it
 // collides names that differ: at 100 columns -- the width Dan runs at --
-// the column renders 8 runes wide, where a front-clip renders both
-// PlanResourceChange and ApplyResourceChange as "…eChange".
+// the column renders 10 display columns wide, where a front-clip renders
+// both PlanResourceChange and ApplyResourceChange as "…rceChange".
 //
 // Asserting only that some RPC text appears would not catch this, since a
 // collided value is still non-empty: the two rows' RPC cells must be shown
 // to differ. two-rpcs.log's two calls carry those two names, which share
-// the 14-rune tail "ResourceChange", for exactly this reason.
+// the 14-column tail "ResourceChange", for exactly this reason.
 //
 // The expected clipped text is computed via fitColumnWidths and
 // clipValueEnd themselves, the same functions renderTable calls, rather
@@ -430,8 +430,8 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 	centreWidth := layoutCentreWidth(m, 100)
 	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
 	rpcWidth := widths[1] // RPC is callColumns' second column, after duration
-	if rpcWidth >= len([]rune(first)) && rpcWidth >= len([]rune(second)) {
-		t.Fatalf("RPC column is %d runes wide at 100 columns, wide enough for both names whole -- this test no longer exercises clipping", rpcWidth)
+	if rpcWidth >= lipgloss.Width(first) && rpcWidth >= lipgloss.Width(second) {
+		t.Fatalf("RPC column is %d display columns wide at 100 columns, wide enough for both names whole -- this test no longer exercises clipping", rpcWidth)
 	}
 	firstWant, secondWant := clipValueEnd(first, rpcWidth), clipValueEnd(second, rpcWidth)
 	if firstWant == secondWant {

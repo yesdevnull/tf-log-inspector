@@ -87,8 +87,13 @@ type Model struct {
 	// sort rather than each paying for its own. Every method that can serve
 	// or fill it takes a POINTER receiver, so they all address the one
 	// Model bubbletea holds (see Run) instead of caching into a copy that
-	// is then discarded. Anything that can change what rows() returns --
-	// the view, the filter -- must invalidate this via invalidateRows.
+	// is then discarded. The `var _ tea.Model = (*Model)(nil)` assertion at
+	// the foot of this file is what holds that shape: give View or Update a
+	// value receiver and the VALUE type satisfies tea.Model, so a copy can
+	// be handed to bubbletea and the render path fills this cache on
+	// something thrown away a frame later. The assertion fails to compile
+	// first. Anything that can change what rows() returns -- the view, the
+	// filter -- must invalidate this via invalidateRows.
 	rowsCache  []row
 	rowsCached bool
 
@@ -173,10 +178,13 @@ func (m Model) Selected() int {
 	return m.selected
 }
 
-// RowCount reports how many rows the active view holds, so selection has
-// something to clamp against. ViewRawLog has no rollup rows of its own --
-// it renders directly from m.log.Entries -- so it is the one view counted
-// separately rather than through rows().
+// RowCount reports what the selection is clamped against for the active
+// view. For the rollup and call views that is the row count itself. For
+// ViewRawLog, which has no rows of its own, it is the log's TOTAL entry
+// count -- not the number of entries the pane draws, which is only those
+// passing entryVisible. Nothing reads the selection in that view (the pane
+// renders from m.raw.top, and scrollRawLog does its own clamping against
+// the same total), so the two never have to agree.
 func (m *Model) RowCount() int {
 	if m.view == ViewRawLog {
 		return len(m.log.Entries)
@@ -346,9 +354,16 @@ func (m *Model) toggleFacetFocus() {
 	m.pane = PaneFacets
 }
 
-// invalidateRows drops any cached rows so the next call to rows() rebuilds
-// them from the current view and filter, rather than serving stale ones,
-// and re-clamps the selection against the list it rebuilds.
+// invalidateRows drops any cached rows so they are rebuilt from the current
+// view and filter rather than served stale, and re-clamps the selection
+// against the list it rebuilds.
+//
+// CALLERS MUST SET m.view FIRST. Clamping needs a row count, so this
+// rebuilds the cache before it returns -- for whichever view m.view names at
+// the moment of the call. Assigning the view afterwards therefore leaves a
+// cache built for the view being left behind, and rows() will serve it. Both
+// callers that switch views (Update's number keys, jumpToSpan) assign
+// m.view before they call this, for that reason.
 //
 // The clamp belongs here because everything that can shorten the list comes
 // through here: narrowing a filter can leave the selection past the end of
