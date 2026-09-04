@@ -2,6 +2,7 @@ package span
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -274,5 +275,52 @@ func TestUIHookBuilderAddressDoesNotAliasScannerBuffer(t *testing.T) {
 		if s.Address != want[i] {
 			t.Errorf("span %d Address = %q, want %q", i, s.Address, want[i])
 		}
+	}
+}
+
+// --- Whole-branch review, findings 5 and 6: saturated durations and
+// backwards UI-hook timestamps must be counted, not just silently clamped.
+
+// A UI-hook line whose timestamp is earlier than the builder's base must
+// clamp to a 0 offset without wrapping, and must be counted -- mirroring
+// logfmt.Scan's own BackwardsTimestamps counter -- since a silent clamp
+// shortens the derived UI-hook wall-clock with no visible trace of why.
+func TestUIHookBuilderCountsBackwardsTimestamps(t *testing.T) {
+	in := uiLineWith("2026-09-04T09:15:10.000000+10:00", "apply_complete", 1, true) + "\n" +
+		uiLineWith("2026-09-04T09:15:00.000000+10:00", "apply_complete", 1, true) + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, in, &b)
+	if b.BackwardsTimestamps() != 1 {
+		t.Errorf("BackwardsTimestamps() = %d, want 1", b.BackwardsTimestamps())
+	}
+}
+
+// An elapsed_seconds absurd enough to overflow uint32 milliseconds must
+// saturate DurationMs rather than wrap, and must be counted: a saturated
+// duration is otherwise indistinguishable from a real one once folded into
+// a sum such as UI-hook total time or the per-type rollup.
+func TestUIHookBuilderCountsSaturatedDuration(t *testing.T) {
+	in := uiLineWith("2026-09-04T09:15:05.500000+10:00", "apply_complete", 1e300, true) + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, in, &b)
+	got := b.Spans()
+	if len(got) != 1 {
+		t.Fatalf("got %d spans, want 1", len(got))
+	}
+	if got[0].DurationMs != math.MaxUint32 {
+		t.Errorf("DurationMs = %d, want math.MaxUint32", got[0].DurationMs)
+	}
+	if b.Saturated() != 1 {
+		t.Errorf("Saturated() = %d, want 1", b.Saturated())
+	}
+}
+
+// A normal duration must never be counted as saturated.
+func TestUIHookBuilderDoesNotCountNormalDurationAsSaturated(t *testing.T) {
+	in := uiLineWith("2026-09-04T09:15:05.500000+10:00", "apply_complete", 2.5, true) + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, in, &b)
+	if b.Saturated() != 0 {
+		t.Errorf("Saturated() = %d, want 0", b.Saturated())
 	}
 }

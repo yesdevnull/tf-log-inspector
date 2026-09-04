@@ -55,8 +55,10 @@ type UIHookBuilder struct {
 	kept      dedupCache // dedup cache for retained ResourceType/Provider/RPC strings, shared with ReportedBuilder
 	malformed uint64
 
-	base     time.Time // first parseable @timestamp seen, any line
-	haveBase bool
+	base      time.Time // first parseable @timestamp seen, any line
+	haveBase  bool
+	backwards uint64 // timestamps earlier than base, clamped to 0 rather than wrapping
+	saturated uint64 // durations that hit math.MaxUint32 rather than overflowing
 }
 
 // Entry implements logfmt.Sink as a no-op: UIHookBuilder only cares about
@@ -84,6 +86,11 @@ func (b *UIHookBuilder) relativeMs(ts string) uint32 {
 	delta := t.Sub(b.base).Milliseconds()
 	switch {
 	case delta < 0:
+		// Concurrent goroutines can emit out of order, the same rationale
+		// logfmt.Scan's own BackwardsTimestamps counter documents. Counted
+		// here, not just clamped, because a silent clamp shortens the
+		// derived UI-hook wall-clock without any visible trace of why.
+		b.backwards++
 		return 0
 	case delta > math.MaxUint32:
 		return math.MaxUint32
@@ -118,6 +125,11 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		scaled := math.Round(ul.Hook.Elapsed * 1000)
 		if scaled > math.MaxUint32 {
 			durationMs = math.MaxUint32
+			// Counted, not just clamped: an unmarked saturation is
+			// indistinguishable from a real multi-million-second duration,
+			// and silently poisons any sum (UI-hook total time, the
+			// per-type rollup) it is folded into.
+			b.saturated++
 		} else {
 			durationMs = uint32(scaled)
 		}
@@ -148,3 +160,15 @@ func (b *UIHookBuilder) Spans() []Span { return b.spans }
 // Malformed reports how many structured lines failed to decode as JSON. Such
 // a line is skipped, never fatal to the scan.
 func (b *UIHookBuilder) Malformed() uint64 { return b.malformed }
+
+// BackwardsTimestamps reports how many UI-hook lines carried a timestamp
+// earlier than this builder's base. Each one clamps to a 0 offset rather
+// than wrapping, which silently shortens the derived UI-hook wall-clock, so
+// this is what lets that be surfaced instead of hidden.
+func (b *UIHookBuilder) BackwardsTimestamps() uint64 { return b.backwards }
+
+// Saturated reports how many span durations hit math.MaxUint32 milliseconds
+// rather than the real (and enormously larger) value computed from
+// elapsed_seconds. A saturated duration is otherwise indistinguishable from
+// a real one once folded into a sum.
+func (b *UIHookBuilder) Saturated() uint64 { return b.saturated }

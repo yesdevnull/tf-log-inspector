@@ -22,7 +22,9 @@ func build(t *testing.T, in string) Report {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	return Build(st, sn.Report(), b.Spans(), ui.Spans(), c, &comps, 5*time.Millisecond)
+	return Build(st, sn.Report(), b.Spans(), ui.Spans(),
+		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(),
+		c, &comps, 5*time.Millisecond)
 }
 
 func render(t *testing.T, r Report) string {
@@ -808,6 +810,196 @@ func TestReportDistinctCompsConsistentForPureStructuredLog(t *testing.T) {
 	out := render(t, r)
 	if !strings.Contains(out, "COMPONENTS (1 distinct, recurring only, top 1)\n         3  (none)\n") {
 		t.Errorf("report's COMPONENTS header is inconsistent with the row shown beneath it:\n%s", out)
+	}
+}
+
+// --- Whole-branch review, fix wave: eight findings. ---
+
+// Finding 1: a log that is majority structured-output but also carries real
+// provider RPC entries (e.g. hclog output interleaved with a
+// structured-output capture) must not claim those counters "are expected to
+// read zero" directly above a nonzero response entries count.
+func TestReportMixedStructuredAndRPCLogGetsMixedWording(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 3; i++ {
+		sb.WriteString(structuredVersionLine)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(`2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5` + "\n")
+	r := build(t, sb.String())
+	if r.Caps.ResponseEntries == 0 {
+		t.Fatal("test fixture has no response entries -- the case under test is not exercised")
+	}
+	out := render(t, r)
+	if strings.Contains(out, "expected to read zero") {
+		t.Errorf("report claims RPC counters read zero on a log that has real RPC entries:\n%s", out)
+	}
+	if !strings.Contains(out, "structured output (terraform.ui JSON)") {
+		t.Errorf("report drops the structured-output explanation entirely on a mixed log:\n%s", out)
+	}
+}
+
+// Finding 2: ResourceType and Action come straight from a structured-output
+// line's JSON with nothing upstream constraining their shape, unlike a
+// field key. A hostile value (a newline, 300 characters, upper-case,
+// punctuation) must never reach the report, and must not be able to break
+// the column layout of every row after it.
+func TestReportMasksHostileResourceTypeAndAction(t *testing.T) {
+	hostileType := "AWS_INSTANCE\ninjected;" + strings.Repeat("x", 300)
+	hostileAction := "CREATE\x00drop"
+	uiSpans := []span.Span{{
+		DurationMs:   1500,
+		RPC:          hostileAction,
+		ResourceType: hostileType,
+		Address:      "aws_instance.example",
+		Fidelity:     span.FidelityUIReported,
+	}}
+	var comps logfmt.Interner
+	c := NewCollector(&comps)
+	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, 0, 0, 0, c, &comps, 0)
+
+	if len(r.SlowestResources) != 1 {
+		t.Fatalf("SlowestResources has %d rows, want 1", len(r.SlowestResources))
+	}
+	if r.SlowestResources[0].ResourceType != "<other>" {
+		t.Errorf("ResourceType = %q, want <other>", r.SlowestResources[0].ResourceType)
+	}
+	if r.SlowestResources[0].Action != "<other>" {
+		t.Errorf("Action = %q, want <other>", r.SlowestResources[0].Action)
+	}
+	if len(r.ByResourceType) != 1 || r.ByResourceType[0].ResourceType != "<other>" {
+		t.Errorf("ByResourceType = %+v, want a single <other> row", r.ByResourceType)
+	}
+
+	out := render(t, r)
+	for _, leak := range []string{"AWS_INSTANCE", "injected", "CREATE", "drop"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("hostile resource type/action reached the report: %q leaked:\n%s", leak, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) > 200 {
+			t.Errorf("report line is %d bytes -- hostile input may have broken the column layout: %q", len(line), line)
+		}
+	}
+}
+
+// Finding 3: a malformed structured line must be counted and surfaced in
+// ANOMALIES, not silently absorbed. If HCP's schema drifts or a log is
+// truncated, this is the only trace of it, on the one machine holding the
+// original log.
+func TestReportSurfacesUIHookMalformedLinesInAnomalies(t *testing.T) {
+	good := uiHookLine("2026-09-04T09:15:00.000000+10:00", uiAddrLocalFile, "local_file", "local", "read", 0)
+	malformed := `{"@level":"info","@timestamp":"2026-09-04T09:15:01.000000+10:00", not valid json`
+	r := build(t, good+"\n"+malformed+"\n")
+	if r.UIMalformedLines != 1 {
+		t.Fatalf("UIMalformedLines = %d, want 1", r.UIMalformedLines)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "ANOMALIES") {
+		t.Fatalf("report missing ANOMALIES section for a log with a malformed UI-hook line:\n%s", out)
+	}
+	if !strings.Contains(out, "UI-hook lines malformed 1") {
+		t.Errorf("report does not surface the malformed UI-hook line count:\n%s", out)
+	}
+}
+
+// Finding 5: a duration that saturates uint32 milliseconds must be counted
+// and surfaced in ANOMALIES -- unmarked, it is indistinguishable from a real
+// value and poisons UI-hook total time and the type rollup.
+func TestReportSurfacesUIHookSaturatedDurationsInAnomalies(t *testing.T) {
+	in := uiHookLine("2026-09-04T09:15:00.000000+10:00", uiAddrLocalFile, "local_file", "local", "read", 1e300) + "\n"
+	r := build(t, in)
+	if r.UISaturatedDurations != 1 {
+		t.Fatalf("UISaturatedDurations = %d, want 1", r.UISaturatedDurations)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "UI-hook durations saturated 1") {
+		t.Errorf("report does not surface the saturated-duration count:\n%s", out)
+	}
+}
+
+// Finding 6: a UI-hook timestamp earlier than the builder's base must be
+// counted, mirroring logfmt.Scan's own BackwardsTimestamps -- a silent
+// clamp shortens the derived UI-hook wall-clock with no visible trace.
+func TestReportSurfacesUIHookBackwardsTimestampsInAnomalies(t *testing.T) {
+	in := uiHookLine("2026-09-04T09:15:10.000000+10:00", uiAddrLocalFile, "local_file", "local", "read", 1) + "\n" +
+		uiHookLine("2026-09-04T09:15:00.000000+10:00", uiAddrInstanceOne, "aws_instance", "aws", "create", 1) + "\n"
+	r := build(t, in)
+	if r.UIBackwardsTimestamps != 1 {
+		t.Fatalf("UIBackwardsTimestamps = %d, want 1", r.UIBackwardsTimestamps)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "UI-hook backwards timestamps 1") {
+		t.Errorf("report does not surface the backwards UI-hook timestamp count:\n%s", out)
+	}
+}
+
+// Finding 4: a sub-second duration must render as something other than a
+// flat "0.0s" -- elapsed_seconds: 0 is a genuinely common figure for a fast
+// data-source refresh, and a fixed one-decimal-second format collapses
+// anything under 100ms to the same zero, making the ranking convey nothing.
+func TestReportSubSecondResourceShowsDistinguishableDuration(t *testing.T) {
+	in := uiHookLine("2026-09-04T09:15:00.000000+10:00", uiAddrLocalFile, "local_file", "local", "read", 0.045) + "\n"
+	r := build(t, in)
+	if len(r.SlowestResources) != 1 || r.SlowestResources[0].DurationMs != 45 {
+		t.Fatalf("SlowestResources = %+v, want one 45ms row", r.SlowestResources)
+	}
+	out := render(t, r)
+	// Scoped to the resource row itself (identified by the "read" action),
+	// not the report as a whole: the log wall-clock line legitimately
+	// renders "0.0s" for an unrelated reason and must not make this test
+	// pass vacuously.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "read") && strings.Contains(line, "local_file") {
+			if strings.Contains(line, "0.0s") {
+				t.Errorf("SLOWEST RESOURCES row renders a sub-second duration as an undifferentiated 0.0s: %q", line)
+			}
+			if !strings.Contains(line, "45ms") {
+				t.Errorf("SLOWEST RESOURCES row does not show a distinguishable sub-second duration: %q", line)
+			}
+		}
+	}
+}
+
+// Finding 7: UISlowestMs is computed but must actually be rendered, or it is
+// a trap for the next reader -- a value nobody reads is not a feature.
+func TestReportRendersUISlowestSpan(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	if !strings.Contains(out, "UI-hook slowest span 8200 ms") {
+		t.Errorf("report does not render UI-hook slowest span:\n%s", out)
+	}
+}
+
+// Finding 8: "top N" must reflect actual truncation, not just the printed
+// row count -- two rows out of two total must not read as "top 2", which
+// implies more exist and were cut.
+func TestReportTopNOmittedWhenNotTruncated(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	if strings.Contains(out, "SLOWEST RESOURCES (addresses masked, top") {
+		t.Errorf("report claims truncation for a SLOWEST RESOURCES list that was not truncated:\n%s", out)
+	}
+	if !strings.Contains(out, "SLOWEST RESOURCES (addresses masked)\n") {
+		t.Errorf("report does not render the untruncated SLOWEST RESOURCES header:\n%s", out)
+	}
+	if strings.Contains(out, "BY RESOURCE TYPE (top") {
+		t.Errorf("report claims truncation for a BY RESOURCE TYPE rollup that was not truncated:\n%s", out)
+	}
+	if !strings.Contains(out, "BY RESOURCE TYPE\n") {
+		t.Errorf("report does not render the untruncated BY RESOURCE TYPE header:\n%s", out)
+	}
+}
+
+func TestReportTopNShownWhenTruncated(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < maxResourceRows+3; i++ {
+		sb.WriteString(uiHookLine(fmt.Sprintf("2026-09-04T09:%02d:00.000000+10:00", i),
+			fmt.Sprintf("aws_instance.i%d", i), "aws_instance", "aws", "create", float64(i)))
+		sb.WriteString("\n")
+	}
+	out := render(t, build(t, sb.String()))
+	if !strings.Contains(out, fmt.Sprintf("SLOWEST RESOURCES (addresses masked, top %d)", maxResourceRows)) {
+		t.Errorf("report does not show truncation when the SLOWEST RESOURCES list was actually cut:\n%s", out)
 	}
 }
 

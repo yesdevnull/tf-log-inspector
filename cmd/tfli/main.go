@@ -82,7 +82,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	elapsed := time.Since(started)
 
-	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(), collector, &comps, elapsed)
+	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(),
+		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(),
+		collector, &comps, elapsed)
 
 	w := stdout
 	var out *os.File

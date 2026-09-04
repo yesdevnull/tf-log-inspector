@@ -275,6 +275,21 @@ func TestMaskAddressTooShortMasksWholesale(t *testing.T) {
 	}
 }
 
+// Whole-branch review, finding 2: the resource type slot inside MaskAddress
+// is guarded exactly like span.Span.ResourceType is in diagnose.Build --
+// nothing upstream constrains what a structured-output line's address
+// string actually contains, so an upper-case or otherwise non-identifier
+// type segment must mask too, not print verbatim.
+func TestMaskAddressMasksHostileResourceTypeSegment(t *testing.T) {
+	got := MaskAddress(`CUSTOMER_SECRET_HEAD.tail`)
+	if strings.Contains(got, "CUSTOMER_SECRET_HEAD") {
+		t.Errorf("MaskAddress leaked the hostile type segment: %q", got)
+	}
+	if got != "<other>.<name>" {
+		t.Errorf("MaskAddress(...) = %q, want <other>.<name>", got)
+	}
+}
+
 func TestMaskComponentKeepsGenuinePathShapedNames(t *testing.T) {
 	// backend/local and dag/walk are genuine Terraform core component names.
 	// Keeping "/" unmasked is deliberate: it is what makes them survive.

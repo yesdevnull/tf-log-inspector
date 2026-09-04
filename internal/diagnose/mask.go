@@ -51,6 +51,37 @@ func MaskComponent(s string) string {
 	return s
 }
 
+// maskIdentifier masks s to "<other>" unless it looks like a genuine
+// Terraform identifier: lower-case letters, digits, underscores and hyphens
+// only, no longer than logfmt.MaxKeyLen. It is the same posture
+// MaskComponent applies to component names, applied here to a resource
+// type or action name -- span.Span.ResourceType and span.Span.RPC, and
+// MaskAddress's type slot, all read straight from a structured-output
+// line's JSON with nothing upstream constraining their shape (unlike a
+// field key, which logfmt.ValidKey already restricts to an identifier
+// charset before it is ever retained). A genuine Terraform type name
+// ("aws_instance", "aws_codebuild_project") or action ("create", "read",
+// "update", "delete") always matches; anything else -- oversized,
+// upper-case, containing a newline or punctuation -- would otherwise reach
+// the report unguarded and, being printed at column 0 with nothing to mask
+// it, could break the column layout of every row after it.
+func maskIdentifier(s string) string {
+	if s == "" {
+		return s
+	}
+	if len(s) > logfmt.MaxKeyLen {
+		return "<other>"
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !ok {
+			return "<other>"
+		}
+	}
+	return s
+}
+
 // maskQuotedSpans replaces every double-quoted span -- quotes included --
 // with a single "<q>" placeholder before the message is split into words. A
 // per-token quote check alone only replaces the words touching the quote
@@ -162,11 +193,14 @@ func hasDigit(s string) bool {
 //
 // The structural keywords "module" and "data" are kept verbatim, as is the
 // resource type -- a public provider schema name, never customer data, and
-// already shown unmasked in its own column wherever this is used. Every
-// module name masks to "<m>", the final instance name masks to "<name>",
-// and any for_each/count index inside "[...]" masks to "<k>" while keeping
-// its brackets (and quotes, for a string key) so indexing stays visible.
-// This is deliberately more conservative than masking only the leaf name:
+// already shown unmasked in its own column wherever this is used -- guarded
+// by maskIdentifier, the same posture MaskComponent applies to component
+// names, since nothing upstream constrains what a structured-output line's
+// "resource_type" field actually contains. Every module name masks to
+// "<m>", the final instance name masks to "<name>", and any for_each/count
+// index inside "[...]" masks to "<k>" while keeping its brackets (and
+// quotes, for a string key) so indexing stays visible. This is deliberately
+// more conservative than masking only the leaf name:
 // module names and index keys are exactly where free-form customer content
 // (environment names, account ids, per-item keys) lives.
 //
@@ -198,7 +232,7 @@ func MaskAddress(addr string) string {
 	}
 
 	typeName, typeIndex := splitSegmentIndex(segs[i])
-	out = append(out, typeName+maskIndex(typeIndex))
+	out = append(out, maskIdentifier(typeName)+maskIndex(typeIndex))
 	i++
 
 	_, nameIndex := splitSegmentIndex(segs[i])
