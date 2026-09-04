@@ -56,3 +56,23 @@ func padRight(s string, w int) string {
 	}
 	return s
 }
+
+// clipValueFront shortens s to at most w runes by dropping characters from
+// the front and marking the cut with a leading ellipsis, so s's tail
+// survives instead of its head. Used wherever a value is one of several
+// that differ mainly in their tail -- a facet's provider address, a table's
+// widest text column -- where a leading ellipsis keeps siblings
+// distinguishable and a trailing one would not.
+func clipValueFront(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w <= 0 {
+		return ""
+	}
+	if w == 1 {
+		return "…"
+	}
+	return "…" + string(r[len(r)-(w-1):])
+}

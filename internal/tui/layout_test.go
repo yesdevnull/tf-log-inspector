@@ -157,3 +157,24 @@ func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 		t.Errorf("RPC-fidelity span detail shows an address line:\n%s", out)
 	}
 }
+
+// Fix round 2: capping each side pane at w/3 fixed the facet pane at 100
+// columns (round 1) but left only w/3 for the centre pane -- the pane the
+// answer actually lives in -- which pushed the providers view's numeric
+// columns out entirely. 100 columns is the width Dan actually runs at, so
+// this is the regression that would have caught it: the composed view at
+// 100 columns must show a front-clipped provider name in the centre pane
+// AND all three of its numeric columns whole.
+func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	out := m.View()
+	if !strings.Contains(out, "…") {
+		t.Errorf("centre pane's provider column was not front-clipped at 100 columns:\n%s", out)
+	}
+	// "5ms      1  5ms" is aws's total, calls and max columns rendered
+	// together in one row -- all three numeric values, whole, in the order
+	// the table actually renders them.
+	if !strings.Contains(out, "5ms      1  5ms") {
+		t.Errorf("providers view at 100 columns is missing one or more numeric columns:\n%s", out)
+	}
+}

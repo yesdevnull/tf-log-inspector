@@ -190,33 +190,51 @@ func typesPreamble(uiSpans []span.Span) []string {
 
 // renderTable formats preamble lines followed by a header and data rows as a
 // table, column widths taken from the widest header or cell in each column.
-// Columns that do not fit within w are dropped whole from the right, via
-// visibleColumnCount, rather than left in and clipped mid-cell: a table
-// ranked by a numeric column (duration, say) is useless with that column
-// sliced away mid-digit, so the last column that fits renders intact and
-// any column after it is omitted entirely instead. clipWidth remains a
-// safety net beneath that -- multi-rune width quirks aside, a row built
-// from only the visible columns should already fit, but the guarantee
-// costs nothing to keep.
+//
+// Numbers are the point of a ranked view: a provider name clipped to its
+// tail is still recognisable, but a missing duration or count tells the
+// reader nothing. So every column keeps its natural width except the
+// widest text column (widestTextColumn) -- almost always the one carrying
+// the data-driven, unbounded values (a provider address, a resource type)
+// -- which is given whatever width is left once every other column has its
+// natural width, and front-clipped there rather than dropped, the same
+// leading-ellipsis treatment renderFacets applies to a facet value that
+// does not fit. clipWidth remains a safety net beneath that for the
+// pathological case where even the non-flexible columns alone exceed w.
 //
 // selected is highlighted, and the data rows are windowed so it stays
 // visible within h lines total: the preamble and header are never scrolled,
 // only the data rows beneath them are.
+//
+// Every row is fit and clipped to budget (w minus highlightLine's escape
+// overhead), not w itself, even though only the selected row is ever
+// wrapped in highlightLine: column widths are shared across every row, so
+// there is no way to reserve that budget for the selected row alone
+// without every row using the same widths. Without it, highlightLine's own
+// end-clip -- needed to keep the styled result within w -- would land on
+// whichever row the cursor is on and cut into its rightmost column, most
+// often a numeric one: the exact defect this rework exists to remove, just
+// moved onto the one row a user is most likely looking at.
 func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
+	budget := w - selectedStyleOverhead
+	if budget < 1 {
+		budget = w
+	}
+
 	widths := columnWidths(cols, data)
-	n := visibleColumnCount(widths, w)
-	cols, widths = cols[:n], widths[:n]
+	flexIdx := widestTextColumn(cols, widths)
+	widths = fitColumnWidths(widths, flexIdx, budget)
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
 	for _, p := range preamble {
 		lines = append(lines, clipWidth(p, w))
 	}
-	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths), w))
+	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths, flexIdx), budget))
 
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)
 	for i := top; i < top+visible; i++ {
-		line := clipWidth(formatRow(data[i].cells[:n], cols, widths), w)
+		line := clipWidth(formatRow(data[i].cells, cols, widths, flexIdx), budget)
 		if i == selected {
 			line = highlightLine(line, w)
 		}
@@ -229,26 +247,53 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 	return strings.Join(lines, "\n")
 }
 
-// visibleColumnCount returns how many leading columns of widths, joined by
-// formatRow's two-space gap, fit within w without cutting a column in the
-// middle. At least 1 is always returned when there is at least one column,
-// even if that first column alone does not fit within w -- clipWidth is
-// still the backstop for that case -- so a table is never rendered as
-// nothing at all.
-func visibleColumnCount(widths []int, w int) int {
-	if len(widths) == 0 {
-		return 0
-	}
-	total := widths[0]
-	n := 1
-	for i := 1; i < len(widths); i++ {
-		total += 2 + widths[i] // "  " gap plus this column's width
-		if total > w {
-			break
+// widestTextColumn returns the index of the widest left-aligned (text)
+// column, ties broken by whichever comes first, or -1 if cols has no text
+// column at all. This is the one column renderTable lets shrink below its
+// natural width: every table in this package has exactly one data-driven,
+// effectively unbounded text column (a provider address, a resource type),
+// so picking the widest is picking that one without needing to name it
+// explicitly per table.
+func widestTextColumn(cols []column, widths []int) int {
+	flexIdx := -1
+	for i, c := range cols {
+		if c.right {
+			continue
 		}
-		n++
+		if flexIdx < 0 || widths[i] > widths[flexIdx] {
+			flexIdx = i
+		}
 	}
-	return n
+	return flexIdx
+}
+
+// fitColumnWidths returns widths with the column at flexIdx shrunk, never
+// grown, to whatever remains of w once every other column keeps its
+// natural width plus the two-space gaps between all of them. Every
+// non-flex column -- every numeric column, and any other text column --
+// is reserved at its full natural width unconditionally: dropping a number
+// is what round 1 got wrong, not just clipping it. flexIdx of -1 (no text
+// column at all) returns widths unchanged.
+func fitColumnWidths(widths []int, flexIdx, w int) []int {
+	if flexIdx < 0 {
+		return widths
+	}
+	reserved := 2 * (len(widths) - 1) // gap between every adjacent column pair
+	for i, wid := range widths {
+		if i != flexIdx {
+			reserved += wid
+		}
+	}
+	remaining := w - reserved
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining >= widths[flexIdx] {
+		return widths
+	}
+	fitted := append([]int(nil), widths...)
+	fitted[flexIdx] = remaining
+	return fitted
 }
 
 // scrollWindow returns the first visible data-row index and how many rows
@@ -306,11 +351,18 @@ func columnWidths(cols []column, data []row) []int {
 }
 
 // formatRow pads cells to widths and joins them with two spaces, aligning
-// each column per cols' right flag.
-func formatRow(cells []string, cols []column, widths []int) string {
+// each column per cols' right flag. The cell at flexIdx is front-clipped
+// (clipValueFront) to widths[flexIdx] first, since that is the one column
+// fitColumnWidths may have shrunk below its natural, unclipped width; every
+// other cell is already no wider than its column, so padding alone is
+// enough for those.
+func formatRow(cells []string, cols []column, widths []int, flexIdx int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
 		w := widths[i]
+		if i == flexIdx {
+			c = clipValueFront(c, w)
+		}
 		if i < len(cols) && cols[i].right {
 			parts[i] = fmt.Sprintf("%*s", w, c)
 		} else {

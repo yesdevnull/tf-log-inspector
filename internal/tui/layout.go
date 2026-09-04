@@ -84,11 +84,14 @@ func detailPaneWidth(rpcSpans []span.Span, w int) int {
 	return capPaneWidth(width, w, maxDetailPaneWidth)
 }
 
-// capPaneWidth clamps a data-driven side-pane width to at most a third of
-// the terminal width and at most maxWidth, so it never exceeds either.
+// capPaneWidth clamps a data-driven side-pane width to at most a quarter of
+// the terminal width and at most maxWidth, so it never exceeds either. A
+// quarter each for facets and detail leaves the centre pane at least half
+// of w -- the centre is where the answer lives (the ranked list itself),
+// so it must not lose more than the two side panes combined get.
 func capPaneWidth(width, terminalWidth, maxWidth int) int {
-	if third := terminalWidth / 3; width > third {
-		width = third
+	if quarter := terminalWidth / 4; width > quarter {
+		width = quarter
 	}
 	if width > maxWidth {
 		width = maxWidth

@@ -134,19 +134,23 @@ func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
 	}
 }
 
-// Fix round 1, finding B: renderTable used to clip the whole joined row to
-// w, so once the provider column's long registry addresses ate the
-// available width, total/calls/max were sliced away entirely and a view
-// ranked by those figures showed no ranking data at all. Whole trailing
-// columns are now dropped instead, so the first column and at least one
-// numeric column after it must still render intact at 70 columns.
-func TestRenderListDropsWholeColumnsRatherThanSlicingCells(t *testing.T) {
+// Fix round 2, finding 2: renderTable now reserves every numeric column at
+// its natural width unconditionally and shrinks only the widest text
+// column, front-clipping it (the same leading-ellipsis treatment finding A
+// applied to facet values) rather than dropping columns wholesale (round
+// 1's fix) or slicing the joined row mid-cell (the original bug). At a
+// width too narrow for the provider column's long registry addresses to
+// fit in full, the provider column must still show a recognisable,
+// front-clipped tail, and every number must still be whole.
+func TestRenderListFrontClipsTheTextColumnAndKeepsNumbersWhole(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	out := m.renderList(70, 20)
-	if !strings.Contains(out, "registry.terraform.io/hashicorp/google") {
-		t.Errorf("first column (provider) is not rendered whole at width 70:\n%s", out)
+	out := m.renderList(40, 20) // narrower than the provider column's natural width
+	if !strings.Contains(out, "…") {
+		t.Errorf("provider column was not front-clipped at width 40:\n%s", out)
 	}
-	if !strings.Contains(out, "8ms") {
-		t.Errorf("no numeric column rendered whole at width 70 -- a ranked list with no ranking data:\n%s", out)
+	for _, want := range []string{"8ms", "5ms"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("numeric column value %q missing at width 40 -- a ranked list with no ranking data:\n%s", want, out)
+		}
 	}
 }

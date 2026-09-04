@@ -186,24 +186,6 @@ func facetValueLine(check, value string, count, w int) string {
 	return clipWidth(line, w)
 }
 
-// clipValueFront shortens s to at most w runes by dropping characters from
-// the front and marking the cut with a leading ellipsis, so s's tail
-// survives instead of its head. See facetValueLine for why the tail is the
-// part worth keeping.
-func clipValueFront(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
-	if w <= 0 {
-		return ""
-	}
-	if w == 1 {
-		return "…"
-	}
-	return "…" + string(r[len(r)-(w-1):])
-}
-
 // facetSectionHeader upper-cases and pluralises a dimension name for
 // display, matching the design mock-up's PROVIDERS/LEVELS section-header
 // style rather than the lower-case singular names FacetsForSpans uses
