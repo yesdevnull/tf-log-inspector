@@ -178,3 +178,66 @@ func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testin
 		t.Errorf("providers view at 100 columns is missing one or more numeric columns:\n%s", out)
 	}
 }
+
+// Fix round 3: round 2's fix let only the single widest text column
+// front-clip, reserving every other text column at full natural width. The
+// calls view has three text columns (RPC, resource type, provider); when
+// one of the other two happened to be the widest, provider was left
+// "reserved" at full natural width by fitColumnWidths but could still be
+// cut by the trailing end-clip once the row as a whole overflowed -- from
+// the wrong end, since an end-clip keeps a value's head, and two provider
+// addresses only diverge in their tail. Two rows with different providers
+// then rendered the same clipped prefix. A test asserting only that some
+// provider text appears would not catch this, since the collided values
+// are all non-empty -- it must assert the two rows' provider text actually
+// differs. two-providers.log's two calls have different providers (aws,
+// google) for exactly this reason.
+//
+// The expected clipped text is computed via fitColumnWidths and
+// clipValueFront themselves, the same functions renderTable calls, rather
+// than a hand-picked width: this is a white-box check that the real
+// column-width policy -- whatever it is today or becomes later -- still
+// keeps two different providers apart, not a pinned guess at its output.
+func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	rows := m.rows()
+	if len(rows) != 2 {
+		t.Fatalf("fixture assumption changed: got %d calls, want 2", len(rows))
+	}
+	aws, google := m.log.RPCSpans[rows[0].spanIdx].Provider, m.log.RPCSpans[rows[1].spanIdx].Provider
+	if aws == google {
+		t.Fatalf("fixture assumption changed: both calls have the same provider %q", aws)
+	}
+
+	centreWidth := layoutCentreWidth(m, 160)
+	budget := centreWidth - selectedStyleOverhead
+	if budget < 1 {
+		budget = centreWidth
+	}
+	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), budget)
+	providerWidth := widths[len(callColumns)-1] // provider is callColumns' last column
+	awsWant, googleWant := clipValueFront(aws, providerWidth), clipValueFront(google, providerWidth)
+	if awsWant == googleWant {
+		t.Fatalf("front-clipped provider text collided at the computed width %d -- test assumption is wrong: %q", providerWidth, awsWant)
+	}
+
+	out := m.View()
+	if !strings.Contains(out, awsWant) {
+		t.Errorf("calls view at 160 columns is missing the aws provider's distinguishing text %q:\n%s", awsWant, out)
+	}
+	if !strings.Contains(out, googleWant) {
+		t.Errorf("calls view at 160 columns is missing the google provider's distinguishing text %q:\n%s", googleWant, out)
+	}
+}
+
+// layoutCentreWidth returns the centre (list) pane's width for a terminal
+// w columns wide, replicating renderPanes' own arithmetic for the
+// w >= facetInlineWidth case this test renders at. Kept here rather than
+// exported from layout.go, since nothing outside a test needs a pane width
+// in isolation from actually rendering into it.
+func layoutCentreWidth(m Model, w int) int {
+	facetW := facetPaneWidth(m.facets, w)
+	detailW := detailPaneWidth(m.log.RPCSpans, w)
+	return w - facetW - detailW - 2*len([]rune(paneSep))
+}

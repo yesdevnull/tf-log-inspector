@@ -169,21 +169,14 @@ func (m Model) renderFacets(w, h int) string {
 }
 
 // facetValueLine formats one facet value's line -- a checkbox, the value
-// and its count -- clipped to at most w runes. The count is never
-// truncated: the spec requires facets to show a count for every value
-// ("each with counts"), so a count dropped by clipping would be a spec
-// miss, not just a squeeze. When the value itself does not fit, it is
-// clipped from the FRONT, keeping its tail, rather than clipped from the
-// end the way clipWidth clips everything else: two facet values sharing a
-// long common prefix (two provider registry addresses, most often) differ
-// only in their tail, so a leading ellipsis is what keeps them
-// distinguishable -- a trailing one would leave them identical.
+// and its count -- clipped to at most w runes via clipIdentifierField. The
+// count is never truncated: the spec requires facets to show a count for
+// every value ("each with counts"), so a count dropped by clipping would
+// be a spec miss, not just a squeeze. The value itself is an identifier
+// (see clipValueFront), so it is the part that gives way, front-clipped
+// rather than dropped from the end.
 func facetValueLine(check, value string, count, w int) string {
-	prefix := fmt.Sprintf("[%s] ", check)
-	suffix := fmt.Sprintf("  %d", count)
-	avail := w - len([]rune(prefix)) - len([]rune(suffix))
-	line := prefix + clipValueFront(value, avail) + suffix
-	return clipWidth(line, w)
+	return clipIdentifierField(fmt.Sprintf("[%s] ", check), value, fmt.Sprintf("  %d", count), w)
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

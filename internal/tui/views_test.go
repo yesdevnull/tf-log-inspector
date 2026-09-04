@@ -107,6 +107,12 @@ func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
 // regardless of Selected(), so selecting a row past the first screenful left
 // it off-screen. provider-rpc.log's two calls, rendered into a pane with
 // room for only one data row, forces the window to move.
+//
+// Row identity is checked via duration ("5ms"/"1ms"), not resource type:
+// fix round 3 lets the calls view's text columns (RPC, resource type,
+// provider) front-clip under a narrow pane, same as any identifier column,
+// so a resource-type substring is no longer a safe way to tell the rows
+// apart at width 60 -- duration is numeric and never clipped.
 func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if len(m.rows()) != 2 {
@@ -114,20 +120,22 @@ func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // select row 1
 	out := m.renderList(60, 2)                                           // header + 1 data row: row 0 no longer fits
-	if strings.Contains(out, "aws_subnet") {
+	if strings.Contains(out, "5ms") {
 		t.Errorf("scrolled window still shows row 0, which should have scrolled off:\n%s", out)
 	}
-	if !strings.Contains(out, "aws_internet_gateway") {
+	if !strings.Contains(out, "1ms") {
 		t.Errorf("selected row 1 scrolled off screen instead of row 0:\n%s", out)
 	}
 }
 
 // Moving within the first screenful must not scroll: only once the
-// selection would fall off the bottom of the window should it move.
+// selection would fall off the bottom of the window should it move. See
+// TestRenderListScrollsToKeepSelectionVisible for why duration, not
+// resource type, identifies the row.
 func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	out := m.renderList(60, 20) // room for both rows; selection (row 0) is already visible
-	for _, want := range []string{"aws_subnet", "aws_internet_gateway"} {
+	for _, want := range []string{"5ms", "1ms"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("both rows should be visible in a tall enough pane, missing %q:\n%s", want, out)
 		}

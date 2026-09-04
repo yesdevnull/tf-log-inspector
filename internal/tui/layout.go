@@ -316,14 +316,27 @@ func (m Model) renderDetail(w, h int) string {
 // through any keypress today; it is unit-tested directly
 // (TestSpanDetailLinesShowsAddressForUIHookSpans) rather than end to end,
 // and is ready for whichever later task makes a UI-hook span selectable.
+//
+// Prov and Addr are identifiers (see clipValueFront) and go through
+// clipIdentifierField, front-clipped rather than end-clipped, so two spans
+// with different providers or addresses that happen to share a long prefix
+// -- ".../hashicorp/azuread" and ".../azurerm" -- stay distinguishable
+// instead of both clipping down to their identical shared head. RPC is
+// deliberately left on plain clipWidth: it names one of a short, closed set
+// of plugin-protocol methods (ApplyResourceChange, ReadDataSource, ...)
+// that diverge within their first few characters, so an end-clip of an RPC
+// name does not collide the way an end-clip of a registry address does --
+// the same reasoning internal/profile.actionColWidth uses for its own
+// closed-vocabulary action column. Dur is a formatted number and is never
+// long enough to need either treatment.
 func spanDetailLines(s span.Span, w int) []string {
 	lines := []string{
 		clipWidth(fmt.Sprintf("RPC   %s", s.RPC), w),
-		clipWidth(fmt.Sprintf("Prov  %s", s.Provider), w),
+		clipIdentifierField("Prov  ", s.Provider, "", w),
 		clipWidth(fmt.Sprintf("Dur   %s", formatMs(uint64(s.DurationMs))), w),
 	}
 	if s.Fidelity == span.FidelityUIReported {
-		lines = append(lines, clipWidth(fmt.Sprintf("Addr  %s", s.Address), w))
+		lines = append(lines, clipIdentifierField("Addr  ", s.Address, "", w))
 	}
 	return lines
 }

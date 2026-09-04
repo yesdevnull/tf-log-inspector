@@ -59,10 +59,21 @@ func padRight(s string, w int) string {
 
 // clipValueFront shortens s to at most w runes by dropping characters from
 // the front and marking the cut with a leading ellipsis, so s's tail
-// survives instead of its head. Used wherever a value is one of several
-// that differ mainly in their tail -- a facet's provider address, a table's
-// widest text column -- where a leading ellipsis keeps siblings
-// distinguishable and a trailing one would not.
+// survives instead of its head.
+//
+// This is the one clipping rule for identifier-like values anywhere in this
+// package -- a provider address, a resource type, a resource address, a
+// component name -- values distinguished from their siblings by their
+// TAIL, not their head: "registry.terraform.io/hashicorp/azuread" and
+// "…/azurerm" share a 31-character prefix and differ only in the last 7,
+// so an end-clip (clipWidth) collapses them to the same text while a
+// leading ellipsis keeps them apart. Prose and message text is the
+// opposite -- distinguished by its head -- and keeps using clipWidth
+// directly; this package's table and detail columns never carry prose, only
+// identifiers, which is why every one of them routes through this rather
+// than each render site choosing a direction for itself. See
+// clipIdentifierField for the "label plus identifier" line shape several of
+// those sites share.
 func clipValueFront(s string, w int) string {
 	r := []rune(s)
 	if len(r) <= w {
@@ -75,4 +86,16 @@ func clipValueFront(s string, w int) string {
 		return "…"
 	}
 	return "…" + string(r[len(r)-(w-1):])
+}
+
+// clipIdentifierField formats prefix + an identifier value, front-clipped
+// via clipValueFront to leave room for prefix and suffix, + suffix, at most
+// w runes total. Shared by every render site that shows one labelled
+// identifier value on its own line -- a facet value's checkbox and count,
+// the detail pane's Prov and Addr fields -- so the front-clip budgeting
+// arithmetic exists in one place rather than being reimplemented at each.
+func clipIdentifierField(prefix, value, suffix string, w int) string {
+	avail := w - len([]rune(prefix)) - len([]rune(suffix))
+	line := prefix + clipValueFront(value, avail) + suffix
+	return clipWidth(line, w)
 }

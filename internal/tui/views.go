@@ -21,7 +21,15 @@ type row struct {
 	spanIdx int
 }
 
-// column describes one column of a rendered list table.
+// column describes one column of a rendered list table. right doubles as
+// this table's value-kind marker: a right-aligned column is numeric, never
+// clipped (fitColumnWidths reserves it at full width); a left-aligned one
+// is text, and every text column in every table this package renders holds
+// an identifier -- a provider address, a resource type, an RPC name --
+// never free-form prose, so formatRow always front-clips a left-aligned
+// cell (see clipValueFront) rather than choosing a direction per column. A
+// future column carrying genuine prose would need its own flag; none does
+// today.
 type column struct {
 	header string
 	right  bool // numeric columns are right-aligned; text columns are left-aligned
@@ -191,16 +199,20 @@ func typesPreamble(uiSpans []span.Span) []string {
 // renderTable formats preamble lines followed by a header and data rows as a
 // table, column widths taken from the widest header or cell in each column.
 //
-// Numbers are the point of a ranked view: a provider name clipped to its
-// tail is still recognisable, but a missing duration or count tells the
-// reader nothing. So every column keeps its natural width except the
-// widest text column (widestTextColumn) -- almost always the one carrying
-// the data-driven, unbounded values (a provider address, a resource type)
-// -- which is given whatever width is left once every other column has its
-// natural width, and front-clipped there rather than dropped, the same
-// leading-ellipsis treatment renderFacets applies to a facet value that
-// does not fit. clipWidth remains a safety net beneath that for the
-// pathological case where even the non-flexible columns alone exceed w.
+// Numbers are the point of a ranked view: an identifier clipped to its tail
+// is still recognisable, but a missing duration or count tells the reader
+// nothing. So every numeric (right-aligned) column keeps its full natural
+// width unconditionally -- dropping or shrinking a number is what round 1
+// got wrong -- and fitColumnWidths distributes whatever width is left among
+// the text columns (every one of this package's tables carries only
+// provider addresses, resource types and RPC names in its text columns:
+// see the kind note on column.right). A text column narrower than its
+// natural width is front-clipped by formatRow via clipValueFront, not
+// dropped and not end-clipped: two rows with different providers or
+// resource types that happen to share a long prefix must still render
+// differently, or the ranking they sit in is unreadable. clipWidth remains
+// a safety net beneath all of this for the pathological case where even
+// the numeric columns alone exceed w.
 //
 // selected is highlighted, and the data rows are windowed so it stays
 // visible within h lines total: the preamble and header are never scrolled,
@@ -212,29 +224,27 @@ func typesPreamble(uiSpans []span.Span) []string {
 // there is no way to reserve that budget for the selected row alone
 // without every row using the same widths. Without it, highlightLine's own
 // end-clip -- needed to keep the styled result within w -- would land on
-// whichever row the cursor is on and cut into its rightmost column, most
-// often a numeric one: the exact defect this rework exists to remove, just
-// moved onto the one row a user is most likely looking at.
+// whichever row the cursor is on and cut into its rightmost column: the
+// exact defect this rework exists to remove, just moved onto the one row a
+// user is most likely looking at.
 func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
 	budget := w - selectedStyleOverhead
 	if budget < 1 {
 		budget = w
 	}
 
-	widths := columnWidths(cols, data)
-	flexIdx := widestTextColumn(cols, widths)
-	widths = fitColumnWidths(widths, flexIdx, budget)
+	widths := fitColumnWidths(cols, columnWidths(cols, data), budget)
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
 	for _, p := range preamble {
 		lines = append(lines, clipWidth(p, w))
 	}
-	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths, flexIdx), budget))
+	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths), budget))
 
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)
 	for i := top; i < top+visible; i++ {
-		line := clipWidth(formatRow(data[i].cells, cols, widths, flexIdx), budget)
+		line := clipWidth(formatRow(data[i].cells, cols, widths), budget)
 		if i == selected {
 			line = highlightLine(line, w)
 		}
@@ -247,53 +257,75 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 	return strings.Join(lines, "\n")
 }
 
-// widestTextColumn returns the index of the widest left-aligned (text)
-// column, ties broken by whichever comes first, or -1 if cols has no text
-// column at all. This is the one column renderTable lets shrink below its
-// natural width: every table in this package has exactly one data-driven,
-// effectively unbounded text column (a provider address, a resource type),
-// so picking the widest is picking that one without needing to name it
-// explicitly per table.
-func widestTextColumn(cols []column, widths []int) int {
-	flexIdx := -1
+// fitColumnWidths returns each column's final width: every numeric column
+// keeps its natural width from `natural` unconditionally, and the text
+// columns share whatever remains after those and the two-space gaps
+// between every column are reserved, each capped at its own natural
+// width -- so a column that already fits never shrinks just because a
+// sibling needs more.
+//
+// When the text columns collectively need more than what remains, the
+// shortfall is distributed by water-filling rather than shrinking whichever
+// column happens to be widest (or first, or last): repeatedly split the
+// space still available evenly across the columns still competing for it,
+// settle any column whose natural width is at or under that even share at
+// its full natural width, and remove it from the competition; what it did
+// not need goes back into the pool for the columns still competing. This
+// is the general form of round 2's single-flex-column shrink -- correct
+// for the one-text-column tables (providers, types) it was built for, and
+// also correct for the calls view's three text columns (RPC, resource
+// type, provider), where letting only the single widest one flex left the
+// other two either always full width (risking the total exceeding w, which
+// pushed the overflow onto whichever column the final clipWidth reached)
+// or never shrinking when they should share the burden.
+func fitColumnWidths(cols []column, natural []int, w int) []int {
+	widths := append([]int(nil), natural...)
+
+	reserved, pool := 2*(len(cols)-1), make([]int, 0, len(cols)) // gap between every adjacent column pair
 	for i, c := range cols {
 		if c.right {
-			continue
-		}
-		if flexIdx < 0 || widths[i] > widths[flexIdx] {
-			flexIdx = i
+			reserved += natural[i]
+		} else {
+			pool = append(pool, i)
 		}
 	}
-	return flexIdx
-}
-
-// fitColumnWidths returns widths with the column at flexIdx shrunk, never
-// grown, to whatever remains of w once every other column keeps its
-// natural width plus the two-space gaps between all of them. Every
-// non-flex column -- every numeric column, and any other text column --
-// is reserved at its full natural width unconditionally: dropping a number
-// is what round 1 got wrong, not just clipping it. flexIdx of -1 (no text
-// column at all) returns widths unchanged.
-func fitColumnWidths(widths []int, flexIdx, w int) []int {
-	if flexIdx < 0 {
+	if len(pool) == 0 {
 		return widths
-	}
-	reserved := 2 * (len(widths) - 1) // gap between every adjacent column pair
-	for i, wid := range widths {
-		if i != flexIdx {
-			reserved += wid
-		}
 	}
 	remaining := w - reserved
 	if remaining < 0 {
 		remaining = 0
 	}
-	if remaining >= widths[flexIdx] {
-		return widths
+
+	for len(pool) > 0 {
+		share := remaining / len(pool)
+		var stillCompeting []int
+		settledAny := false
+		for _, i := range pool {
+			if natural[i] <= share {
+				remaining -= natural[i]
+				settledAny = true
+			} else {
+				stillCompeting = append(stillCompeting, i)
+			}
+		}
+		if !settledAny {
+			// Every remaining column wants more than an even share: split
+			// what's left evenly, one extra rune to each of the first
+			// remaining%len(pool) columns so the total assigned is exactly
+			// remaining rather than falling short to integer rounding.
+			base, extra := remaining/len(pool), remaining%len(pool)
+			for k, i := range pool {
+				widths[i] = base
+				if k < extra {
+					widths[i]++
+				}
+			}
+			return widths
+		}
+		pool = stillCompeting
 	}
-	fitted := append([]int(nil), widths...)
-	fitted[flexIdx] = remaining
-	return fitted
+	return widths
 }
 
 // scrollWindow returns the first visible data-row index and how many rows
@@ -351,22 +383,22 @@ func columnWidths(cols []column, data []row) []int {
 }
 
 // formatRow pads cells to widths and joins them with two spaces, aligning
-// each column per cols' right flag. The cell at flexIdx is front-clipped
-// (clipValueFront) to widths[flexIdx] first, since that is the one column
-// fitColumnWidths may have shrunk below its natural, unclipped width; every
-// other cell is already no wider than its column, so padding alone is
-// enough for those.
-func formatRow(cells []string, cols []column, widths []int, flexIdx int) string {
+// each column per cols' right flag. Every text (left-aligned) cell is
+// front-clipped via clipValueFront first -- every text column in this
+// package holds an identifier (see clipValueFront), and clipValueFront is
+// a no-op when the cell already fits its column, so this is safe to apply
+// unconditionally rather than singling out whichever column
+// fitColumnWidths happened to shrink. Numeric (right-aligned) cells are
+// never clipped: fitColumnWidths reserves every numeric column at its full
+// natural width, so one never needs to be.
+func formatRow(cells []string, cols []column, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
 		w := widths[i]
-		if i == flexIdx {
-			c = clipValueFront(c, w)
-		}
 		if i < len(cols) && cols[i].right {
 			parts[i] = fmt.Sprintf("%*s", w, c)
 		} else {
-			parts[i] = fmt.Sprintf("%-*s", w, c)
+			parts[i] = fmt.Sprintf("%-*s", w, clipValueFront(c, w))
 		}
 	}
 	return strings.Join(parts, "  ")
