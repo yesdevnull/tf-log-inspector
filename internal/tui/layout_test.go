@@ -92,8 +92,8 @@ func TestNoLineExceedsTerminalWidth(t *testing.T) {
 // terminal width: the panes are composed by padding each one to its
 // declared width and joining them with a separator, so a row one column
 // short puts its │ separators a column to the left of every other row's.
-// Counting the selected row's ANSI escapes as if they were columns did
-// exactly that, and only on the one row the user is looking at.
+// This pins the selected row specifically, since its ANSI escapes are the
+// one thing on that row that must count for nothing towards its width.
 func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{70, 100, 160} {

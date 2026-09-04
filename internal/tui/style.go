@@ -13,9 +13,9 @@ import (
 // auto-detect the terminal. Auto-detection keys off os.Stdout being a real
 // TTY, which it never is under `go test`, so an auto-detected renderer would
 // silently strip every style -- making the selected-row highlight
-// untestable, and invisible in the golden files this task also adds -- and
-// would make those goldens vary with whatever colour capability the machine
-// that generated them happened to report. A fixed profile keeps both
+// untestable, and invisible in this package's golden files -- and would make
+// those goldens vary with whatever colour capability the machine that
+// generated them happened to report. A fixed profile keeps both
 // deterministic.
 var styleRenderer = func() *lipgloss.Renderer {
 	r := lipgloss.NewRenderer(io.Discard)

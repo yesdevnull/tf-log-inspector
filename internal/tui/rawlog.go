@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -242,24 +241,34 @@ func (m *Model) searchAgain(direction int) {
 // renderRawLog does, and moves the raw log's top entry to the first match.
 // It does not wrap around either end of the log; reaching an end without a
 // match leaves the position unchanged.
+//
+// It matches against the same ANSI-stripped text renderRawLog puts on
+// screen, not the entry's original bytes: an escape sequence sitting inside
+// a colourised plan line is invisible to the user, so it must not be able to
+// split a phrase the screen shows whole, or let a query match bytes the
+// screen never displays. searchFrom scans the whole log, so the scratch
+// buffer is reused across entries the way renderRawLog reuses its own,
+// rather than allocating one stripped copy per entry.
 func (m *Model) searchFrom(start int, forward bool) bool {
 	if m.raw.lastQuery == "" {
 		return false
 	}
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
-	needle := []byte(m.raw.lastQuery)
 
 	step := 1
 	if !forward {
 		step = -1
 	}
+	var scratch []byte
 	for i := start + step; i >= 0 && i < len(m.log.Entries); i += step {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue
 		}
-		if bytes.Contains(m.log.Bytes(e), needle) {
+		var plain string
+		plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
+		if strings.Contains(plain, m.raw.lastQuery) {
 			m.raw.top = i
 			return true
 		}

@@ -286,10 +286,25 @@ func TestRawLogStripsANSIFromLogLines(t *testing.T) {
 	}
 }
 
-// Span.Entry indexes the same log's Entries, but nothing revalidates it
-// when a Log is assembled. componentProviders checks it before indexing;
-// jumpToSpan did not, so the two disagreed about whether the field can be
-// trusted. Both check it now.
+// A search must match the same text the pane renders, not the entry's
+// original bytes: an escape sequence sitting in the middle of a colourised
+// phrase is invisible on screen, so a query for that phrase has to find it
+// even though the escape splits it in the underlying bytes.
+func TestSlashSearchMatchesAPhraseAnEscapeSequenceSplits(t *testing.T) {
+	data := []byte("2026-09-04T10:00:00.000+1000 [INFO] aws\x1b[0m_instance.example: Creation complete\n")
+	l := &model.Log{Data: data, Entries: []logfmt.Entry{{Off: 0, Len: uint32(len(data))}}}
+	m := New(l, "x.log")
+	m.view = ViewRawLog
+	m.raw.lastQuery = "aws_instance"
+	if !m.searchFrom(-1, true) {
+		t.Errorf("search did not find %q, split only by an escape sequence the screen does not show:\n%s", m.raw.lastQuery, m.renderRawLog(200, 10))
+	}
+}
+
+// Span.Entry indexes the same log's Entries, but nothing revalidates it when
+// a Log is assembled, so jumpToSpan must guard the index itself rather than
+// trust it: an out-of-range Entry must leave the model exactly where it was
+// rather than index past the end of Entries.
 func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
 	l := &model.Log{
 		Entries:  []logfmt.Entry{{}},

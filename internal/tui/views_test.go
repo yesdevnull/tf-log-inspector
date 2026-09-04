@@ -165,10 +165,10 @@ func TestRenderListFrontClipsTheTextColumnAndKeepsNumbersWhole(t *testing.T) {
 	}
 }
 
-// A column header is prose -- it names the column -- so it is told apart by
-// its head even where the column's VALUES are told apart by their tails.
-// Running headers through the same clip as their values front-clipped
-// "resource type" to "…urce type", a word fragment as a column label.
+// A column header is prose -- it names the column -- so it must be end-clipped
+// and told apart by its head, even in a column whose VALUES are front-clipped
+// and told apart by their tails: front-clipping "resource type" the same way
+// its values are would leave "…urce type", a word fragment as a column label.
 //
 // Both rows are checked together at one width, because the point is that
 // the two clip in opposite directions in the same column: the width is

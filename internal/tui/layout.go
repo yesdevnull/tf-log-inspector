@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -61,12 +62,12 @@ const hugeWidth = 1 << 30
 func facetNaturalWidth(facets []model.Facet) int {
 	width := minFacetPaneWidth
 	for _, f := range facets {
-		if n := len([]rune(facetSectionHeader(f.Name))); n > width {
+		if n := lipgloss.Width(facetSectionHeader(f.Name)); n > width {
 			width = n
 		}
 		kind := facetValueKind(f.Name)
 		for _, v := range f.Values {
-			if n := len([]rune(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind))); n > width {
+			if n := lipgloss.Width(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind)); n > width {
 				width = n
 			}
 		}
@@ -86,7 +87,7 @@ func detailNaturalWidth(rpcSpans []span.Span) int {
 	width := minDetailPaneWidth
 	for _, s := range rpcSpans {
 		for _, line := range spanDetailLines(s, hugeWidth) {
-			if n := len([]rune(line)); n > width {
+			if n := lipgloss.Width(line); n > width {
 				width = n
 			}
 		}
@@ -386,7 +387,8 @@ func (m *Model) renderDetail(w, h int) string {
 // span lives in m.log.UISpans instead. So this branch is unreachable
 // through any keypress today; it is unit-tested directly
 // (TestSpanDetailLinesShowsAddressForUIHookSpans) rather than end to end,
-// and is ready for whichever later task makes a UI-hook span selectable.
+// and stays that way until some view exposes an individual UI-hook span for
+// selection.
 //
 // RPC, Prov and Addr are all identifier values, and all three go through
 // clipIdentifierField, each clipped from the end its kind allows (see

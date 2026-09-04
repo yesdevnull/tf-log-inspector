@@ -395,9 +395,14 @@ func TestLevelFacetCountsEveryEntry(t *testing.T) {
 // model already had, and nothing else: the ranked views roll up spans, and
 // a span has no level for a filter to match.
 func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
-	rawBefore := m.renderRawLog(200, 100)
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	callsBefore := m.rows()
+	if len(callsBefore) == 0 {
+		t.Fatal("fixture assumption changed: no call rows to compare the rollup baseline against")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	rawBefore := m.renderRawLog(200, 100)
 
 	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelTrace.String())
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
@@ -412,6 +417,8 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 	if strings.Contains(rawAfter, "SYNTHESISED") {
 		t.Errorf("an entry outside the selected level survived the filter:\n%s", rawAfter)
 	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if got := m.rows(); len(got) != len(callsBefore) {
 		t.Errorf("selecting a level changed the rollup rows from %d to %d -- a span has no level to filter on", len(callsBefore), len(got))
 	}

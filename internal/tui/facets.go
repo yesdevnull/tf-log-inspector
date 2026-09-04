@@ -202,7 +202,7 @@ func (m *Model) moveFacetCursor(delta int) {
 // hundreds of values, so j would move an invisible cursor and space would
 // toggle a filter the user cannot see.
 func (m Model) renderFacets(w, h int) string {
-	lines, cursor, header := m.facetLines(w)
+	lines, cursor, headerIdx := m.facetLines(w)
 	top, visible := scrollWindow(cursor, len(lines), h)
 	if visible == 0 {
 		return ""
@@ -215,8 +215,8 @@ func (m Model) renderFacets(w, h int) string {
 	// given up -- scrollWindow only pins it to the window's top edge when
 	// there is a single line to show, and a single line has no room for a
 	// header anyway.
-	if header < top && cursor > top {
-		out[0] = lines[header]
+	if headerIdx < top && cursor > top {
+		out[0] = lines[headerIdx]
 	}
 	return strings.Join(out, "\n")
 }
@@ -226,11 +226,11 @@ func (m Model) renderFacets(w, h int) string {
 // and which line holds the header of the dimension the cursor is in.
 // Building the list whole is what lets the cursor's flat value index
 // (facetFlatIndex) be resolved against a display that also carries headers.
-func (m Model) facetLines(w int) (lines []string, cursor, header int) {
+func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 	focused := m.pane == PaneFacets
 	for dimIdx, f := range m.facets {
 		if dimIdx == m.facetCursor.dim {
-			header = len(lines)
+			headerIdx = len(lines)
 		}
 		lines = append(lines, clipWidth(facetSectionHeader(f.Name), w))
 		kind := facetValueKind(f.Name)
@@ -253,7 +253,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, header int) {
 			lines = append(lines, line)
 		}
 	}
-	return lines, cursor, header
+	return lines, cursor, headerIdx
 }
 
 // facetValueKind is the kind of value a facet dimension holds, and so which
