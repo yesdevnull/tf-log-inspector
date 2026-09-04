@@ -279,7 +279,29 @@ internal/tui/         bubbletea program and views
 ```
 
 `internal/tui` is the only package permitted to import bubbletea or lipgloss.
-Nothing below it knows a terminal exists. This keeps the parked features
+Nothing below it knows a terminal exists.
+
+**Decided 2026-09-04, at the start of phase 3.** The dependencies are taken.
+`go.mod` gains its first `require` block: bubbletea v1.3.10 (8 direct and 9
+indirect modules of its own) plus lipgloss. Everything outside `internal/tui`
+stays dependency-free, and `internal/model` and `internal/profile` must not
+gain a terminal import.
+
+The alternative was hand-rolling with the standard library, which needs raw
+terminal mode via termios syscalls with separate Windows console handling,
+plus ANSI rendering, resize handling and escape-sequence decoding. That is the
+same class of platform-specific code the `mmap` decision above rejects — and
+the parts most likely to be subtly wrong are the ones that cannot be tested
+without a terminal. Rejecting that complexity for a 37MB buffer and then
+accepting it for a screen renderer would not be consistent.
+
+**The risk this accepts,** recorded because it falls on the one machine this
+project cannot test: distribution is via `go install` onto work hardware, and
+a corporate module proxy or dependency vetting may not serve seventeen
+modules as readily as it serves none. `--diagnose` and `--profile` are
+unaffected either way; if the TUI proves uninstallable there, the headless
+modes remain the whole product and the dependency was still confined to the
+package that can be dropped. This keeps the parked features
 (run comparison, headless output) cheap to add later, and it is what makes the
 TUI testable as a pure function.
 
@@ -294,8 +316,12 @@ The `mmap` decision was sized against a 1GB log at 102 bytes per line. Four
 real HCP captures measure **365 to 828 bytes per line** and **17 to 37MB**
 total, so the largest observed log costs 37MB resident plus a ~1MB entry
 index. `mmap` would buy constant residency for a log size that has not
-appeared, at the cost of platform-specific code and build tags in a project
-whose hard constraint is zero third-party dependencies. Reading the file
+appeared, at the cost of platform-specific code and build tags in a package
+that has none. (That phrasing originally read "a project whose hard constraint
+is zero third-party dependencies", which overstated it: this document has
+always permitted `internal/tui` to import bubbletea. The argument against
+`mmap` is about platform-specific code in `internal/model`, not about
+dependencies.) Reading the file
 whole is the simplest thing that works at the measured sizes; the accessor
 is an interface boundary, so swapping in `ReadAt` or `mmap` later is
 contained if a 1GB log ever turns up.
@@ -656,7 +682,13 @@ anything is built on top of it.
    type join is the first deliverable: both builders populate
    `Span.ResourceType`, so it needs no address attribution and it is what
    answers "which resource type cost the most, and what did its RPCs cost".
-3. **TUI: layout C with views 1, 2, 4 and 6** — provider and type rollups, the
+3. **TUI: layout C with views 1, 2, 4 and 6** — planned in
+   `docs/superpowers/plans/2026-09-04-phase-3-tui.md`. `s` (cycle sort) and
+   `?` (help) from the key table are deliberately not in that plan: neither is
+   named in this phase's scope line and both are cheap once the panes exist.
+   Free-text search ships synchronous rather than as the cancellable
+   goroutine described below, for the same reason the whole-file read replaced
+   `mmap` — the design was sized against 1GB, and measured logs are 17-37MB — provider and type rollups, the
    ranked call list, and the raw log view including span-to-log jumping. This
    is the smallest thing that fully serves the primary use case.
 4. **Timeline (view 5)** with swimlanes and stall annotation.
