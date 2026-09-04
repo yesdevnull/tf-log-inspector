@@ -966,7 +966,10 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 // title, so it is the one that runs out of room first.
 func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	want := viewTitle(ViewTypes)
+	// Spelled out rather than read back from viewTitle, so this measures the
+	// rendered frame against a fixed string instead of following whatever
+	// the title function happens to return.
+	const want = "BY RESOURCE TYPE"
 	for _, w := range []int{160, 100, 99, 70, 69, 40, 20} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		if !strings.Contains(m.View(), want) {
