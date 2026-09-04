@@ -126,9 +126,9 @@ func TestReportKeepsColumnsAlignedWithLongResourceType(t *testing.T) {
 }
 
 // Two resource types sharing a long common prefix must not collide into one
-// truncated label -- BY RESOURCE TYPE's resource-type column is the only
-// thing distinguishing its rows, unlike SLOWEST CALLS/RESOURCES, which still
-// have an address or provider column to fall back on.
+// truncated label. Both providers here are identical too, so the SLOWEST
+// CALLS row has nothing but the resource-type column itself to distinguish
+// one row from the other.
 func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
 	l := &model.Log{
 		RPCSpans: []span.Span{
@@ -140,10 +140,11 @@ func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
 	if err := Render(&sb, l); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	out := sb.String()
+	rows := tableRows(t, sb.String(), "SLOWEST CALLS")
+	table := strings.Join(rows, "\n")
 	for _, want := range []string{"azuread_service_principal_password", "azuread_service_principal_certificate"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("report does not render %q as a distinguishable label:\n%s", want, out)
+		if !strings.Contains(table, want) {
+			t.Errorf("SLOWEST CALLS does not render %q as a distinguishable label:\n%s", want, table)
 		}
 	}
 }

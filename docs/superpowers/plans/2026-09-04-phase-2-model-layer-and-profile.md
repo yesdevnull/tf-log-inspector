@@ -108,7 +108,7 @@ Note `RPC` carries the *hook action* on UI-hook spans and the *RPC name* on repo
 | `internal/model/join_test.go` | |
 | `internal/model/filter.go` | `Filter`, `Facet`, `FacetValue`, `FacetsForSpans` |
 | `internal/model/filter_test.go` | |
-| `internal/model/lanes.go` | `PackLanes`, `PeakConcurrency`, `IdleWindow` |
+| `internal/model/lanes.go` | `PackLanes`, `PeakConcurrency` |
 | `internal/model/lanes_test.go` | |
 | `internal/profile/profile.go` | `Render` — the headless text report |
 | `internal/profile/profile_test.go` | |
@@ -1239,7 +1239,7 @@ Expected: PASS.
 - Modify: `README.md` (document `--profile` and its disclosure warning)
 
 **Interfaces:**
-- Consumes: `model.Log`, `model.JoinByResourceType`, `model.RollupBy`, `model.PeakConcurrency`, `model.PackLanes`
+- Consumes: `model.Log`, `model.JoinByResourceType`, `model.RollupBy`, `model.PeakConcurrency` (`model.PackLanes` is not consumed here -- see the revision on Task 6 Step 3)
 - Produces: `func Render(w io.Writer, l *model.Log) error`
 
 - [ ] **Step 1: Write the failing test**
@@ -1336,7 +1336,7 @@ Write `Render` to emit, in order:
 3. `BY PROVIDER` — `model.RollupBy(l.RPCSpans, func(s span.Span) string { return s.Provider })`, columns: total, calls, max, provider. This is the spec's view 1. Skip the section when there are no RPC spans.
 4. `SLOWEST CALLS` — RPC spans sorted by `DurationMs` descending, top 20: duration, RPC, resource type, provider.
 5. `SLOWEST RESOURCES` — UI-hook spans sorted by `DurationMs` descending, top 20: duration, action, resource type, **unmasked** `Address`.
-6. `CONCURRENCY` — for RPC spans only: `model.PeakConcurrency`, the lane count from `model.PackLanes`, summed span time, and the ratio of summed time to wall clock. Call `PackLanes` on `l.RPCSpans` and `l.UISpans` separately, never on a concatenation; surface `model.ErrMixedTimelines` as a returned error rather than ignoring it.
+6. `CONCURRENCY` — for RPC spans only: `model.PeakConcurrency`, summed span time, and the ratio of summed time to wall clock. **Revised 2026-09-04:** this step originally also specified printing the lane count from `model.PackLanes` here and surfacing `model.ErrMixedTimelines` from that call. A later ruling removed both: `PackLanes`' lane count is a rendering construct for the phase-4 timeline — every span, including a degenerate zero-duration one, needs a row to draw it in, whether or not it overlaps anything — not a profiling metric, so it does not belong in this report; and `lanes >= peak` for a degenerate span is inherent to the two functions answering different questions, not a bug to surface. `PeakConcurrency` itself gained the mixed-fidelity guard `PackLanes` already had, and `Render` surfaces `model.ErrMixedTimelines` from that call instead.
 7. When `len(l.RPCSpans) == 0 && len(l.UISpans) == 0`, print a single explanatory line containing `no spans` naming the likely cause — no protocol lines and no `terraform.ui` stream — and return without the other sections.
 
 Reuse the millisecond formatting shape from `internal/diagnose/diagnose.go`'s `formatMs` (sub-second as `842ms`, otherwise one decimal second). Copy it rather than exporting it: the two reports are free to diverge, and a shared formatter would couple a safety-critical renderer to a convenience one.

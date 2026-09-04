@@ -244,6 +244,18 @@ so the UI is interactive and cancellable while a large file loads. The raw log
 view is usable as soon as the file is mapped; ranked views populate when
 parsing completes.
 
+**Added 2026-09-04:** `--profile` (phase 2) reads the whole file into memory
+via `model.Load`, the same whole-file read this section justifies above.
+`--diagnose` (phase 1) streams instead, via `logfmt.Scan` over an
+`os.Open`ed `io.Reader`, and never holds the file whole. The asymmetry is
+deliberate, not an inconsistency to reconcile: `--diagnose` only ever needs
+one entry at a time to build its structural report, while `--profile`'s
+model layer needs random access into `Log.Data` for span-to-log jumping and
+for holding both tiers' spans at once. Both are bounded by the same 17–37MB
+observed captures above, so neither mode's memory cost is a concern at
+today's measured sizes; this is worth re-checking if a much larger capture
+ever turns up.
+
 ## Data model
 
 The indexed unit is a **logical entry**, not a physical line. A single log
@@ -478,6 +490,21 @@ This view exists to answer the one question a ranked list cannot: whether an
 eight-minute plan was eight minutes of work, or ninety seconds of work and six
 minutes of waiting. Those have different causes and different fixes.
 
+**Added 2026-09-04:** lane packing and peak concurrency (phase 2's
+`model.PackLanes` and `model.PeakConcurrency`, both consumed here) use
+half-open interval semantics: a span occupies `[StartMs, EndMs)`. A
+zero-duration span, or one whose start was clamped to zero because its
+reported duration exceeded its offset from the log's first entry, has an
+empty interval that overlaps nothing -- so it correctly contributes nothing
+to peak concurrency, even nested inside spans that are genuinely running.
+`PackLanes` still gives such a span its own lane, because this view needs a
+row to draw every span in regardless of whether it overlaps anything. The
+consequence: `PackLanes`' lane count can legitimately exceed
+`PeakConcurrency`'s peak. That is not a bug for this view to reconcile or
+surface as a discrepancy -- the two numbers answer different questions, and
+`lanes >= peak` is inherent to the semantics above, not a signal that
+something went wrong.
+
 ### Filtering and search
 
 - **Facets** are the structured filter: providers, levels, RPC names, each with
@@ -576,6 +603,15 @@ anything is built on top of it.
 
 Phases 3 and 4 deliver the primary use case without depending on the one piece
 of genuine inference in the design. That ordering is deliberate.
+
+**Added 2026-09-04:** phase 2 ships three things with no caller yet, recorded
+here so a later reviewer does not re-litigate them as YAGNI violations:
+`model.PackLanes` and `ErrMixedTimelines` are consumed by phase 4's timeline
+(view 5); `model.Filter` and `FacetsForSpans` are consumed by phase 3's facet
+pane; and `TypeRow.UIMaxMs` is consumed by phase 3's `BY RESOURCE TYPE` view,
+alongside the fields `--profile` already renders. Each is under test now
+because pure functions over the model are the cheapest place to get them
+right, even though the TUI that calls them does not exist yet.
 
 ## Out of scope
 

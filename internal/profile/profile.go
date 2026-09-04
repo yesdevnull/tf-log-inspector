@@ -25,34 +25,55 @@ import (
 // see shape and rank, not a full listing.
 const maxRows = 20
 
-// typeColWidth and actionColWidth are the fixed widths given to a resource
-// type / RPC name column and a UI-hook action column respectively, in
-// SLOWEST CALLS and SLOWEST RESOURCES. Both are truncated to these widths
-// before formatting -- see truncate -- so a name wider than its column can
-// never shunt every column after it out of alignment. This is safe in those
-// two tables specifically because the truncated field there is always
-// followed by an unbounded last column (provider or address) that nothing
-// else needs to stay aligned with. BY RESOURCE TYPE does not use
-// typeColWidth for its resource-type column -- see maxResourceTypeColWidth.
+// typeColWidth is the fixed width given to the RPC-name column in SLOWEST
+// CALLS. It is truncated to this width before formatting -- see truncate --
+// so a name wider than its column can never shunt every column after it out
+// of alignment. A collision from that truncation is harmless here: an RPC
+// name is not the only thing distinguishing one row from another, since the
+// resource-type and provider columns follow it. actionColWidth is the same
+// idea for the UI-hook action column in SLOWEST RESOURCES, which has an even
+// smaller, closed vocabulary ("read", "apply", ...) and so never truncates
+// in practice.
+//
+// The resource-type column in all three tables (BY RESOURCE TYPE, SLOWEST
+// CALLS, SLOWEST RESOURCES) does not use a fixed width -- see
+// resourceTypeColWidth -- because a resource type is the one field where a
+// truncation collision is not harmless: two distinct types sharing a long
+// common prefix, e.g. azuread_service_principal_password and
+// azuread_service_principal_certificate, would otherwise render as the same
+// label.
 const (
 	typeColWidth   = 24
 	actionColWidth = 8
 )
 
-// maxResourceTypeColWidth caps how wide BY RESOURCE TYPE grows its
-// resource-type column to fit the data, rather than truncating at a fixed
-// width the way the other tables do. That table's resource-type column is
-// the only thing distinguishing one row from another -- unlike SLOWEST
-// CALLS and SLOWEST RESOURCES, it has no address or provider column to fall
-// back on -- so a fixed-width truncation risks colliding two distinct types
-// that share a long common prefix into one label, e.g.
-// azuread_service_principal_password and azuread_service_principal_certificate
-// both starting with "azuread_service_princ...". Every trailing column in
-// that table is a fixed-width numeric, so widening the first one costs
-// nothing but line length. The cap exists only so one pathological name
-// cannot blow the table out arbitrarily; 48 is the longest resource type
-// name observed in practice (azuread_application_federated_identity_credential).
-const maxResourceTypeColWidth = 48
+// maxResourceTypeColWidth caps how wide a resource-type column is allowed to
+// grow to fit the data, rather than truncating at a fixed width the way
+// typeColWidth and actionColWidth do. Every trailing column next to a
+// resource-type column is either a fixed-width numeric or itself unbounded,
+// so widening the resource-type column costs only line length. The cap
+// exists only so one pathological name cannot blow a table out arbitrarily;
+// 49 is the longest resource type name observed in practice
+// (azuread_application_federated_identity_credential).
+const maxResourceTypeColWidth = 49
+
+// resourceTypeColWidth computes how wide a resource-type column must be to
+// render every one of the given values in full, capped at
+// maxResourceTypeColWidth. It starts from typeColWidth so a table with only
+// short type names still gets a column wide enough to be readable next to
+// the other columns.
+func resourceTypeColWidth(types []string) int {
+	width := typeColWidth
+	for _, t := range types {
+		if len(t) > width {
+			width = len(t)
+		}
+	}
+	if width > maxResourceTypeColWidth {
+		width = maxResourceTypeColWidth
+	}
+	return width
+}
 
 // truncate ellipsizes s to at most n bytes so a fixed-width column can never
 // overflow into the columns that follow it. A %-Ns verb only pads a short
@@ -101,7 +122,9 @@ func Render(w io.Writer, l *model.Log) error {
 	writeProviderRollup(b, l.RPCSpans)
 	writeSlowestCalls(b, l.RPCSpans)
 	writeSlowestResources(b, l.UISpans)
-	writeConcurrency(b, l.RPCSpans)
+	if err := writeConcurrency(b, l.RPCSpans); err != nil {
+		return err
+	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -116,18 +139,14 @@ func writeResourceTypeJoin(b *strings.Builder, rpcSpans, uiSpans []span.Span) {
 
 	fmt.Fprintf(b, "BY RESOURCE TYPE\n")
 	uiPresent := false
-	width := typeColWidth
-	for _, r := range rows {
+	types := make([]string, len(rows))
+	for i, r := range rows {
 		if r.UIResources > 0 {
 			uiPresent = true
 		}
-		if len(r.ResourceType) > width {
-			width = len(r.ResourceType)
-		}
+		types[i] = r.ResourceType
 	}
-	if width > maxResourceTypeColWidth {
-		width = maxResourceTypeColWidth
-	}
+	width := resourceTypeColWidth(types)
 	if uiPresent {
 		// See writeSlowestResources for why UI-hook figures carry this
 		// caveat: it applies here too, since these UI totals are sums of the
@@ -187,10 +206,15 @@ func writeSlowestCalls(b *strings.Builder, rpcSpans []span.Span) {
 	} else {
 		fmt.Fprintf(b, "SLOWEST CALLS\n")
 	}
+	types := make([]string, len(rows))
+	for i, s := range rows {
+		types[i] = s.ResourceType
+	}
+	width := resourceTypeColWidth(types)
 	for _, s := range rows {
 		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
 			formatMs(uint64(s.DurationMs)), typeColWidth, truncate(s.RPC, typeColWidth),
-			typeColWidth, truncate(s.ResourceType, typeColWidth), s.Provider)
+			width, truncate(s.ResourceType, width), s.Provider)
 	}
 	fmt.Fprintf(b, "\n")
 }
@@ -220,10 +244,15 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 	// caveat on its own SLOWEST RESOURCES section.
 	fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n")
 	fmt.Fprintf(b, "  neighbouring rows are not reliably ordered.\n")
+	types := make([]string, len(rows))
+	for i, s := range rows {
+		types[i] = s.ResourceType
+	}
+	width := resourceTypeColWidth(types)
 	for _, s := range rows {
 		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
 			formatMs(uint64(s.DurationMs)), actionColWidth, truncate(s.RPC, actionColWidth),
-			typeColWidth, truncate(s.ResourceType, typeColWidth), s.Address)
+			width, truncate(s.ResourceType, width), s.Address)
 	}
 	fmt.Fprintf(b, "\n")
 }
@@ -240,9 +269,9 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 // disagree (see the doc comment on PeakConcurrency), so printing both here
 // invites exactly the "these two numbers should match" reading that is
 // wrong.
-func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) {
+func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) error {
 	if len(rpcSpans) == 0 {
-		return
+		return nil
 	}
 
 	var summed uint64
@@ -258,8 +287,13 @@ func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) {
 		}
 	}
 
+	peak, err := model.PeakConcurrency(rpcSpans)
+	if err != nil {
+		return err
+	}
+
 	fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
-	fmt.Fprintf(b, "  peak concurrency     %d\n", model.PeakConcurrency(rpcSpans))
+	fmt.Fprintf(b, "  peak concurrency     %d\n", peak)
 	if clamped {
 		// A span whose reported duration exceeds its offset from the log's
 		// first entry has its start clamped to zero (span.Span.StartClamped),
@@ -281,6 +315,7 @@ func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) {
 		fmt.Fprintf(b, "  summed / wall clock  %.1fx\n", float64(summed)/float64(wallClock))
 	}
 	fmt.Fprintf(b, "\n")
+	return nil
 }
 
 // formatMs renders a millisecond duration: whole milliseconds below one

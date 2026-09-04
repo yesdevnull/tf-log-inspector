@@ -12,13 +12,26 @@ import (
 // without the lanes duplicating span data.
 type Lane struct{ Spans []int }
 
-// ErrMixedTimelines is returned when PackLanes is handed spans from more than
-// one builder. See the doc comment on span.Span: the builders anchor
-// StartMs/EndMs to different zero points, so packing a mixed slice
-// interleaves two unrelated timelines into lanes that look plausible and mean
-// nothing. Refusing is the only safe behaviour, because there is no signal in
-// the output that would let a reader notice.
+// ErrMixedTimelines is returned when PackLanes or PeakConcurrency is handed
+// spans from more than one builder. See the doc comment on span.Span: the
+// builders anchor StartMs/EndMs to different zero points, so sweeping a mixed
+// slice interleaves two unrelated timelines into a result that looks
+// plausible and means nothing. Refusing is the only safe behaviour, because
+// there is no signal in the output that would let a reader notice.
 var ErrMixedTimelines = errors.New("model: cannot pack lanes across spans of different fidelity")
+
+// sameFidelity reports ErrMixedTimelines when spans holds more than one
+// span.Fidelity. Both PackLanes and PeakConcurrency sweep StartMs/EndMs, so
+// both need this guard: those fields are comparable only within spans built
+// by the same builder -- see the doc comment on span.Span.
+func sameFidelity(spans []span.Span) error {
+	for _, s := range spans[1:] {
+		if s.Fidelity != spans[0].Fidelity {
+			return ErrMixedTimelines
+		}
+	}
+	return nil
+}
 
 // PackLanes assigns spans to execution lanes by greedy interval packing: each
 // span goes into the first lane whose last span has already finished.
@@ -30,10 +43,8 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 	if len(spans) == 0 {
 		return nil, nil
 	}
-	for _, s := range spans[1:] {
-		if s.Fidelity != spans[0].Fidelity {
-			return nil, ErrMixedTimelines
-		}
+	if err := sameFidelity(spans); err != nil {
+		return nil, err
 	}
 
 	order := make([]int, len(spans))
@@ -86,7 +97,23 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 // nothing -- so PackLanes' lane count can legitimately exceed this
 // function's peak. That is not a discrepancy to reconcile; the two answer
 // different questions.
-func PeakConcurrency(spans []span.Span) int {
+//
+// A zero-duration span is a synthetic edge case; the degenerate case that
+// actually turns up in real logs is StartClamped: a span whose reported
+// duration exceeds its offset from the log's first entry has its start
+// clamped to zero, which collapses its timeline extent to zero even though
+// its DurationMs is not, so it too overlaps nothing here.
+//
+// It rejects a mixed-fidelity slice for the same reason PackLanes does: see
+// sameFidelity.
+func PeakConcurrency(spans []span.Span) (int, error) {
+	if len(spans) == 0 {
+		return 0, nil
+	}
+	if err := sameFidelity(spans); err != nil {
+		return 0, err
+	}
+
 	type event struct {
 		at    uint32
 		delta int
@@ -110,5 +137,5 @@ func PeakConcurrency(spans []span.Span) int {
 			peak = cur
 		}
 	}
-	return peak
+	return peak, nil
 }

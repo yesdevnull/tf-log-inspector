@@ -75,8 +75,26 @@ func TestPeakConcurrency(t *testing.T) {
 		timed(200, 800, span.FidelityReported),
 		timed(5000, 6000, span.FidelityReported),
 	}
-	if got := PeakConcurrency(spans); got != 3 {
+	got, err := PeakConcurrency(spans)
+	if err != nil {
+		t.Fatalf("PeakConcurrency: %v", err)
+	}
+	if got != 3 {
 		t.Errorf("PeakConcurrency = %d, want 3", got)
+	}
+}
+
+// PeakConcurrency sweeps the same hazardous StartMs/EndMs fields PackLanes
+// does, so it must refuse a mixed-fidelity slice for the same reason:
+// packing two builders' timelines together produces a plausible, silently
+// wrong number.
+func TestPeakConcurrencyRejectsMixedFidelity(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 1000, span.FidelityReported),
+		timed(0, 1000, span.FidelityUIReported),
+	}
+	if _, err := PeakConcurrency(spans); err == nil {
+		t.Fatal("PeakConcurrency accepted spans from two different timelines")
 	}
 }
 
@@ -98,7 +116,11 @@ func TestPeakConcurrencyHandoverBoundary(t *testing.T) {
 		timed(0, 500, span.FidelityReported),
 		timed(500, 1000, span.FidelityReported),
 	}
-	if got := PeakConcurrency(spans); got != 1 {
+	got, err := PeakConcurrency(spans)
+	if err != nil {
+		t.Fatalf("PeakConcurrency: %v", err)
+	}
+	if got != 1 {
 		t.Errorf("PeakConcurrency = %d, want 1 (handover not overlap)", got)
 	}
 }
@@ -118,7 +140,11 @@ func TestPeakConcurrencyIgnoresZeroDurationSpans(t *testing.T) {
 		timed(200, 800, span.FidelityReported),
 		timed(500, 500, span.FidelityReported), // zero-duration, nested inside both
 	}
-	if got := PeakConcurrency(spans); got != 2 {
+	got, err := PeakConcurrency(spans)
+	if err != nil {
+		t.Fatalf("PeakConcurrency: %v", err)
+	}
+	if got != 2 {
 		t.Errorf("PeakConcurrency = %d, want 2 (the zero-duration span's empty interval overlaps nothing)", got)
 	}
 

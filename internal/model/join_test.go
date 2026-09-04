@@ -83,6 +83,24 @@ func TestJoinByResourceTypeOrdersByUIThenRPC(t *testing.T) {
 	}
 }
 
+// When UI and RPC totals both tie, the ordering falls back to ResourceType
+// ascending so two runs over one log cannot disagree.
+func TestJoinByResourceTypeBreaksTiesByResourceType(t *testing.T) {
+	got := JoinByResourceType(
+		nil,
+		[]span.Span{
+			uiSp("zebra_resource", 5000),
+			uiSp("aardvark_resource", 5000),
+		},
+	)
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2: %+v", len(got), got)
+	}
+	if got[0].ResourceType != "aardvark_resource" || got[1].ResourceType != "zebra_resource" {
+		t.Errorf("got %q then %q, want aardvark_resource then zebra_resource: equal UI and RPC totals must break ties by ResourceType ascending", got[0].ResourceType, got[1].ResourceType)
+	}
+}
+
 func TestJoinByResourceTypeEmptyInput(t *testing.T) {
 	if got := JoinByResourceType(nil, nil); len(got) != 0 {
 		t.Errorf("got %d rows from no spans, want 0", len(got))

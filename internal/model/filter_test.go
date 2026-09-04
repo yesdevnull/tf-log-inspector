@@ -41,6 +41,18 @@ func TestFilterIsOrWithinAndAndAcross(t *testing.T) {
 	}
 }
 
+// A populated Levels map is restrictive, not permissive -- unlike the empty
+// case above, only the selected levels may pass.
+func TestMatchEntryFiltersByLevel(t *testing.T) {
+	f := Filter{Levels: map[logfmt.Level]bool{logfmt.LevelWarn: true}}
+	if !f.MatchEntry(logfmt.Entry{Level: logfmt.LevelWarn}) {
+		t.Error("rejected an entry at a selected level")
+	}
+	if f.MatchEntry(logfmt.Entry{Level: logfmt.LevelTrace}) {
+		t.Error("accepted an entry at a level not selected")
+	}
+}
+
 func TestSpansMatchingPreservesOrder(t *testing.T) {
 	spans := []span.Span{
 		sp("a", "aws", "r", 3),

@@ -12,11 +12,15 @@ import (
 const noKey = "(none)"
 
 // Bucket is one row of a rollup.
+//
+// TotalMs is widened to uint64: 2174 spans summing to 1.5e6 ms is comfortable
+// in uint32, but a long apply is not, and overflow here would silently
+// invert the ordering.
 type Bucket struct {
 	Key     string
-	TotalMs uint64 // widened: 2174 spans summing to 1.5e6 ms is comfortable in
-	MaxMs   uint32 // uint32, but a long apply is not, and overflow here would
-	Count   int    // silently invert the ordering
+	TotalMs uint64
+	MaxMs   uint32
+	Count   int
 }
 
 // RollupBy groups spans by a caller-supplied key and returns buckets ordered
