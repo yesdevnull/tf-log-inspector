@@ -598,7 +598,25 @@ their wrapper level. The remaining shape,
 
 Nested Go-log timestamps are now peeled too, confined to nested headers:
 accepting that format at the start of a line would promote continuation text
-into an entry of its own. No figure other than that count is affected, and
+into an entry of its own. Confirmed on the same debug log at `d0c7afc`:
+
+| level | debug `40c9a5f` | debug `d0c7afc` | TRACE `40c9a5f` | TRACE `d0c7afc` |
+|---|---|---|---|---|
+| UNKNOWN | 1314 | 1314 | 1 | 1 |
+| TRACE | — | — | 73794 | 73794 |
+| DEBUG | 11215 | 12050 | 11449 | 12284 |
+| INFO | 901 | 66 | 901 | 66 |
+| WARN | 115 | 115 | 114 | 114 |
+
+Both logs move 835 entries from INFO to DEBUG and change nothing else. The
+totals hold — 13,545 and 86,259 — so level attribution moved without
+disturbing an entry boundary, and the identical split across two different
+captures of the same workspace is what a deterministic provider should
+produce. The 66 that remain are genuine Terraform INFO lines.
+
+The `TRACE` count is untouched, which matters more than the correction
+itself: the peel does not reach the protocol entries that tiers 1 and 2 are
+built from, confirming those arrive un-nested. No figure other than that count is affected, and
 the tier-1 result in particular is independent of the peel:
 `40c9a5f` matched `"Received downstream response"` as a bare message prefix,
 which is only possible because HCP delivers protocol lines un-nested.
