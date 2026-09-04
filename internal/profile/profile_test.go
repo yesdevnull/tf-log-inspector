@@ -198,3 +198,32 @@ func tableRows(t *testing.T, out, header string) []string {
 	}
 	return strings.Split(strings.TrimRight(rest[:end], "\n"), "\n")
 }
+
+// Every duration in this report is a duration under logging. Four captures of
+// one HCP workspace measured 24.1s with no logging enabled against 522.2s with
+// debug plus provider TRACE, because Terraform re-logs each line of a
+// provider's stderr through its own logger. A reader who takes these figures
+// for wall-clock truth will go and optimise time that does not exist without
+// the log -- so the report must say so itself rather than relying on the
+// README, since the report is what leaves the machine.
+func TestReportStatesDurationsAreMeasuredUnderLogging(t *testing.T) {
+	out := render(t, "../../testdata/provider-rpc.log")
+	if !strings.Contains(out, "under logging") {
+		t.Errorf("report does not caveat that its durations are measured under logging:\n%s", out)
+	}
+	// Rankings survive the tax because every span paid it; the caveat is
+	// worthless if it leaves the reader thinking nothing here is usable.
+	if !strings.Contains(out, "Rankings") {
+		t.Errorf("caveat does not say what remains valid:\n%s", out)
+	}
+}
+
+// The caveat applies to a log with no spans just as much as one with spans --
+// and the no-spans path returns early, which is exactly where a header
+// addition is easy to miss.
+func TestLoggingCaveatSurvivesTheNoSpansPath(t *testing.T) {
+	out := render(t, "../../testdata/core-only.log")
+	if !strings.Contains(out, "under logging") {
+		t.Errorf("no-spans report omits the logging caveat:\n%s", out)
+	}
+}

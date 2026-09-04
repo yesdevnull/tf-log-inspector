@@ -108,6 +108,7 @@ func Render(w io.Writer, l *model.Log) error {
 	fmt.Fprintf(b, "\n")
 	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n")
 	fmt.Fprintf(b, "--diagnose, this report is not safe to share.\n\n")
+	writeLoggingCaveat(b)
 
 	if len(l.RPCSpans) == 0 && len(l.UISpans) == 0 {
 		fmt.Fprintf(b, "NO SPANS\n")
@@ -327,4 +328,25 @@ func formatMs(ms uint64) string {
 		return fmt.Sprintf("%dms", ms)
 	}
 	return fmt.Sprintf("%.1fs", float64(ms)/1000)
+}
+
+// writeLoggingCaveat states that every duration below was measured under
+// logging. Terraform re-logs each line of a provider's stderr through its own
+// logger, so a provider that dumps HTTP bodies at DEBUG pays that cost per
+// line: four captures of one workspace measured 24.1s with no logging enabled
+// against 522.2s with debug plus provider TRACE, and in one case a single API
+// response accounted for 49% of a 30MB log.
+//
+// It prints before the no-spans early return, so no path can omit it, and it
+// names what survives as well as what does not. A caveat that leaves the
+// reader believing none of the report is usable would be its own kind of
+// wrong: every span paid the same tax, so the ordering holds even where the
+// absolute figures do not.
+func writeLoggingCaveat(b *strings.Builder) {
+	fmt.Fprintf(b, "Durations here are measured under logging, which is not free:\n")
+	fmt.Fprintf(b, "one workspace planned in 24.1s unlogged and 522.2s with debug\n")
+	fmt.Fprintf(b, "plus provider TRACE. Rankings hold, since every span paid the\n")
+	fmt.Fprintf(b, "same cost. Absolute times do not transfer to an unlogged run,\n")
+	fmt.Fprintf(b, "and comparing a chatty provider against a quiet one is the\n")
+	fmt.Fprintf(b, "least reliable reading.\n\n")
 }
