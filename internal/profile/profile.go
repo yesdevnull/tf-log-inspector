@@ -26,20 +26,45 @@ import (
 const maxRows = 20
 
 // typeColWidth and actionColWidth are the fixed widths given to a resource
-// type / RPC name column and a UI-hook action column respectively. Both are
-// truncated to these widths before formatting -- see truncate -- so a name
-// wider than its column can never shunt every column after it out of
-// alignment.
+// type / RPC name column and a UI-hook action column respectively, in
+// SLOWEST CALLS and SLOWEST RESOURCES. Both are truncated to these widths
+// before formatting -- see truncate -- so a name wider than its column can
+// never shunt every column after it out of alignment. This is safe in those
+// two tables specifically because the truncated field there is always
+// followed by an unbounded last column (provider or address) that nothing
+// else needs to stay aligned with. BY RESOURCE TYPE does not use
+// typeColWidth for its resource-type column -- see maxResourceTypeColWidth.
 const (
 	typeColWidth   = 24
 	actionColWidth = 8
 )
+
+// maxResourceTypeColWidth caps how wide BY RESOURCE TYPE grows its
+// resource-type column to fit the data, rather than truncating at a fixed
+// width the way the other tables do. That table's resource-type column is
+// the only thing distinguishing one row from another -- unlike SLOWEST
+// CALLS and SLOWEST RESOURCES, it has no address or provider column to fall
+// back on -- so a fixed-width truncation risks colliding two distinct types
+// that share a long common prefix into one label, e.g.
+// azuread_service_principal_password and azuread_service_principal_certificate
+// both starting with "azuread_service_princ...". Every trailing column in
+// that table is a fixed-width numeric, so widening the first one costs
+// nothing but line length. The cap exists only so one pathological name
+// cannot blow the table out arbitrarily; 48 is the longest resource type
+// name observed in practice (azuread_application_federated_identity_credential).
+const maxResourceTypeColWidth = 48
 
 // truncate ellipsizes s to at most n bytes so a fixed-width column can never
 // overflow into the columns that follow it. A %-Ns verb only pads a short
 // string; it never shortens a long one, and real provider type names run
 // well past any width this report could reasonably use -- for example
 // azuread_application_federated_identity_credential.
+//
+// This slices by byte count, not rune count, so it would split a multi-byte
+// UTF-8 rune if one landed at the cut point. That is not reachable today:
+// every string passed to truncate is a Terraform RPC name or resource-type
+// identifier, and both are restricted to ASCII by Terraform's own naming
+// rules. Revisit this if truncate is ever applied to arbitrary text.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -91,11 +116,17 @@ func writeResourceTypeJoin(b *strings.Builder, rpcSpans, uiSpans []span.Span) {
 
 	fmt.Fprintf(b, "BY RESOURCE TYPE\n")
 	uiPresent := false
+	width := typeColWidth
 	for _, r := range rows {
 		if r.UIResources > 0 {
 			uiPresent = true
-			break
 		}
+		if len(r.ResourceType) > width {
+			width = len(r.ResourceType)
+		}
+	}
+	if width > maxResourceTypeColWidth {
+		width = maxResourceTypeColWidth
 	}
 	if uiPresent {
 		// See writeSlowestResources for why UI-hook figures carry this
@@ -110,10 +141,10 @@ func writeResourceTypeJoin(b *strings.Builder, rpcSpans, uiSpans []span.Span) {
 	// truncate guards the resource-type column against, just on the header
 	// row instead of the data.
 	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n",
-		typeColWidth, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
+		width, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
 	for _, r := range rows {
 		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n",
-			typeColWidth, truncate(r.ResourceType, typeColWidth), r.UIResources, formatMs(r.UITotalMs),
+			width, truncate(r.ResourceType, width), r.UIResources, formatMs(r.UITotalMs),
 			r.RPCCalls, formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs)))
 	}
 	fmt.Fprintf(b, "\n")
@@ -216,15 +247,34 @@ func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) {
 
 	var summed uint64
 	var wallClock uint32
+	var clamped bool
 	for _, s := range rpcSpans {
 		summed += uint64(s.DurationMs)
 		if s.EndMs > wallClock {
 			wallClock = s.EndMs
 		}
+		if s.StartClamped {
+			clamped = true
+		}
 	}
 
 	fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
 	fmt.Fprintf(b, "  peak concurrency     %d\n", model.PeakConcurrency(rpcSpans))
+	if clamped {
+		// A span whose reported duration exceeds its offset from the log's
+		// first entry has its start clamped to zero (span.Span.StartClamped),
+		// which collapses its timeline extent to zero even though its
+		// reported duration is not. Such a span contributes duration but no
+		// measurable concurrency -- see PeakConcurrency's doc comment on why
+		// a zero-extent span overlaps nothing -- which can otherwise make
+		// peak concurrency read as unexpectedly low, or even zero, next to a
+		// nonzero span count. The number above is correct; this only
+		// explains it.
+		fmt.Fprintf(b, "  Note: one or more spans have a clamped start -- a span\n")
+		fmt.Fprintf(b, "  whose reported duration exceeds its offset from the\n")
+		fmt.Fprintf(b, "  log's first entry has its start clamped to zero, so it\n")
+		fmt.Fprintf(b, "  contributes duration but no measurable concurrency.\n")
+	}
 	fmt.Fprintf(b, "  summed span time     %s\n", formatMs(summed))
 	if wallClock > 0 {
 		fmt.Fprintf(b, "  wall clock           %s\n", formatMs(uint64(wallClock)))

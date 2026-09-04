@@ -125,6 +125,63 @@ func TestReportKeepsColumnsAlignedWithLongResourceType(t *testing.T) {
 	}
 }
 
+// Two resource types sharing a long common prefix must not collide into one
+// truncated label -- BY RESOURCE TYPE's resource-type column is the only
+// thing distinguishing its rows, unlike SLOWEST CALLS/RESOURCES, which still
+// have an address or provider column to fall back on.
+func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
+	l := &model.Log{
+		RPCSpans: []span.Span{
+			{DurationMs: 10, RPC: "PlanResourceChange", Provider: "registry.terraform.io/hashicorp/azuread", ResourceType: "azuread_service_principal_password"},
+			{DurationMs: 20, RPC: "PlanResourceChange", Provider: "registry.terraform.io/hashicorp/azuread", ResourceType: "azuread_service_principal_certificate"},
+		},
+	}
+	var sb strings.Builder
+	if err := Render(&sb, l); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := sb.String()
+	for _, want := range []string{"azuread_service_principal_password", "azuread_service_principal_certificate"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report does not render %q as a distinguishable label:\n%s", want, out)
+		}
+	}
+}
+
+// A span whose start is clamped contributes duration but no measurable
+// concurrency (see writeConcurrency), which can make peak concurrency read
+// as unexpectedly low next to a nonzero span count. The report must explain
+// that, but only when it is actually true.
+func TestReportNotesClampedStartsUnderConcurrency(t *testing.T) {
+	l := &model.Log{
+		RPCSpans: []span.Span{
+			{DurationMs: 12, StartMs: 0, EndMs: 0, StartClamped: true, RPC: "PlanResourceChange", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_subnet"},
+		},
+	}
+	var sb strings.Builder
+	if err := Render(&sb, l); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(sb.String(), "clamped") {
+		t.Errorf("report does not explain a clamped start:\n%s", sb.String())
+	}
+}
+
+func TestReportOmitsClampedNoteWhenNoSpanIsClamped(t *testing.T) {
+	l := &model.Log{
+		RPCSpans: []span.Span{
+			{DurationMs: 12, StartMs: 0, EndMs: 12, StartClamped: false, RPC: "PlanResourceChange", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_subnet"},
+		},
+	}
+	var sb strings.Builder
+	if err := Render(&sb, l); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(sb.String(), "clamped") {
+		t.Errorf("report explains a clamped start when none is clamped:\n%s", sb.String())
+	}
+}
+
 // tableRows returns the lines directly under a section header, up to the
 // first blank line -- the column header row plus every data row.
 func tableRows(t *testing.T, out, header string) []string {
