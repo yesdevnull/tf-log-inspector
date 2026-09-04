@@ -46,6 +46,67 @@ func TestRawLogHonoursFilters(t *testing.T) {
 	}
 }
 
+// A provider facet filters raw log entries by component, not by span
+// ownership: an entry is that provider's traffic (and stays visible) as
+// long as it shares a component with one of that provider's spans, whether
+// or not the entry itself closes a span. two-providers.log's two spans sit
+// on two different components, so selecting aws must keep its own line and
+// drop google's.
+func TestRawLogProviderFacetFiltersByComponent(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = focusFacets(t, m) // cursor starts on the provider dimension's first (aws) value
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	out := m.renderRawLog(200, 100)
+	if !strings.Contains(out, "aws_subnet") {
+		t.Errorf("aws's own entry missing after selecting the aws provider facet:\n%s", out)
+	}
+	if strings.Contains(out, "google_compute_instance") {
+		t.Errorf("google's entry survived after selecting the aws provider facet:\n%s", out)
+	}
+}
+
+// A core entry -- Terraform's own lines, plan output -- has no component
+// that maps to any provider, so it has nothing to match once a provider
+// facet narrows the view, and is hidden rather than shown by default.
+func TestRawLogProviderFacetHidesCoreEntries(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	before := m.renderRawLog(200, 100)
+	if !strings.Contains(before, "SYNTHESISED") {
+		t.Fatal("fixture's core comment header is not present unfiltered -- test assumption is wrong")
+	}
+	m = focusFacets(t, m)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := m.renderRawLog(200, 100); strings.Contains(got, "SYNTHESISED") {
+		t.Errorf("core entry with no provider component survived an active provider filter:\n%s", got)
+	}
+}
+
+// RPC and resource type are properties of a call, not of a log line: most
+// of what surrounds a slow call (a provider's own DEBUG chatter, HTTP body
+// dumps) carries neither field, so applying either dimension to raw
+// entries would hide exactly the context this view exists to show.
+// Selecting either must leave the raw log completely unchanged.
+func TestRawLogIgnoresRPCAndResourceTypeFacets(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	before := m.renderRawLog(200, 100)
+
+	m = focusFacets(t, m)
+	for i := 0; i < 2; i++ { // move past both provider values onto the rpc dimension's only value
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := m.renderRawLog(200, 100); got != before {
+		t.Errorf("selecting an rpc facet narrowed the raw log:\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace}) // deselect it again
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // move onto the resource type dimension's first value
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := m.renderRawLog(200, 100); got != before {
+		t.Errorf("selecting a resource type facet narrowed the raw log:\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+}
+
 // Paging must not walk off either end of the entry index.
 func TestRawLogPagingIsClamped(t *testing.T) {
 	m := update(t, New(testLog(t, "core-only.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})

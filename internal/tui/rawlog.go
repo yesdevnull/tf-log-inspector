@@ -69,36 +69,55 @@ func (m *Model) pageRawLog(delta int) {
 	}
 }
 
-// entryOwners indexes every span in every given slice by the entry that
-// closed it, so a raw log entry can be resolved back to the span it belongs
-// to in one lookup rather than a scan per entry.
-func entryOwners(spanSets ...[]span.Span) map[uint32]span.Span {
-	out := map[uint32]span.Span{}
-	for _, spans := range spanSets {
-		for _, s := range spans {
-			out[s.Entry] = s
+// componentProviders maps a log line's component (Entry.Comp) to the
+// provider whose span closed on an entry carrying that component. It is
+// built once per render/search from the (few thousand, at most) spans
+// rather than walked per entry (tens of thousands on a real capture): every
+// entry sharing a component with a provider's own closing entry is that
+// provider's traffic -- its request/response lines, its DEBUG chatter, its
+// HTTP body dumps -- not just the one line that happened to close a span.
+// A component of 0 means "none" (see logfmt.Entry), so it is never
+// recorded: an entry with no component never resolves to a provider.
+func componentProviders(spans []span.Span, entries []logfmt.Entry) map[uint16]string {
+	out := map[uint16]string{}
+	for _, s := range spans {
+		if int(s.Entry) >= len(entries) {
+			continue
+		}
+		if c := entries[s.Entry].Comp; c != 0 {
+			out[c] = s.Provider
 		}
 	}
 	return out
 }
 
-// entryVisible reports whether entry i passes the raw log's active facet
+// entryVisible reports whether entry e passes the raw log's active facet
 // filter. Level is a per-entry attribute and applies directly via
-// Filter.MatchEntry. Provider, RPC and resource type are span concepts, and
-// most entries -- Terraform's own core lines, plan output, continuations --
-// belong to no span at all, so there is nothing on a bare entry to test
-// those dimensions against; owners[i] resolves that only where possible,
-// and is the zero span.Span for everything else. Filter.MatchSpan already
-// treats an unconstrained dimension as "no opinion" regardless of value, so
-// with no provider/RPC/type facet selected every entry still passes; once
-// one is selected, an entry with no owning span has nothing to match and is
-// hidden, the same way it would be if it were a span that failed the
-// filter.
-func entryVisible(f model.Filter, owners map[uint32]span.Span, i int, e logfmt.Entry) bool {
+// Filter.MatchEntry.
+//
+// Of the three span dimensions, only provider applies here, via
+// compProviders: an entry's own component says whose traffic it is,
+// regardless of whether that particular entry happens to close a span. RPC
+// and resource type are deliberately NOT applied to raw entries at all --
+// they are properties of one call, not of a log line, and most lines
+// (request/response chatter, DEBUG output, HTTP body dumps) surrounding a
+// call never carry a tf_rpc or tf_resource_type field of their own. Hiding
+// every line outside the exact RPC boundary because, say, ReadDataSource is
+// selected would hide precisely the context -- the provider's own
+// surrounding output -- that jumping to a slow call exists to show.
+//
+// With no provider facet selected every entry passes regardless of
+// component. Once one is selected, an entry whose component maps to no
+// provider (Terraform's own core lines, plan output) is hidden: the filter
+// asked for one provider's traffic, and a core line is not that.
+func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entry) bool {
 	if !f.MatchEntry(e) {
 		return false
 	}
-	return f.MatchSpan(owners[uint32(i)])
+	if len(f.Providers) == 0 {
+		return true
+	}
+	return f.Providers[compProviders[e.Comp]]
 }
 
 // renderRawLog renders entries from TopEntry() downward, honouring the
@@ -111,12 +130,12 @@ func entryVisible(f model.Filter, owners map[uint32]span.Span, i int, e logfmt.E
 // overflow the pane than show nothing for the one entry the user jumped to).
 func (m Model) renderRawLog(w, h int) string {
 	f := m.filter()
-	owners := entryOwners(m.log.RPCSpans, m.log.UISpans)
+	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 
 	var lines []string
 	for i := m.TopEntry(); i < len(m.log.Entries); i++ {
 		e := m.log.Entries[i]
-		if !entryVisible(f, owners, i, e) {
+		if !entryVisible(f, compProviders, e) {
 			continue
 		}
 		entryLines := strings.Split(strings.TrimRight(string(m.log.Bytes(e)), "\n"), "\n")
@@ -186,7 +205,7 @@ func (m *Model) searchFrom(start int, forward bool) bool {
 		return false
 	}
 	f := m.filter()
-	owners := entryOwners(m.log.RPCSpans, m.log.UISpans)
+	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 	needle := []byte(m.raw.lastQuery)
 
 	step := 1
@@ -195,7 +214,7 @@ func (m *Model) searchFrom(start int, forward bool) bool {
 	}
 	for i := start + step; i >= 0 && i < len(m.log.Entries); i += step {
 		e := m.log.Entries[i]
-		if !entryVisible(f, owners, i, e) {
+		if !entryVisible(f, compProviders, e) {
 			continue
 		}
 		if bytes.Contains(m.log.Bytes(e), needle) {
