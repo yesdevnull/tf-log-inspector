@@ -575,6 +575,16 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
 
 ## Open questions
 
+Every measurement dated 2026-09-04 below comes from three `--diagnose`
+reports on real HCP Terraform runs — one structured-output, one
+debug-toggle, one TRACE — all produced by `tfli` at commit `40c9a5f`, which
+predates the nested-header peel. That matters for one figure: the `INFO 901`
+level count is Terraform's wrapper level, not the provider's, and a re-run on
+a later build should show most of those as DEBUG. No other figure quoted here
+is affected, and the tier-1 result in particular is independent of the peel:
+`40c9a5f` matched `"Received downstream response"` as a bare message prefix,
+which is only possible because HCP delivers protocol lines un-nested.
+
 1. **Whether an HCP Terraform raw run log actually contains provider RPC
    entries.** Execution location is now settled — runs happen on HCP Terraform
    runners, and TRACE is enabled there by workspace variable or the per-run
