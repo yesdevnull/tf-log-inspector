@@ -666,13 +666,20 @@ func (r Report) Render(w io.Writer) error {
 // logging alone does not produce them and never has: terraform-plugin-go
 // writes tf_req_duration_ms and "Sending request downstream" exclusively
 // through logging.ProtocolTrace, so both are filtered out below TRACE. A
-// real debug-enabled HCP run measured zero of each. The proto subsystem
-// takes its level from TF_LOG_SDK_PROTO and is built as its own hclog
-// logger with its own level, so it can be raised on its own rather than
-// turning all of Terraform up to TRACE.
+// real debug-enabled HCP run measured zero of each.
+//
+// Two gates sit between the provider and the log file. TF_LOG_SDK_PROTO
+// raises the provider's proto subsystem, which is built as its own hclog
+// logger with its own level. Terraform then re-emits plugin output through
+// a logger of its own, whose level comes from TF_LOG_PROVIDER falling back
+// to TF_LOG (internal/logging/logging.go, providerLogLevel), and which
+// discards the provider's TRACE lines when it sits at DEBUG. Raising only
+// the first was measured to yield a log with no TRACE entries at all, so
+// naming one variable without the other costs the reader a whole run.
 func writeRPCCaptureHint(b *strings.Builder) {
 	fmt.Fprintf(b, "  Provider RPC entries are emitted only at TRACE, so debug\n")
-	fmt.Fprintf(b, "  logging alone will not produce them. Set TF_LOG_SDK_PROTO=TRACE\n")
-	fmt.Fprintf(b, "  to raise the protocol subsystem on its own, or TF_LOG=TRACE\n")
-	fmt.Fprintf(b, "  for everything.\n")
+	fmt.Fprintf(b, "  logging alone will not produce them. Two levels gate them:\n")
+	fmt.Fprintf(b, "  what the provider writes, and what Terraform keeps. Set both\n")
+	fmt.Fprintf(b, "  TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE, or raise\n")
+	fmt.Fprintf(b, "  everything with TF_LOG=TRACE.\n")
 }

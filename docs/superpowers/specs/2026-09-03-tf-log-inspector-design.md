@@ -724,12 +724,37 @@ which is only possible because HCP delivers protocol lines un-nested.
    So no single capture yet yields both views, and they answer different
    questions: which *resources* were slow, versus which *calls* were slow.
 
-   **The untried combination is the debug toggle plus
-   `TF_LOG_SDK_PROTO=TRACE`.** Every TRACE capture so far raised the root
-   level; that variable raises only the protocol subsystem, which is the one
-   carrying `tf_req_duration_ms`. If the debug toggle preserves the
-   `terraform.ui` stream while the subsystem supplies the RPC entries, one
-   log serves both tiers. One run settles it.
+   **`TF_LOG=DEBUG` plus `TF_LOG_SDK_PROTO=TRACE` was tried and produced
+   nothing:** 17,496 KB against the plain debug run's 17,436 KB, and zero
+   TRACE entries (UNKNOWN 1315, DEBUG 12283, INFO 66, WARN 115 — a delta of
+   +233 DEBUG, which reads as run-to-run variation).
+
+   **There are two gates, and that variable opens only one.**
+   `TF_LOG_SDK_PROTO` governs what the *provider* writes. Terraform then
+   re-emits plugin stderr through a logger of its own, whose level
+   `internal/logging/logging.go` resolves as:
+
+       providerEnvLevel := strings.ToUpper(os.Getenv(envLogProvider)) // TF_LOG_PROVIDER
+       if providerEnvLevel == "" {
+           providerEnvLevel = strings.ToUpper(os.Getenv(envLog))      // TF_LOG
+       }
+
+   With `TF_LOG=DEBUG` and `TF_LOG_PROVIDER` unset, that logger sits at
+   DEBUG and discards the provider's TRACE lines on the way through. The
+   provider very likely emitted them; Terraform dropped them.
+
+   **The combination that addresses both gates is `TF_LOG=DEBUG` plus
+   `TF_LOG_PROVIDER=TRACE` plus `TF_LOG_SDK_PROTO=TRACE`.** Core keeps
+   falling back to `TF_LOG`, so it stays at DEBUG — which is the condition
+   under which structured output has always survived. Note that Terraform's
+   unsuffixed `TF_LOG_PROVIDER` and `terraform-plugin-go`'s
+   `TF_LOG_PROVIDER_<NAME>` are different variables with confusingly similar
+   names; the unsuffixed one is the gate that matters here.
+
+   The run is informative either way. If structured output survives, it was
+   *core* at TRACE that suppressed it, and one log can serve both tiers. If
+   it does not, the suppression has another cause and the one-view-per-
+   capture constraint is real.
 
    **If it does not work,** the TUI shows whichever tier its log supports and
    the capture is chosen by the question being asked. It must not merge two

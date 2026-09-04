@@ -26,16 +26,23 @@ at TRACE: `terraform-plugin-go` logs `tf_req_duration_ms` and
 DEBUG-level log contains neither.
 
 HCP Terraform's **Debug Logging** toggle alone is therefore not sufficient. It
-yields `tf_req_id` — set on the provider's own logger — but no durations. Set
-a workspace variable to raise the protocol subsystem specifically:
+yields `tf_req_id` — set on the provider's own logger — but no durations.
 
+There are two gates between the provider and the log file, and both must be
+open. `TF_LOG_SDK_PROTO` governs what the provider writes; Terraform then
+re-emits plugin output through a logger whose level comes from
+`TF_LOG_PROVIDER`, falling back to `TF_LOG`. Raising only the first is not
+enough — measured: it produces a log byte-for-byte comparable to a plain
+debug run, with no TRACE entries at all.
+
+Set both as workspace variables:
+
+    TF_LOG_PROVIDER=TRACE
     TF_LOG_SDK_PROTO=TRACE
 
-That subsystem gets its own logger and its own level, so this does not require
-turning all of Terraform up to TRACE. Whether HCP's log capture passes the
-resulting lines through is not yet confirmed; if the log comes back without
-`tf_req_duration_ms`, try `TF_LOG=TRACE` before concluding the data is
-unreachable.
+`TF_LOG=TRACE` alone also works and is simpler, but it raises Terraform core
+too, and a core-TRACE run has so far never contained the `terraform.ui`
+stream.
 
 A debug run's raw log contains **both**: the `terraform.ui` JSON and the
 debug text, interleaved. One debug run therefore feeds every tier `tfli`

@@ -1058,8 +1058,17 @@ func TestGuidanceDoesNotPromiseRPCDetailFromDebugLogging(t *testing.T) {
 					t.Errorf("guidance still claims %q, which the debug-run measurement disproved:\n%s", wrong, out)
 				}
 			}
-			if !strings.Contains(out, "TF_LOG_SDK_PROTO") {
-				t.Errorf("guidance does not name the variable that raises the protocol subsystem to TRACE:\n%s", out)
+			// Two gates sit between the provider and the log file:
+			// TF_LOG_SDK_PROTO governs what the provider writes, and
+			// TF_LOG_PROVIDER (falling back to TF_LOG) governs what
+			// Terraform keeps when re-emitting plugin output. Raising
+			// only the first was measured to produce a log with no TRACE
+			// entries at all, so guidance naming one without the other
+			// sends the reader on a wasted run.
+			for _, v := range []string{"TF_LOG_SDK_PROTO", "TF_LOG_PROVIDER"} {
+				if !strings.Contains(out, v) {
+					t.Errorf("guidance does not name %s, one of the two gates that must be open:\n%s", v, out)
+				}
 			}
 		})
 	}
