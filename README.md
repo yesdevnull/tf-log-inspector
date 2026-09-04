@@ -86,6 +86,20 @@ For a local plan:
 `--diagnose` reports the log's structure: size, levels, which extraction tier
 applies, which fields are present, and the most common message shapes.
 
+### Durations are measured under logging
+
+Debug logging is not free, and on the runs measured here it is not close to
+free: the same workspace planned in 24.1s with no logging enabled and 522.2s
+with debug plus provider TRACE. Terraform re-logs each line of a provider's
+stderr through its own logger, so a provider that dumps HTTP bodies at DEBUG
+pays that cost per line — in one measured case a single API response
+accounted for 49% of a 30MB log.
+
+Rankings within a log therefore hold: every span paid the same tax, so the
+slowest call really was the slowest. Absolute durations do not transfer to a
+run without logging, and comparisons between a chatty provider and a quiet one
+are the least reliable reading.
+
 `--profile` reports where the plan spent its time: resource types and
 providers ranked by total duration, the slowest individual calls and
 resources, and concurrency. Use it to find the slow resource, not to share

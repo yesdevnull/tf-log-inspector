@@ -206,6 +206,67 @@ span is matched to the core-side address context active at that moment, keyed
 on RPC name, resource type and time. It is **inference, not observation**, and
 is treated as such throughout — see Address attribution below.
 
+## The observer effect: logging changes what is measured
+
+**Measured 2026-09-04, and it is large.** Four captures of the same HCP
+workspace, days apart but the same configuration:
+
+| capture | wall clock |
+|---|---|
+| normal (structured output only) | 24.1s |
+| debug toggle | 138.3s |
+| `TF_LOG=TRACE` | 730.0s |
+| debug toggle + `TF_LOG_PROVIDER`/`TF_LOG_SDK_PROTO` at TRACE | 522.2s |
+
+A plan that takes 24 seconds unlogged takes around 20 times longer with debug
+logging on. The tool cannot see an unlogged run — its only input is the log —
+so **every absolute duration it reports is a duration under logging**.
+
+**The mechanism is already documented above:** Terraform captures a provider's
+stderr and re-logs it line by line through its own logger. Every line is
+re-parsed and re-emitted, then captured again by HCP. Providers that dump HTTP
+bodies at DEBUG therefore pay that cost per line of body.
+
+**A worked example, because the magnitude is easy to disbelieve.** The
+slowest single RPC in the dual-tier capture was a 116,591 ms `azurerm`
+`Configure`. Inside that span the provider made exactly one Azure API call —
+`GET /subscriptions/<id>/providers`, the resource-provider list — plus two
+token requests. `EnsureRegistered` completed 2 ms before the span closed,
+having found every required provider already registered, so no registration
+work occurred. What the span contains instead is the API response: 3.1 MB of
+azurerm log lines, inside a window of 14.8 MB — **49% of the entire 30 MB log
+produced by one call**.
+
+### What this means for the tool
+
+- **Rankings within a capture remain valid.** Every span in a log paid the
+  same logging tax, so "which resource type cost the most" and "which call was
+  slowest" survive. The Microsoft Graph reads really are the slow ones.
+- **Absolute durations do not transfer to an unlogged run**, and neither do
+  ratios between a heavily-logging provider and a quiet one. A provider that
+  dumps HTTP bodies is penalised against one that does not, so cross-provider
+  comparison is the least trustworthy reading.
+- **The TUI must not present these as wall-clock truth.** Phase 3 and phase 4
+  render timelines and rollups from exactly these numbers; a timeline that
+  says "116 seconds" invites a reader to go and optimise 116 seconds that will
+  not exist without the log. Some standing caveat belongs in the interface,
+  not only in this document.
+
+### Honest limits of this measurement
+
+The four captures are separate runs, and upstream API latency genuinely varies
+between them — `azuread_service_principal` totalled 19.0s across 20 reads in
+one capture and 247.0s across 17 in another, which is real variance and not
+logging overhead. So the 20x figure is an observation about four runs, not a
+controlled experiment. What is not in doubt is the direction, the rough
+magnitude, and the mechanism.
+
+**The controlled test, if it is ever worth running:** the structured-output
+capture is already the control at 24.1s, since it needs nothing enabled. Two
+normal runs, one with `resource_provider_registrations = "none"` and one
+without, would isolate the resource-provider list call's true cost without any
+logging tax at all.
+
 ## Architecture
 
 ```
@@ -438,6 +499,11 @@ complete resource state including secret values. Reliable redaction of that is
 not a guarantee this project will make.
 
 ## Views and interaction
+
+Every duration these views render is a duration under logging — see *The
+observer effect* above. The interface needs a standing caveat to that effect;
+a timeline reading "116 seconds" otherwise invites a reader to optimise time
+that will not exist without the log.
 
 Layout: three panes. Facets left, list centre, detail right.
 
