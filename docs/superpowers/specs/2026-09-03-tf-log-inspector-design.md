@@ -583,11 +583,26 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    fact: it depends on HCP capturing the Terraform process's stderr into the
    retrievable run log rather than discarding or separating it.
 
-   **The check:** enable debug logging on one run, retrieve the raw log, and
-   `grep -c tf_req_duration_ms`. A non-zero count confirms the entire premise
-   of the tool. A zero count means the timing data is not reachable from
-   outside the runner, and the project needs rethinking rather than
-   implementing. **This gates phase 2.**
+   **Result, 2026-09-04 (partial).** Dan ran a debug-enabled HCP run and
+   `grep`ped the raw log: no `tf_req_duration_ms`, but `tf_req_id` is present.
+
+   The cause is a logging *level*, not HCP discarding the data.
+   `tf_req_duration_ms` is written in exactly two places in
+   `terraform-plugin-go` — `tfprotov5/internal/tf5serverlogging/downstream_request.go`
+   and its v6 twin — and every write goes through `logging.ProtocolTrace`,
+   which is TRACE only. `"Sending request downstream"` is TRACE by the same
+   route, so **tiers 1 and 2 both require TRACE**. `tf_req_id` survives at
+   DEBUG because `RequestIdContext` sets it on three loggers, one of which is
+   the provider's own `tflog` logger whose level the provider author chooses.
+
+   **The remaining check:** the proto subsystem takes its level from
+   `TF_LOG_SDK_PROTO` and is built as its own `hclog.New` logger with its own
+   `SetLevel`, so it does not inherit the root SDK level. Keep the debug
+   toggle on, add `TF_LOG_SDK_PROTO=TRACE` as a workspace variable, and grep
+   again. If that is empty, repeat with `TF_LOG=TRACE` to distinguish a
+   downstream capture filter from the provider never emitting. Only if *both*
+   are empty is the timing data genuinely unreachable from outside the runner.
+   **This gates phase 2.**
 2. **How reliable address correlation is under real concurrency.** The
    mechanism is confirmed to exist — core logs addresses, and logs its own side
    of each RPC. What is unknown is the *ambiguity rate* when many resources of
@@ -596,8 +611,10 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    complexity and should be cut. **`--diagnose` must report the confidence
    distribution**, and that number decides whether the view ships.
 3. **Whether tier 2 pairing is available.** `"Sending request downstream"`
-   lines were absent from the public samples inspected. Phase 1 confirms
-   whether real logs contain them.
+   lines were absent from the public samples inspected. Now partly explained:
+   the line is emitted via `logging.ProtocolTrace`, so any sample captured
+   below TRACE cannot contain it. Tier 2 stands or falls with tier 1 on the
+   level question in open question 1, not on a separate one.
 4. **Which tier real logs actually support.** Tier 1 is expected to be the
    normal case, but providers not built on `terraform-plugin-go` will not emit
    `tf_req_duration_ms`. Phase 1 measures the proportion of spans by tier.
