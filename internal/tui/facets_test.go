@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -218,5 +219,122 @@ func TestFacetValueLineMarksAnEndClippedValue(t *testing.T) {
 	}
 	if !strings.HasSuffix(line, "2") {
 		t.Errorf("count was dropped: %q", line)
+	}
+}
+
+// manyFacetValues builds n values wide enough apart to tell apart in a
+// rendered pane, so a windowing test can name the exact value it expects.
+func manyFacetValues(n int) []model.FacetValue {
+	vs := make([]model.FacetValue, n)
+	for i := range vs {
+		vs[i] = model.FacetValue{Value: fmt.Sprintf("value-%03d", i), Count: 1}
+	}
+	return vs
+}
+
+// The facet cursor moves through every value of every dimension, but the
+// pane used to show the first h lines whatever the cursor was doing: on a
+// real capture, where the resource type dimension alone runs to hundreds of
+// values, most of the pane was unreachable -- j moved an invisible cursor
+// and space toggled a filter the user could not see. The window must follow
+// the cursor, and the dimension the cursor is in must stay labelled.
+func TestFacetPaneWindowsAroundTheCursor(t *testing.T) {
+	const height, target = 20, 45
+	m := Model{pane: PaneFacets, facets: []model.Facet{{Name: dimProvider, Values: manyFacetValues(60)}}}
+	for i := 0; i < target; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	_, val, ok := m.cursorFacetValue()
+	if want := fmt.Sprintf("value-%03d", target); !ok || val != want {
+		t.Fatalf("cursor is on %q (ok=%v), want %q -- the test never reached the value it renders for", val, ok, want)
+	}
+
+	out := m.renderFacets(30, height)
+	lines := strings.Split(out, "\n")
+	if len(lines) != height {
+		t.Errorf("facet pane rendered %d lines, want exactly %d", len(lines), height)
+	}
+	var cursorLines []string
+	for _, ln := range lines {
+		if strings.Contains(ln, "\x1b[7m") {
+			cursorLines = append(cursorLines, ln)
+		}
+	}
+	if len(cursorLines) != 1 {
+		t.Fatalf("got %d cursor lines, want exactly 1 -- the cursor is off the visible window:\n%s", len(cursorLines), out)
+	}
+	if want := fmt.Sprintf("value-%03d", target); !strings.Contains(cursorLines[0], want) {
+		t.Errorf("cursor line %q is not the cursor's value %q", cursorLines[0], want)
+	}
+	if !strings.Contains(out, facetSectionHeader(dimProvider)) {
+		t.Errorf("the cursor's dimension lost its header, so its checkboxes say nothing about what they select:\n%s", out)
+	}
+}
+
+// Narrowing a filter can leave the selection past the end of what is left.
+// The table then highlights nothing and the detail pane beside it falls to
+// its placeholder -- a list with no cursor at all until the user presses an
+// arrow key.
+func TestFilteringClampsTheSelection(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.Selected() != 1 {
+		t.Fatalf("Selected = %d, want the second call selected before the filter narrows the list", m.Selected())
+	}
+	m = focusFacets(t, m)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace}) // narrow to one provider's single call
+	if m.RowCount() != 1 {
+		t.Fatalf("fixture assumption changed: %d calls after selecting one provider, want 1", m.RowCount())
+	}
+	if m.Selected() != 0 {
+		t.Errorf("Selected = %d after the filter narrowed the list to 1 row, want 0", m.Selected())
+	}
+	if got := m.renderDetail(60, 20); strings.Contains(got, "(no call selected)") {
+		t.Errorf("detail pane lost its span because the selection was left past the end of the list:\n%s", got)
+	}
+}
+
+// Both panes carry a cursor at all times, so drawing both the same way
+// leaves Tab -- the spec's first key -- with no visible effect. The pane
+// without focus dims its cursor rather than dropping it.
+func TestOnlyTheFocusedPaneDrawsALiveCursor(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log") // focus starts on the list
+	facets, list := m.renderFacets(40, 20), m.renderList(60, 20)
+	if strings.Contains(facets, "\x1b[7m") {
+		t.Errorf("facet cursor is drawn as focused while the list has focus:\n%s", facets)
+	}
+	if !strings.Contains(facets, "\x1b[7;2m") {
+		t.Errorf("unfocused facet cursor is not drawn at all:\n%s", facets)
+	}
+	if !strings.Contains(list, "\x1b[7m") {
+		t.Errorf("focused list has no live cursor:\n%s", list)
+	}
+
+	m = focusFacets(t, m)
+	facets, list = m.renderFacets(40, 20), m.renderList(60, 20)
+	if !strings.Contains(facets, "\x1b[7m") {
+		t.Errorf("focused facet pane has no live cursor:\n%s", facets)
+	}
+	if strings.Contains(list, "\x1b[7m") {
+		t.Errorf("list cursor is still drawn as focused after Tab moved focus away:\n%s", list)
+	}
+	if !strings.Contains(list, "\x1b[7;2m") {
+		t.Errorf("unfocused list cursor is not drawn at all:\n%s", list)
+	}
+}
+
+// The detail pane has no cursor of its own, so Tab's third stop is
+// invisible unless the pane says so some other way.
+func TestDetailPaneTitleMarksFocus(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	if got := m.renderDetail(40, 20); strings.Contains(got, "\x1b[7m") {
+		t.Errorf("detail pane marks focus it does not have:\n%s", got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab}) // PaneList -> PaneDetail
+	if m.Focus() != PaneDetail {
+		t.Fatalf("focus = %v after one Tab from the list, want PaneDetail", m.Focus())
+	}
+	if got := m.renderDetail(40, 20); !strings.Contains(got, "\x1b[7m") {
+		t.Errorf("detail pane does not show that it has focus:\n%s", got)
 	}
 }

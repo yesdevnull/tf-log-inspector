@@ -181,7 +181,7 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 	}
 	data := []row{{cells: []string{"registry.terraform.io/hashicorp/aws", "1"}, spanIdx: -1}}
 
-	lines := strings.Split(renderTable(nil, cols, data, -1, 12, 10), "\n")
+	lines := strings.Split(renderTable(nil, cols, data, -1, true, 12, 10), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want a header and one data row:\n%s", len(lines), strings.Join(lines, "\n"))
 	}

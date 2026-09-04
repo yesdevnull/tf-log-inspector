@@ -22,19 +22,33 @@ var styleRenderer = func() *lipgloss.Renderer {
 	return r
 }()
 
-// selectedStyle marks the row or facet value the cursor is on. Reverse
-// video, rather than an explicit colour, reads correctly against both light
-// and dark terminal themes without this package having to guess either.
+// selectedStyle marks the row or facet value the cursor is on in the pane
+// that HAS keyboard focus. Reverse video, rather than an explicit colour,
+// reads correctly against both light and dark terminal themes without this
+// package having to guess either.
 var selectedStyle = styleRenderer.NewStyle().Reverse(true)
 
-// highlightLine re-renders s in reverse video, right-padded to fill w
-// terminal columns so the highlight reads as a full-width bar. The escape
-// sequences selectedStyle adds occupy no columns of their own, so the
-// content gets the whole of w: a styled row is exactly as wide on screen as
-// the unstyled rows above and below it, and the pane separators to its
-// right stay in the same column.
-func highlightLine(s string, w int) string {
-	return selectedStyle.Render(padRight(clipWidth(s, w), w))
+// unfocusedCursorStyle marks the cursor of a pane that does not have focus.
+// Both panes carry a cursor at all times -- Tab moves the keyboard between
+// them without moving either cursor -- so drawing both the same way leaves
+// the user no way to see what Tab did. It stays a reverse-video bar, dimmed
+// rather than dropped: a terminal that ignores faint then shows a cursor
+// that merely looks focused, where a marker-only treatment would show no
+// cursor at all.
+var unfocusedCursorStyle = styleRenderer.NewStyle().Reverse(true).Faint(true)
+
+// cursorBar re-renders s as the cursor's full-width bar, right-padded to
+// fill w terminal columns, in the style that says whether its pane has
+// focus. The escape sequences the styles add occupy no columns of their
+// own, so the content gets the whole of w: a styled row is exactly as wide
+// on screen as the unstyled rows above and below it, and the pane
+// separators to its right stay in the same column.
+func cursorBar(s string, w int, focused bool) string {
+	style := unfocusedCursorStyle
+	if focused {
+		style = selectedStyle
+	}
+	return style.Render(padRight(clipWidth(s, w), w))
 }
 
 // padRight right-pads s with spaces to exactly w terminal columns. Callers

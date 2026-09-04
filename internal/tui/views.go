@@ -199,12 +199,12 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 func (m *Model) renderList(w, h int) string {
 	switch m.view {
 	case ViewProviders:
-		return renderTable(nil, providerColumns, m.rows(), m.selected, w, h)
+		return renderTable(nil, providerColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
 	case ViewTypes:
 		preamble := typesPreamble(m.filter().SpansMatching(m.log.UISpans))
-		return renderTable(preamble, typeColumns, m.rows(), m.selected, w, h)
+		return renderTable(preamble, typeColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
 	case ViewCalls:
-		return renderTable(nil, callColumns, m.rows(), m.selected, w, h)
+		return renderTable(nil, callColumns, m.rows(), m.selected, m.pane == PaneList, w, h)
 	default:
 		return ""
 	}
@@ -241,12 +241,13 @@ func typesPreamble(uiSpans []span.Span) []string {
 // unreadable. clipWidth remains a safety net beneath all of this for the
 // pathological case where even the numeric columns alone exceed w.
 //
-// selected is highlighted, and the data rows are windowed so it stays
-// visible within h lines total: the preamble and header are never scrolled,
+// selected is drawn as the cursor bar, in the style focused says (see
+// cursorBar), and the data rows are windowed so it stays visible within h
+// lines total: the preamble and header are never scrolled,
 // only the data rows beneath them are.
 //
-// Every row, highlighted or not, is fit and clipped to the full w: the
-// escape sequences highlightLine wraps the selected row in occupy no
+// Every row, cursor or not, is fit and clipped to the full w: the
+// escape sequences cursorBar wraps the selected row in occupy no
 // terminal columns, so the highlighted row has exactly as many columns of
 // content as its neighbours and column widths stay shared across the whole
 // table.
@@ -255,7 +256,7 @@ func typesPreamble(uiSpans []span.Span) []string {
 // ("resource type") is told apart by its head even where the column's
 // values are told apart by their tails, so it end-clips while they
 // front-clip. See headerKinds.
-func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
+func renderTable(preamble []string, cols []column, data []row, selected int, focused bool, w, h int) string {
 	widths := fitColumnWidths(cols, columnWidths(cols, data), w)
 	kinds := columnKinds(cols)
 
@@ -270,7 +271,7 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 	for i := top; i < top+visible; i++ {
 		line := clipWidth(formatRow(data[i].cells, kinds, widths), w)
 		if i == selected {
-			line = highlightLine(line, w)
+			line = cursorBar(line, w, focused)
 		}
 		lines = append(lines, line)
 	}

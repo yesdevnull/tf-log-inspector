@@ -264,10 +264,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // invalidateRows drops any cached rows so the next call to rows() rebuilds
-// them from the current view and filter, rather than serving stale ones.
+// them from the current view and filter, rather than serving stale ones,
+// and re-clamps the selection against the list it rebuilds.
+//
+// The clamp belongs here because everything that can shorten the list comes
+// through here: narrowing a filter can leave the selection past the end of
+// what is left, and a table whose cursor is off its own end highlights
+// nothing while the detail pane beside it falls to "(no call selected)" --
+// a list with no cursor at all until the user presses an arrow key.
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
+	m.clampSelection()
 }
 
 // moveCursor routes an up/down/j/k press to whichever pane has focus: the
@@ -298,6 +306,14 @@ func (m *Model) moveCursor(delta int) {
 // clamp to catch it.
 func (m *Model) moveSelection(delta int) {
 	m.selected += delta
+	m.clampSelection()
+}
+
+// clampSelection brings the selection back inside the active view's rows:
+// to the last row when it sits past the end, and to 0 for a view with no
+// rows at all, which is where a selection has to sit for the first row that
+// appears to be the one selected.
+func (m *Model) clampSelection() {
 	if max := m.RowCount() - 1; m.selected > max {
 		m.selected = max
 	}

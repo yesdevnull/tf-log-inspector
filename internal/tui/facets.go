@@ -129,15 +129,50 @@ func (m *Model) moveFacetCursor(delta int) {
 }
 
 // renderFacets renders the facet pane: each dimension's name followed by its
-// values and their span counts (counts always reflect the whole log, not
-// the current filter -- see the doc comment on Model.facets), at most w
-// runes wide and h lines tall. The cursor marks the value space would
-// toggle -- highlighted, not just prefixed with ">", so it is actually
-// visible rather than merely inferable -- and a checkbox marks whether it is
+// values and their counts (counts always reflect the whole log, not the
+// current filter -- see the doc comment on Model.facets), at most w runes
+// wide and h lines tall. The cursor marks the value space would toggle --
+// drawn as a bar, not just prefixed with ">", so it is actually visible
+// rather than merely inferable -- and a checkbox marks whether it is
 // currently selected.
+//
+// The lines are windowed around the cursor by the same pin-to-edge rule the
+// centre table uses (scrollWindow). Showing the first h lines instead would
+// put every value below the fold out of reach: the cursor moves through all
+// of them, and on a real capture the resource type dimension alone runs to
+// hundreds of values, so j would move an invisible cursor and space would
+// toggle a filter the user cannot see.
 func (m Model) renderFacets(w, h int) string {
-	var lines []string
+	lines, cursor, header := m.facetLines(w)
+	top, visible := scrollWindow(cursor, len(lines), h)
+	if visible == 0 {
+		return ""
+	}
+	out := append([]string(nil), lines[top:top+visible]...)
+	// Keep the cursor's own dimension labelled once the window has scrolled
+	// past that dimension's header: the first visible line stands in for it,
+	// which costs one value line rather than leaving a column of checkboxes
+	// with nothing to say what they select. The cursor is never the line
+	// given up -- scrollWindow only pins it to the window's top edge when
+	// there is a single line to show, and a single line has no room for a
+	// header anyway.
+	if header < top && cursor > top {
+		out[0] = lines[header]
+	}
+	return strings.Join(out, "\n")
+}
+
+// facetLines renders every dimension's header and every value beneath it
+// into one flat list of lines, and reports which line the cursor sits on
+// and which line holds the header of the dimension the cursor is in.
+// Building the list whole is what lets the cursor's flat value index
+// (facetFlatIndex) be resolved against a display that also carries headers.
+func (m Model) facetLines(w int) (lines []string, cursor, header int) {
+	focused := m.pane == PaneFacets
 	for dimIdx, f := range m.facets {
+		if dimIdx == m.facetCursor.dim {
+			header = len(lines)
+		}
 		lines = append(lines, clipWidth(facetSectionHeader(f.Name), w))
 		kind := facetValueKind(f.Name)
 		for valIdx, v := range f.Values {
@@ -146,22 +181,20 @@ func (m Model) renderFacets(w, h int) string {
 				check = "x"
 			}
 			// Every line is built at the full pane width, cursor or not:
-			// the escapes highlightLine adds cost no terminal columns, so
-			// its own end-clip is a no-op here rather than re-truncating
-			// the count facetValueLine went to the trouble of keeping
-			// whole (or biting back into the value's tail -- the part a
-			// leading ellipsis was chosen to preserve).
+			// the escapes cursorBar adds cost no terminal columns, so its
+			// own end-clip is a no-op here rather than re-truncating the
+			// count facetValueLine went to the trouble of keeping whole (or
+			// biting back into the value's tail -- the part a leading
+			// ellipsis was chosen to preserve).
 			line := facetValueLine(check, v.Value, v.Count, w, kind)
 			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
-				line = highlightLine(line, w)
+				cursor = len(lines)
+				line = cursorBar(line, w, focused)
 			}
 			lines = append(lines, line)
 		}
 	}
-	if len(lines) > h {
-		lines = lines[:h]
-	}
-	return strings.Join(lines, "\n")
+	return lines, cursor, header
 }
 
 // facetValueKind is the kind of value a facet dimension holds, and so which

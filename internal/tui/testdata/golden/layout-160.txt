@@ -1,7 +1,7 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                                │ provider                                total  calls  max                  │ SPAN DETAIL                             
-[7m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                 [0m │ (no call selected)                      
+[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                 [0m │ (no call selected)                      
 [ ] …ry.terraform.io/hashicorp/google  1 │ registry.terraform.io/hashicorp/aws       5ms      1  5ms                  │                                         
 RPCS                                     │                                                                            │                                         
 [ ] ApplyResourceChange  2               │                                                                            │                                         

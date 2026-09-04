@@ -343,7 +343,15 @@ func joinPanes(h int, panes ...pane) string {
 // row's spanIdx is -1 for the latter -- so both fall through to the same
 // honest placeholder rather than showing stale or zero-valued fields.
 func (m *Model) renderDetail(w, h int) string {
-	lines := []string{clipWidth("SPAN DETAIL", w)}
+	// The detail pane has no cursor of its own to mark, so its title
+	// carries the focus instead: Tab's third stop would otherwise be
+	// invisible, leaving the user no way to tell that the keyboard had
+	// moved off the list.
+	title := clipWidth("SPAN DETAIL", w)
+	if m.pane == PaneDetail {
+		title = cursorBar(title, w, true)
+	}
+	lines := []string{title}
 	rows := m.rows()
 	if m.selected < 0 || m.selected >= len(rows) || rows[m.selected].spanIdx < 0 {
 		lines = append(lines, clipWidth("(no call selected)", w))
