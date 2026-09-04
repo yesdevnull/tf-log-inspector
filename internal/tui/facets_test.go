@@ -394,8 +394,15 @@ func TestLevelFacetCountsEveryEntry(t *testing.T) {
 // A level filters the raw log, through the same Filter.MatchEntry path the
 // model already had, and nothing else: the ranked views roll up spans, and
 // a span has no level for a filter to match.
+// multiline-body.log is chosen over mixed-hcp.log specifically because its
+// span-closing entry (tf_req_duration_ms, line 7) is TRACE while another
+// entry (the HTTP response body, line 2) is DEBUG: selecting DEBUG excludes
+// the span's own level. A regression that let level selection reach into the
+// rollup path would drop the span along with the TRACE entries, so this
+// fixture -- unlike one where every entry shares the span's level -- can
+// actually tell that regression apart from correct behaviour.
 func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	callsBefore := m.rows()
 	if len(callsBefore) == 0 {
 		t.Fatal("fixture assumption changed: no call rows to compare the rollup baseline against")
@@ -403,18 +410,18 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	rawBefore := m.renderRawLog(200, 100)
+	if !strings.Contains(rawBefore, "Called downstream") {
+		t.Fatal("fixture assumption changed: the TRACE-only line this test narrows away is not shown unfiltered")
+	}
 
-	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelTrace.String())
+	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelDebug.String())
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 
 	rawAfter := m.renderRawLog(200, 100)
 	if rawAfter == rawBefore {
 		t.Errorf("selecting a level left the raw log unchanged:\n%s", rawAfter)
 	}
-	if !strings.Contains(rawBefore, "SYNTHESISED") {
-		t.Fatal("fixture assumption changed: the untimestamped header comment is not shown unfiltered")
-	}
-	if strings.Contains(rawAfter, "SYNTHESISED") {
+	if strings.Contains(rawAfter, "Called downstream") {
 		t.Errorf("an entry outside the selected level survived the filter:\n%s", rawAfter)
 	}
 
