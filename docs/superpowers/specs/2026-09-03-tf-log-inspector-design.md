@@ -578,9 +578,21 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
 Every measurement dated 2026-09-04 below comes from three `--diagnose`
 reports on real HCP Terraform runs — one structured-output, one
 debug-toggle, one TRACE — all produced by `tfli` at commit `40c9a5f`, which
-predates the nested-header peel. That matters for one figure: the `INFO 901`
-level count is Terraform's wrapper level, not the provider's, and a re-run on
-a later build should show most of those as DEBUG. No other figure quoted here
+predates the nested-header peel. Re-running all three on `ce2b801` changed
+almost nothing: the 2174-span figures are byte-identical, and the only
+substantive difference is 1,152 message templates losing a masked `[DEBUG]`
+prefix.
+
+**A prediction recorded here was falsified.** This note previously said the
+`INFO 901` count was Terraform's wrapper level and that a later build would
+show most of those as DEBUG. It did not move, in either the debug or the
+TRACE report. The likely cause is that the bare-prefix branch of the peel
+strips the prefix without adopting its level — a deliberate choice, since a
+message quoting `[ERROR]` must not relabel a TRACE entry — which leaves the
+wrapper level in place for exactly the lines suspected of carrying the wrong
+one. Whether those 901 lines are mislabelled provider lines or genuine
+Terraform INFO lines is **unresolved**, and the peel should not be described
+as fixing a level misattribution until it is. No figure other than that count
 is affected, and the tier-1 result in particular is independent of the peel:
 `40c9a5f` matched `"Received downstream response"` as a bare message prefix,
 which is only possible because HCP delivers protocol lines un-nested.
