@@ -231,6 +231,78 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 	}
 }
 
+// An RPC name is not distinguished by its tail: it names one of a closed
+// set of plugin-protocol methods sharing long suffixes
+// (...ResourceChange, ...ResourceConfig, ...ResourceState) that diverge at
+// the HEAD, so the calls view's RPC column must end-clip. Front-clipping it
+// collides names that differ: at 100 columns -- the width Dan runs at --
+// the column renders 8 runes wide, where a front-clip renders both
+// PlanResourceChange and ApplyResourceChange as "…eChange".
+//
+// Asserting only that some RPC text appears would not catch this, since a
+// collided value is still non-empty: the two rows' RPC cells must be shown
+// to differ. two-rpcs.log's two calls carry those two names, which share
+// the 14-rune tail "ResourceChange", for exactly this reason.
+//
+// The expected clipped text is computed via fitColumnWidths and clipWidth
+// themselves, the same functions renderTable calls, rather than a
+// hand-picked width -- the same white-box approach as the provider test
+// above. The assertion is made against the centre pane alone, since the
+// facet list and the detail pane both spell RPC names out in full and
+// would satisfy a search of the whole composed view whatever the calls
+// table rendered.
+func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
+	m := update(t, New(testLog(t, "two-rpcs.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	rows := m.rows()
+	if len(rows) != 2 {
+		t.Fatalf("fixture assumption changed: got %d calls, want 2", len(rows))
+	}
+	first, second := m.log.RPCSpans[rows[0].spanIdx].RPC, m.log.RPCSpans[rows[1].spanIdx].RPC
+	if first == second {
+		t.Fatalf("fixture assumption changed: both calls have the same RPC %q", first)
+	}
+
+	centreWidth := layoutCentreWidth(m, 100)
+	budget := centreWidth - selectedStyleOverhead
+	if budget < 1 {
+		budget = centreWidth
+	}
+	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), budget)
+	rpcWidth := widths[1] // RPC is callColumns' second column, after duration
+	if rpcWidth >= len([]rune(first)) && rpcWidth >= len([]rune(second)) {
+		t.Fatalf("RPC column is %d runes wide at 100 columns, wide enough for both names whole -- this test no longer exercises clipping", rpcWidth)
+	}
+	firstWant, secondWant := clipWidth(first, rpcWidth), clipWidth(second, rpcWidth)
+	if firstWant == secondWant {
+		t.Fatalf("clipped RPC text collided at the computed width %d: %q", rpcWidth, firstWant)
+	}
+
+	out := m.View()
+	centre := centrePaneOf(out)
+	if !strings.Contains(centre, firstWant) {
+		t.Errorf("calls view at 100 columns is missing %q's distinguishing text %q:\n%s", first, firstWant, out)
+	}
+	if !strings.Contains(centre, secondWant) {
+		t.Errorf("calls view at 100 columns is missing %q's distinguishing text %q:\n%s", second, secondWant, out)
+	}
+}
+
+// centrePaneOf returns just the centre (list) pane's text from a composed
+// view, one line per line of the input. Panes are joined with paneSep, so a
+// line that carries every pane splits into a facet, centre and detail
+// field; a line rendered outside the pane row (the header, the caveat, the
+// key line) contributes nothing.
+func centrePaneOf(view string) string {
+	var centre []string
+	for _, line := range strings.Split(view, "\n") {
+		if fields := strings.Split(line, paneSep); len(fields) == 3 {
+			centre = append(centre, fields[1])
+		}
+	}
+	return strings.Join(centre, "\n")
+}
+
 // layoutCentreWidth returns the centre (list) pane's width for a terminal
 // w columns wide, replicating renderPanes' own arithmetic for the
 // w >= facetInlineWidth case this test renders at. Kept here rather than

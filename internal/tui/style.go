@@ -69,11 +69,12 @@ func padRight(s string, w int) string {
 // so an end-clip (clipWidth) collapses them to the same text while a
 // leading ellipsis keeps them apart. Prose and message text is the
 // opposite -- distinguished by its head -- and keeps using clipWidth
-// directly; this package's table and detail columns never carry prose, only
-// identifiers, which is why every one of them routes through this rather
-// than each render site choosing a direction for itself. See
-// clipIdentifierField for the "label plus identifier" line shape several of
-// those sites share.
+// directly, as does the one identifier that is also distinguished by its
+// head: an RPC name, which names one of a closed set of plugin-protocol
+// methods sharing long suffixes (see columnKind). Which of the two rules a
+// value gets follows from the kind of value it is, not from a choice made
+// at each render site. See clipIdentifierField for the "label plus
+// identifier" line shape several of those sites share.
 func clipValueFront(s string, w int) string {
 	r := []rune(s)
 	if len(r) <= w {

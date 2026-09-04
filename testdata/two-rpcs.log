@@ -1,0 +1,10 @@
+# SYNTHESISED to exercise the calls view's RPC column: every other RPC
+# fixture in this repo names a single RPC method, which cannot show whether
+# two RPC names that share a tail stay distinguishable once the column is
+# clipped. This file has two completed RPC spans from one provider whose RPC
+# names -- PlanResourceChange and ApplyResourceChange -- share the 14-rune
+# tail "ResourceChange" and diverge at the head. Modelled on
+# testdata/provider-rpc.log's "Received downstream response" shape; values
+# are invented; no line here is from a real run.
+2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=2634bc46-bb66-3d22-528d-d2eaf8165f52 tf_resource_type=aws_subnet tf_rpc=PlanResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=12 @module=sdk.proto
+2022-12-15T00:16:21.400Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=7a1f9c3e-2b4d-4e5f-9a1b-3c2d1e0f9a8b tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=25 @module=sdk.proto

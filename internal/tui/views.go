@@ -21,41 +21,62 @@ type row struct {
 	spanIdx int
 }
 
-// column describes one column of a rendered list table. right doubles as
-// this table's value-kind marker: a right-aligned column is numeric, never
-// clipped (fitColumnWidths reserves it at full width); a left-aligned one
-// is text, and every text column in every table this package renders holds
-// an identifier -- a provider address, a resource type, an RPC name --
-// never free-form prose, so formatRow always front-clips a left-aligned
-// cell (see clipValueFront) rather than choosing a direction per column. A
-// future column carrying genuine prose would need its own flag; none does
-// today.
+// columnKind says what a column holds. Which end of an over-long value
+// survives clipping is a property of the value itself, not of the render
+// site, so a column declares its kind once and formatRow derives both the
+// alignment and the clip direction from it -- there is no separate
+// alignment field that could disagree with the kind.
+type columnKind int
+
+const (
+	// tailIdentifierColumn holds an identifier distinguished from its
+	// siblings by its TAIL -- a provider address, a resource type. It is
+	// left-aligned and front-clipped via clipValueFront, so
+	// "…/hashicorp/aws" and "…/hashicorp/google" stay apart. It is the zero
+	// value: a column that forgets to declare a kind gets the conservative
+	// treatment rather than being reserved at full width as a number.
+	tailIdentifierColumn columnKind = iota
+	// headIdentifierColumn holds an identifier distinguished by its HEAD --
+	// an RPC name, one of a closed set of plugin-protocol methods that share
+	// long suffixes (...ResourceChange, ...ResourceConfig,
+	// ...ResourceState) and diverge in their first few characters. It is
+	// left-aligned and end-clipped via clipWidth: front-clipping
+	// PlanResourceChange and ApplyResourceChange renders both as "…eChange".
+	headIdentifierColumn
+	// numericColumn holds a formatted number -- a duration or a count. It is
+	// right-aligned and never clipped: fitColumnWidths reserves it at its
+	// full natural width, because a half-shown number tells the reader
+	// nothing.
+	numericColumn
+)
+
+// column describes one column of a rendered list table.
 type column struct {
 	header string
-	right  bool // numeric columns are right-aligned; text columns are left-aligned
+	kind   columnKind
 }
 
 var providerColumns = []column{
-	{header: "provider"},
-	{header: "total", right: true},
-	{header: "calls", right: true},
-	{header: "max", right: true},
+	{header: "provider", kind: tailIdentifierColumn},
+	{header: "total", kind: numericColumn},
+	{header: "calls", kind: numericColumn},
+	{header: "max", kind: numericColumn},
 }
 
 var typeColumns = []column{
-	{header: "resource type"},
-	{header: "UI res.", right: true},
-	{header: "UI total", right: true},
-	{header: "RPC calls", right: true},
-	{header: "RPC total", right: true},
-	{header: "RPC max", right: true},
+	{header: "resource type", kind: tailIdentifierColumn},
+	{header: "UI res.", kind: numericColumn},
+	{header: "UI total", kind: numericColumn},
+	{header: "RPC calls", kind: numericColumn},
+	{header: "RPC total", kind: numericColumn},
+	{header: "RPC max", kind: numericColumn},
 }
 
 var callColumns = []column{
-	{header: "duration", right: true},
-	{header: "RPC"},
-	{header: "resource type"},
-	{header: "provider"},
+	{header: "duration", kind: numericColumn},
+	{header: "RPC", kind: headIdentifierColumn},
+	{header: "resource type", kind: tailIdentifierColumn},
+	{header: "provider", kind: tailIdentifierColumn},
 }
 
 // rows returns the current view's rows, restricted to the active facet
@@ -205,14 +226,13 @@ func typesPreamble(uiSpans []span.Span) []string {
 // width unconditionally -- dropping or shrinking a number is what round 1
 // got wrong -- and fitColumnWidths distributes whatever width is left among
 // the text columns (every one of this package's tables carries only
-// provider addresses, resource types and RPC names in its text columns:
-// see the kind note on column.right). A text column narrower than its
-// natural width is front-clipped by formatRow via clipValueFront, not
-// dropped and not end-clipped: two rows with different providers or
-// resource types that happen to share a long prefix must still render
-// differently, or the ranking they sit in is unreadable. clipWidth remains
-// a safety net beneath all of this for the pathological case where even
-// the numeric columns alone exceed w.
+// identifiers in its text columns: provider addresses, resource types and
+// RPC names). A text column narrower than its natural width is clipped by
+// formatRow, not dropped, from whichever end its columnKind says carries
+// the less distinguishing part of the value: two rows whose providers or
+// RPCs differ must still render differently, or the ranking they sit in is
+// unreadable. clipWidth remains a safety net beneath all of this for the
+// pathological case where even the numeric columns alone exceed w.
 //
 // selected is highlighted, and the data rows are windowed so it stays
 // visible within h lines total: the preamble and header are never scrolled,
@@ -259,7 +279,8 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 
 // fitColumnWidths returns each column's final width: every numeric column
 // keeps its natural width from `natural` unconditionally, and the text
-// columns share whatever remains after those and the two-space gaps
+// columns -- both identifier kinds alike, since only their clip direction
+// differs -- share whatever remains after those and the two-space gaps
 // between every column are reserved, each capped at its own natural
 // width -- so a column that already fits never shrinks just because a
 // sibling needs more.
@@ -283,7 +304,7 @@ func fitColumnWidths(cols []column, natural []int, w int) []int {
 
 	reserved, pool := 2*(len(cols)-1), make([]int, 0, len(cols)) // gap between every adjacent column pair
 	for i, c := range cols {
-		if c.right {
+		if c.kind == numericColumn {
 			reserved += natural[i]
 		} else {
 			pool = append(pool, i)
@@ -382,22 +403,29 @@ func columnWidths(cols []column, data []row) []int {
 	return widths
 }
 
-// formatRow pads cells to widths and joins them with two spaces, aligning
-// each column per cols' right flag. Every text (left-aligned) cell is
-// front-clipped via clipValueFront first -- every text column in this
-// package holds an identifier (see clipValueFront), and clipValueFront is
-// a no-op when the cell already fits its column, so this is safe to apply
+// formatRow pads cells to widths and joins them with two spaces, taking
+// each column's alignment and clip direction from its kind (see
+// columnKind): a numeric cell is right-aligned and never clipped, since
+// fitColumnWidths reserves its column at full natural width; a
+// tail-distinguished identifier is front-clipped so its tail survives, and
+// a head-distinguished one is end-clipped so its head does. Both clips are
+// no-ops when the cell already fits its column, so they apply
 // unconditionally rather than singling out whichever column
-// fitColumnWidths happened to shrink. Numeric (right-aligned) cells are
-// never clipped: fitColumnWidths reserves every numeric column at its full
-// natural width, so one never needs to be.
+// fitColumnWidths happened to shrink.
 func formatRow(cells []string, cols []column, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
 		w := widths[i]
-		if i < len(cols) && cols[i].right {
+		kind := tailIdentifierColumn
+		if i < len(cols) {
+			kind = cols[i].kind
+		}
+		switch kind {
+		case numericColumn:
 			parts[i] = fmt.Sprintf("%*s", w, c)
-		} else {
+		case headIdentifierColumn:
+			parts[i] = fmt.Sprintf("%-*s", w, clipWidth(c, w))
+		default:
 			parts[i] = fmt.Sprintf("%-*s", w, clipValueFront(c, w))
 		}
 	}
