@@ -970,7 +970,22 @@ func FacetsForSpans(spans []span.Span) []Facet {
 }
 ```
 
-Add `sortFacetValues` using `sort.Slice`, ordering by `Count` descending then `Value` ascending.
+Add the helper it calls:
+
+```go
+// sortFacetValues orders a facet's values by span count descending, ties
+// broken by value ascending so the ordering is total.
+func sortFacetValues(vs []FacetValue) {
+	sort.Slice(vs, func(i, j int) bool {
+		if vs[i].Count != vs[j].Count {
+			return vs[i].Count > vs[j].Count
+		}
+		return vs[i].Value < vs[j].Value
+	})
+}
+```
+
+and add `"sort"` to the file's imports.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1281,6 +1296,13 @@ func TestReportStatesUIHookResolution(t *testing.T) {
 	}
 }
 
+func TestReportShowsProviderRollup(t *testing.T) {
+	out := render(t, "../../testdata/provider-rpc.log")
+	if !strings.Contains(out, "BY PROVIDER") {
+		t.Errorf("report missing the provider rollup:\n%s", out)
+	}
+}
+
 func TestReportShowsConcurrencyForRPCSpans(t *testing.T) {
 	out := render(t, "../../testdata/provider-rpc.log")
 	if !strings.Contains(out, "CONCURRENCY") {
@@ -1311,10 +1333,11 @@ Write `Render` to emit, in order:
 
 1. A header naming the file's size and span counts, then the warning line — it must contain the exact substring `not masked`, e.g. `Resource addresses below are NOT masked. Unlike --diagnose, this report is not safe to share.`
 2. `BY RESOURCE TYPE` — `model.JoinByResourceType(l.RPCSpans, l.UISpans)`, columns: resource type, UI resources, UI total, RPC calls, RPC total, RPC max. Include the whole-seconds caveat (must contain `whole seconds`) whenever any UI column is non-zero.
-3. `SLOWEST CALLS` — RPC spans sorted by `DurationMs` descending, top 20: duration, RPC, resource type, provider.
-4. `SLOWEST RESOURCES` — UI-hook spans sorted by `DurationMs` descending, top 20: duration, action, resource type, **unmasked** `Address`.
-5. `CONCURRENCY` — for RPC spans only: `model.PeakConcurrency`, the lane count from `model.PackLanes`, summed span time, and the ratio of summed time to wall clock. Call `PackLanes` on `l.RPCSpans` and `l.UISpans` separately, never on a concatenation; surface `model.ErrMixedTimelines` as a returned error rather than ignoring it.
-6. When `len(l.RPCSpans) == 0 && len(l.UISpans) == 0`, print a single explanatory line containing `no spans` naming the likely cause — no protocol lines and no `terraform.ui` stream — and return without the other sections.
+3. `BY PROVIDER` — `model.RollupBy(l.RPCSpans, func(s span.Span) string { return s.Provider })`, columns: total, calls, max, provider. This is the spec's view 1. Skip the section when there are no RPC spans.
+4. `SLOWEST CALLS` — RPC spans sorted by `DurationMs` descending, top 20: duration, RPC, resource type, provider.
+5. `SLOWEST RESOURCES` — UI-hook spans sorted by `DurationMs` descending, top 20: duration, action, resource type, **unmasked** `Address`.
+6. `CONCURRENCY` — for RPC spans only: `model.PeakConcurrency`, the lane count from `model.PackLanes`, summed span time, and the ratio of summed time to wall clock. Call `PackLanes` on `l.RPCSpans` and `l.UISpans` separately, never on a concatenation; surface `model.ErrMixedTimelines` as a returned error rather than ignoring it.
+7. When `len(l.RPCSpans) == 0 && len(l.UISpans) == 0`, print a single explanatory line containing `no spans` naming the likely cause — no protocol lines and no `terraform.ui` stream — and return without the other sections.
 
 Reuse the millisecond formatting shape from `internal/diagnose/diagnose.go`'s `formatMs` (sub-second as `842ms`, otherwise one decimal second). Copy it rather than exporting it: the two reports are free to diverge, and a shared formatter would couple a safety-critical renderer to a convenience one.
 
