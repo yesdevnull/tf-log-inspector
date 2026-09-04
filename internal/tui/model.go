@@ -405,8 +405,8 @@ func (m *Model) moveSelection(delta int) {
 // rows at all, which is where a selection has to sit for the first row that
 // appears to be the one selected.
 func (m *Model) clampSelection() {
-	if max := m.RowCount() - 1; m.selected > max {
-		m.selected = max
+	if last := m.RowCount() - 1; m.selected > last {
+		m.selected = last
 	}
 	if m.selected < 0 {
 		m.selected = 0

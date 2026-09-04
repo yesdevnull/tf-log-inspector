@@ -15,6 +15,14 @@ import (
 // row is one line of the centre pane's list, already formatted into display
 // cells.
 type row struct {
+	// cells holds exactly one formatted cell per column of the column list
+	// this row's view is paired with in renderList -- providerRows with
+	// providerColumns, typeRows with typeColumns, callRows with
+	// callColumns. Every width and kind a cell is rendered against is
+	// derived from that same list, so columnWidths and formatRow index the
+	// two together without guarding: a builder that drops or adds a cell is
+	// a programming error, and an out-of-range panic at the first render
+	// says so where a quietly missing column would not.
 	cells []string
 	// spanIdx is the index into m.log.RPCSpans that this row represents, or
 	// -1 when the row is a rollup rather than a single span. The raw log's
@@ -226,17 +234,23 @@ func (m *Model) renderList(w, h int) string {
 	if m.filterActive() {
 		empty = noMatchNote
 	}
+	// Only the columns and the preamble differ between the table views;
+	// everything else renderTable needs is the same for all of them, so the
+	// switch selects those two and the call itself is made once.
+	var cols []column
+	var preamble []string
 	switch m.view {
 	case ViewProviders:
-		return renderTable(nil, providerColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+		cols = providerColumns
 	case ViewTypes:
-		preamble := typesPreamble(m.filter().SpansMatching(m.log.UISpans))
-		return renderTable(preamble, typeColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+		cols = typeColumns
+		preamble = typesPreamble(m.filter().SpansMatching(m.log.UISpans))
 	case ViewCalls:
-		return renderTable(nil, callColumns, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+		cols = callColumns
 	default:
 		return ""
 	}
+	return renderTable(preamble, cols, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 }
 
 // captureGuidance is what the centre pane shows for a log with no spans at
@@ -389,9 +403,6 @@ func fitColumnWidths(cols []column, natural []int, w int) []int {
 			pool = append(pool, i)
 		}
 	}
-	if len(pool) == 0 {
-		return widths
-	}
 	remaining := w - reserved
 	if remaining < 0 {
 		remaining = 0
@@ -502,12 +513,7 @@ func columnWidths(cols []column, data []row) []int {
 	}
 	for _, r := range data {
 		for i, c := range r.cells {
-			if i >= len(widths) {
-				continue
-			}
-			if n := lipgloss.Width(c); n > widths[i] {
-				widths[i] = n
-			}
+			widths[i] = max(widths[i], lipgloss.Width(c))
 		}
 	}
 	return widths
@@ -527,11 +533,7 @@ func columnWidths(cols []column, data []row) []int {
 func formatRow(cells []string, kinds []columnKind, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
-		w := widths[i]
-		kind := tailIdentifierColumn
-		if i < len(kinds) {
-			kind = kinds[i]
-		}
+		w, kind := widths[i], kinds[i]
 		if kind == numericColumn {
 			// A numeric cell is formatMs or strconv output: ASCII, where a
 			// rune is a column, so fmt's own rune-counted width is the same

@@ -96,10 +96,10 @@ func (m *Model) scrollRawLog(delta int) {
 	if m.raw.top < 0 {
 		m.raw.top = 0
 	}
-	if max := len(m.log.Entries) - 1; max < 0 {
+	if last := len(m.log.Entries) - 1; last < 0 {
 		m.raw.top = 0
-	} else if m.raw.top > max {
-		m.raw.top = max
+	} else if m.raw.top > last {
+		m.raw.top = last
 	}
 }
 

@@ -62,14 +62,10 @@ const hugeWidth = 1 << 30
 func facetNaturalWidth(facets []model.Facet) int {
 	width := minFacetPaneWidth
 	for _, f := range facets {
-		if n := lipgloss.Width(facetSectionHeader(f.Name)); n > width {
-			width = n
-		}
+		width = max(width, lipgloss.Width(facetSectionHeader(f.Name)))
 		kind := facetValueKind(f.Name)
 		for _, v := range f.Values {
-			if n := lipgloss.Width(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind)); n > width {
-				width = n
-			}
+			width = max(width, lipgloss.Width(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind)))
 		}
 	}
 	return width
@@ -87,9 +83,7 @@ func detailNaturalWidth(rpcSpans []span.Span) int {
 	width := minDetailPaneWidth
 	for _, s := range rpcSpans {
 		for _, line := range spanDetailLines(s, hugeWidth) {
-			if n := lipgloss.Width(line); n > width {
-				width = n
-			}
+			width = max(width, lipgloss.Width(line))
 		}
 	}
 	return width
@@ -133,6 +127,14 @@ func capPaneWidth(width, terminalWidth, minWidth, maxWidth int) int {
 // paneSep separates adjacent panes when composing a row. It is one visible
 // column (the │ itself) plus a space of breathing room on each side.
 const paneSep = " │ "
+
+// paneSepWidth is how many terminal columns paneSep costs a pane row, which
+// is what the width arithmetic in renderPanes has to subtract. It is
+// measured with lipgloss.Width, the same measure every other width in this
+// package uses: a rune count agrees with it only for as long as paneSep
+// stays ASCII-plus-a-narrow-box-drawing-glyph, and the whole package's rule
+// is that display columns are never inferred from rune counts.
+var paneSepWidth = lipgloss.Width(paneSep)
 
 // defaultWidth and defaultHeight size the view before the first
 // tea.WindowSizeMsg arrives -- bubbletea does not report a size until the
@@ -244,18 +246,18 @@ func countMatching(f model.Filter, spans []span.Span) int {
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer() string {
-	switch {
-	case m.blockedJump:
+	if m.blockedJump {
 		return jumpBlockedNote
-	case m.view != ViewRawLog:
-		return footerKeys()
-	case m.raw.searching:
-		return "/" + m.raw.query
-	case m.raw.notFound:
-		return "/" + m.raw.lastQuery + "  pattern not found"
-	default:
-		return footerKeys()
 	}
+	if m.view == ViewRawLog {
+		switch {
+		case m.raw.searching:
+			return "/" + m.raw.query
+		case m.raw.notFound:
+			return "/" + m.raw.lastQuery + "  pattern not found"
+		}
+	}
+	return footerKeys()
 }
 
 // jumpBlockedNote is what the footer says when Enter refused to jump to a
@@ -360,7 +362,7 @@ func (m *Model) renderPanes(w, h int) string {
 	case w >= facetInlineWidth:
 		facetW := facetPaneWidth(m.facetPaneNatural, w)
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
-		listW := w - facetW - detailW - 2*len([]rune(paneSep))
+		listW := w - facetW - detailW - 2*paneSepWidth
 		return joinPanes(h,
 			pane{m.renderFacets(facetW, h), facetW},
 			pane{m.renderCentre(listW, h), listW},
@@ -368,7 +370,7 @@ func (m *Model) renderPanes(w, h int) string {
 		)
 	case w >= detailInlineWidth:
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
-		listW := w - detailW - len([]rune(paneSep))
+		listW := w - detailW - paneSepWidth
 		return joinPanes(h,
 			pane{m.renderCentre(listW, h), listW},
 			pane{m.renderDetail(detailW, h), detailW},

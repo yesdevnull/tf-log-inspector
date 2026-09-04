@@ -471,7 +471,7 @@ func centrePaneOf(view string) string {
 func layoutCentreWidth(m Model, w int) int {
 	facetW := facetPaneWidth(m.facetPaneNatural, w)
 	detailW := detailPaneWidth(m.detailPaneNatural, w)
-	return w - facetW - detailW - 2*len([]rune(paneSep))
+	return w - facetW - detailW - 2*paneSepWidth
 }
 
 // minDetailPaneWidth exists so the detail pane always has room for its own
