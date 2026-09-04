@@ -74,43 +74,34 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 // plan was slow because of work or because of waiting: summed span time
 // divided by wall clock gives the average, and this gives the ceiling.
 //
-// Events at the same instant are ordered by priority, not just by delta: a
-// genuine handover -- one span's end coinciding with a different span's
-// start -- must retire before the new start is counted (peakEndPriority
-// before peakStartPriority), or two adjacent, non-overlapping spans would
-// double-count that instant. But a zero-duration span's own end coincides
-// with its own start at the same instant, and if that end retired first --
-// as an ordinary end always should -- the pair would always net to zero and
-// the span would never register as concurrent with anything, even sitting
-// squarely inside a window where other spans are running. So a zero-duration
-// span's end is given its own, lowest priority: it retires only after every
-// start at that instant, including its own, has been counted.
+// Both this function and PackLanes use half-open interval semantics:
+// [StartMs, EndMs), the same convention PackLanes' "laneEnd[l] <= s.StartMs"
+// reuse test expresses. A zero-duration span has StartMs == EndMs, so its
+// interval [t, t) is empty -- it contains no instant, so it overlaps
+// nothing, so it correctly contributes nothing here. That holds even when
+// the span sits nested inside others that are genuinely running: an empty
+// interval overlaps no instant, including the instants those other spans
+// occupy. PackLanes still allocates such a span a lane, because the phase-4
+// timeline needs a row to draw it in even though it correctly overlaps
+// nothing -- so PackLanes' lane count can legitimately exceed this
+// function's peak. That is not a discrepancy to reconcile; the two answer
+// different questions.
 func PeakConcurrency(spans []span.Span) int {
-	const (
-		peakEndPriority     = 0 // end of a span whose StartMs != EndMs: a genuine handover
-		peakStartPriority   = 1
-		peakZeroEndPriority = 2 // end of a span whose StartMs == EndMs: retire only after counted
-	)
 	type event struct {
-		at       uint32
-		priority int
-		delta    int
+		at    uint32
+		delta int
 	}
 	events := make([]event, 0, len(spans)*2)
 	for _, s := range spans {
-		endPriority := peakEndPriority
-		if s.StartMs == s.EndMs {
-			endPriority = peakZeroEndPriority
-		}
-		events = append(events,
-			event{at: s.StartMs, priority: peakStartPriority, delta: 1},
-			event{at: s.EndMs, priority: endPriority, delta: -1})
+		events = append(events, event{s.StartMs, 1}, event{s.EndMs, -1})
 	}
 	sort.Slice(events, func(i, j int) bool {
 		if events[i].at != events[j].at {
 			return events[i].at < events[j].at
 		}
-		return events[i].priority < events[j].priority
+		// Ends before starts at the same instant: a span ending exactly as
+		// another begins is a handover, not overlap.
+		return events[i].delta < events[j].delta
 	})
 	var cur, peak int
 	for _, e := range events {

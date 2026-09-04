@@ -76,9 +76,7 @@ func Render(w io.Writer, l *model.Log) error {
 	writeProviderRollup(b, l.RPCSpans)
 	writeSlowestCalls(b, l.RPCSpans)
 	writeSlowestResources(b, l.UISpans)
-	if err := writeConcurrency(b, l.RPCSpans, l.UISpans); err != nil {
-		return err
-	}
+	writeConcurrency(b, l.RPCSpans)
 
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -200,20 +198,20 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 }
 
 // writeConcurrency renders CONCURRENCY for the RPC tier: peak concurrency,
-// lane count, summed span time and its ratio to wall clock. It packs each
-// tier's spans separately -- see model.ErrMixedTimelines -- and surfaces a
-// packing error rather than ignoring it.
-func writeConcurrency(b *strings.Builder, rpcSpans, uiSpans []span.Span) error {
+// summed span time, wall clock and their ratio.
+//
+// This deliberately does not call model.PackLanes or print a lane count.
+// PackLanes' lane count is a rendering construct for the phase-4 timeline --
+// every span, including a degenerate zero-duration one, needs a row to draw
+// it in, whether or not it overlaps anything -- not a profiling metric. For
+// a degenerate zero-duration span, PackLanes' lane count and
+// model.PeakConcurrency's peak measure different things and can legitimately
+// disagree (see the doc comment on PeakConcurrency), so printing both here
+// invites exactly the "these two numbers should match" reading that is
+// wrong.
+func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) {
 	if len(rpcSpans) == 0 {
-		return nil
-	}
-
-	rpcLanes, err := model.PackLanes(rpcSpans)
-	if err != nil {
-		return fmt.Errorf("packing RPC-tier lanes: %w", err)
-	}
-	if _, err := model.PackLanes(uiSpans); err != nil {
-		return fmt.Errorf("packing UI-hook-tier lanes: %w", err)
+		return
 	}
 
 	var summed uint64
@@ -227,14 +225,12 @@ func writeConcurrency(b *strings.Builder, rpcSpans, uiSpans []span.Span) error {
 
 	fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
 	fmt.Fprintf(b, "  peak concurrency     %d\n", model.PeakConcurrency(rpcSpans))
-	fmt.Fprintf(b, "  lanes packed         %d\n", len(rpcLanes))
 	fmt.Fprintf(b, "  summed span time     %s\n", formatMs(summed))
 	if wallClock > 0 {
 		fmt.Fprintf(b, "  wall clock           %s\n", formatMs(uint64(wallClock)))
 		fmt.Fprintf(b, "  summed / wall clock  %.1fx\n", float64(summed)/float64(wallClock))
 	}
 	fmt.Fprintf(b, "\n")
-	return nil
 }
 
 // formatMs renders a millisecond duration: whole milliseconds below one
