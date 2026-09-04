@@ -57,8 +57,8 @@ func TestEscClearsAllFilters(t *testing.T) {
 	}
 }
 
-// The dimension header is upper-cased and pluralised (task 6, to match the
-// design mock-up's PROVIDERS/LEVELS section labels), so this checks case-
+// The dimension header is upper-cased and pluralised to match the design
+// mock-up's PROVIDERS/LEVELS section labels, so this checks case-
 // insensitively rather than pinning the exact casing.
 func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
@@ -68,8 +68,8 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 	}
 }
 
-// Step A (task 6): without a visible cursor, space's "toggle whatever the
-// cursor points at" is unusable -- the user cannot tell what they are about
+// Without a visible cursor, space's "toggle whatever the cursor points at"
+// is unusable -- the user cannot tell what they are about
 // to select. two-providers.log's provider values are sorted alphabetically
 // (aws, then google), so the cursor starts on the aws value.
 func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
@@ -126,12 +126,11 @@ func TestRowsCacheInvalidatesOnFilterChange(t *testing.T) {
 	}
 }
 
-// Fix round 1, finding A: two facet values sharing a long common prefix --
-// two provider registry addresses, most often -- must still render as
-// distinguishable lines even when neither fits in full. A fixed-width
-// facet pane clipped both to "[ ] registry.terraform.i", identical for
-// both providers; clipping the value from the front instead keeps each
-// one's distinguishing tail.
+// Two facet values sharing a long common prefix -- two provider registry
+// addresses, most often -- must still render as distinguishable lines even
+// when neither fits in full. Clipping from the end would give both
+// "[ ] registry.terraform.i", one checkbox indistinguishable from the
+// other; clipping from the front keeps each one's distinguishing tail.
 func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
 	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 20, facetValueKind(dimProvider))
 	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 20, facetValueKind(dimProvider))
@@ -146,10 +145,10 @@ func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
 	}
 }
 
-// Fix round 1, finding A: the spec requires facets to show a count for
-// every value. A count sliced off by clipping the whole assembled line
-// would be a spec miss, not just a squeeze, so the count must survive even
-// when the value itself is clipped hard.
+// The spec requires facets to show a count for every value. A count sliced
+// off by clipping the whole assembled line would be a spec miss, not just a
+// squeeze, so the count must survive even when the value itself is clipped
+// hard.
 func TestFacetValueLineNeverDropsTheCount(t *testing.T) {
 	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 20, facetValueKind(dimProvider))
 	if !strings.HasSuffix(line, "42") {
@@ -201,11 +200,10 @@ func TestFacetPaneKeepsRPCNamesDistinctAtOneHundredColumns(t *testing.T) {
 }
 
 // A clipped value must be marked as clipped, whichever end it was cut
-// from. The front-clip has carried a leading ellipsis since the facet pane
-// was first squeezed; the end-clip carried nothing, so a head-distinguished
-// value such as an RPC name rendered as "[ ] ApplyResourceChang  2" -- a
-// truncated control that reads as a complete one, and a user who picks it
-// expecting the whole name gets no hint they are choosing blind.
+// from. Unmarked, a head-distinguished value such as an RPC name renders as
+// "[ ] ApplyResourceChang  2": a truncated control that reads as a complete
+// one, so a user picking it expecting the whole name gets no hint they are
+// choosing blind.
 func TestFacetValueLineMarksAnEndClippedValue(t *testing.T) {
 	const value = "ApplyResourceChange"
 	line := facetValueLine(" ", value, 2, 24, facetValueKind(dimRPC))
@@ -233,12 +231,12 @@ func manyFacetValues(n int) []model.FacetValue {
 	return vs
 }
 
-// The facet cursor moves through every value of every dimension, but the
-// pane used to show the first h lines whatever the cursor was doing: on a
-// real capture, where the resource type dimension alone runs to hundreds of
-// values, most of the pane was unreachable -- j moved an invisible cursor
-// and space toggled a filter the user could not see. The window must follow
-// the cursor, and the dimension the cursor is in must stay labelled.
+// The facet cursor moves through every value of every dimension, so the
+// window has to follow it: a pane that showed its first h lines whatever
+// the cursor was doing would put everything below the fold out of reach --
+// on a real capture the resource type dimension alone runs to hundreds of
+// values -- with j moving an invisible cursor and space toggling a filter
+// the user cannot see. The dimension the cursor is in must stay labelled.
 func TestFacetPaneWindowsAroundTheCursor(t *testing.T) {
 	const height, target = 20, 45
 	m := Model{pane: PaneFacets, facets: []model.Facet{{Name: dimProvider, Values: manyFacetValues(60)}}}

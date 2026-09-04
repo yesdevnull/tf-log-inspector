@@ -40,12 +40,11 @@ func TestRunReportsNonHclogContent(t *testing.T) {
 	}
 }
 
-// The structured-output fixture must report structured lines and, now that
-// span.Sniffer counts completion-bearing UI-hook lines, select the
-// ui-reported tier as usable rather than falling through to the
-// no-tier-usable structured-output guidance -- and it must never disclose
-// the fixture's resource addresses. Wiring span.UIHookBuilder itself into
-// this CLI so spans are actually built is task 2's job.
+// The structured-output fixture must report structured lines and select the
+// ui-reported tier as usable -- span.Sniffer counts completion-bearing
+// UI-hook lines, so the report has a usable tier rather than falling
+// through to the no-tier-usable structured-output guidance -- and it must
+// never disclose the fixture's resource addresses.
 func TestRunReportsStructuredOutputLog(t *testing.T) {
 	var sb strings.Builder
 	if err := run([]string{"--diagnose", filepath.Join("..", "..", "testdata", "structured-ui.log")}, &sb, io.Discard); err != nil {
@@ -76,14 +75,8 @@ func TestRunReportsMissingFileClearly(t *testing.T) {
 	}
 }
 
-// A bare invocation (no --diagnose or --profile) now opens the TUI rather
-// than erroring. tea.NewProgram needs a terminal, so this cannot launch the
-// program in a test; instead it checks that the default case reaches
-// model.Load, by way of the load error a missing file surfaces. That error
-// is model.Load's, not the old "--diagnose or --profile" usage message this
-// test replaces.
-// A bare invocation (no --diagnose or --profile) now opens the TUI rather
-// than erroring. runProfile and runTUI are structurally identical up to a
+// A bare invocation (no --diagnose or --profile) opens the TUI rather than
+// erroring. runProfile and runTUI are structurally identical up to a
 // missing-file error (both call model.Load and return its error verbatim),
 // so a test that only checks the error text cannot tell the two apart --
 // it would pass unchanged if the default case dispatched to runProfile

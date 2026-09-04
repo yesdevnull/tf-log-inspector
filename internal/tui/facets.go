@@ -189,7 +189,7 @@ func (m *Model) moveFacetCursor(delta int) {
 
 // renderFacets renders the facet pane: each dimension's name followed by its
 // values and their counts (counts always reflect the whole log, not the
-// current filter -- see the doc comment on Model.facets), at most w runes
+// current filter -- see the doc comment on Model.facets), at most w columns
 // wide and h lines tall. The cursor marks the value space would toggle --
 // drawn as a bar, not just prefixed with ">", so it is actually visible
 // rather than merely inferable -- and a checkbox marks whether it is
@@ -272,7 +272,7 @@ func facetValueKind(dim string) columnKind {
 }
 
 // facetValueLine formats one facet value's line -- a checkbox, the value
-// and its count -- clipped to at most w runes via clipIdentifierField. The
+// and its count -- clipped to at most w columns via clipIdentifierField. The
 // count is never truncated: the spec requires facets to show a count for
 // every value ("each with counts"), so a count dropped by clipping would
 // be a spec miss, not just a squeeze. The value itself is the part that

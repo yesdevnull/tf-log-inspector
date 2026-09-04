@@ -70,8 +70,8 @@ func TestRowCountMatchesRowsLength(t *testing.T) {
 }
 
 // A view narrower than its columns must degrade, not wrap into unreadable
-// wreckage. Width degradation proper is Task 6; this pins that renderList
-// never emits a line wider than it was given. Width is display columns:
+// wreckage. This pins the part renderList itself owns: it never emits a
+// line wider than it was given. Width is display columns:
 // the selected row's ANSI escapes take up none, so counting their runes
 // would flag a row that is exactly as wide as its neighbours.
 func TestRenderListRespectsItsWidth(t *testing.T) {
@@ -83,8 +83,8 @@ func TestRenderListRespectsItsWidth(t *testing.T) {
 	}
 }
 
-// Step A (task 6): without a visible highlight, enter-to-jump (task 5) is
-// unusable -- the user cannot tell which row they are about to act on.
+// Without a visible cursor bar, enter-to-jump is unusable -- the user
+// cannot tell which row they are about to act on.
 // New starts selection on row 0, so the header (line 0) must be plain and
 // the first data row (line 1) must carry the highlight.
 func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
@@ -106,23 +106,23 @@ func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
 	}
 }
 
-// Step B (task 6): renderList used to always show the first h lines
-// regardless of Selected(), so selecting a row past the first screenful left
-// it off-screen. provider-rpc.log's two calls, rendered into a pane with
-// room for only one data row, forces the window to move.
+// A window pinned to the first h lines regardless of Selected() leaves a
+// row selected past the first screenful off-screen. provider-rpc.log's two
+// calls, rendered into a pane with room for only one data row, force the
+// window to move.
 //
 // Row identity is checked via duration ("5ms"/"1ms"), not resource type:
-// fix round 3 lets the calls view's text columns (RPC, resource type,
-// provider) front-clip under a narrow pane, same as any identifier column,
-// so a resource-type substring is no longer a safe way to tell the rows
-// apart at width 60 -- duration is numeric and never clipped.
+// the calls view's text columns (RPC, resource type, provider) front-clip
+// under a narrow pane like any identifier column, so a resource-type
+// substring is not a safe way to tell the rows apart at width 60 --
+// duration is numeric and never clipped.
 func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if len(m.rows()) != 2 {
 		t.Fatalf("fixture assumption changed: got %d calls, want 2", len(m.rows()))
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // select row 1
-	out := m.renderList(60, 2)                                           // header + 1 data row: row 0 no longer fits
+	out := m.renderList(60, 2)                                           // header + 1 data row: no room for row 0 as well
 	if strings.Contains(out, "5ms") {
 		t.Errorf("scrolled window still shows row 0, which should have scrolled off:\n%s", out)
 	}
@@ -145,14 +145,13 @@ func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
 	}
 }
 
-// Fix round 2, finding 2: renderTable now reserves every numeric column at
-// its natural width unconditionally and shrinks only the widest text
-// column, front-clipping it (the same leading-ellipsis treatment finding A
-// applied to facet values) rather than dropping columns wholesale (round
-// 1's fix) or slicing the joined row mid-cell (the original bug). At a
-// width too narrow for the provider column's long registry addresses to
-// fit in full, the provider column must still show a recognisable,
-// front-clipped tail, and every number must still be whole.
+// A ranked view without its numbers ranks nothing, and an identifier cut
+// from the wrong end names nothing: renderTable reserves every numeric
+// column at its natural width and takes the shortfall out of the text
+// columns, which front-clip. At a width too narrow for the provider
+// column's long registry addresses to fit in full, the provider column
+// must still show a recognisable, front-clipped tail, and every number
+// must still be whole.
 func TestRenderListFrontClipsTheTextColumnAndKeepsNumbersWhole(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	out := m.renderList(40, 20) // narrower than the provider column's natural width

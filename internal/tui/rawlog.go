@@ -11,10 +11,11 @@ import (
 )
 
 // rawLogPageSize is how many entries PgUp/PgDown move the raw log's top
-// entry by. A real pane height isn't known here -- Model's width/height are
-// the whole terminal, and splitting that into per-pane heights is Task 6's
-// layout work -- so this is a fixed, reasonable screenful rather than
-// something derived from state this task doesn't own.
+// entry by. The pane's own height is not known here -- Model's width and
+// height are the whole terminal's, and the pane heights are worked out in
+// layout.go as part of composing a frame -- so this is a fixed, reasonable
+// screenful rather than something derived from state a key handler cannot
+// see.
 const rawLogPageSize = 20
 
 // rawLogState holds the raw log view's own state: which entry sits at the
@@ -141,7 +142,7 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 }
 
 // renderRawLog renders entries from TopEntry() downward, honouring the
-// active facet filter, at most w runes wide and h lines tall.
+// active facet filter, at most w columns wide and h lines tall.
 //
 // A log line's own bytes are untrusted terminal input -- Log.Bytes returns
 // them verbatim, and Terraform's plan output in a captured log is

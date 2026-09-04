@@ -17,9 +17,9 @@ import (
 type row struct {
 	cells []string
 	// spanIdx is the index into m.log.RPCSpans that this row represents, or
-	// -1 when the row is a rollup rather than a single span. Task 5's
-	// jump-to-log needs it, so it is established here rather than
-	// retrofitted.
+	// -1 when the row is a rollup rather than a single span. The raw log's
+	// jump-to-log resolves a row to a span through it, so every row carries
+	// one.
 	spanIdx int
 }
 
@@ -158,8 +158,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 
 // callRows ranks the RPC spans matching f by duration descending, ties
 // broken by RPC name so the ordering is total. Each row's spanIdx indexes
-// into rpcSpans itself, never into a filtered subset, so jump-to-log (Task
-// 5) keeps landing on the right span even while a filter narrows the list.
+// into rpcSpans itself, never into a filtered subset, so jump-to-log keeps
+// landing on the right span even while a filter narrows the list.
 // It sorts a slice of indices rather than the spans themselves: m.log.RPCSpans
 // must not be mutated, since every other view and any later --profile run
 // over the same Log reads it too.
@@ -194,7 +194,7 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 	return rows
 }
 
-// renderList renders the current view's rows as a table at most w runes
+// renderList renders the current view's rows as a table at most w columns
 // wide and h lines tall, with the row at Selected() highlighted and the
 // window scrolled just far enough to keep it visible.
 func (m *Model) renderList(w, h int) string {
@@ -229,10 +229,10 @@ func typesPreamble(uiSpans []span.Span) []string {
 // table, column widths taken from the widest header or cell in each column.
 //
 // Numbers are the point of a ranked view: an identifier clipped to its tail
-// is still recognisable, but a missing duration or count tells the reader
-// nothing. So every numeric (right-aligned) column keeps its full natural
-// width unconditionally -- dropping or shrinking a number is what round 1
-// got wrong -- and fitColumnWidths distributes whatever width is left among
+// is still recognisable, but a duration or count that is missing, or shown
+// half, tells the reader nothing. So every numeric (right-aligned) column
+// keeps its full natural width unconditionally, and fitColumnWidths
+// distributes whatever width is left among
 // the text columns (every one of this package's tables carries only
 // identifiers in its text columns: provider addresses, resource types and
 // RPC names). A text column narrower than its natural width is clipped by
@@ -297,14 +297,14 @@ func renderTable(preamble []string, cols []column, data []row, selected int, foc
 // space still available evenly across the columns still competing for it,
 // settle any column whose natural width is at or under that even share at
 // its full natural width, and remove it from the competition; what it did
-// not need goes back into the pool for the columns still competing. This
-// is the general form of round 2's single-flex-column shrink -- correct
-// for the one-text-column tables (providers, types) it was built for, and
-// also correct for the calls view's three text columns (RPC, resource
-// type, provider), where letting only the single widest one flex left the
-// other two either always full width (risking the total exceeding w, which
-// pushed the overflow onto whichever column the final clipWidth reached)
-// or never shrinking when they should share the burden.
+// not need goes back into the pool for the columns still competing.
+//
+// Water-filling is what lets one rule serve both a table with a single text
+// column (providers, types) and one with three (the calls view's RPC,
+// resource type and provider). Flexing only the widest column would leave
+// the rest reserved at their full natural width, so the row could still
+// exceed w -- and the overflow would then land on whichever column the
+// final clipWidth happened to reach, from whichever end it happened to cut.
 func fitColumnWidths(cols []column, natural []int, w int) []int {
 	widths := append([]int(nil), natural...)
 

@@ -209,18 +209,16 @@ func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 	}
 }
 
-// Fix round 2: capping each side pane at w/3 fixed the facet pane at 100
-// columns (round 1) but left only w/3 for the centre pane -- the pane the
-// answer actually lives in -- which pushed the providers view's numeric
-// columns out entirely. 100 columns is the width Dan actually runs at, so
-// this is the regression that would have caught it: the composed view at
-// 100 columns must show a front-clipped provider name in the centre pane
-// AND all three of its numeric columns whole.
+// 100 columns is the width Dan actually runs at, and it is where the two
+// side panes and the centre pane compete hardest: give the side panes too
+// much and the providers view's numeric columns are pushed out of the
+// centre entirely. The composed view at 100 columns must show a
+// front-clipped provider name in the centre pane AND all three of its
+// numeric columns whole.
 // Both assertions are made against the centre pane alone. The facet pane
 // at 100 columns front-clips its own provider values, so a search of the
 // whole composed view for an ellipsis is satisfied whatever the centre
-// pane renders -- it cannot fail, and so cannot report the regression it
-// exists for.
+// pane renders -- it cannot fail, and so cannot report anything.
 func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	centre := centrePaneOf(m.View())
@@ -235,19 +233,16 @@ func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testin
 	}
 }
 
-// Fix round 3: round 2's fix let only the single widest text column
-// front-clip, reserving every other text column at full natural width. The
-// calls view has three text columns (RPC, resource type, provider); when
-// one of the other two happened to be the widest, provider was left
-// "reserved" at full natural width by fitColumnWidths but could still be
-// cut by the trailing end-clip once the row as a whole overflowed -- from
-// the wrong end, since an end-clip keeps a value's head, and two provider
-// addresses only diverge in their tail. Two rows with different providers
-// then rendered the same clipped prefix. A test asserting only that some
-// provider text appears would not catch this, since the collided values
-// are all non-empty -- it must assert the two rows' provider text actually
-// differs. two-providers.log's two calls have different providers (aws,
-// google) for exactly this reason.
+// The calls view has three text columns (RPC, resource type, provider), and
+// every one of them has to be able to give way. A column left reserved at
+// its full natural width while the row as a whole overflows is cut by the
+// trailing clipWidth instead -- from the wrong end, since that keeps a
+// value's head and two provider addresses diverge only in their tail, so
+// two rows with different providers render the same text. A test asserting
+// only that some provider text appears would not catch that, since the
+// collided values are all non-empty: it must assert the two rows' provider
+// text actually differs. two-providers.log's two calls have different
+// providers (aws, google) for exactly this reason.
 //
 // The expected clipped text is computed via fitColumnWidths and
 // clipValueFront themselves, the same functions renderTable calls, rather

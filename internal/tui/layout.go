@@ -337,7 +337,7 @@ func joinPanes(h int, panes ...pane) string {
 }
 
 // renderDetail renders the detail pane: the selected row's span, when the
-// current view has one to show, at most w runes wide and h lines tall.
+// current view has one to show, at most w columns wide and h lines tall.
 // ViewRawLog and the rollup views (ViewProviders, ViewTypes) have no single
 // span behind the selection -- rows() returns nil for the former and every
 // row's spanIdx is -1 for the latter -- so both fall through to the same
