@@ -70,8 +70,9 @@ type Span struct {
 	// tracks its own baseline, independently, from the first @timestamp it
 	// successfully parses.
 	//
-	// The consequence: when spans from both builders exist side by side
-	// (nothing does this yet -- only Sniffer is wired into the CLI today),
+	// The consequence: when spans from both builders exist side by side --
+	// which the CLI now permits, since it runs both builders over every
+	// log, though no real capture has yet produced spans from both --
 	// their StartMs/EndMs sit on two different timelines with two
 	// different zero points, even though every individual number looks
 	// equally plausible. They are directly comparable only within spans
