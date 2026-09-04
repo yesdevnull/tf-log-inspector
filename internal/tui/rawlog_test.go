@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -29,12 +30,23 @@ func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {
 }
 
 // An entry's byte range covers its continuation lines, so a multi-line entry
-// renders whole rather than as a fragment.
+// renders whole rather than as a fragment. multiline-body.log's HTTP
+// response is four physical lines, and the response body sits on the third
+// of them: the body is the content a user who jumped to a slow call came to
+// read, so each line is named individually rather than counted. A count
+// cannot tell a whole entry from one that lost some of its middle.
 func TestRawLogRendersWholeMultiLineEntries(t *testing.T) {
 	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	out := m.renderRawLog(200, 40)
-	if strings.Count(out, "\n") < 4 {
-		t.Errorf("raw log rendered too few lines for a multi-line fixture:\n%s", out)
+	for _, want := range []string{
+		"HTTP Response Received",                 // the entry's own header line
+		"http.response.body=",                    // its first continuation
+		`| {"__type"`,                            // the body itself, two lines in
+		"http.response.header.x_amzn_requestid=", // its last continuation
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("raw log dropped %q from a four-line entry:\n%s", want, out)
+		}
 	}
 }
 
@@ -93,20 +105,50 @@ func TestRawLogIgnoresRPCAndResourceTypeFacets(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	before := m.renderRawLog(200, 100)
 
-	m = focusFacets(t, m)
-	for i := 0; i < 2; i++ { // move past both provider values onto the rpc dimension's only value
-		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	}
+	m = moveFacetCursorTo(t, m, dimRPC, "ApplyResourceChange")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	if got := m.renderRawLog(200, 100); got != before {
 		t.Errorf("selecting an rpc facet narrowed the raw log:\nbefore:\n%s\nafter:\n%s", before, got)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace}) // deselect it again
 
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // move onto the resource type dimension's first value
+	m = moveFacetCursorTo(t, m, dimType, "aws_subnet")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	if got := m.renderRawLog(200, 100); got != before {
 		t.Errorf("selecting a resource type facet narrowed the raw log:\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+}
+
+// manyEntryLog builds a log of n single-line entries. Every fixture in
+// testdata is shorter than one page, so paging over one cannot be told from
+// paging that does nothing: both leave the top entry clamped where it was.
+func manyEntryLog(n int) *model.Log {
+	var data []byte
+	entries := make([]logfmt.Entry, n)
+	for i := range entries {
+		line := fmt.Sprintf("2026-09-04T10:00:00.000+1000 [INFO] entry-%03d\n", i)
+		entries[i] = logfmt.Entry{Off: uint64(len(data)), Len: uint32(len(line)), Lines: 1, Timestamped: true}
+		data = append(data, line...)
+	}
+	return &model.Log{Data: data, Entries: entries}
+}
+
+// PgDown and PgUp move the raw log by a whole screenful, which is what makes
+// a long capture navigable at all: a real log runs to tens of thousands of
+// entries, and one 'j' at a time will not cross it.
+func TestRawLogPagesByAScreenful(t *testing.T) {
+	m := update(t, New(manyEntryLog(3*rawLogPageSize), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	if got := m.TopEntry(); got != rawLogPageSize {
+		t.Errorf("TopEntry = %d after PgDown, want a whole page of %d", got, rawLogPageSize)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	if got := m.TopEntry(); got != 2*rawLogPageSize {
+		t.Errorf("TopEntry = %d after a second PgDown, want %d", got, 2*rawLogPageSize)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	if got := m.TopEntry(); got != rawLogPageSize {
+		t.Errorf("TopEntry = %d after PgUp, want it back at %d", got, rawLogPageSize)
 	}
 }
 
@@ -298,6 +340,167 @@ func TestSlashSearchMatchesAPhraseAnEscapeSequenceSplits(t *testing.T) {
 	m.raw.lastQuery = "aws_instance"
 	if !m.searchFrom(0, true, true) {
 		t.Errorf("search did not find %q, split only by an escape sequence the screen does not show:\n%s", m.raw.lastQuery, m.renderRawLog(200, 10))
+	}
+}
+
+// n and N repeat the last submitted search forward and backward. Without
+// them a search is a single jump: the second occurrence of a string is
+// unreachable except by scrolling to it by hand. provider-rpc.log's two
+// calls both name ApplyResourceChange, so there is a second match to reach
+// and a first to come back to.
+func TestNAndShiftNRepeatTheSearchForwardAndBack(t *testing.T) {
+	const query = "tf_rpc=ApplyResourceChange"
+	m := rawLogView(t, "provider-rpc.log")
+	var matches []int
+	for i, e := range m.log.Entries {
+		if strings.Contains(string(m.log.Bytes(e)), query) {
+			matches = append(matches, i)
+		}
+	}
+	if len(matches) != 2 {
+		t.Fatalf("fixture assumption changed: %q is in %d entries, want exactly 2 so a repeat has somewhere to go", query, len(matches))
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, query)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := m.TopEntry(); got != matches[0] {
+		t.Fatalf("TopEntry = %d after the search, want the first match %d", got, matches[0])
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if got := m.TopEntry(); got != matches[1] {
+		t.Errorf("TopEntry = %d after 'n', want the next match %d", got, matches[1])
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if got := m.TopEntry(); got != matches[0] {
+		t.Errorf("TopEntry = %d after 'N', want the previous match %d", got, matches[0])
+	}
+}
+
+// The search prompt is a line editor, not just a key sink: backspace removes
+// the last rune typed, and space extends the query rather than being taken
+// as the facet-toggle binding it is everywhere else. A prompt that cannot
+// correct a typo or hold a phrase is a prompt the user has to abandon and
+// reopen.
+func TestSearchPromptEditsTheQuery(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "awz")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = typeQuery(t, m, "s")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = typeQuery(t, m, "subnet")
+	if got, want := footerOf(m.View()), "/aws subnet"; got != want {
+		t.Errorf("prompt = %q, want %q", got, want)
+	}
+}
+
+// Esc cancels the prompt without searching, and hands the keyboard back: the
+// keys typed after it are commands again, not more of an abandoned query.
+func TestEscCancelsTheSearchPrompt(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	before := m.TopEntry()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "aws_internet_gateway")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+		t.Errorf("footer = %q after Esc, want the key hints back", got)
+	}
+	if m.TopEntry() != before {
+		t.Errorf("TopEntry = %d after cancelling the prompt, want the position left at %d", m.TopEntry(), before)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if got := m.TopEntry(); got != before+1 {
+		t.Errorf("TopEntry = %d after 'j' following a cancelled prompt, want %d -- the prompt is still capturing keys", got, before+1)
+	}
+}
+
+// Enter on an empty query closes the prompt without running a search. There
+// is no pattern to look for, and reporting "pattern not found" for a search
+// the user never made describes nothing -- while hiding the key hints in the
+// one view where n and N matter most.
+func TestEnterOnAnEmptyQueryClosesThePromptWithoutSearching(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+		t.Errorf("footer = %q after Enter on an empty query, want the key hints", got)
+	}
+	if m.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after Enter on an empty query, want the position left at 0", m.TopEntry())
+	}
+}
+
+// Esc with nothing selected changes no filter, so the raw log's "pattern not
+// found" still describes the search on screen and must stand. Clearing it
+// would put the key hints back over a miss the user can still see the
+// consequences of.
+func TestEscWithNoFiltersLeavesTheMissReportStanding(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "no-such-text-anywhere")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Fatalf("footer = %q, want the miss reported before Esc is pressed", got)
+	}
+	if len(m.selectedFacets) != 0 {
+		t.Fatalf("selectedFacets = %v, want nothing selected so Esc has no filter to clear", m.selectedFacets)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Errorf("footer = %q after an Esc that cleared nothing, want the miss still reported", got)
+	}
+}
+
+// '/' hands the keyboard to a text search over the raw log, and only there:
+// the prompt captures every subsequent key, so opening it over a ranked
+// table would take the keyboard away with nothing on screen for the search
+// to run against.
+//
+// The test is that 'q' still quits, not that the footer shows no prompt:
+// the footer only ever draws a prompt in the raw log (see Model.footer), so
+// a prompt opened over a table would capture the keyboard with nothing
+// whatsoever on screen to say so. What the user would see is a 'q' that
+// stopped working.
+func TestSlashOpensTheSearchPromptOnlyInTheRawLog(t *testing.T) {
+	for _, key := range []rune{'1', '2', '4'} {
+		m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		if m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}); !m.Quitting() {
+			t.Errorf("view %q: 'q' after '/' did not quit -- a prompt captured the keyboard outside the raw log", key)
+		}
+	}
+}
+
+// componentProviders reads Span.Entry, which nothing revalidates when a Log
+// is assembled, so it must guard the index itself: a span pointing past the
+// entries contributes nothing rather than indexing off the end.
+func TestComponentProvidersSkipsASpanPointingPastTheLog(t *testing.T) {
+	entries := []logfmt.Entry{{Comp: 7}}
+	spans := []span.Span{
+		{Provider: "registry.terraform.io/hashicorp/aws", Entry: 0},
+		{Provider: "registry.terraform.io/hashicorp/google", Entry: 99},
+	}
+	got := componentProviders(spans, entries)
+	if len(got) != 1 || got[7] != "registry.terraform.io/hashicorp/aws" {
+		t.Errorf("componentProviders = %v, want only component 7 mapped to aws", got)
+	}
+}
+
+// jumpToSpan takes a row's spanIdx, and must guard it at both ends: a row
+// index past the last span has no span behind it, so the jump is a no-op
+// rather than a read off the end of RPCSpans. -1 (every rollup row) is
+// covered by TestEnterOnARollupRowIsInert.
+func TestJumpToSpanIgnoresARowIndexPastTheLastSpan(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	m.jumpToSpan(len(m.log.RPCSpans))
+	if m.ActiveView() != ViewProviders {
+		t.Errorf("view = %v after a jump to a row index past the last span, want it left alone", m.ActiveView())
+	}
+	if m.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after a jump to a row index past the last span, want 0", m.TopEntry())
 	}
 }
 

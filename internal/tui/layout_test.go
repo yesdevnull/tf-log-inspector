@@ -92,8 +92,10 @@ func TestNoLineExceedsTerminalWidth(t *testing.T) {
 // terminal width: the panes are composed by padding each one to its
 // declared width and joining them with a separator, so a row one column
 // short puts its │ separators a column to the left of every other row's.
-// This pins the selected row specifically, since its ANSI escapes are the
-// one thing on that row that must count for nothing towards its width.
+// What this pins is joinPanes' own padding -- it re-pads every pane line to
+// that pane's declared width, measured in display columns, so a pane whose
+// content is short or whose line carries ANSI escapes still occupies its
+// full share of the row.
 func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{70, 100, 160} {
@@ -201,6 +203,65 @@ func TestFFocusesTheFacetPaneAtInlineWidth(t *testing.T) {
 	}
 }
 
+// The facet overlay replaces the whole pane row, so it may only ever be
+// drawn at a width that has no room for the facet pane inline. Drawn at 160
+// columns it would blank the ranked list and the detail pane -- the two
+// panes the answer actually lives in -- on a terminal with room for all
+// three.
+//
+// Both routes to that state are pinned: pressing 'f' at 160 columns, and
+// opening the overlay on a narrow terminal and then widening it, which
+// leaves the flag set with no keypress in between.
+func TestTheFacetOverlayIsNeverDrawnAtInlineWidth(t *testing.T) {
+	wide := tea.WindowSizeMsg{Width: 160, Height: 40}
+	for _, c := range []struct {
+		name string
+		open func(t *testing.T, m Model) Model
+	}{
+		{"pressing f at 160 columns", func(t *testing.T, m Model) Model {
+			m = update(t, m, wide)
+			return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+		}},
+		{"opening the overlay at 90 columns then widening", func(t *testing.T, m Model) Model {
+			m = update(t, m, tea.WindowSizeMsg{Width: 90, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+			return update(t, m, wide)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := c.open(t, New(testLog(t, "two-providers.log"), "x.log"))
+			out := m.View()
+			if !strings.Contains(out, "SPAN DETAIL") {
+				t.Errorf("the detail pane is off screen at 160 columns:\n%s", out)
+			}
+			if centre := centrePaneOf(out); !strings.Contains(centre, "hashicorp/google") {
+				t.Errorf("the ranked list is blank at 160 columns:\n%s", out)
+			}
+		})
+	}
+}
+
+// Below detailInlineWidth the detail pane collapses too and the list is
+// rendered ALONE at the full terminal width -- not at the narrower width it
+// had beside a pane that is no longer drawn. The width is the whole point of
+// collapsing the pane: at 69 columns the provider column has room for a
+// registry address in full, which at 70 -- where the detail pane still takes
+// its share of the row -- it does not.
+func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
+	const addr = "registry.terraform.io/hashicorp/google"
+	base := New(testLog(t, "two-providers.log"), "x.log")
+
+	const narrow = detailInlineWidth - 1
+	m := update(t, base, tea.WindowSizeMsg{Width: narrow, Height: 40})
+	if got := m.renderPanes(narrow, 10); !strings.Contains(got, addr) {
+		t.Errorf("%q is still clipped at %d columns -- the list did not get the whole row once the detail pane collapsed:\n%s", addr, narrow, got)
+	}
+	m = update(t, base, tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
+	if got := m.renderPanes(detailInlineWidth, 10); strings.Contains(got, addr) {
+		t.Fatalf("%q fits whole at %d columns beside the detail pane, so this no longer measures what the collapse hands back:\n%s", addr, detailInlineWidth, got)
+	}
+}
+
 // The detail pane shows the selected call's RPC, provider and duration.
 func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
@@ -213,14 +274,22 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	}
 }
 
-// A rollup row (ViewProviders, the default view) has no single span to
-// describe, so the detail pane must say so honestly rather than showing
-// stale or zero-valued span fields.
+// A rollup row (ViewProviders, the default view) rolls up many spans, so
+// there is no single span for the detail pane to describe. It must say so,
+// rather than picking one span and presenting its fields as the selected
+// row's: a pane showing one call's RPC and duration beside a row that
+// totals several is a wrong answer, not a missing one.
+//
+// 40 columns is wide enough for the placeholder and for an unclipped RPC
+// name, so both halves of the assertion measure what they say.
 func TestDetailPaneOnARollupRowIsHonest(t *testing.T) {
 	m := New(testLog(t, "provider-rpc.log"), "x.log")
 	out := m.renderDetail(40, 20)
-	if strings.Contains(out, "\n"+m.log.RPCSpans[0].RPC) {
-		t.Errorf("detail pane shows a specific span's RPC for a rollup row:\n%s", out)
+	if !strings.Contains(out, "(no call selected)") {
+		t.Errorf("detail pane does not say a rollup row has no single span to show:\n%s", out)
+	}
+	if rpc := m.log.RPCSpans[0].RPC; strings.Contains(out, rpc) {
+		t.Errorf("detail pane shows the span %q for a rollup row:\n%s", rpc, out)
 	}
 }
 

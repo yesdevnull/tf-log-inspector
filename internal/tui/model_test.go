@@ -110,6 +110,36 @@ func TestTabCyclesPaneFocus(t *testing.T) {
 	}
 }
 
+// The detail pane has no scrollable content of its own, so an arrow key
+// while it holds focus is inert. Moving the list's selection from there
+// would move a cursor bar in a pane the keyboard has left -- and take the
+// detail pane's own contents with it, since the pane describes whatever the
+// list has selected.
+func TestArrowKeysAreInertWhileTheDetailPaneHasFocus(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	if m.RowCount() < 2 {
+		t.Fatalf("fixture assumption changed: %d call rows, want at least 2 so a selection has somewhere to move", m.RowCount())
+	}
+	for i := 0; i < int(paneCount) && m.Focus() != PaneDetail; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	}
+	if m.Focus() != PaneDetail {
+		t.Fatalf("focus never reached PaneDetail")
+	}
+	before := m.Selected()
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'j'}},
+		{Type: tea.KeyDown},
+		{Type: tea.KeyRunes, Runes: []rune{'k'}},
+		{Type: tea.KeyUp},
+	} {
+		if got := update(t, m, key); got.Selected() != before {
+			t.Errorf("%v with the detail pane focused moved the selection to %d, want it left at %d", key, got.Selected(), before)
+		}
+	}
+}
+
 // Selection must not run past the end of the list or below zero, and it must
 // reset when the view changes, since row 40 of one view is meaningless in
 // another.

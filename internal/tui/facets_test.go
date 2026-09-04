@@ -57,14 +57,85 @@ func TestEscClearsAllFilters(t *testing.T) {
 	}
 }
 
-// The dimension header is upper-cased and pluralised to match the design
-// mock-up's PROVIDERS/LEVELS section labels, so this checks case-
-// insensitively rather than pinning the exact casing.
-func TestFacetPaneShowsCountsPerValue(t *testing.T) {
+// Esc clears every filter from whichever pane has focus -- the spec binds it
+// globally, not to the facet pane. Gated to the facet pane it would strand a
+// user who has since pressed Tab with a narrowed view and no visible way
+// back: the key hint line still offers "Esc clear".
+//
+// TestEscClearsAllFilters focuses the facet pane before pressing Esc, so it
+// cannot see such a gate; this presses it from the list.
+func TestEscClearsFiltersFromAnyPane(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
-	out := m.renderFacets(30, 20)
-	if !strings.Contains(strings.ToUpper(out), "PROVIDER") {
-		t.Errorf("facet pane missing the provider dimension:\n%s", out)
+	before := len(m.rows())
+	m = focusFacets(t, m)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.rows()); got >= before {
+		t.Fatalf("toggling a facet left %d rows, want fewer than %d -- nothing for Esc to clear", got, before)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.Focus() == PaneFacets {
+		t.Fatalf("focus is still on the facet pane after Tab, so this cannot press Esc from anywhere else")
+	}
+	if got := update(t, m, tea.KeyMsg{Type: tea.KeyEsc}); len(got.rows()) != before {
+		t.Errorf("Esc from %v left %d rows, want the unfiltered %d", m.Focus(), len(got.rows()), before)
+	}
+}
+
+// Space toggles the facet the facet pane's cursor points at, and only while
+// that pane has focus. The facet cursor is still drawn -- dimmed -- in an
+// unfocused pane, so a space accepted from the list or the detail pane
+// rewrites the ranked numbers this tool exists to report with nothing on
+// screen that was behaving like a control.
+//
+// The terminal is wide enough for all three panes, so the facet pane is
+// drawn and its cursor sits on a value that would narrow the list if space
+// reached it.
+func TestSpaceOnlyTogglesFromTheFacetPane(t *testing.T) {
+	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	before := len(base.rows())
+	if before < 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a stray toggle would be visible", before)
+	}
+	for _, want := range []Pane{PaneList, PaneDetail} {
+		m := base
+		for i := 0; i < int(paneCount) && m.Focus() != want; i++ {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		}
+		if m.Focus() != want {
+			t.Fatalf("focus never reached %v", want)
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+		if got := len(m.rows()); got != before {
+			t.Errorf("space with %v focused left %d rows, want the unfiltered %d", want, got, before)
+		}
+		if len(m.selectedFacets) != 0 {
+			t.Errorf("space with %v focused selected %v, want nothing", want, m.selectedFacets)
+		}
+	}
+}
+
+// The spec requires a count beside every facet value: the count is what
+// tells the user how much ticking a checkbox will narrow the view, and a
+// dimension of bare labels says nothing about which value is worth
+// selecting.
+//
+// Asserted against renderFacets directly -- the facet pane is the only pane
+// that renders a count -- and against two-tier.log, whose dimensions have
+// values with DIFFERENT counts, so a count that renders as a constant is
+// told apart from one read off the value.
+func TestFacetPaneShowsCountsPerValue(t *testing.T) {
+	m := New(testLog(t, "two-tier.log"), "x.log")
+	out := m.renderFacets(60, 40) // wide and tall enough that nothing is clipped or windowed away
+	for _, want := range []string{
+		"[ ] registry.terraform.io/hashicorp/aws  3",
+		"[ ] ApplyResourceChange  2",
+		"[ ] PlanResourceChange  1",
+		"[ ] aws_instance  2",
+		"[ ] aws_subnet  1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("facet pane missing the value line %q:\n%s", want, out)
+		}
 	}
 }
 
