@@ -82,6 +82,10 @@ type Model struct {
 	rowsCache  []row
 	rowsCached bool
 
+	// raw is the raw log view's own state: which entry sits at its top, and
+	// any free-text search in progress or last run. See rawlog.go.
+	raw rawLogState
+
 	width, height int
 	quitting      bool
 }
@@ -145,6 +149,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// While a search query is being typed, every key is text for the
+		// query rather than a command -- including keys bound elsewhere,
+		// such as "j" or "q" -- so this is handled before anything else.
+		if m.raw.searching {
+			m = m.handleSearchKey(msg)
+			return m, nil
+		}
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
 		// happens to render it as " " too, but dispatching on Type is the
 		// documented, unambiguous way to recognise it.
@@ -168,6 +179,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Esc clears every active filter regardless of which pane has
 			// focus -- the spec binds it globally, not to the facet pane.
 			m.clearFilters()
+		case "enter":
+			// Enter jumps from a span-bearing row -- currently only
+			// ViewCalls' rows carry a real spanIdx -- to the log entry that
+			// closed it. A rollup row (spanIdx -1) has no single span to
+			// jump to, so jumpToSpan leaves m unchanged for those.
+			if m.pane == PaneList {
+				if rows := m.rows(); m.selected >= 0 && m.selected < len(rows) {
+					m = m.jumpToSpan(rows[m.selected].spanIdx)
+				}
+			}
+		case "pgdown":
+			if m.view == ViewRawLog {
+				m.pageRawLog(1)
+			}
+		case "pgup":
+			if m.view == ViewRawLog {
+				m.pageRawLog(-1)
+			}
+		case "/":
+			// Search only makes sense against the raw log's text.
+			if m.view == ViewRawLog {
+				m.raw.searching = true
+				m.raw.query = ""
+			}
+		case "n":
+			if m.view == ViewRawLog {
+				m.searchAgain(1)
+			}
+		case "N":
+			if m.view == ViewRawLog {
+				m.searchAgain(-1)
+			}
 		default:
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
