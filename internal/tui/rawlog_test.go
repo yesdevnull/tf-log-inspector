@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
 // The whole point: from a slow call, land on the log lines that produced it.
@@ -170,5 +172,115 @@ func TestSlashSearchHonoursActiveFilter(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.TopEntry() != before {
 		t.Errorf("search jumped to a match hidden by the active filter: TopEntry = %d, want unchanged %d", m.TopEntry(), before)
+	}
+}
+
+// footerOf returns the composed view's last line, which is the footer: the
+// key hints, or the search prompt while a search is open or has just
+// failed.
+func footerOf(view string) string {
+	lines := strings.Split(view, "\n")
+	return lines[len(lines)-1]
+}
+
+// rawLogView returns a model showing the raw log at a known terminal size.
+func rawLogView(t *testing.T, fixture string) Model {
+	t.Helper()
+	m := update(t, New(testLog(t, fixture), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+}
+
+// typeQuery sends each rune of q as its own key press, the way a user types
+// into the search prompt.
+func typeQuery(t *testing.T, m Model, q string) Model {
+	t.Helper()
+	for _, r := range q {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return m
+}
+
+// '/' captures every subsequent key, so without a prompt the keyboard has
+// silently stopped doing what it did a moment ago and the user is typing
+// into a void.
+func TestSearchPromptShowsTheQueryBeingTyped(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "aws")
+	if got := footerOf(m.View()); got != "/aws" {
+		t.Errorf("footer while searching = %q, want the prompt %q", got, "/aws")
+	}
+}
+
+// A search that matches nothing leaves the position unchanged, which is
+// indistinguishable from a search that matched the entry already on screen.
+// The one has to be reported, and the report has to clear once a later
+// search succeeds.
+func TestFailedSearchIsReportedAndClearsOnTheNextMatch(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "no-such-text-anywhere")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Errorf("footer after a failed search = %q, want it to report the miss", got)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "aws_internet_gateway")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+		t.Errorf("footer after a successful search = %q, want the key hints back", got)
+	}
+}
+
+// In the alt screen Ctrl+C arrives as a key rather than a signal, so a
+// search prompt that swallows every key must still honour it: otherwise the
+// only way out of a prompt opened by accident is to guess Esc.
+func TestCtrlCQuitsFromTheSearchPrompt(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlC}); !m.Quitting() {
+		t.Error("Ctrl+C while the search prompt is open did not quit")
+	}
+}
+
+// The spec binds up/down and j/k to "move" in every view. In the raw log
+// nothing reads the row selection -- the pane renders from TopEntry -- so
+// moving has to move the pane's top entry, clamped the same way paging is.
+func TestArrowKeysScrollTheRawLog(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	if m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}); m.TopEntry() != 1 {
+		t.Errorf("TopEntry = %d after one 'j', want 1", m.TopEntry())
+	}
+	if m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}); m.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after 'k' back to the top, want 0", m.TopEntry())
+	}
+	if m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}); m.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after 'k' at the top, want it clamped to 0", m.TopEntry())
+	}
+	for i := 0; i < 500; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	if m.TopEntry() >= len(m.log.Entries) {
+		t.Errorf("TopEntry = %d ran past %d entries", m.TopEntry(), len(m.log.Entries))
+	}
+}
+
+// Log.Bytes returns a line's ORIGINAL bytes, and Terraform's own plan
+// output in a captured log is colourised. Those bytes are untrusted: an
+// escape sequence that moves the cursor or clears the screen would corrupt
+// the whole frame rather than just its own line, and a colour left unreset
+// bleeds into the panes beside it.
+func TestRawLogStripsANSIFromLogLines(t *testing.T) {
+	data := []byte("2026-09-04T10:00:00.000+1000 [INFO] \x1b[1m\x1b[32m+ create\x1b[0m\x1b[2J aws_instance.example\n")
+	l := &model.Log{Data: data, Entries: []logfmt.Entry{{Off: 0, Len: uint32(len(data))}}}
+	m := New(l, "x.log")
+	m.view = ViewRawLog
+	out := m.renderRawLog(200, 10)
+	if strings.ContainsRune(out, 0x1b) {
+		t.Errorf("raw log pane emitted an escape sequence from the log's own bytes: %q", out)
+	}
+	if !strings.Contains(out, "+ create") {
+		t.Errorf("stripping the escapes took the line's text with it: %q", out)
 	}
 }

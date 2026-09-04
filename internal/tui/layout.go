@@ -167,7 +167,7 @@ func (m *Model) View() string {
 	b.WriteString(m.renderPanes(w, paneH))
 	b.WriteString("\n\n")
 	writeLoggingCaveat(&b, w)
-	fmt.Fprintf(&b, "\n%s", clipWidth(footerKeys(), w))
+	fmt.Fprintf(&b, "\n%s", clipWidth(m.footer(), w))
 
 	lines := strings.Split(b.String(), "\n")
 	if len(lines) > h {
@@ -179,6 +179,23 @@ func (m *Model) View() string {
 // header names the file and its span counts.
 func header(m *Model) string {
 	return fmt.Sprintf("tfli -- %s -- %d RPC spans, %d UI spans", m.name, len(m.log.RPCSpans), len(m.log.UISpans))
+}
+
+// footer is the line beneath the panes. It is the search prompt while a
+// query is being typed -- '/' captures every key, so the prompt is what
+// tells the user their keyboard has been taken over and shows them what
+// they have typed -- and the result of a search that found nothing, which
+// otherwise looks exactly like a search that matched the entry already on
+// screen. Otherwise it is the key hints.
+func (m *Model) footer() string {
+	switch {
+	case m.raw.searching:
+		return "/" + m.raw.query
+	case m.raw.notFound:
+		return "/" + m.raw.lastQuery + "  pattern not found"
+	default:
+		return footerKeys()
+	}
 }
 
 // footerKeys is the key-binding hint line shown beneath the panes. It is 62

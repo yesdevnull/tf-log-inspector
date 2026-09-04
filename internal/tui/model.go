@@ -180,6 +180,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// such as "j" or "q" -- so this is handled before anything else.
 		if m.raw.searching {
 			m = m.handleSearchKey(msg)
+			if m.quitting {
+				return &m, tea.Quit
+			}
 			return &m, nil
 		}
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
@@ -228,6 +231,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.raw.searching = true
 				m.raw.query = ""
+				m.raw.notFound = false
 			}
 		case "n":
 			if m.view == ViewRawLog {
@@ -267,11 +271,21 @@ func (m *Model) invalidateRows() {
 }
 
 // moveCursor routes an up/down/j/k press to whichever pane has focus: the
-// list's row selection, or the facet pane's value cursor. PaneDetail has no
-// scrollable content of its own yet, so a press while it has focus is inert.
+// centre pane's own cursor, or the facet pane's value cursor. PaneDetail has
+// no scrollable content of its own yet, so a press while it has focus is
+// inert.
+//
+// What the centre pane's cursor IS depends on the view: the rollup and call
+// views have a selected row, while the raw log has none -- it renders from
+// its top entry and nothing there reads the selection -- so in that view a
+// press scrolls the pane instead.
 func (m *Model) moveCursor(delta int) {
 	switch m.pane {
 	case PaneList:
+		if m.view == ViewRawLog {
+			m.scrollRawLog(delta)
+			return
+		}
 		m.moveSelection(delta)
 	case PaneFacets:
 		m.moveFacetCursor(delta)

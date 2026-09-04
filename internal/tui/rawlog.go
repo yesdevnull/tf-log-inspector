@@ -30,6 +30,12 @@ type rawLogState struct {
 	searching bool
 	query     string
 	lastQuery string
+
+	// notFound records that the last search ran off the end of the log
+	// without a match. A miss leaves the position unchanged, which on its
+	// own looks exactly like a match on the entry already shown, so the
+	// footer says which it was; see Model.footer.
+	notFound bool
 }
 
 // TopEntry reports the index into m.log.Entries currently at the top of the
@@ -54,11 +60,16 @@ func (m Model) jumpToSpan(idx int) Model {
 	return m
 }
 
-// pageRawLog moves the raw log's top entry by delta screenfuls, clamped to
-// [0, len(Entries)-1] (or 0 for a log with no entries at all) so paging can
-// never walk off either end of the index.
+// pageRawLog moves the raw log's top entry by delta screenfuls.
 func (m *Model) pageRawLog(delta int) {
-	m.raw.top += delta * rawLogPageSize
+	m.scrollRawLog(delta * rawLogPageSize)
+}
+
+// scrollRawLog moves the raw log's top entry by delta entries, clamped to
+// [0, len(Entries)-1] (or 0 for a log with no entries at all) so neither
+// paging nor an arrow key can walk off either end of the index.
+func (m *Model) scrollRawLog(delta int) {
+	m.raw.top += delta
 	if m.raw.top < 0 {
 		m.raw.top = 0
 	}
@@ -121,7 +132,16 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 }
 
 // renderRawLog renders entries from TopEntry() downward, honouring the
-// active facet filter, at most w runes wide and h lines tall. Each visible
+// active facet filter, at most w runes wide and h lines tall.
+//
+// A log line's own bytes are untrusted terminal input -- Log.Bytes returns
+// them verbatim, and Terraform's plan output in a captured log is
+// colourised -- so every line is stripped of its escape sequences before it
+// is clipped. Measuring around them would not be enough: a sequence that
+// moves the cursor or clears the screen corrupts the whole frame rather
+// than its own line, and a colour the line never resets bleeds into the
+// panes beside it. One scratch buffer is reused across the loop, as
+// StripANSI's API intends. Each visible
 // entry renders every line Off/Len cover -- including continuations -- so a
 // multi-line entry such as an HTTP body dump appears whole rather than as a
 // fragment; an entry that would not fit inside the remaining height is left
@@ -133,6 +153,7 @@ func (m Model) renderRawLog(w, h int) string {
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 
 	var lines []string
+	var scratch []byte
 	for i := m.TopEntry(); i < len(m.log.Entries); i++ {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
@@ -143,7 +164,9 @@ func (m Model) renderRawLog(w, h int) string {
 			break
 		}
 		for _, ln := range entryLines {
-			lines = append(lines, clipWidth(ln, w))
+			var plain string
+			plain, scratch = logfmt.StripANSI(ln, scratch)
+			lines = append(lines, clipWidth(plain, w))
 		}
 		if len(lines) >= h {
 			break
@@ -154,18 +177,27 @@ func (m Model) renderRawLog(w, h int) string {
 
 // handleSearchKey routes one keystroke while a search query is being typed:
 // runes and space extend the query, backspace removes its last rune, enter
-// submits it and jumps to the first match, esc cancels without searching.
+// submits it and jumps to the first match, esc cancels without searching,
+// and ctrl+c quits.
 func (m Model) handleSearchKey(msg tea.KeyMsg) Model {
 	switch msg.Type {
+	case tea.KeyCtrlC:
+		// In the alt screen Ctrl+C arrives as a key rather than a signal, so
+		// the quit binding has to be honoured here too: a prompt that
+		// swallows every key would otherwise trap a user who opened it by
+		// accident until they guessed Esc.
+		m.raw.searching = false
+		m.quitting = true
 	case tea.KeyEnter:
 		m.raw.searching = false
 		if m.raw.query != "" {
 			m.raw.lastQuery = m.raw.query
-			m.searchFrom(m.raw.top, true)
+			m.raw.notFound = !m.searchFrom(m.raw.top, true)
 		}
 	case tea.KeyEsc:
 		m.raw.searching = false
 		m.raw.query = ""
+		m.raw.notFound = false
 	case tea.KeyBackspace:
 		if r := []rune(m.raw.query); len(r) > 0 {
 			m.raw.query = string(r[:len(r)-1])
@@ -184,7 +216,7 @@ func (m *Model) searchAgain(direction int) {
 	if m.raw.lastQuery == "" {
 		return
 	}
-	m.searchFrom(m.raw.top, direction > 0)
+	m.raw.notFound = !m.searchFrom(m.raw.top, direction > 0)
 }
 
 // searchFrom is the synchronous free-text search over m.log.Data described
