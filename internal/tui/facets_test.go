@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
 // focusFacets tabs until the facet pane has focus, so a test can act on it
@@ -130,8 +131,8 @@ func TestRowsCacheInvalidatesOnFilterChange(t *testing.T) {
 // both providers; clipping the value from the front instead keeps each
 // one's distinguishing tail.
 func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
-	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 20)
-	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 20)
+	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 20, facetValueKind(dimProvider))
+	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 20, facetValueKind(dimProvider))
 	if aws == google {
 		t.Fatalf("two values sharing a long prefix rendered identically at width 20: %q", aws)
 	}
@@ -148,8 +149,51 @@ func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
 // would be a spec miss, not just a squeeze, so the count must survive even
 // when the value itself is clipped hard.
 func TestFacetValueLineNeverDropsTheCount(t *testing.T) {
-	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 20)
+	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 20, facetValueKind(dimProvider))
 	if !strings.HasSuffix(line, "42") {
 		t.Errorf("count was dropped even though the value was clipped to make room: %q", line)
+	}
+}
+
+// A facet value is a control, not a caption: two values that clip to the
+// same text are two checkboxes the user cannot choose between. The rpc
+// dimension's values are plugin-protocol method names, told apart by their
+// head, so they must be end-clipped like the calls view's RPC column rather
+// than front-clipped like a provider address.
+//
+// The width matters. At a 100-column terminal the facet pane is capped at a
+// quarter of the terminal, 25 runes; the checkbox costs 4 and a four-digit
+// count -- what an apply over a thousand-resource workspace produces --
+// costs 6, leaving 15 for the value. PlanResourceChange and
+// ApplyResourceChange share the 14-character suffix "ResourceChange", so
+// front-clipping both to 15 leaves both reading "…ResourceChange", against
+// counts that such a run makes equal as well. At 120 and 160 columns the
+// pane is wide enough that neither value is clipped at all, so this pins
+// the width where it bites.
+//
+// The provider dimension comes first, as FacetsForSpans orders them, which
+// is also where the cursor starts: the two rpc lines are then both plain,
+// so comparing them compares text rather than highlighting.
+func TestFacetPaneKeepsRPCNamesDistinctAtOneHundredColumns(t *testing.T) {
+	m := Model{facets: []model.Facet{
+		{Name: dimProvider, Values: []model.FacetValue{{Value: "registry.terraform.io/hashicorp/aws", Count: 2326}}},
+		{Name: dimRPC, Values: []model.FacetValue{
+			{Value: "PlanResourceChange", Count: 1284},
+			{Value: "ApplyResourceChange", Count: 1284},
+		}},
+	}}
+	w := facetPaneWidth(m.facets, 100) // sized exactly as renderPanes sizes it at width 100
+	lines := strings.Split(m.renderFacets(w, 20), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("got %d facet lines, want two headers and three values:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	plan, apply := lines[3], lines[4]
+	if plan == apply {
+		t.Fatalf("PlanResourceChange and ApplyResourceChange both rendered as %q at pane width %d -- two checkboxes the user cannot tell apart", plan, w)
+	}
+	for _, c := range []struct{ line, head string }{{plan, "Plan"}, {apply, "Apply"}} {
+		if !strings.Contains(c.line, c.head) {
+			t.Errorf("facet line %q lost the head %q that distinguishes it", c.line, c.head)
+		}
 	}
 }

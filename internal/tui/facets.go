@@ -139,6 +139,7 @@ func (m Model) renderFacets(w, h int) string {
 	var lines []string
 	for dimIdx, f := range m.facets {
 		lines = append(lines, clipWidth(facetSectionHeader(f.Name), w))
+		kind := facetValueKind(f.Name)
 		for valIdx, v := range f.Values {
 			check := " "
 			if m.selectedFacets[f.Name][v.Value] {
@@ -155,7 +156,7 @@ func (m Model) renderFacets(w, h int) string {
 			if cursor {
 				lineWidth = w - selectedStyleOverhead
 			}
-			line := facetValueLine(check, v.Value, v.Count, lineWidth)
+			line := facetValueLine(check, v.Value, v.Count, lineWidth, kind)
 			if cursor {
 				line = highlightLine(line, w)
 			}
@@ -168,15 +169,30 @@ func (m Model) renderFacets(w, h int) string {
 	return strings.Join(lines, "\n")
 }
 
+// facetValueKind is the kind of value a facet dimension holds, and so which
+// end of an over-long value survives clipping (see columnKind). The rpc
+// dimension's values are plugin-protocol method names, told apart by their
+// HEAD -- PlanResourceChange and ApplyResourceChange share a 14-character
+// suffix -- while a provider address or a resource type is told apart by
+// its TAIL. This is the only place a dimension name is resolved to a kind,
+// so no two render sites can disagree about a dimension.
+func facetValueKind(dim string) columnKind {
+	if dim == dimRPC {
+		return headIdentifierColumn
+	}
+	return tailIdentifierColumn
+}
+
 // facetValueLine formats one facet value's line -- a checkbox, the value
 // and its count -- clipped to at most w runes via clipIdentifierField. The
 // count is never truncated: the spec requires facets to show a count for
 // every value ("each with counts"), so a count dropped by clipping would
-// be a spec miss, not just a squeeze. The value itself is an identifier
-// (see clipValueFront), so it is the part that gives way, front-clipped
-// rather than dropped from the end.
-func facetValueLine(check, value string, count, w int) string {
-	return clipIdentifierField(fmt.Sprintf("[%s] ", check), value, fmt.Sprintf("  %d", count), w)
+// be a spec miss, not just a squeeze. The value itself is the part that
+// gives way, clipped from whichever end its kind allows rather than dropped
+// from the end regardless -- a facet value is a control, so two values that
+// clip to the same text are two checkboxes the user cannot choose between.
+func facetValueLine(check, value string, count, w int, kind columnKind) string {
+	return clipIdentifierField(fmt.Sprintf("[%s] ", check), value, fmt.Sprintf("  %d", count), w, kind)
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

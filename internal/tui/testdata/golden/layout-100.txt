@@ -4,7 +4,7 @@ PROVIDERS                 │ provider           total  calls  max         │ S
 [7m[ ] …icorp/aws  1[0m │ [7m…hashicorp/google    8ms      1  8ms[0m │ (no call selected)       
 [ ] …/hashicorp/google  1 │ …io/hashicorp/aws    5ms      1  5ms         │                          
 RPCS                      │                                              │                          
-[ ] …plyResourceChange  2 │                                              │                          
+[ ] ApplyResourceChang  2 │                                              │                          
 RESOURCE TYPES            │                                              │                          
 [ ] aws_subnet  1         │                                              │                          
 [ ] …_compute_instance  1 │                                              │                          

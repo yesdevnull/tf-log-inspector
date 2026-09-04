@@ -73,8 +73,9 @@ func padRight(s string, w int) string {
 // head: an RPC name, which names one of a closed set of plugin-protocol
 // methods sharing long suffixes (see columnKind). Which of the two rules a
 // value gets follows from the kind of value it is, not from a choice made
-// at each render site. See clipIdentifierField for the "label plus
-// identifier" line shape several of those sites share.
+// at each render site: clipValueForKind is where a kind becomes a
+// direction. See clipIdentifierField for the "label plus identifier" line
+// shape several of those sites share.
 func clipValueFront(s string, w int) string {
 	r := []rune(s)
 	if len(r) <= w {
@@ -89,14 +90,28 @@ func clipValueFront(s string, w int) string {
 	return "…" + string(r[len(r)-(w-1):])
 }
 
-// clipIdentifierField formats prefix + an identifier value, front-clipped
-// via clipValueFront to leave room for prefix and suffix, + suffix, at most
-// w runes total. Shared by every render site that shows one labelled
+// clipValueForKind clips s to at most w runes from whichever end its kind
+// says may give way: a tail-distinguished value keeps its tail
+// (clipValueFront), a head-distinguished one keeps its head (clipWidth).
+// This is the single place the taxonomy in columnKind is turned into a clip
+// direction, so a table cell, a facet value and a detail field all agree on
+// what happens to a given kind of value.
+func clipValueForKind(s string, w int, kind columnKind) string {
+	if kind == headIdentifierColumn {
+		return clipWidth(s, w)
+	}
+	return clipValueFront(s, w)
+}
+
+// clipIdentifierField formats prefix + an identifier value, clipped via
+// clipValueForKind to leave room for prefix and suffix, + suffix, at most w
+// runes total. Shared by every render site that shows one labelled
 // identifier value on its own line -- a facet value's checkbox and count,
-// the detail pane's Prov and Addr fields -- so the front-clip budgeting
-// arithmetic exists in one place rather than being reimplemented at each.
-func clipIdentifierField(prefix, value, suffix string, w int) string {
+// the detail pane's Prov and Addr fields -- so the budgeting arithmetic
+// exists in one place rather than being reimplemented at each. Which end of
+// the value gives way is the caller's kind, not this function's choice.
+func clipIdentifierField(prefix, value, suffix string, w int, kind columnKind) string {
 	avail := w - len([]rune(prefix)) - len([]rune(suffix))
-	line := prefix + clipValueFront(value, avail) + suffix
+	line := prefix + clipValueForKind(value, avail, kind) + suffix
 	return clipWidth(line, w)
 }

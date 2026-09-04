@@ -59,8 +59,9 @@ func facetPaneWidth(facets []model.Facet, w int) int {
 		if n := len([]rune(facetSectionHeader(f.Name))); n > width {
 			width = n
 		}
+		kind := facetValueKind(f.Name)
 		for _, v := range f.Values {
-			if n := len([]rune(facetValueLine(" ", v.Value, v.Count, hugeWidth))); n > width {
+			if n := len([]rune(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind))); n > width {
 				width = n
 			}
 		}
@@ -332,11 +333,11 @@ func (m Model) renderDetail(w, h int) string {
 func spanDetailLines(s span.Span, w int) []string {
 	lines := []string{
 		clipWidth(fmt.Sprintf("RPC   %s", s.RPC), w),
-		clipIdentifierField("Prov  ", s.Provider, "", w),
+		clipIdentifierField("Prov  ", s.Provider, "", w, tailIdentifierColumn),
 		clipWidth(fmt.Sprintf("Dur   %s", formatMs(uint64(s.DurationMs))), w),
 	}
 	if s.Fidelity == span.FidelityUIReported {
-		lines = append(lines, clipIdentifierField("Addr  ", s.Address, "", w))
+		lines = append(lines, clipIdentifierField("Addr  ", s.Address, "", w, tailIdentifierColumn))
 	}
 	return lines
 }

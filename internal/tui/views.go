@@ -26,6 +26,11 @@ type row struct {
 // site, so a column declares its kind once and formatRow derives both the
 // alignment and the clip direction from it -- there is no separate
 // alignment field that could disagree with the kind.
+//
+// It is the whole package's value taxonomy, not just the tables': the facet
+// pane resolves each dimension's name to a kind (facetValueKind) and clips
+// its values by the same rule, so the same value is clipped the same way
+// wherever it appears.
 type columnKind int
 
 const (
@@ -420,14 +425,11 @@ func formatRow(cells []string, cols []column, widths []int) string {
 		if i < len(cols) {
 			kind = cols[i].kind
 		}
-		switch kind {
-		case numericColumn:
+		if kind == numericColumn {
 			parts[i] = fmt.Sprintf("%*s", w, c)
-		case headIdentifierColumn:
-			parts[i] = fmt.Sprintf("%-*s", w, clipWidth(c, w))
-		default:
-			parts[i] = fmt.Sprintf("%-*s", w, clipValueFront(c, w))
+			continue
 		}
+		parts[i] = fmt.Sprintf("%-*s", w, clipValueForKind(c, w, kind))
 	}
 	return strings.Join(parts, "  ")
 }
