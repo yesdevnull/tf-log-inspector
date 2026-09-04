@@ -133,3 +133,20 @@ func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
 		}
 	}
 }
+
+// Fix round 1, finding B: renderTable used to clip the whole joined row to
+// w, so once the provider column's long registry addresses ate the
+// available width, total/calls/max were sliced away entirely and a view
+// ranked by those figures showed no ranking data at all. Whole trailing
+// columns are now dropped instead, so the first column and at least one
+// numeric column after it must still render intact at 70 columns.
+func TestRenderListDropsWholeColumnsRatherThanSlicingCells(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	out := m.renderList(70, 20)
+	if !strings.Contains(out, "registry.terraform.io/hashicorp/google") {
+		t.Errorf("first column (provider) is not rendered whole at width 70:\n%s", out)
+	}
+	if !strings.Contains(out, "8ms") {
+		t.Errorf("no numeric column rendered whole at width 70 -- a ranked list with no ranking data:\n%s", out)
+	}
+}

@@ -1,35 +1,35 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
-provider                                tot │ SPAN DETAIL             
-[7mregistry.terraform.io/hashicorp/goo[0m │ (no call selected)      
-registry.terraform.io/hashicorp/aws       5 │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
-                                            │                         
+provider                                     │ SPAN DETAIL            
+[7mregistry.terraform.io/hashicorp/goog[0m │ (no call selected)     
+registry.terraform.io/hashicorp/aws          │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
+                                             │                        
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s

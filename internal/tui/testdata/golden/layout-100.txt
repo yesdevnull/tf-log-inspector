@@ -1,35 +1,35 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
-PROVIDERS                │ provider                                total  │ SPAN DETAIL             
-[7m[ ] registry.ter[0m │ [7mregistry.terraform.io/hashicorp/google[0m │ (no call selected)      
-[ ] registry.terraform.i │ registry.terraform.io/hashicorp/aws       5ms  │                         
-RPCS                     │                                                │                         
-[ ] ApplyResourceChange  │                                                │                         
-RESOURCE TYPES           │                                                │                         
-[ ] aws_subnet  1        │                                                │                         
-[ ] google_compute_insta │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
-                         │                                                │                         
+PROVIDERS                         │ provider                     │ SPAN DETAIL                      
+[7m[ ] ….io/hashicorp/aws  1[0m │ [7mregistry.terraform.i[0m │ (no call selected)               
+[ ] …aform.io/hashicorp/google  1 │ registry.terraform.io/hashic │                                  
+RPCS                              │                              │                                  
+[ ] ApplyResourceChange  2        │                              │                                  
+RESOURCE TYPES                    │                              │                                  
+[ ] aws_subnet  1                 │                              │                                  
+[ ] google_compute_instance  1    │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
+                                  │                              │                                  
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s

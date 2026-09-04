@@ -144,9 +144,19 @@ func (m Model) renderFacets(w, h int) string {
 			if m.selectedFacets[f.Name][v.Value] {
 				check = "x"
 			}
-			line := fmt.Sprintf("[%s] %s  %d", check, v.Value, v.Count)
-			line = clipWidth(line, w)
-			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
+			cursor := dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val
+			// The cursor's line is budgeted at w-selectedStyleOverhead
+			// before highlightLine wraps it, so highlightLine's own clip is
+			// a no-op: highlightLine clips from the end, which would
+			// otherwise re-truncate the count facetValueLine just went to
+			// the trouble of keeping whole (or bite back into the value's
+			// tail -- the part a leading ellipsis was chosen to preserve).
+			lineWidth := w
+			if cursor {
+				lineWidth = w - selectedStyleOverhead
+			}
+			line := facetValueLine(check, v.Value, v.Count, lineWidth)
+			if cursor {
 				line = highlightLine(line, w)
 			}
 			lines = append(lines, line)
@@ -156,6 +166,42 @@ func (m Model) renderFacets(w, h int) string {
 		lines = lines[:h]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// facetValueLine formats one facet value's line -- a checkbox, the value
+// and its count -- clipped to at most w runes. The count is never
+// truncated: the spec requires facets to show a count for every value
+// ("each with counts"), so a count dropped by clipping would be a spec
+// miss, not just a squeeze. When the value itself does not fit, it is
+// clipped from the FRONT, keeping its tail, rather than clipped from the
+// end the way clipWidth clips everything else: two facet values sharing a
+// long common prefix (two provider registry addresses, most often) differ
+// only in their tail, so a leading ellipsis is what keeps them
+// distinguishable -- a trailing one would leave them identical.
+func facetValueLine(check, value string, count, w int) string {
+	prefix := fmt.Sprintf("[%s] ", check)
+	suffix := fmt.Sprintf("  %d", count)
+	avail := w - len([]rune(prefix)) - len([]rune(suffix))
+	line := prefix + clipValueFront(value, avail) + suffix
+	return clipWidth(line, w)
+}
+
+// clipValueFront shortens s to at most w runes by dropping characters from
+// the front and marking the cut with a leading ellipsis, so s's tail
+// survives instead of its head. See facetValueLine for why the tail is the
+// part worth keeping.
+func clipValueFront(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w <= 0 {
+		return ""
+	}
+	if w == 1 {
+		return "…"
+	}
+	return "…" + string(r[len(r)-(w-1):])
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

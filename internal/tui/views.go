@@ -190,18 +190,22 @@ func typesPreamble(uiSpans []span.Span) []string {
 
 // renderTable formats preamble lines followed by a header and data rows as a
 // table, column widths taken from the widest header or cell in each column.
-// Every line, including preamble, is clipped to w runes so a table wider
-// than its pane can never wrap into unreadable wreckage. That clip is a
-// safety net, not real column degradation (shrinking or dropping columns to
-// fit) -- a narrow pane against wide cell content still truncates the
-// right-hand columns wholesale rather than degrading gracefully; nothing in
-// phase 3's scope calls for more than the width guarantee.
+// Columns that do not fit within w are dropped whole from the right, via
+// visibleColumnCount, rather than left in and clipped mid-cell: a table
+// ranked by a numeric column (duration, say) is useless with that column
+// sliced away mid-digit, so the last column that fits renders intact and
+// any column after it is omitted entirely instead. clipWidth remains a
+// safety net beneath that -- multi-rune width quirks aside, a row built
+// from only the visible columns should already fit, but the guarantee
+// costs nothing to keep.
 //
 // selected is highlighted, and the data rows are windowed so it stays
 // visible within h lines total: the preamble and header are never scrolled,
 // only the data rows beneath them are.
 func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
 	widths := columnWidths(cols, data)
+	n := visibleColumnCount(widths, w)
+	cols, widths = cols[:n], widths[:n]
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
 	for _, p := range preamble {
@@ -212,7 +216,7 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)
 	for i := top; i < top+visible; i++ {
-		line := clipWidth(formatRow(data[i].cells, cols, widths), w)
+		line := clipWidth(formatRow(data[i].cells[:n], cols, widths), w)
 		if i == selected {
 			line = highlightLine(line, w)
 		}
@@ -223,6 +227,28 @@ func renderTable(preamble []string, cols []column, data []row, selected, w, h in
 		lines = lines[:h]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// visibleColumnCount returns how many leading columns of widths, joined by
+// formatRow's two-space gap, fit within w without cutting a column in the
+// middle. At least 1 is always returned when there is at least one column,
+// even if that first column alone does not fit within w -- clipWidth is
+// still the backstop for that case -- so a table is never rendered as
+// nothing at all.
+func visibleColumnCount(widths []int, w int) int {
+	if len(widths) == 0 {
+		return 0
+	}
+	total := widths[0]
+	n := 1
+	for i := 1; i < len(widths); i++ {
+		total += 2 + widths[i] // "  " gap plus this column's width
+		if total > w {
+			break
+		}
+		n++
+	}
+	return n
 }
 
 // scrollWindow returns the first visible data-row index and how many rows

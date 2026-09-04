@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -17,14 +18,86 @@ const (
 	detailInlineWidth = 70
 )
 
-// Fixed widths for the side panes. The list (centre) pane takes whatever is
-// left, since it is the pane every view's actual content lives in -- the
-// side panes exist to summarise or filter it, not compete with it for
-// space.
+// minFacetPaneWidth and minDetailPaneWidth are the floor facetPaneWidth and
+// detailPaneWidth return even for a log whose values are all short: enough
+// for the facet pane's own section headers ("RESOURCE TYPES" is the
+// longest) and the detail pane's placeholder ("(no call selected)").
 const (
-	facetPaneWidth  = 24
-	detailPaneWidth = 24
+	minFacetPaneWidth  = 15
+	minDetailPaneWidth = 19
 )
+
+// maxFacetPaneWidth and maxDetailPaneWidth cap how wide the side panes are
+// allowed to grow to fit the data, mirroring
+// internal/profile.maxResourceTypeColWidth: without a cap, one
+// pathologically long value would claim width from the centre pane -- the
+// pane every view's actual content lives in -- out of proportion to what
+// showing that one value in full is worth.
+const (
+	maxFacetPaneWidth  = 40
+	maxDetailPaneWidth = 40
+)
+
+// hugeWidth stands in for "no clipping" when measuring a line's natural,
+// untruncated length: passing it to a function that clips at a given width
+// (clipWidth, spanDetailLines) is cheaper than duplicating the formatting
+// logic in an unclipped variant.
+const hugeWidth = 1 << 30
+
+// facetPaneWidth sizes the facets pane to fit every current facet value and
+// its count in full when there is room, the same data-driven-with-a-cap
+// approach internal/profile.resourceTypeColWidth uses for its resource-type
+// column. A fixed pane width left every value longer than that width
+// indistinguishable from its siblings and its count gone entirely once
+// clipped -- the spec requires facets to show a count for every value -- so
+// this measures the actual data instead. It never claims more than a third
+// of the terminal, so one long value cannot starve the centre pane the way
+// a fixed width once starved the facet pane in the other direction.
+func facetPaneWidth(facets []model.Facet, w int) int {
+	width := minFacetPaneWidth
+	for _, f := range facets {
+		if n := len([]rune(facetSectionHeader(f.Name))); n > width {
+			width = n
+		}
+		for _, v := range f.Values {
+			if n := len([]rune(facetValueLine(" ", v.Value, v.Count, hugeWidth))); n > width {
+				width = n
+			}
+		}
+	}
+	return capPaneWidth(width, w, maxFacetPaneWidth)
+}
+
+// detailPaneWidth sizes the detail pane to fit the widest RPC/provider/
+// duration/address line across every RPC span, not just the currently
+// selected one, so the pane's width does not jump around as the selection
+// changes. Capped the same way facetPaneWidth is, for the same reason.
+func detailPaneWidth(rpcSpans []span.Span, w int) int {
+	width := minDetailPaneWidth
+	for _, s := range rpcSpans {
+		for _, line := range spanDetailLines(s, hugeWidth) {
+			if n := len([]rune(line)); n > width {
+				width = n
+			}
+		}
+	}
+	return capPaneWidth(width, w, maxDetailPaneWidth)
+}
+
+// capPaneWidth clamps a data-driven side-pane width to at most a third of
+// the terminal width and at most maxWidth, so it never exceeds either.
+func capPaneWidth(width, terminalWidth, maxWidth int) int {
+	if third := terminalWidth / 3; width > third {
+		width = third
+	}
+	if width > maxWidth {
+		width = maxWidth
+	}
+	if width < 1 {
+		width = 1
+	}
+	return width
+}
 
 // paneSep separates adjacent panes when composing a row. It is one visible
 // column (the │ itself) plus a space of breathing room on each side.
@@ -130,17 +203,20 @@ func (m Model) renderPanes(w, h int) string {
 	}
 	switch {
 	case w >= facetInlineWidth:
-		listW := w - facetPaneWidth - detailPaneWidth - 2*len([]rune(paneSep))
+		facetW := facetPaneWidth(m.facets, w)
+		detailW := detailPaneWidth(m.log.RPCSpans, w)
+		listW := w - facetW - detailW - 2*len([]rune(paneSep))
 		return joinPanes(h,
-			pane{m.renderFacets(facetPaneWidth, h), facetPaneWidth},
+			pane{m.renderFacets(facetW, h), facetW},
 			pane{m.renderCentre(listW, h), listW},
-			pane{m.renderDetail(detailPaneWidth, h), detailPaneWidth},
+			pane{m.renderDetail(detailW, h), detailW},
 		)
 	case w >= detailInlineWidth:
-		listW := w - detailPaneWidth - len([]rune(paneSep))
+		detailW := detailPaneWidth(m.log.RPCSpans, w)
+		listW := w - detailW - len([]rune(paneSep))
 		return joinPanes(h,
 			pane{m.renderCentre(listW, h), listW},
-			pane{m.renderDetail(detailPaneWidth, h), detailPaneWidth},
+			pane{m.renderDetail(detailW, h), detailW},
 		)
 	default:
 		return m.renderCentre(w, h)
@@ -227,6 +303,16 @@ func (m Model) renderDetail(w, h int) string {
 // -- an RPC-tier span never carries one -- so gating on Fidelity, not just
 // on Address being non-empty, documents that this is a property of the
 // span's kind rather than an incidental absence.
+//
+// The UI-hook branch is scaffolding, not dead code: the spec requires the
+// detail pane to show a UI-hook span's unmasked address, but no view in
+// this package currently exposes an individual UI-hook span for selection
+// -- row.spanIdx only ever indexes m.log.RPCSpans (a pre-existing
+// constraint this package does not redefine), and every FidelityUIReported
+// span lives in m.log.UISpans instead. So this branch is unreachable
+// through any keypress today; it is unit-tested directly
+// (TestSpanDetailLinesShowsAddressForUIHookSpans) rather than end to end,
+// and is ready for whichever later task makes a UI-hook span selectable.
 func spanDetailLines(s span.Span, w int) []string {
 	lines := []string{
 		clipWidth(fmt.Sprintf("RPC   %s", s.RPC), w),

@@ -122,3 +122,34 @@ func TestRowsCacheInvalidatesOnFilterChange(t *testing.T) {
 		t.Errorf("rows() returned %d rows after filtering, want fewer than %d -- looks like a stale cache", len(got), len(warm))
 	}
 }
+
+// Fix round 1, finding A: two facet values sharing a long common prefix --
+// two provider registry addresses, most often -- must still render as
+// distinguishable lines even when neither fits in full. A fixed-width
+// facet pane clipped both to "[ ] registry.terraform.i", identical for
+// both providers; clipping the value from the front instead keeps each
+// one's distinguishing tail.
+func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
+	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 20)
+	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 20)
+	if aws == google {
+		t.Fatalf("two values sharing a long prefix rendered identically at width 20: %q", aws)
+	}
+	if !strings.HasSuffix(aws, "aws  1") {
+		t.Errorf("clipped aws line lost its distinguishing tail or its count: %q", aws)
+	}
+	if !strings.HasSuffix(google, "google  1") {
+		t.Errorf("clipped google line lost its distinguishing tail or its count: %q", google)
+	}
+}
+
+// Fix round 1, finding A: the spec requires facets to show a count for
+// every value. A count sliced off by clipping the whole assembled line
+// would be a spec miss, not just a squeeze, so the count must survive even
+// when the value itself is clipped hard.
+func TestFacetValueLineNeverDropsTheCount(t *testing.T) {
+	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 20)
+	if !strings.HasSuffix(line, "42") {
+		t.Errorf("count was dropped even though the value was clipped to make room: %q", line)
+	}
+}
