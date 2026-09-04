@@ -11,9 +11,12 @@ import (
 )
 
 // focusFacets tabs until the facet pane has focus, so a test can act on it
-// without depending on which pane New starts focused.
+// without depending on which pane New starts focused. It widens the terminal
+// first: Tab cycles only the panes the current width actually draws, and
+// below facetInlineWidth the facet pane is not one of them.
 func focusFacets(t *testing.T, m Model) Model {
 	t.Helper()
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	for i := 0; i < 8; i++ {
 		if m.Focus() == PaneFacets {
 			return m
@@ -32,10 +35,7 @@ func focusFacets(t *testing.T, m Model) Model {
 func TestFacetToggleFiltersEveryView(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	before := len(m.rows())
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab}) // focus moves off the list
-	for m.Focus() != PaneFacets {
-		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	}
+	m = focusFacets(t, m)
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	if len(m.rows()) >= before {
 		t.Errorf("toggling a facet did not narrow the list: %d then %d", before, len(m.rows()))
@@ -428,5 +428,82 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if got := m.rows(); len(got) != len(callsBefore) {
 		t.Errorf("selecting a level changed the rollup rows from %d to %d -- a span has no level to filter on", len(callsBefore), len(got))
+	}
+}
+
+// The facet pane advertises a count beside every value, and ticking that
+// value must list exactly that many calls. The two numbers come from
+// different code paths -- model.FacetsForSpans counts them,
+// model.Filter.MatchSpan filters by them -- so a value the pane offers but
+// the filter cannot match shows a positive count against an empty table,
+// which reads as "this dimension really has no calls" rather than as a bug.
+//
+// "(none)" is the value that broke: a provider-level RPC such as
+// GetProviderSchema belongs to no resource type, so its span's ResourceType
+// is empty, counted under model.FacetKey("") and -- until the two agreed --
+// matched against a raw "" no span carries.
+//
+// The property is asserted over every value of every dimension rather than
+// over the one that broke, since it is the invariant that generalises: any
+// future dimension whose offered key and matched key disagree fails here.
+// The level dimension is excluded deliberately and not by oversight -- its
+// counts are ENTRY counts and it filters the raw log only (see levelFacet).
+func TestTickingAFacetValueListsItsAdvertisedCount(t *testing.T) {
+	facets := New(testLog(t, "provider-level-rpc.log"), "x.log").facets
+	var sawNone bool
+	for _, f := range facets {
+		if f.Name == dimLevel {
+			continue
+		}
+		if len(f.Values) == 0 {
+			t.Errorf("dimension %q has no values, so it asserts nothing", f.Name)
+		}
+		for _, v := range f.Values {
+			if v.Value == model.FacetKey("") {
+				sawNone = true
+			}
+			// A fresh model per value: selectedFacets is a map, so a
+			// toggle applied to one model is visible to any other sharing
+			// it, and each value must be measured on its own.
+			m := update(t, New(testLog(t, "provider-level-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+			m = moveFacetCursorTo(t, m, f.Name, v.Value)
+			m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+			if got := len(m.rows()); got != v.Count {
+				t.Errorf("%s=%q advertises %d calls, ticking it lists %d", f.Name, v.Value, v.Count, got)
+			}
+		}
+	}
+	if !sawNone {
+		t.Fatalf("fixture assumption changed: no %q value in any dimension, so the case that broke is not covered", model.FacetKey(""))
+	}
+}
+
+// A dimension can be empty while others are not. core-only.log is the
+// classic capture taken with TF_LOG=TRACE but no TF_LOG_PROVIDER: it has no
+// provider RPC spans at all, so its provider, rpc and resource type
+// dimensions are empty and only its level dimension has values. A cursor
+// left at {0,0} points into an empty dimension, which draws no cursor bar
+// anywhere in the pane and leaves space inert until j teleports it past the
+// first value of the first populated dimension.
+func TestFacetCursorStartsOnADimensionThatHasValues(t *testing.T) {
+	m := New(testLog(t, "core-only.log"), "x.log")
+	if len(m.facets[0].Values) != 0 {
+		t.Fatalf("fixture assumption changed: dimension %q has values, so this cannot exercise an empty one", m.facets[0].Name)
+	}
+	dim, val, ok := m.cursorFacetValue()
+	if !ok {
+		t.Fatal("the facet cursor points at no value, so space has nothing to toggle and the pane draws no cursor")
+	}
+	if dim != dimLevel {
+		t.Errorf("cursor started on dimension %q, want the first one with values (%q)", dim, dimLevel)
+	}
+
+	m = focusFacets(t, m)
+	if out := m.renderFacets(40, 20); !strings.Contains(out, "\x1b[7m") {
+		t.Errorf("no cursor bar drawn anywhere in the facet pane:\n%s", out)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if !m.selectedFacets[dim][val] {
+		t.Errorf("space did not select %s=%q, the value the cursor points at", dim, val)
 	}
 }

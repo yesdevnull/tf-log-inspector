@@ -296,7 +296,7 @@ func TestSlashSearchMatchesAPhraseAnEscapeSequenceSplits(t *testing.T) {
 	m := New(l, "x.log")
 	m.view = ViewRawLog
 	m.raw.lastQuery = "aws_instance"
-	if !m.searchFrom(-1, true) {
+	if !m.searchFrom(0, true, true) {
 		t.Errorf("search did not find %q, split only by an escape sequence the screen does not show:\n%s", m.raw.lastQuery, m.renderRawLog(200, 10))
 	}
 }
@@ -311,12 +311,12 @@ func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
 		RPCSpans: []span.Span{{RPC: "ApplyResourceChange", Provider: "aws", Entry: 99}},
 	}
 	m := New(l, "x.log")
-	got := m.jumpToSpan(0)
-	if got.ActiveView() != ViewProviders {
-		t.Errorf("view = %v after a jump to an out-of-range entry, want it left alone", got.ActiveView())
+	m.jumpToSpan(0)
+	if m.ActiveView() != ViewProviders {
+		t.Errorf("view = %v after a jump to an out-of-range entry, want it left alone", m.ActiveView())
 	}
-	if got.TopEntry() != 0 {
-		t.Errorf("TopEntry = %d after a jump to an out-of-range entry, want 0", got.TopEntry())
+	if m.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after a jump to an out-of-range entry, want 0", m.TopEntry())
 	}
 }
 
@@ -334,5 +334,110 @@ func TestSearchStateIsNotReportedOutsideTheRawLog(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
 		t.Errorf("footer in the calls view = %q, want the key hints", got)
+	}
+}
+
+// A newly submitted search must be able to match the entry at the top of
+// the pane. Enter on a slow call puts the entry that closed its span on the
+// pane's first line; a '/' for a string in that very entry has to find it
+// rather than report "pattern not found" with the text on screen.
+//
+// n and N must still advance past it, or they would return the match
+// already shown for ever instead of moving to the next one, so both halves
+// are pinned here: the same query, from the same position, must match on
+// submission and miss on the repeat.
+func TestSlashSearchMatchesTheEntryAtTheTopOfThePane(t *testing.T) {
+	const query = "aws_internet_gateway"
+	m := rawLogView(t, "provider-rpc.log")
+	target, matches := -1, 0
+	for i, e := range m.log.Entries {
+		if strings.Contains(string(m.log.Bytes(e)), query) {
+			matches++
+			if target < 0 {
+				target = i
+			}
+		}
+	}
+	if matches != 1 || target <= 0 {
+		t.Fatalf("fixture assumption changed: %q is in %d entries, first at %d -- want exactly one, below the first entry", query, matches, target)
+	}
+	for m.TopEntry() < target {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, query)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); strings.Contains(got, "not found") {
+		t.Errorf("footer = %q -- the search missed text sitting on the pane's first line", got)
+	}
+	if m.TopEntry() != target {
+		t.Errorf("TopEntry = %d after the search, want the matching entry %d", m.TopEntry(), target)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Errorf("footer = %q after 'n' -- the repeat must advance past the match already shown, and there is no other", got)
+	}
+	if m.TopEntry() != target {
+		t.Errorf("TopEntry = %d after a failed 'n', want it left at %d", m.TopEntry(), target)
+	}
+}
+
+// "pattern not found" is a cached derivation of the last query, the
+// position it searched from and the filter it searched under. Anything that
+// moves one of those makes it a claim about a search that no longer
+// describes what is on screen -- and while it stands, the footer's key
+// hints are hidden in the one view where n and N matter most.
+func TestFailedSearchReportClearsWhenItsPositionOrFilterMoves(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		act  func(t *testing.T, m Model) Model
+	}{
+		{"scrolling", func(t *testing.T, m Model) Model {
+			return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		}},
+		{"paging", func(t *testing.T, m Model) Model {
+			return update(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+		}},
+		{"toggling a facet", func(t *testing.T, m Model) Model {
+			return update(t, focusFacets(t, m), tea.KeyMsg{Type: tea.KeySpace})
+		}},
+		{"clearing filters", func(t *testing.T, m Model) Model {
+			m = update(t, focusFacets(t, m), tea.KeyMsg{Type: tea.KeySpace})
+			return update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := rawLogView(t, "two-providers.log")
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+			m = typeQuery(t, m, "no-such-text-anywhere")
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+				t.Fatalf("footer = %q, want the miss reported before %s moves it", got, c.name)
+			}
+			after := c.act(t, m)
+			if got := footerOf(after.View()); strings.Contains(got, "not found") {
+				t.Errorf("footer = %q after %s, want the key hints back -- the miss describes a search that has moved on", got, c.name)
+			}
+		})
+	}
+}
+
+// An entry belonging to no provider -- Terraform's own core lines, plan
+// output, or a provider whose address the log never named -- resolves to
+// the empty provider, and the facet pane offers exactly that as "(none)".
+// Matching the raw "" instead makes that checkbox select nothing, the same
+// disagreement between what a dimension OFFERS and what it MATCHES that
+// model.FacetKey exists to close.
+func TestEntryVisibleMatchesAComponentlessEntryAgainstTheNoneFacet(t *testing.T) {
+	f := model.Filter{Providers: map[string]bool{model.FacetKey(""): true}}
+	core := logfmt.Entry{} // Comp 0: no component, so no provider
+	if !entryVisible(f, map[uint16]string{}, core) {
+		t.Errorf("an entry with no provider is hidden while %q is the selected provider facet", model.FacetKey(""))
+	}
+	named := model.Filter{Providers: map[string]bool{"registry.terraform.io/hashicorp/aws": true}}
+	if entryVisible(named, map[uint16]string{}, core) {
+		t.Errorf("an entry with no provider survived a filter asking for one provider's traffic")
 	}
 }

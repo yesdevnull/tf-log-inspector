@@ -154,10 +154,7 @@ const (
 // so a view even one line too tall loses its topmost line off the top of
 // the screen, and the topmost line here is the header naming the open file.
 func (m *Model) View() string {
-	w, h := m.width, m.height
-	if w <= 0 {
-		w = defaultWidth
-	}
+	w, h := m.paneWidth(), m.height
 	if h <= 0 {
 		h = defaultHeight
 	}
@@ -288,6 +285,42 @@ func (m *Model) renderPanes(w, h int) string {
 	default:
 		return m.renderCentre(w, h)
 	}
+}
+
+// paneWidth is the width the pane row is composed at: the terminal's own
+// width once bubbletea has reported one, and defaultWidth before the first
+// tea.WindowSizeMsg arrives. Key handling and rendering both go through it,
+// so the two cannot disagree about which panes the frame has.
+func (m *Model) paneWidth() int {
+	if m.width <= 0 {
+		return defaultWidth
+	}
+	return m.width
+}
+
+// focusablePanes lists the panes renderPanes actually draws at width w, in
+// Tab's cycle order. It is derived from the same width decision renderPanes
+// makes, rather than repeating those comparisons, so the two cannot drift.
+//
+// Only a drawn pane can hold focus. Focus on a collapsed pane is focus the
+// user cannot see, and the keys bound there are not inert: space toggles a
+// facet, which changes the ranked numbers this tool exists to report, with
+// nothing on screen to say why the rows moved.
+func (m *Model) focusablePanes(w int) []Pane {
+	if w < facetInlineWidth && m.showFacetOverlay {
+		// The overlay replaces the whole pane row, so it is the only pane
+		// on screen and the only one Tab can reach.
+		return []Pane{PaneFacets}
+	}
+	panes := make([]Pane, 0, paneCount)
+	if w >= facetInlineWidth {
+		panes = append(panes, PaneFacets)
+	}
+	panes = append(panes, PaneList)
+	if w >= detailInlineWidth {
+		panes = append(panes, PaneDetail)
+	}
+	return panes
 }
 
 // renderCentre renders the centre pane's content for the active view.

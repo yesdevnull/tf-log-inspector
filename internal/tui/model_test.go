@@ -97,9 +97,10 @@ func TestUnimplementedViewKeysAreInert(t *testing.T) {
 
 // New starts focus on PaneList, so the cycle from there visits Detail, then
 // Facets, then back to List -- the same cycle order as always, just entered
-// at a different point.
+// at a different point. The terminal is wide enough for all three panes to
+// be drawn, which is what makes all three focusable.
 func TestTabCyclesPaneFocus(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	want := []Pane{PaneDetail, PaneFacets, PaneList}
 	for _, w := range want {
 		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
@@ -203,4 +204,86 @@ func liveModel(t *testing.T, fixture string, keys ...tea.Msg) *Model {
 		t.Fatalf("Update returned %T, want *tui.Model -- bubbletea would render a different model from the one it updated", prog)
 	}
 	return live
+}
+
+// Tab must not focus a pane the frame does not draw. At 80 columns -- the
+// default terminal, and narrower than facetInlineWidth -- the facet pane is
+// collapsed, but the keys bound to it are not inert: space toggles a facet,
+// which changes the ranked numbers this tool exists to report, with nothing
+// on screen to say why a row vanished. The reproduced sequence is two Tabs,
+// then Down, then Space.
+func TestTabSkipsPanesTheWidthHasCollapsed(t *testing.T) {
+	size := tea.WindowSizeMsg{Width: 80, Height: 24}
+	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), size)
+	before := len(base.rows())
+	if before < 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a filter can be seen to narrow them", before)
+	}
+
+	m := base
+	for i := 0; i < 2*int(paneCount); i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.Focus() == PaneFacets {
+			t.Fatalf("Tab %d focused the facet pane, which is not drawn at %d columns", i+1, size.Width)
+		}
+	}
+
+	m = update(t, base, tea.KeyMsg{Type: tea.KeyTab})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.rows()); got != before {
+		t.Errorf("space after two Tabs left %d provider rows, want the unfiltered %d -- a filter was applied through a pane the user cannot see", got, before)
+	}
+	if len(m.selectedFacets) != 0 {
+		t.Errorf("selectedFacets = %v after keys pressed at 80 columns, want nothing selected", m.selectedFacets)
+	}
+}
+
+// Below detailInlineWidth the detail pane collapses too, leaving the list
+// alone on screen, so Tab has nowhere else to go and must leave focus where
+// it is rather than cycling through two invisible panes.
+func TestTabIsInertWhenOnlyTheListIsDrawn(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 60, Height: 24})
+	for i := 0; i < 3; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.Focus() != PaneList {
+			t.Fatalf("Tab %d moved focus to %v, but the list is the only pane drawn at 60 columns", i+1, m.Focus())
+		}
+	}
+}
+
+// Focus can also be stranded by dragging the terminal's edge rather than by
+// pressing Tab: a pane focused while it was drawn stops being drawn when the
+// window narrows past its threshold, and the keys bound to it would go on
+// rewriting the ranked numbers invisibly.
+func TestNarrowingTheTerminalMovesFocusOffACollapsedPane(t *testing.T) {
+	m := focusFacets(t, New(testLog(t, "two-providers.log"), "x.log"))
+	before := len(m.rows())
+	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if m.Focus() == PaneFacets {
+		t.Fatalf("focus stayed on the facet pane after the terminal narrowed to 80 columns, where it is not drawn")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.rows()); got != before {
+		t.Errorf("space after narrowing left %d rows, want the unfiltered %d", got, before)
+	}
+}
+
+// Update must drive the model it was called on, not a copy of it. Run
+// registers a *Model and bubbletea re-updates whatever Update returns; a
+// value receiver made every message start from a fresh copy, so the model
+// the caller held and the model bubbletea rendered were two models -- and
+// selectedFacets, a map, was shared between them, so a facet toggle written
+// to one silently rewrote the other's ranked numbers.
+func TestUpdateDrivesTheModelItWasCalledOn(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	var prog tea.Model = &m
+	next, _ := prog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if next != prog {
+		t.Errorf("Update returned %p, want the model it was called on (%p)", next, prog)
+	}
+	if m.ActiveView() != ViewCalls {
+		t.Errorf("ActiveView = %v on the model Update was called on, want ViewCalls", m.ActiveView())
+	}
 }

@@ -90,8 +90,12 @@ func (m Model) selectedLevels() map[logfmt.Level]bool {
 }
 
 // cursorFacetValue resolves the facet pane's cursor to the dimension name
-// and value it currently points at. ok is false only for a log with no
-// facets at all -- nothing for space to act on.
+// and value it currently points at. ok is false when the cursor's own
+// dimension holds no values -- a dimension can be empty while others are
+// not, so this is not the same as a log with no facet values at all -- and
+// the pane then draws no cursor bar anywhere and space has nothing to act
+// on. New seeds the cursor onto a dimension that has values
+// (firstFacetCursor) so that state is not where a log starts.
 func (m Model) cursorFacetValue() (dim, val string, ok bool) {
 	if m.facetCursor.dim < 0 || m.facetCursor.dim >= len(m.facets) {
 		return "", "", false
@@ -101,6 +105,23 @@ func (m Model) cursorFacetValue() (dim, val string, ok bool) {
 		return "", "", false
 	}
 	return f.Name, f.Values[m.facetCursor.val].Value, true
+}
+
+// firstFacetCursor is the coordinate of the first value of the first
+// dimension that has any. A dimension can be empty: a capture taken with
+// TF_LOG=TRACE but no TF_LOG_PROVIDER has no provider RPC spans at all, so
+// its provider, rpc and resource type dimensions are all empty while its
+// level dimension is full. Left at {0,0} the cursor would point into one of
+// those, drawing no cursor bar in the pane and leaving space inert until a
+// j press teleported it past the first value of the first populated
+// dimension.
+func firstFacetCursor(facets []model.Facet) facetCursor {
+	for d, f := range facets {
+		if len(f.Values) > 0 {
+			return facetCursor{dim: d}
+		}
+	}
+	return facetCursor{}
 }
 
 // toggleSelectedFacetValue flips whether the facet pane's cursor value is

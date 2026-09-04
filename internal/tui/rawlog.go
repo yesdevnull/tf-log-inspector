@@ -49,9 +49,9 @@ func (m Model) TopEntry() int {
 // a row that represents many spans rather than one (every ViewProviders and
 // ViewTypes row); jumpToSpan leaves m unchanged for those, since there is no
 // single span to jump to.
-func (m Model) jumpToSpan(idx int) Model {
+func (m *Model) jumpToSpan(idx int) {
 	if idx < 0 || idx >= len(m.log.RPCSpans) {
-		return m
+		return
 	}
 	// Span.Entry indexes the same log's Entries, but nothing revalidates it
 	// when a Log is assembled, so every reader of the field checks it --
@@ -60,13 +60,12 @@ func (m Model) jumpToSpan(idx int) Model {
 	// view where it is: there is no entry to jump to.
 	entry := int(m.log.RPCSpans[idx].Entry)
 	if entry >= len(m.log.Entries) {
-		return m
+		return
 	}
 	m.view = ViewRawLog
 	m.raw.top = entry
 	m.selected = 0
 	m.invalidateRows()
-	return m
 }
 
 // pageRawLog moves the raw log's top entry by delta screenfuls.
@@ -77,7 +76,11 @@ func (m *Model) pageRawLog(delta int) {
 // scrollRawLog moves the raw log's top entry by delta entries, clamped to
 // [0, len(Entries)-1] (or 0 for a log with no entries at all) so neither
 // paging nor an arrow key can walk off either end of the index.
+//
+// It also drops any "pattern not found": the miss was reported about the
+// position the search started from, and scrolling has moved it.
 func (m *Model) scrollRawLog(delta int) {
+	m.raw.notFound = false
 	m.raw.top += delta
 	if m.raw.top < 0 {
 		m.raw.top = 0
@@ -129,7 +132,11 @@ func componentProviders(spans []span.Span, entries []logfmt.Entry) map[uint16]st
 // With no provider facet selected every entry passes regardless of
 // component. Once one is selected, an entry whose component maps to no
 // provider (Terraform's own core lines, plan output) is hidden: the filter
-// asked for one provider's traffic, and a core line is not that.
+// asked for one provider's traffic, and a core line is not that. Such an
+// entry resolves to the empty provider, so it is normalised through
+// model.FacetKey and matched against "(none)" -- the same key the facet
+// pane offers for a span with no provider address -- rather than against a
+// raw "" no checkbox can ever select.
 func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entry) bool {
 	if !f.MatchEntry(e) {
 		return false
@@ -137,7 +144,7 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 	if len(f.Providers) == 0 {
 		return true
 	}
-	return f.Providers[compProviders[e.Comp]]
+	return f.Providers[model.FacetKey(compProviders[e.Comp])]
 }
 
 // renderRawLog renders entries from TopEntry() downward, honouring the
@@ -188,7 +195,7 @@ func (m Model) renderRawLog(w, h int) string {
 // runes and space extend the query, backspace removes its last rune, enter
 // submits it and jumps to the first match, esc cancels without searching,
 // and ctrl+c quits.
-func (m Model) handleSearchKey(msg tea.KeyMsg) Model {
+func (m *Model) handleSearchKey(msg tea.KeyMsg) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		// In the alt screen Ctrl+C arrives as a key rather than a signal, so
@@ -201,7 +208,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) Model {
 		m.raw.searching = false
 		if m.raw.query != "" {
 			m.raw.lastQuery = m.raw.query
-			m.raw.notFound = !m.searchFrom(m.raw.top, true)
+			m.raw.notFound = !m.searchFrom(m.raw.top, true, true)
 		}
 	case tea.KeyEsc:
 		m.raw.searching = false
@@ -216,16 +223,19 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) Model {
 	case tea.KeyRunes:
 		m.raw.query += string(msg.Runes)
 	}
-	return m
 }
 
 // searchAgain repeats the last submitted search, forward for n or backward
 // for N. It is a no-op until a search has been run at least once.
+//
+// It searches from the entry AFTER the one at the top of the pane, since the
+// top entry is where the previous match landed: including it would make n
+// return that same match for ever.
 func (m *Model) searchAgain(direction int) {
 	if m.raw.lastQuery == "" {
 		return
 	}
-	m.raw.notFound = !m.searchFrom(m.raw.top, direction > 0)
+	m.raw.notFound = !m.searchFrom(m.raw.top, direction > 0, false)
 }
 
 // searchFrom is the synchronous free-text search over m.log.Data described
@@ -242,6 +252,13 @@ func (m *Model) searchAgain(direction int) {
 // It does not wrap around either end of the log; reaching an end without a
 // match leaves the position unchanged.
 //
+// includeStart says whether the entry AT start counts as a candidate. A
+// newly submitted search includes it: the user can see that entry on the
+// pane's first line -- Enter on a slow call puts it there -- and a query for
+// text sitting on that very line must find it rather than report "pattern
+// not found". n and N exclude it, or they would return the match already
+// shown for ever instead of advancing.
+//
 // It matches against the same ANSI-stripped text renderRawLog puts on
 // screen, not the entry's original bytes: an escape sequence sitting inside
 // a colourised plan line is invisible to the user, so it must not be able to
@@ -249,7 +266,7 @@ func (m *Model) searchAgain(direction int) {
 // screen never displays. searchFrom scans the whole log, so the scratch
 // buffer is reused across entries the way renderRawLog reuses its own,
 // rather than allocating one stripped copy per entry.
-func (m *Model) searchFrom(start int, forward bool) bool {
+func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 	if m.raw.lastQuery == "" {
 		return false
 	}
@@ -260,8 +277,12 @@ func (m *Model) searchFrom(start int, forward bool) bool {
 	if !forward {
 		step = -1
 	}
+	first := start
+	if !includeStart {
+		first += step
+	}
 	var scratch []byte
-	for i := start + step; i >= 0 && i < len(m.log.Entries); i += step {
+	for i := first; i >= 0 && i < len(m.log.Entries); i += step {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue

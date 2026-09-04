@@ -145,20 +145,59 @@ func TestGoldenLayouts(t *testing.T) {
 }
 
 // Pressing 'f' below the facet-pane's inline width threshold must open it as
-// an overlay; above the threshold the facet pane is already shown inline, so
-// there is nothing for 'f' to do.
+// an overlay AND give it the keyboard. The overlay exists precisely so
+// facets are usable on a narrow terminal, and an overlay without focus is a
+// column of checkboxes drawn with a faint cursor that space does nothing to,
+// while j and k move a selection in the list it is covering.
+//
+// two-providers.log is used rather than mixed-hcp.log because it has a
+// second provider to narrow away: selecting the only value a dimension has
+// can never change a row count, so it could not tell a working space from
+// an inert one.
 func TestFTogglesTheFacetOverlayBelowInlineWidth(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 90, Height: 40})
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 90, Height: 40})
+	before := len(m.rows())
+	if before < 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a filter can be seen to narrow them", before)
+	}
 	if strings.Contains(m.View(), "PROVIDERS") {
 		t.Fatalf("facets shown inline at width 90, want collapsed:\n%s", m.View())
 	}
+
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	if !strings.Contains(m.View(), "PROVIDERS") {
 		t.Errorf("'f' did not open the facet overlay:\n%s", m.View())
 	}
+	if m.Focus() != PaneFacets {
+		t.Fatalf("focus = %v with the facet overlay open, want PaneFacets", m.Focus())
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.rows()); got >= before {
+		t.Errorf("space in the facet overlay left %d rows, want fewer than %d -- the overlay cannot be operated", got, before)
+	}
+
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	if strings.Contains(m.View(), "PROVIDERS") {
 		t.Errorf("second 'f' did not close the facet overlay:\n%s", m.View())
+	}
+	if m.Focus() != PaneList {
+		t.Errorf("focus = %v after closing the overlay, want it back on the list that is now on screen", m.Focus())
+	}
+}
+
+// At or above facetInlineWidth the facet pane is already drawn, so 'f' must
+// move focus onto it rather than set an overlay flag with no visible effect.
+// A flag set there is dead state that pops an overlay open unasked the
+// moment the terminal is narrowed.
+func TestFFocusesTheFacetPaneAtInlineWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if m.Focus() != PaneFacets {
+		t.Errorf("focus = %v after 'f' at 160 columns, want the facet pane already on screen", m.Focus())
+	}
+	m = update(t, m, tea.WindowSizeMsg{Width: 90, Height: 40})
+	if strings.Contains(m.View(), "PROVIDERS") {
+		t.Errorf("narrowing the terminal popped open a facet overlay the user never asked for:\n%s", m.View())
 	}
 }
 

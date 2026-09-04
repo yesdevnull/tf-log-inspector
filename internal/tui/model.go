@@ -43,13 +43,19 @@ const (
 	PaneDetail
 )
 
-// paneCount is how many values Pane has, so Tab can cycle through them with
-// a single modulo rather than a switch that must be kept in sync by hand.
+// paneCount is how many values Pane has. Tab cycles over the panes the
+// current width actually draws (focusablePanes), which is a subset of
+// these, so this sizes that list rather than serving as a modulus.
 const paneCount = PaneDetail + 1
 
 // Model is the bubbletea model for tfli's full-screen interface. It wraps a
-// loaded log; nothing here mutates the log, so a Model can be freely copied
-// the way bubbletea's value-receiver Update requires.
+// loaded log; nothing here mutates the log.
+//
+// It is driven through a POINTER and never copied: selectedFacets is a map,
+// so a copy shares the user's filter with the model it was copied from and
+// a toggle applied to one silently rewrites the other's ranked numbers.
+// Init, Update and View all take pointer receivers for that reason, and
+// the compile-time assertion below pins it.
 type Model struct {
 	log  *model.Log
 	name string
@@ -101,9 +107,12 @@ type Model struct {
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
 
-	// showFacetOverlay is whether 'f' has toggled the facet pane open below
-	// the width it would otherwise show inline at. It has no effect once the
-	// terminal is wide enough to show facets inline anyway; see layout.go.
+	// showFacetOverlay is whether the facet pane is open as an overlay, in
+	// place of the list and detail panes, below the width it would otherwise
+	// show inline at. It is only ever set below that width (see
+	// toggleFacetFocus): a terminal wide enough to show facets inline has
+	// nothing to overlay, and a flag left set there would pop the overlay
+	// open unasked the moment the terminal was narrowed.
 	showFacetOverlay bool
 
 	width, height int
@@ -126,6 +135,7 @@ func New(l *model.Log, path string) Model {
 	// rather than spans, and it filters only the raw log.
 	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
 	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: facets}
+	m.facetCursor = firstFacetCursor(facets)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
 	m.detailPaneNatural = detailNaturalWidth(l.RPCSpans)
 	return m
@@ -169,27 +179,27 @@ func (m *Model) RowCount() int {
 
 // Init starts no commands: the model has everything it needs from New, and
 // nothing here depends on bubbletea's runtime to load.
-func (m Model) Init() tea.Cmd {
+func (m *Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles one message and returns the model to render next. The
-// receiver is a value, so each message starts from a copy and a test can
-// drive the same model twice without the first run leaking into the second;
-// the RESULT is a pointer, so bubbletea renders and re-updates the very
-// model this returns and the caches on it (see rowsCache) survive.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles one message and returns the model to render next, which is
+// always the receiver itself. The receiver is a POINTER, so there is exactly
+// one Model: the caches on it (see rowsCache) survive, and a facet toggle --
+// which mutates the selectedFacets map in place -- cannot be written to one
+// model while another is rendered.
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// While a search query is being typed, every key is text for the
 		// query rather than a command -- including keys bound elsewhere,
 		// such as "j" or "q" -- so this is handled before anything else.
 		if m.raw.searching {
-			m = m.handleSearchKey(msg)
+			m.handleSearchKey(msg)
 			if m.quitting {
-				return &m, tea.Quit
+				return m, tea.Quit
 			}
-			return &m, nil
+			return m, nil
 		}
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
 		// happens to render it as " " too, but dispatching on Type is the
@@ -198,14 +208,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pane == PaneFacets {
 				m.toggleSelectedFacetValue()
 			}
-			return &m, nil
+			return m, nil
 		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
-			return &m, tea.Quit
+			return m, tea.Quit
 		case "tab":
-			m.pane = (m.pane + 1) % paneCount
+			m.focusNextPane()
 		case "up", "k":
 			m.moveCursor(-1)
 		case "down", "j":
@@ -221,7 +231,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// jump to, so jumpToSpan leaves m unchanged for those.
 			if m.pane == PaneList {
 				if rows := m.rows(); m.selected >= 0 && m.selected < len(rows) {
-					m = m.jumpToSpan(rows[m.selected].spanIdx)
+					m.jumpToSpan(rows[m.selected].spanIdx)
 				}
 			}
 		case "pgdown":
@@ -248,12 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchAgain(-1)
 			}
 		case "f":
-			// Below the facet pane's inline width threshold, 'f' opens it as
-			// an overlay in place of the list and detail panes; see
-			// layout.go's renderPanes. Above that threshold facets are
-			// already shown inline, so this toggle simply has no visible
-			// effect until the terminal narrows.
-			m.showFacetOverlay = !m.showFacetOverlay
+			m.toggleFacetFocus()
 		default:
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
@@ -265,8 +270,69 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.keepFocusOnADrawnPane()
 	}
-	return &m, nil
+	return m, nil
+}
+
+// focusNextPane is Tab: it moves focus to the next pane the current frame
+// actually draws, wrapping at the end. Panes the width degradation has
+// collapsed are skipped rather than cycled through invisibly.
+func (m *Model) focusNextPane() {
+	panes := m.focusablePanes(m.paneWidth())
+	for i, p := range panes {
+		if p == m.pane {
+			m.pane = panes[(i+1)%len(panes)]
+			return
+		}
+	}
+	m.pane = panes[0]
+}
+
+// keepFocusOnADrawnPane brings focus back to a pane the current width draws.
+// A resize narrow enough to collapse the focused pane would otherwise leave
+// the keyboard pointed at a pane that is no longer on screen -- the same
+// invisible-focus hazard focusNextPane exists to prevent, reached by
+// dragging the terminal's edge instead of by pressing Tab.
+//
+// Focus falls back to the list, the pane every width draws, except while the
+// facet overlay is open: there the facet pane is the only pane on screen.
+func (m *Model) keepFocusOnADrawnPane() {
+	panes := m.focusablePanes(m.paneWidth())
+	fallback := panes[0]
+	for _, p := range panes {
+		if p == m.pane {
+			return
+		}
+		if p == PaneList {
+			fallback = PaneList
+		}
+	}
+	m.pane = fallback
+}
+
+// toggleFacetFocus is 'f': it puts the facet pane in front of the user and
+// gives it the keyboard, whatever the terminal width, and pressing it again
+// hands the keyboard back to the list.
+//
+// Below facetInlineWidth the facet pane is not drawn at all, so it is opened
+// as an overlay in place of the list and detail panes (see layout.go's
+// renderPanes). Focus has to move with it: the overlay exists precisely so
+// facets are usable on a narrow terminal, and an overlay the keyboard cannot
+// reach is a column of checkboxes space does nothing to.
+//
+// At or above that width the facets are already on screen, so 'f' only moves
+// focus -- the same place Tab would eventually land. It never sets the
+// overlay flag there, so narrowing the terminal later cannot pop an overlay
+// open that the user never asked for.
+func (m *Model) toggleFacetFocus() {
+	if m.pane == PaneFacets {
+		m.showFacetOverlay = false
+		m.pane = PaneList
+		return
+	}
+	m.showFacetOverlay = m.paneWidth() < facetInlineWidth
+	m.pane = PaneFacets
 }
 
 // invalidateRows drops any cached rows so the next call to rows() rebuilds
@@ -278,9 +344,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // what is left, and a table whose cursor is off its own end highlights
 // nothing while the detail pane beside it falls to "(no call selected)" --
 // a list with no cursor at all until the user presses an arrow key.
+//
+// The raw log's "pattern not found" is dropped here for the same reason. It
+// is a cached derivation of the last query, the position it searched from
+// and the filter it searched under; a filter change moves the last of those,
+// so the footer would otherwise keep asserting a miss for a search that no
+// longer describes what is on screen -- and keep the key hints hidden in the
+// one view where n and N matter most.
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
+	m.raw.notFound = false
 	m.clampSelection()
 }
 
@@ -332,11 +406,19 @@ func (m *Model) clampSelection() {
 // list, detail), degrading by width, with the header and observer-effect
 // caveat that this package's tests pin regardless of that composition.
 
+// Only *Model satisfies tea.Model. Every method that can mutate the model
+// or fill a cache on it takes a pointer receiver, so the value type does
+// not implement the interface and no caller can hand bubbletea a copy.
+var _ tea.Model = (*Model)(nil)
+
 // Run opens the full-screen interface for l, loaded from path, and blocks
-// until the user quits. It registers a *Model: bubbletea needs only
-// Init/Update/View on whatever it is given, and a pointer is what lets the
-// render path share one model -- and so one rows cache -- with the update
-// that produced it.
+// until the user quits. It registers a *Model, and only a *Model can be
+// registered: View takes a pointer receiver, so the VALUE type does not
+// satisfy tea.Model and tea.NewProgram(m) -- the shape that once let the
+// render path cache into a copy bubbletea then discarded -- does not
+// compile. The assertion above states that invariant, so restoring a value
+// receiver on View or Update breaks the build here rather than quietly
+// re-splitting the model in two.
 func Run(l *model.Log, path string) error {
 	m := New(l, path)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
