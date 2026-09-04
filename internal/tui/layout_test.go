@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -67,14 +68,62 @@ func TestLayoutDegradesByWidth(t *testing.T) {
 
 // No rendered line may exceed the terminal width at any supported size, or
 // the terminal wraps and the layout becomes wreckage.
+//
+// The measurement is display columns (lipgloss.Width), not runes: the
+// selected row and the facet cursor carry ANSI escapes that occupy no
+// columns at all, so a rune count both overstates their width and lets a
+// row that is actually SHORT than the rest pass unnoticed. The companion
+// check below pins that short case, which a per-line maximum cannot see.
 func TestNoLineExceedsTerminalWidth(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{70, 100, 160} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		for _, line := range strings.Split(m.View(), "\n") {
-			if n := len([]rune(line)); n > w {
-				t.Errorf("width %d: line of %d runes: %q", w, n, line)
+			if n := lipgloss.Width(line); n > w {
+				t.Errorf("width %d: line of %d columns: %q", w, n, line)
 			}
+		}
+	}
+}
+
+// Every line of the pane row must be the SAME width, not merely within the
+// terminal width: the panes are composed by padding each one to its
+// declared width and joining them with a separator, so a row one column
+// short puts its │ separators a column to the left of every other row's.
+// Counting the selected row's ANSI escapes as if they were columns did
+// exactly that, and only on the one row the user is looking at.
+func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for _, w := range []int{70, 100, 160} {
+		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+		for _, line := range strings.Split(m.View(), "\n") {
+			if !strings.Contains(line, paneSep) {
+				continue // header, caveat and footer are not pane rows
+			}
+			if n := lipgloss.Width(line); n != w {
+				t.Errorf("width %d: pane row is %d columns, want %d: %q", w, n, w, line)
+			}
+		}
+	}
+}
+
+// bubbletea's renderer keeps only the last h lines of what View returns
+// (standardRenderer.flush: it cannot move the cursor into the terminal's
+// scrollback buffer), so a view of h+1 lines -- one trailing newline is
+// enough -- silently loses its FIRST line off the top of the screen. That
+// line is the header naming the open file, so the defect is invisible to
+// any test that asserts on View()'s text. This pins the invariant the
+// renderer actually enforces instead.
+func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for _, h := range []int{60, 40, 24, 12, 11, 10, 5, 1} {
+		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: h})
+		view := m.View()
+		if n := len(strings.Split(view, "\n")); n > h {
+			t.Errorf("height %d: View() is %d lines, which loses its top %d:\n%s", h, n, n-h, view)
+		}
+		if !strings.HasPrefix(view, "tfli -- ") {
+			t.Errorf("height %d: View() does not start with the header line:\n%s", h, view)
 		}
 	}
 }
@@ -165,17 +214,22 @@ func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 // this is the regression that would have caught it: the composed view at
 // 100 columns must show a front-clipped provider name in the centre pane
 // AND all three of its numeric columns whole.
+// Both assertions are made against the centre pane alone. The facet pane
+// at 100 columns front-clips its own provider values, so a search of the
+// whole composed view for an ellipsis is satisfied whatever the centre
+// pane renders -- it cannot fail, and so cannot report the regression it
+// exists for.
 func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
-	out := m.View()
-	if !strings.Contains(out, "…") {
-		t.Errorf("centre pane's provider column was not front-clipped at 100 columns:\n%s", out)
+	centre := centrePaneOf(m.View())
+	if !strings.Contains(centre, "…") {
+		t.Errorf("centre pane's provider column was not front-clipped at 100 columns:\n%s", centre)
 	}
 	// "5ms      1  5ms" is aws's total, calls and max columns rendered
 	// together in one row -- all three numeric values, whole, in the order
 	// the table actually renders them.
-	if !strings.Contains(out, "5ms      1  5ms") {
-		t.Errorf("providers view at 100 columns is missing one or more numeric columns:\n%s", out)
+	if !strings.Contains(centre, "5ms      1  5ms") {
+		t.Errorf("providers view at 100 columns is missing one or more numeric columns:\n%s", centre)
 	}
 }
 
@@ -198,6 +252,11 @@ func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testin
 // than a hand-picked width: this is a white-box check that the real
 // column-width policy -- whatever it is today or becomes later -- still
 // keeps two different providers apart, not a pinned guess at its output.
+//
+// The assertion is made against the centre pane alone. The facet pane and
+// the detail pane both render provider addresses of their own, at their own
+// widths, so a search of the whole composed view can be satisfied by a pane
+// other than the one under test.
 func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -211,23 +270,22 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 	}
 
 	centreWidth := layoutCentreWidth(m, 160)
-	budget := centreWidth - selectedStyleOverhead
-	if budget < 1 {
-		budget = centreWidth
-	}
-	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), budget)
+	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
 	providerWidth := widths[len(callColumns)-1] // provider is callColumns' last column
+	if providerWidth >= len([]rune(aws)) && providerWidth >= len([]rune(google)) {
+		t.Fatalf("provider column is %d runes wide at 160 columns, wide enough for both addresses whole -- this test no longer exercises clipping", providerWidth)
+	}
 	awsWant, googleWant := clipValueFront(aws, providerWidth), clipValueFront(google, providerWidth)
 	if awsWant == googleWant {
 		t.Fatalf("front-clipped provider text collided at the computed width %d -- test assumption is wrong: %q", providerWidth, awsWant)
 	}
 
-	out := m.View()
-	if !strings.Contains(out, awsWant) {
-		t.Errorf("calls view at 160 columns is missing the aws provider's distinguishing text %q:\n%s", awsWant, out)
+	centre := centrePaneOf(m.View())
+	if !strings.Contains(centre, awsWant) {
+		t.Errorf("calls view at 160 columns is missing the aws provider's distinguishing text %q:\n%s", awsWant, centre)
 	}
-	if !strings.Contains(out, googleWant) {
-		t.Errorf("calls view at 160 columns is missing the google provider's distinguishing text %q:\n%s", googleWant, out)
+	if !strings.Contains(centre, googleWant) {
+		t.Errorf("calls view at 160 columns is missing the google provider's distinguishing text %q:\n%s", googleWant, centre)
 	}
 }
 
@@ -244,9 +302,9 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 // to differ. two-rpcs.log's two calls carry those two names, which share
 // the 14-rune tail "ResourceChange", for exactly this reason.
 //
-// The expected clipped text is computed via fitColumnWidths and clipWidth
-// themselves, the same functions renderTable calls, rather than a
-// hand-picked width -- the same white-box approach as the provider test
+// The expected clipped text is computed via fitColumnWidths and
+// clipValueEnd themselves, the same functions renderTable calls, rather
+// than a hand-picked width -- the same white-box approach as the provider test
 // above. The assertion is made against the centre pane alone, since the
 // facet list and the detail pane both spell RPC names out in full and
 // would satisfy a search of the whole composed view whatever the calls
@@ -264,16 +322,12 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 	}
 
 	centreWidth := layoutCentreWidth(m, 100)
-	budget := centreWidth - selectedStyleOverhead
-	if budget < 1 {
-		budget = centreWidth
-	}
-	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), budget)
+	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
 	rpcWidth := widths[1] // RPC is callColumns' second column, after duration
 	if rpcWidth >= len([]rune(first)) && rpcWidth >= len([]rune(second)) {
 		t.Fatalf("RPC column is %d runes wide at 100 columns, wide enough for both names whole -- this test no longer exercises clipping", rpcWidth)
 	}
-	firstWant, secondWant := clipWidth(first, rpcWidth), clipWidth(second, rpcWidth)
+	firstWant, secondWant := clipValueEnd(first, rpcWidth), clipValueEnd(second, rpcWidth)
 	if firstWant == secondWant {
 		t.Fatalf("clipped RPC text collided at the computed width %d: %q", rpcWidth, firstWant)
 	}
@@ -312,4 +366,19 @@ func layoutCentreWidth(m Model, w int) int {
 	facetW := facetPaneWidth(m.facets, w)
 	detailW := detailPaneWidth(m.log.RPCSpans, w)
 	return w - facetW - detailW - 2*len([]rune(paneSep))
+}
+
+// minDetailPaneWidth exists so the detail pane always has room for its own
+// placeholder. It is only a floor if it is applied after the quarter-of-the-
+// terminal cap: at 70 columns -- one of the three widths the spec names --
+// a quarter is 17, which renders "(no call selected" with the closing paren
+// cut off, a pane too narrow to label itself.
+func TestDetailPaneFitsItsPlaceholderAtTheNarrowestSupportedWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
+	if got := detailPaneWidth(m.log.RPCSpans, detailInlineWidth); got < minDetailPaneWidth {
+		t.Errorf("detail pane is %d columns at width %d, below its own minimum of %d", got, detailInlineWidth, minDetailPaneWidth)
+	}
+	if !strings.Contains(m.View(), "(no call selected)") {
+		t.Errorf("detail pane placeholder is cut off at %d columns:\n%s", detailInlineWidth, m.View())
+	}
 }

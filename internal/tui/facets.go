@@ -145,19 +145,14 @@ func (m Model) renderFacets(w, h int) string {
 			if m.selectedFacets[f.Name][v.Value] {
 				check = "x"
 			}
-			cursor := dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val
-			// The cursor's line is budgeted at w-selectedStyleOverhead
-			// before highlightLine wraps it, so highlightLine's own clip is
-			// a no-op: highlightLine clips from the end, which would
-			// otherwise re-truncate the count facetValueLine just went to
-			// the trouble of keeping whole (or bite back into the value's
-			// tail -- the part a leading ellipsis was chosen to preserve).
-			lineWidth := w
-			if cursor {
-				lineWidth = w - selectedStyleOverhead
-			}
-			line := facetValueLine(check, v.Value, v.Count, lineWidth, kind)
-			if cursor {
+			// Every line is built at the full pane width, cursor or not:
+			// the escapes highlightLine adds cost no terminal columns, so
+			// its own end-clip is a no-op here rather than re-truncating
+			// the count facetValueLine went to the trouble of keeping
+			// whole (or biting back into the value's tail -- the part a
+			// leading ellipsis was chosen to preserve).
+			line := facetValueLine(check, v.Value, v.Count, w, kind)
+			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
 				line = highlightLine(line, w)
 			}
 			lines = append(lines, line)

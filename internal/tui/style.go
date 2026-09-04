@@ -27,31 +27,23 @@ var styleRenderer = func() *lipgloss.Renderer {
 // and dark terminal themes without this package having to guess either.
 var selectedStyle = styleRenderer.NewStyle().Reverse(true)
 
-// selectedStyleOverhead is how many runes selectedStyle.Render adds beyond
-// its content: the escape sequences that switch reverse video on and off.
-// highlightLine budgets for it so a styled line's rune count, escapes
-// included, never exceeds the width it was given -- the width guarantee
-// this package tests counts runes, not the terminal columns those runes
-// will actually occupy.
-var selectedStyleOverhead = len([]rune(selectedStyle.Render("")))
-
-// highlightLine re-renders s in reverse video, right-padded to fill w runes
-// so the highlight reads as a full-width bar, while keeping the escaped
-// result itself within w runes. If w leaves no room for the escape
-// overhead, s is returned clipped but unstyled rather than risking a line
-// over its budget.
+// highlightLine re-renders s in reverse video, right-padded to fill w
+// terminal columns so the highlight reads as a full-width bar. The escape
+// sequences selectedStyle adds occupy no columns of their own, so the
+// content gets the whole of w: a styled row is exactly as wide on screen as
+// the unstyled rows above and below it, and the pane separators to its
+// right stay in the same column.
 func highlightLine(s string, w int) string {
-	if w <= selectedStyleOverhead {
-		return clipWidth(s, w)
-	}
-	contentWidth := w - selectedStyleOverhead
-	return selectedStyle.Render(padRight(clipWidth(s, contentWidth), contentWidth))
+	return selectedStyle.Render(padRight(clipWidth(s, w), w))
 }
 
-// padRight right-pads s with spaces to exactly w runes. Callers must clip s
-// to at most w runes first -- this never truncates.
+// padRight right-pads s with spaces to exactly w terminal columns. Callers
+// must clip s to at most w columns first -- this never truncates. It
+// measures display width rather than runes so that a line carrying ANSI
+// escapes, which occupy no columns, is padded to the same visible width as
+// a plain one.
 func padRight(s string, w int) string {
-	if n := len([]rune(s)); n < w {
+	if n := lipgloss.Width(s); n < w {
 		return s + strings.Repeat(" ", w-n)
 	}
 	return s
@@ -66,16 +58,16 @@ func padRight(s string, w int) string {
 // component name -- values distinguished from their siblings by their
 // TAIL, not their head: "registry.terraform.io/hashicorp/azuread" and
 // "…/azurerm" share a 31-character prefix and differ only in the last 7,
-// so an end-clip (clipWidth) collapses them to the same text while a
+// so an end-clip (clipValueEnd) collapses them to the same text while a
 // leading ellipsis keeps them apart. Prose and message text is the
-// opposite -- distinguished by its head -- and keeps using clipWidth
-// directly, as does the one identifier that is also distinguished by its
-// head: an RPC name, which names one of a closed set of plugin-protocol
-// methods sharing long suffixes (see columnKind). Which of the two rules a
-// value gets follows from the kind of value it is, not from a choice made
-// at each render site: clipValueForKind is where a kind becomes a
-// direction. See clipIdentifierField for the "label plus identifier" line
-// shape several of those sites share.
+// opposite -- distinguished by its head -- and end-clips, as does the one
+// identifier that is also distinguished by its head: an RPC name, which
+// names one of a closed set of plugin-protocol methods sharing long
+// suffixes (see columnKind). Which of the two rules a value gets follows
+// from the kind of value it is, not from a choice made at each render site:
+// clipValueForKind is where a kind becomes a direction. See
+// clipIdentifierField for the "label plus identifier" line shape several of
+// those sites share.
 func clipValueFront(s string, w int) string {
 	r := []rune(s)
 	if len(r) <= w {
@@ -90,15 +82,40 @@ func clipValueFront(s string, w int) string {
 	return "…" + string(r[len(r)-(w-1):])
 }
 
+// clipValueEnd shortens s to at most w runes by dropping characters from
+// the end and marking the cut with a trailing ellipsis, so s's head
+// survives instead of its tail.
+//
+// It is clipValueFront's mirror, for values distinguished by their HEAD --
+// an RPC name (see columnKind), a column header. The ellipsis matters for
+// the same reason it does on the front-clip: a clipped value that carries
+// no marker reads as a complete one, and a facet value or a table cell is
+// something the user acts on. clipWidth, which cuts without a marker, is
+// the safety net for already-composed lines rather than for bare values.
+func clipValueEnd(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w <= 0 {
+		return ""
+	}
+	if w == 1 {
+		return "…"
+	}
+	return string(r[:w-1]) + "…"
+}
+
 // clipValueForKind clips s to at most w runes from whichever end its kind
 // says may give way: a tail-distinguished value keeps its tail
-// (clipValueFront), a head-distinguished one keeps its head (clipWidth).
-// This is the single place the taxonomy in columnKind is turned into a clip
-// direction, so a table cell, a facet value and a detail field all agree on
-// what happens to a given kind of value.
+// (clipValueFront), a head-distinguished one keeps its head
+// (clipValueEnd). Both mark the cut with an ellipsis at the end they cut
+// from. This is the single place the taxonomy in columnKind is turned into
+// a clip direction, so a table cell, a facet value and a detail field all
+// agree on what happens to a given kind of value.
 func clipValueForKind(s string, w int, kind columnKind) string {
 	if kind == headIdentifierColumn {
-		return clipWidth(s, w)
+		return clipValueEnd(s, w)
 	}
 	return clipValueFront(s, w)
 }

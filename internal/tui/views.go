@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -45,7 +46,7 @@ const (
 	// an RPC name, one of a closed set of plugin-protocol methods that share
 	// long suffixes (...ResourceChange, ...ResourceConfig,
 	// ...ResourceState) and diverge in their first few characters. It is
-	// left-aligned and end-clipped via clipWidth: front-clipping
+	// left-aligned and end-clipped via clipValueEnd: front-clipping
 	// PlanResourceChange and ApplyResourceChange renders both as "…eChange".
 	headIdentifierColumn
 	// numericColumn holds a formatted number -- a duration or a count. It is
@@ -243,33 +244,30 @@ func typesPreamble(uiSpans []span.Span) []string {
 // visible within h lines total: the preamble and header are never scrolled,
 // only the data rows beneath them are.
 //
-// Every row is fit and clipped to budget (w minus highlightLine's escape
-// overhead), not w itself, even though only the selected row is ever
-// wrapped in highlightLine: column widths are shared across every row, so
-// there is no way to reserve that budget for the selected row alone
-// without every row using the same widths. Without it, highlightLine's own
-// end-clip -- needed to keep the styled result within w -- would land on
-// whichever row the cursor is on and cut into its rightmost column: the
-// exact defect this rework exists to remove, just moved onto the one row a
-// user is most likely looking at.
+// Every row, highlighted or not, is fit and clipped to the full w: the
+// escape sequences highlightLine wraps the selected row in occupy no
+// terminal columns, so the highlighted row has exactly as many columns of
+// content as its neighbours and column widths stay shared across the whole
+// table.
+//
+// The header is clipped as prose, not as an identifier: a column header
+// ("resource type") is told apart by its head even where the column's
+// values are told apart by their tails, so it end-clips while they
+// front-clip. See headerKinds.
 func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
-	budget := w - selectedStyleOverhead
-	if budget < 1 {
-		budget = w
-	}
-
-	widths := fitColumnWidths(cols, columnWidths(cols, data), budget)
+	widths := fitColumnWidths(cols, columnWidths(cols, data), w)
+	kinds := columnKinds(cols)
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
 	for _, p := range preamble {
 		lines = append(lines, clipWidth(p, w))
 	}
-	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths), budget))
+	lines = append(lines, clipWidth(formatRow(headerCells(cols), headerKinds(cols), widths), w))
 
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)
 	for i := top; i < top+visible; i++ {
-		line := clipWidth(formatRow(data[i].cells, cols, widths), budget)
+		line := clipWidth(formatRow(data[i].cells, kinds, widths), w)
 		if i == selected {
 			line = highlightLine(line, w)
 		}
@@ -387,6 +385,36 @@ func headerCells(cols []column) []string {
 	return cells
 }
 
+// columnKinds is each column's kind, in order: what formatRow needs to
+// align and clip that column's VALUES.
+func columnKinds(cols []column) []columnKind {
+	kinds := make([]columnKind, len(cols))
+	for i, c := range cols {
+		kinds[i] = c.kind
+	}
+	return kinds
+}
+
+// headerKinds is how each column's HEADER is aligned and clipped, which is
+// not always how its values are. A header is prose -- "resource type",
+// "provider" -- told apart by its head, so a text column's header
+// end-clips even where the column's values front-clip: front-clipping
+// "resource type" to "…urce type" labels the column with a word fragment.
+// A numeric column's header keeps the column's own kind, staying
+// right-aligned over its numbers and never clipped: fitColumnWidths
+// reserves such a column at its natural width, which columnWidths already
+// measured against the header itself.
+func headerKinds(cols []column) []columnKind {
+	kinds := make([]columnKind, len(cols))
+	for i, c := range cols {
+		kinds[i] = headIdentifierColumn
+		if c.kind == numericColumn {
+			kinds[i] = numericColumn
+		}
+	}
+	return kinds
+}
+
 // columnWidths computes how wide each column must be to fit its header and
 // every cell in data, the same data-driven approach internal/profile uses
 // for its resource-type column rather than a width fixed in advance.
@@ -409,21 +437,23 @@ func columnWidths(cols []column, data []row) []int {
 }
 
 // formatRow pads cells to widths and joins them with two spaces, taking
-// each column's alignment and clip direction from its kind (see
-// columnKind): a numeric cell is right-aligned and never clipped, since
-// fitColumnWidths reserves its column at full natural width; a
-// tail-distinguished identifier is front-clipped so its tail survives, and
-// a head-distinguished one is end-clipped so its head does. Both clips are
-// no-ops when the cell already fits its column, so they apply
-// unconditionally rather than singling out whichever column
-// fitColumnWidths happened to shrink.
-func formatRow(cells []string, cols []column, widths []int) string {
+// each cell's alignment and clip direction from kinds[i] (see columnKind):
+// a numeric cell is right-aligned and never clipped, since fitColumnWidths
+// reserves its column at full natural width; a tail-distinguished
+// identifier is front-clipped so its tail survives, and a head-distinguished
+// one is end-clipped so its head does. Both clips are no-ops when the cell
+// already fits its column, so they apply unconditionally rather than
+// singling out whichever column fitColumnWidths happened to shrink.
+//
+// The kinds are passed in rather than read off cols because a header row
+// and a data row of the same table clip differently: see headerKinds.
+func formatRow(cells []string, kinds []columnKind, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
 		w := widths[i]
 		kind := tailIdentifierColumn
-		if i < len(cols) {
-			kind = cols[i].kind
+		if i < len(kinds) {
+			kind = kinds[i]
 		}
 		if kind == numericColumn {
 			parts[i] = fmt.Sprintf("%*s", w, c)
@@ -434,19 +464,22 @@ func formatRow(cells []string, cols []column, widths []int) string {
 	return strings.Join(parts, "  ")
 }
 
-// clipWidth truncates s to at most w runes. It is the last line of defence
-// against a line overrunning its pane -- column widths are otherwise
-// data-driven and unbounded -- so real degradation (Task 6) can be added
-// without this guarantee ever regressing.
+// clipWidth truncates s to at most w terminal columns, without marking the
+// cut. It is the last line of defence against a line overrunning its pane
+// -- column widths are otherwise data-driven and unbounded -- and applies
+// to lines that have already been composed rather than to bare values,
+// which clip by their kind (clipValueForKind) and do carry a marker.
+//
+// Width here is display columns, not runes: an ANSI escape sequence
+// occupies no columns, so counting its runes would make a full-width styled
+// line look over-wide and cut real content off its end. ansi.Truncate
+// measures the same way lipgloss.Width does and carries escapes across the
+// cut, so a clipped styled line still turns its styling off again.
 func clipWidth(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
 	if w <= 0 {
 		return ""
 	}
-	return string(r[:w])
+	return ansi.Truncate(s, w, "")
 }
 
 // formatMs renders a millisecond duration: whole milliseconds below one

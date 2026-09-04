@@ -197,3 +197,26 @@ func TestFacetPaneKeepsRPCNamesDistinctAtOneHundredColumns(t *testing.T) {
 		}
 	}
 }
+
+// A clipped value must be marked as clipped, whichever end it was cut
+// from. The front-clip has carried a leading ellipsis since the facet pane
+// was first squeezed; the end-clip carried nothing, so a head-distinguished
+// value such as an RPC name rendered as "[ ] ApplyResourceChang  2" -- a
+// truncated control that reads as a complete one, and a user who picks it
+// expecting the whole name gets no hint they are choosing blind.
+func TestFacetValueLineMarksAnEndClippedValue(t *testing.T) {
+	const value = "ApplyResourceChange"
+	line := facetValueLine(" ", value, 2, 24, facetValueKind(dimRPC))
+	if strings.Contains(line, value) {
+		t.Fatalf("value fits whole at width 24, so this no longer exercises clipping: %q", line)
+	}
+	if !strings.HasPrefix(line, "[ ] Apply") {
+		t.Errorf("end-clipped value lost its distinguishing head: %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Errorf("end-clipped value is not marked as clipped, so it reads as a complete one: %q", line)
+	}
+	if !strings.HasSuffix(line, "2") {
+		t.Errorf("count was dropped: %q", line)
+	}
+}

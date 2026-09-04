@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestProvidersViewRanksByTotalTime(t *testing.T) {
@@ -70,11 +71,13 @@ func TestRowCountMatchesRowsLength(t *testing.T) {
 
 // A view narrower than its columns must degrade, not wrap into unreadable
 // wreckage. Width degradation proper is Task 6; this pins that renderList
-// never emits a line wider than it was given.
+// never emits a line wider than it was given. Width is display columns:
+// the selected row's ANSI escapes take up none, so counting their runes
+// would flag a row that is exactly as wide as its neighbours.
 func TestRenderListRespectsItsWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	for _, line := range strings.Split(m.renderList(60, 20), "\n") {
-		if len([]rune(line)) > 60 {
+		if lipgloss.Width(line) > 60 {
 			t.Errorf("line exceeds the given width of 60: %q", line)
 		}
 	}
@@ -160,5 +163,32 @@ func TestRenderListFrontClipsTheTextColumnAndKeepsNumbersWhole(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("numeric column value %q missing at width 40 -- a ranked list with no ranking data:\n%s", want, out)
 		}
+	}
+}
+
+// A column header is prose -- it names the column -- so it is told apart by
+// its head even where the column's VALUES are told apart by their tails.
+// Running headers through the same clip as their values front-clipped
+// "resource type" to "…urce type", a word fragment as a column label.
+//
+// Both rows are checked together at one width, because the point is that
+// the two clip in opposite directions in the same column: the width is
+// chosen so neither fits whole.
+func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
+	cols := []column{
+		{header: "resource type", kind: tailIdentifierColumn},
+		{header: "n", kind: numericColumn},
+	}
+	data := []row{{cells: []string{"registry.terraform.io/hashicorp/aws", "1"}, spanIdx: -1}}
+
+	lines := strings.Split(renderTable(nil, cols, data, -1, 12, 10), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want a header and one data row:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if want := "resource…  n"; lines[0] != want {
+		t.Errorf("header row = %q, want %q -- a header must keep its head and mark the cut", lines[0], want)
+	}
+	if want := "…corp/aws  1"; lines[1] != want {
+		t.Errorf("data row = %q, want %q -- an identifier value must keep its tail", lines[1], want)
 	}
 }

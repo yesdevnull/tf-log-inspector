@@ -19,9 +19,12 @@ const (
 )
 
 // minFacetPaneWidth and minDetailPaneWidth are the floor facetPaneWidth and
-// detailPaneWidth return even for a log whose values are all short: enough
-// for the facet pane's own section headers ("RESOURCE TYPES" is the
-// longest) and the detail pane's placeholder ("(no call selected)").
+// detailPaneWidth return: enough for the facet pane's own section headers
+// ("RESOURCE TYPES" is the longest) and the detail pane's placeholder
+// ("(no call selected)"). They are real floors, applied last in
+// capPaneWidth -- a pane clamped below them shows its own furniture cut in
+// half, which tells the reader less than the couple of columns it hands
+// back to the centre pane are worth.
 const (
 	minFacetPaneWidth  = 15
 	minDetailPaneWidth = 19
@@ -50,7 +53,7 @@ const hugeWidth = 1 << 30
 // column. A fixed pane width left every value longer than that width
 // indistinguishable from its siblings and its count gone entirely once
 // clipped -- the spec requires facets to show a count for every value -- so
-// this measures the actual data instead. It never claims more than a third
+// this measures the actual data instead. capPaneWidth keeps it to a quarter
 // of the terminal, so one long value cannot starve the centre pane the way
 // a fixed width once starved the facet pane in the other direction.
 func facetPaneWidth(facets []model.Facet, w int) int {
@@ -66,7 +69,7 @@ func facetPaneWidth(facets []model.Facet, w int) int {
 			}
 		}
 	}
-	return capPaneWidth(width, w, maxFacetPaneWidth)
+	return capPaneWidth(width, w, minFacetPaneWidth, maxFacetPaneWidth)
 }
 
 // detailPaneWidth sizes the detail pane to fit the widest RPC/provider/
@@ -82,23 +85,29 @@ func detailPaneWidth(rpcSpans []span.Span, w int) int {
 			}
 		}
 	}
-	return capPaneWidth(width, w, maxDetailPaneWidth)
+	return capPaneWidth(width, w, minDetailPaneWidth, maxDetailPaneWidth)
 }
 
 // capPaneWidth clamps a data-driven side-pane width to at most a quarter of
-// the terminal width and at most maxWidth, so it never exceeds either. A
-// quarter each for facets and detail leaves the centre pane at least half
-// of w -- the centre is where the answer lives (the ranked list itself),
-// so it must not lose more than the two side panes combined get.
-func capPaneWidth(width, terminalWidth, maxWidth int) int {
+// the terminal width and at most maxWidth, then back up to minWidth. A
+// quarter each for facets and detail leaves the centre pane most of w --
+// the centre is where the answer lives (the ranked list itself), so it must
+// not lose more than the two side panes combined get.
+//
+// minWidth is applied LAST, so it wins over the quarter: below roughly 76
+// columns a quarter is narrower than the detail pane's own placeholder, and
+// a pane too narrow to label itself is worth less to the reader than the
+// two or three columns it would return to the centre. That ordering is what
+// makes minWidth a floor rather than a preference.
+func capPaneWidth(width, terminalWidth, minWidth, maxWidth int) int {
 	if quarter := terminalWidth / 4; width > quarter {
 		width = quarter
 	}
 	if width > maxWidth {
 		width = maxWidth
 	}
-	if width < 1 {
-		width = 1
+	if width < minWidth {
+		width = minWidth
 	}
 	return width
 }
@@ -120,6 +129,12 @@ const (
 // right, degrading by width per the design spec's width-degradation rules.
 // The header naming the file and the observer-effect caveat are always
 // shown in full, regardless of how the panes below them degrade.
+//
+// The result is exactly h lines with no trailing newline, and never more.
+// bubbletea's renderer keeps only the LAST h lines of what View returns --
+// it cannot scroll the cursor back into the terminal's scrollback buffer --
+// so a view even one line too tall loses its topmost line off the top of
+// the screen, and the topmost line here is the header naming the open file.
 func (m Model) View() string {
 	w, h := m.width, m.height
 	if w <= 0 {
@@ -135,8 +150,13 @@ func (m Model) View() string {
 	b.WriteString(m.renderPanes(w, paneH))
 	b.WriteString("\n\n")
 	writeLoggingCaveat(&b, w)
-	fmt.Fprintf(&b, "\n%s\n", clipWidth(footerKeys(), w))
-	return b.String()
+	fmt.Fprintf(&b, "\n%s", clipWidth(footerKeys(), w))
+
+	lines := strings.Split(b.String(), "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // header names the file and its span counts.
@@ -156,7 +176,9 @@ func footerKeys() string {
 // lines, including its trailing blank), the caveat (writeLoggingCaveatLines
 // lines) and its surrounding blank lines, and the footer (1 line) are taken
 // out of the total height h. It never goes below 1: a terminal too short to
-// show everything still shows something rather than an empty pane.
+// show everything still shows something rather than an empty pane, and View
+// then trims the surplus off the BOTTOM, keeping the header and the pane row
+// rather than whatever happened to fit last.
 func paneHeight(h int) int {
 	fixed := 2 + 1 + writeLoggingCaveatLines + 1 + 1
 	if paneH := h - fixed; paneH > 0 {

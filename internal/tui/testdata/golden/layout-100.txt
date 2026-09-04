@@ -1,10 +1,10 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
-PROVIDERS                 │ provider           total  calls  max         │ SPAN DETAIL              
-[7m[ ] …icorp/aws  1[0m │ [7m…hashicorp/google    8ms      1  8ms[0m │ (no call selected)       
-[ ] …/hashicorp/google  1 │ …io/hashicorp/aws    5ms      1  5ms         │                          
+PROVIDERS                 │ provider                   total  calls  max │ SPAN DETAIL              
+[7m[ ] ….io/hashicorp/aws  1[0m │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ (no call selected)       
+[ ] …/hashicorp/google  1 │ …rraform.io/hashicorp/aws    5ms      1  5ms │                          
 RPCS                      │                                              │                          
-[ ] ApplyResourceChang  2 │                                              │                          
+[ ] ApplyResourceChan…  2 │                                              │                          
 RESOURCE TYPES            │                                              │                          
 [ ] aws_subnet  1         │                                              │                          
 [ ] …_compute_instance  1 │                                              │                          
