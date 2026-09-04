@@ -621,7 +621,21 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    successful TRACE capture delivered that way would have reported
    `response entries 0` and read as a failure. Nested headers are now peeled;
    verified both ways against a nested TRACE line.
-   **This gates phase 2.**
+   **ANSWERED, 2026-09-04. The premise holds.** A TRACE-level HCP run:
+
+   | | value |
+   |---|---|
+   | `response duration fields` | 2174 |
+   | `request entries` | 2174 |
+   | `correlated req ids` | 2174 |
+   | selected tier | `reported` (tier 1) |
+   | spans built | 2174 |
+   | slowest span | 126,103 ms |
+   | total span time | 1,739,913 ms over a 730 s wall clock |
+
+   Every response pairs with a request, so tier 1 and tier 2 are both fully
+   available and 29 minutes of summed RPC time sits inside a 12-minute plan.
+   **Phase 2 is unblocked.**
 2. **How reliable address correlation is under real concurrency.** The
    mechanism is confirmed to exist — core logs addresses, and logs its own side
    of each RPC. What is unknown is the *ambiguity rate* when many resources of
@@ -629,18 +643,34 @@ Deliberately excluded, recorded so they are not rediscovered as omissions:
    plan. If most spans come back `Ambiguous`, view `3` is not worth its
    complexity and should be cut. **`--diagnose` must report the confidence
    distribution**, and that number decides whether the view ships.
-3. **Whether tier 2 pairing is available.** `"Sending request downstream"`
-   lines were absent from the public samples inspected. Now partly explained:
-   the line is emitted via `logging.ProtocolTrace`, so any sample captured
-   below TRACE cannot contain it. Tier 2 stands or falls with tier 1 on the
-   level question in open question 1, not on a separate one.
-4. **Which tier real logs actually support.** Tier 1 is expected to be the
-   normal case, but providers not built on `terraform-plugin-go` will not emit
-   `tf_req_duration_ms`. Phase 1 measures the proportion of spans by tier.
-5. **`TF_LOG_CORE` versus `TF_LOG_PROVIDER` splitting.** Terraform can route
-   core and provider logs at different levels, and address correlation requires
-   both in one file. Whether Dan's CI captures both determines whether view `3`
-   is reachable at all in the environment that matters.
+3. **Whether tier 2 pairing is available. ANSWERED, 2026-09-04: yes.**
+   Absent from the public samples because the line is emitted via
+   `logging.ProtocolTrace` and those samples were captured below TRACE. A
+   real TRACE log carries 2174 `"Sending request downstream"` entries against
+   2174 responses, and all 2174 correlate by `tf_req_id`. Tier 2 is a real
+   fallback, not a hypothesis.
+4. **Which tier real logs actually support. ANSWERED, 2026-09-04: tier 1,
+   entirely.** All 2174 spans in the TRACE log came from
+   `tf_req_duration_ms`; the sniffer selected `reported` and never fell back.
+   The four providers exercised — azurerm 4.81, tfe 0.59, azuread 3.9,
+   github 6.3.1 — are all built on `terraform-plugin-go`, so this measures a
+   real stack rather than the general case. A provider outside that family
+   would still degrade to a lower tier, which is why the tiers stay.
+5. **`TF_LOG_CORE` versus `TF_LOG_PROVIDER` splitting. ANSWERED,
+   2026-09-04: both land in one file.** The TRACE log carries 9,336 core
+   vertex lines and 6,537 core GRPC lines alongside 34,356 provider entries,
+   so core's addresses and the provider's RPCs are correlatable in principle.
+   View 3 is reachable in the environment that matters; whether it is
+   *reliable* is open question 2, still unmeasured because tier 3 is not
+   built.
+
+8. **What a TRACE capture costs in structured output.** The debug-toggle run
+   carried 1,311 `terraform.ui` lines alongside its debug text. The TRACE run
+   carried **zero**, so the per-resource UI-hook view was lost exactly where
+   the RPC view was gained. Whether that is inherent to raising `TF_LOG`, or
+   an artefact of how this particular run was captured, is not established —
+   and it matters, because the two views answer different questions. Worth
+   settling before the TUI assumes both are available from one log.
 6. **Real-world line rate.** ~~The 102 bytes/line figure comes from one small
    public log and is used for capacity planning.~~ **Answered, 2026-09-04:**
    828 bytes/line mean on a real 17.9 MB debug log (21,557 physical lines,
