@@ -304,3 +304,20 @@ func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
 		t.Errorf("TopEntry = %d after a jump to an out-of-range entry, want 0", got.TopEntry())
 	}
 }
+
+// The search prompt and its miss describe the raw log, the only view '/'
+// searches, so leaving that view puts the key hints back rather than
+// reporting a search whose result is no longer on screen.
+func TestSearchStateIsNotReportedOutsideTheRawLog(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "no-such-text-anywhere")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Fatalf("footer = %q, want the miss reported in the raw log", got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+		t.Errorf("footer in the calls view = %q, want the key hints", got)
+	}
+}

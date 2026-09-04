@@ -187,8 +187,14 @@ func header(m *Model) string {
 // they have typed -- and the result of a search that found nothing, which
 // otherwise looks exactly like a search that matched the entry already on
 // screen. Otherwise it is the key hints.
+//
+// Both states belong to the raw log, the only view '/' searches, so both
+// are shown only there: a miss reported over the calls table would describe
+// a search whose result is not on screen.
 func (m *Model) footer() string {
 	switch {
+	case m.view != ViewRawLog:
+		return footerKeys()
 	case m.raw.searching:
 		return "/" + m.raw.query
 	case m.raw.notFound:
