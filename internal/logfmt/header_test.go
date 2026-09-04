@@ -172,3 +172,47 @@ func TestParseHeaderBareLevelPrefixDoesNotOverrideLevel(t *testing.T) {
 		t.Errorf("Msg = %q, want the bracket stripped", h.Msg)
 	}
 }
+
+// The AzureAD provider logs through Go's standard log package rather than
+// hclog, so its nested header carries a "2006/01/02 15:04:05" timestamp --
+// two space-separated tokens, which a single-token scan cannot recognise.
+// Measured as 901 INFO entries in a real HCP log whose providers had said
+// DEBUG, and the reason an earlier peel left that count untouched.
+func TestParseHeaderPeelsNestedGoLogHeader(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [INFO]  provider.terraform-provider-azuread_v3.9.0_x5: 2026/09/04 09:15:03 [DEBUG] performing request`)
+	if h.Level != LevelDebug {
+		t.Errorf("Level = %v, want DEBUG from the nested Go-log header", h.Level)
+	}
+	if h.Msg != "performing request" {
+		t.Errorf("Msg = %q, want the nested header stripped", h.Msg)
+	}
+	if h.Comp != "provider.terraform-provider-azuread_v3.9.0_x5" {
+		t.Errorf("Comp = %q, want the outer provider component", h.Comp)
+	}
+	if h.TS.Second() != 2 {
+		t.Errorf("TS second = %d, want the outer timestamp's 2", h.TS.Second())
+	}
+}
+
+// Go's log package prints a fractional second when configured with
+// Lmicroseconds, and time.Parse accepts one after the seconds field even
+// though the layout does not name it.
+func TestParseHeaderPeelsNestedGoLogHeaderWithMicroseconds(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [INFO]  provider.x: 2026/09/04 09:15:03.123456 [WARN] throttled`)
+	if h.Level != LevelWarn {
+		t.Errorf("Level = %v, want WARN", h.Level)
+	}
+	if h.Msg != "throttled" {
+		t.Errorf("Msg = %q, want the nested header stripped", h.Msg)
+	}
+}
+
+// The leniency is for nested headers only. Accepting a Go-log timestamp at
+// the start of a line would promote continuation text -- a provider's
+// multi-line body, or interleaved plan output -- into a logical entry of
+// its own, splitting entries that belong together.
+func TestParseHeaderRejectsGoLogTimestampAsAnEntryHeader(t *testing.T) {
+	if ParseHeader(`2026/09/04 09:15:03 [DEBUG] this is a continuation line`).HasTS {
+		t.Error("HasTS = true, want false: a Go-log timestamp does not open an hclog entry")
+	}
+}

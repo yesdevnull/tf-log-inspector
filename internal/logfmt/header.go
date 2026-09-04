@@ -40,7 +40,7 @@ func ParseHeader(line string) Header {
 	// whose clock may be skewed, while the outer timestamp is the one every
 	// other entry in the log is ordered by. The outer component is kept,
 	// since that is what names the provider.
-	if _, inner, ok := splitTimestamp(h.Msg); ok {
+	if inner, ok := splitNestedTimestamp(h.Msg); ok {
 		level, msg := splitLevel(inner)
 		if level != LevelUnknown {
 			h.Level = level
@@ -64,6 +64,45 @@ func ParseHeader(line string) Header {
 		h.Msg = msg
 	}
 	return h
+}
+
+// goLogLayout is the Go standard library log package's default timestamp.
+// Providers that log through "log" rather than hclog -- azuread among them --
+// nest this format inside Terraform's message. It spans two space-separated
+// tokens, so splitTimestamp's single-token scan cannot see it.
+const goLogLayout = "2006/01/02 15:04:05"
+
+// splitNestedTimestamp peels a leading timestamp in either supported format
+// off a nested header, reporting whether one was there.
+//
+// The extra leniency is deliberately confined to nested headers. Accepting a
+// Go-log timestamp at the start of a line would promote continuation text --
+// a provider's multi-line body, or interleaved plan output -- into an entry
+// of its own, splitting entries that belong together.
+func splitNestedTimestamp(s string) (rest string, ok bool) {
+	// Every supported timestamp opens with a digit and most messages open
+	// with a letter, so this rejects the common case before any parsing.
+	if s == "" || !isDigit(s[0]) {
+		return s, false
+	}
+	if _, r, ok := splitTimestamp(s); ok {
+		return r, true
+	}
+	first := strings.IndexByte(s, ' ')
+	if first < 0 {
+		return s, false
+	}
+	second := strings.IndexByte(s[first+1:], ' ')
+	if second < 0 {
+		return s, false
+	}
+	// time.Parse accepts a fractional second after the seconds field even
+	// though the layout does not name one, which covers log.Lmicroseconds.
+	end := first + 1 + second
+	if _, err := time.Parse(goLogLayout, s[:end]); err != nil {
+		return s, false
+	}
+	return strings.TrimLeft(s[end+1:], " "), true
 }
 
 // splitTimestamp peels a leading hclog timestamp off a line, reporting

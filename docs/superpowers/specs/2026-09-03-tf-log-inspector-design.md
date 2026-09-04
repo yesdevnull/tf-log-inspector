@@ -583,17 +583,23 @@ almost nothing: the 2174-span figures are byte-identical, and the only
 substantive difference is 1,152 message templates losing a masked `[DEBUG]`
 prefix.
 
-**A prediction recorded here was falsified.** This note previously said the
-`INFO 901` count was Terraform's wrapper level and that a later build would
-show most of those as DEBUG. It did not move, in either the debug or the
-TRACE report. The likely cause is that the bare-prefix branch of the peel
-strips the prefix without adopting its level — a deliberate choice, since a
-message quoting `[ERROR]` must not relabel a TRACE entry — which leaves the
-wrapper level in place for exactly the lines suspected of carrying the wrong
-one. Whether those 901 lines are mislabelled provider lines or genuine
-Terraform INFO lines is **unresolved**, and the peel should not be described
-as fixing a level misattribution until it is. No figure other than that count
-is affected, and the tier-1 result in particular is independent of the peel:
+**A prediction recorded here was falsified, then explained.** This note
+said the `INFO 901` count was Terraform's wrapper level and that a later
+build would show most of those as DEBUG. It did not move. Grepping the
+entries settled why: 19 of the 20 commonest shapes are
+
+    [INFO] provider.terraform-provider-azuread_v3.9.0_x5: yyyy/mm/dd hh:ii:ss [DEBUG] ...
+
+The nested timestamp is Go's standard `log` package format, not hclog's.
+The peel scanned a single space-delimited token against hclog's layout, so a
+two-token `2006/01/02 15:04:05` was never recognised and the entries kept
+their wrapper level. The remaining shape,
+`[INFO] provider: configuring client automatic mTLS`, is a genuine INFO line.
+
+Nested Go-log timestamps are now peeled too, confined to nested headers:
+accepting that format at the start of a line would promote continuation text
+into an entry of its own. No figure other than that count is affected, and
+the tier-1 result in particular is independent of the peel:
 `40c9a5f` matched `"Received downstream response"` as a bare message prefix,
 which is only possible because HCP delivers protocol lines un-nested.
 
