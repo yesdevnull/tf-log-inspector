@@ -192,3 +192,28 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 		t.Errorf("data row = %q, want %q -- an identifier value must keep its tail", lines[1], want)
 	}
 }
+
+// clipWidth and padRight measure display columns, so the value taxonomy
+// must too: a double-width rune is one rune but two columns, and a value
+// "clipped to fit" by rune count still overruns the column it was clipped
+// for. Invisible for ASCII identifiers, but the taxonomy and the safety net
+// beneath it have to measure the same way or neither can be relied on.
+func TestValueClipsMeasureDisplayColumns(t *testing.T) {
+	const wide = "日本語テキスト" // 7 runes, 14 display columns
+	if n := lipgloss.Width(wide); n != 14 {
+		t.Fatalf("fixture assumption changed: %q is %d columns, want 14", wide, n)
+	}
+	for _, c := range []struct {
+		name string
+		got  string
+		want int
+	}{
+		{"clipValueFront", clipValueFront(wide, 6), 6},
+		{"clipValueEnd", clipValueEnd(wide, 6), 6},
+		{"clipIdentifierField", clipIdentifierField("[ ] ", wide, "  12", 16, tailIdentifierColumn), 16},
+	} {
+		if n := lipgloss.Width(c.got); n > c.want {
+			t.Errorf("%s returned %q, %d columns wide, want at most %d", c.name, c.got, n, c.want)
+		}
+	}
+}

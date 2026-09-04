@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // The whole point: from a slow call, land on the log lines that produced it.
@@ -282,5 +283,24 @@ func TestRawLogStripsANSIFromLogLines(t *testing.T) {
 	}
 	if !strings.Contains(out, "+ create") {
 		t.Errorf("stripping the escapes took the line's text with it: %q", out)
+	}
+}
+
+// Span.Entry indexes the same log's Entries, but nothing revalidates it
+// when a Log is assembled. componentProviders checks it before indexing;
+// jumpToSpan did not, so the two disagreed about whether the field can be
+// trusted. Both check it now.
+func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
+	l := &model.Log{
+		Entries:  []logfmt.Entry{{}},
+		RPCSpans: []span.Span{{RPC: "ApplyResourceChange", Provider: "aws", Entry: 99}},
+	}
+	m := New(l, "x.log")
+	got := m.jumpToSpan(0)
+	if got.ActiveView() != ViewProviders {
+		t.Errorf("view = %v after a jump to an out-of-range entry, want it left alone", got.ActiveView())
+	}
+	if got.TopEntry() != 0 {
+		t.Errorf("TopEntry = %d after a jump to an out-of-range entry, want 0", got.TopEntry())
 	}
 }

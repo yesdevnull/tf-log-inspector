@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -63,9 +64,9 @@ func padRight(s string, w int) string {
 	return s
 }
 
-// clipValueFront shortens s to at most w runes by dropping characters from
-// the front and marking the cut with a leading ellipsis, so s's tail
-// survives instead of its head.
+// clipValueFront shortens s to at most w terminal columns by dropping
+// characters from the front and marking the cut with a leading ellipsis, so
+// s's tail survives instead of its head.
 //
 // This is the one clipping rule for identifier-like values anywhere in this
 // package -- a provider address, a resource type, a resource address, a
@@ -83,8 +84,8 @@ func padRight(s string, w int) string {
 // clipIdentifierField for the "label plus identifier" line shape several of
 // those sites share.
 func clipValueFront(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
+	width := lipgloss.Width(s)
+	if width <= w {
 		return s
 	}
 	if w <= 0 {
@@ -93,12 +94,21 @@ func clipValueFront(s string, w int) string {
 	if w == 1 {
 		return "…"
 	}
-	return "…" + string(r[len(r)-(w-1):])
+	// TruncateLeft cuts on grapheme boundaries and keeps whichever grapheme
+	// straddles the cut, so a double-width one can leave a tail a column
+	// wider than was asked for: drop further cells until it fits beside the
+	// ellipsis. An ASCII identifier settles on the first try.
+	for drop := width - (w - 1); drop <= width; drop++ {
+		if tail := ansi.TruncateLeft(s, drop, ""); lipgloss.Width(tail) <= w-1 {
+			return "…" + tail
+		}
+	}
+	return "…"
 }
 
-// clipValueEnd shortens s to at most w runes by dropping characters from
-// the end and marking the cut with a trailing ellipsis, so s's head
-// survives instead of its tail.
+// clipValueEnd shortens s to at most w terminal columns by dropping
+// characters from the end and marking the cut with a trailing ellipsis, so
+// s's head survives instead of its tail.
 //
 // It is clipValueFront's mirror, for values distinguished by their HEAD --
 // an RPC name (see columnKind), a column header. The ellipsis matters for
@@ -107,20 +117,16 @@ func clipValueFront(s string, w int) string {
 // something the user acts on. clipWidth, which cuts without a marker, is
 // the safety net for already-composed lines rather than for bare values.
 func clipValueEnd(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
+	if lipgloss.Width(s) <= w {
 		return s
 	}
 	if w <= 0 {
 		return ""
 	}
-	if w == 1 {
-		return "…"
-	}
-	return string(r[:w-1]) + "…"
+	return ansi.Truncate(s, w, "…")
 }
 
-// clipValueForKind clips s to at most w runes from whichever end its kind
+// clipValueForKind clips s to at most w terminal columns from whichever end its kind
 // says may give way: a tail-distinguished value keeps its tail
 // (clipValueFront), a head-distinguished one keeps its head
 // (clipValueEnd). Both mark the cut with an ellipsis at the end they cut
@@ -136,13 +142,18 @@ func clipValueForKind(s string, w int, kind columnKind) string {
 
 // clipIdentifierField formats prefix + an identifier value, clipped via
 // clipValueForKind to leave room for prefix and suffix, + suffix, at most w
-// runes total. Shared by every render site that shows one labelled
+// terminal columns total. Shared by every render site that shows one labelled
 // identifier value on its own line -- a facet value's checkbox and count,
 // the detail pane's Prov and Addr fields -- so the budgeting arithmetic
 // exists in one place rather than being reimplemented at each. Which end of
 // the value gives way is the caller's kind, not this function's choice.
+//
+// Width is display columns throughout, the same measure clipWidth and
+// padRight use: a taxonomy that clipped by rune count beneath a safety net
+// that cuts by column count would leave neither able to promise that a
+// value fits the space it was clipped for.
 func clipIdentifierField(prefix, value, suffix string, w int, kind columnKind) string {
-	avail := w - len([]rune(prefix)) - len([]rune(suffix))
+	avail := w - lipgloss.Width(prefix) - lipgloss.Width(suffix)
 	line := prefix + clipValueForKind(value, avail, kind) + suffix
 	return clipWidth(line, w)
 }

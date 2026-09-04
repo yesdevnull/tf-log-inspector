@@ -438,3 +438,21 @@ func paneSepColumns(t *testing.T, view string) []int {
 	t.Fatalf("view has no pane row:\n%s", view)
 	return nil
 }
+
+// The detail pane's RPC line is a render site of the same value taxonomy
+// the facet pane and the calls table use, so the same RPC name clipped at
+// all three must be marked as clipped at all three: an unmarked truncation
+// reads as a complete name.
+func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
+	s := span.Span{RPC: "ValidateResourceTypeConfig", Provider: "aws", DurationMs: 5}
+	line := spanDetailLines(s, 20)[0]
+	if strings.Contains(line, s.RPC) {
+		t.Fatalf("the RPC name fits whole at width 20, so this no longer exercises clipping: %q", line)
+	}
+	if !strings.HasPrefix(line, "RPC   Valid") {
+		t.Errorf("RPC detail line %q lost the head that distinguishes the name", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Errorf("RPC detail line %q is not marked as clipped, so it reads as a complete name", line)
+	}
+}

@@ -382,21 +382,21 @@ func (m *Model) renderDetail(w, h int) string {
 // (TestSpanDetailLinesShowsAddressForUIHookSpans) rather than end to end,
 // and is ready for whichever later task makes a UI-hook span selectable.
 //
-// Prov and Addr are identifiers (see clipValueFront) and go through
-// clipIdentifierField, front-clipped rather than end-clipped, so two spans
-// with different providers or addresses that happen to share a long prefix
-// -- ".../hashicorp/azuread" and ".../azurerm" -- stay distinguishable
-// instead of both clipping down to their identical shared head. RPC is
-// deliberately left on plain clipWidth: it names one of a short, closed set
-// of plugin-protocol methods (ApplyResourceChange, ReadDataSource, ...)
-// that diverge within their first few characters, so an end-clip of an RPC
-// name does not collide the way an end-clip of a registry address does --
-// the same reasoning internal/profile.actionColWidth uses for its own
-// closed-vocabulary action column. Dur is a formatted number and is never
-// long enough to need either treatment.
+// RPC, Prov and Addr are all identifier values, and all three go through
+// clipIdentifierField, each clipped from the end its kind allows (see
+// columnKind): the same value clipped here, in the facet pane and in the
+// calls table is then clipped the same way and carries the same marker.
+// Prov and Addr front-clip, so two providers or addresses sharing a long
+// prefix -- ".../hashicorp/azuread" and ".../azurerm" -- do not both clip
+// down to their identical shared head. RPC end-clips, since it names one of
+// a short, closed set of plugin-protocol methods that share long suffixes
+// and diverge within their first few characters -- the same reasoning
+// internal/profile.actionColWidth uses for its own closed-vocabulary action
+// column. Dur is a formatted number and is never long enough to need either
+// treatment.
 func spanDetailLines(s span.Span, w int) []string {
 	lines := []string{
-		clipWidth(fmt.Sprintf("RPC   %s", s.RPC), w),
+		clipIdentifierField("RPC   ", s.RPC, "", w, headIdentifierColumn),
 		clipIdentifierField("Prov  ", s.Provider, "", w, tailIdentifierColumn),
 		clipWidth(fmt.Sprintf("Dur   %s", formatMs(uint64(s.DurationMs))), w),
 	}

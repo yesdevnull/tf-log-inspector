@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -417,20 +418,21 @@ func headerKinds(cols []column) []columnKind {
 	return kinds
 }
 
-// columnWidths computes how wide each column must be to fit its header and
-// every cell in data, the same data-driven approach internal/profile uses
-// for its resource-type column rather than a width fixed in advance.
+// columnWidths computes how many display columns each column must be given
+// to fit its header and every cell in data, the same data-driven approach
+// internal/profile uses for its resource-type column rather than a width
+// fixed in advance.
 func columnWidths(cols []column, data []row) []int {
 	widths := make([]int, len(cols))
 	for i, c := range cols {
-		widths[i] = len([]rune(c.header))
+		widths[i] = lipgloss.Width(c.header)
 	}
 	for _, r := range data {
 		for i, c := range r.cells {
 			if i >= len(widths) {
 				continue
 			}
-			if n := len([]rune(c)); n > widths[i] {
+			if n := lipgloss.Width(c); n > widths[i] {
 				widths[i] = n
 			}
 		}
@@ -458,10 +460,13 @@ func formatRow(cells []string, kinds []columnKind, widths []int) string {
 			kind = kinds[i]
 		}
 		if kind == numericColumn {
+			// A numeric cell is formatMs or strconv output: ASCII, where a
+			// rune is a column, so fmt's own rune-counted width is the same
+			// measure padRight applies to the text cells beside it.
 			parts[i] = fmt.Sprintf("%*s", w, c)
 			continue
 		}
-		parts[i] = fmt.Sprintf("%-*s", w, clipValueForKind(c, w, kind))
+		parts[i] = padRight(clipValueForKind(c, w, kind), w)
 	}
 	return strings.Join(parts, "  ")
 }

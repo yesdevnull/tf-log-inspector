@@ -53,8 +53,17 @@ func (m Model) jumpToSpan(idx int) Model {
 	if idx < 0 || idx >= len(m.log.RPCSpans) {
 		return m
 	}
+	// Span.Entry indexes the same log's Entries, but nothing revalidates it
+	// when a Log is assembled, so every reader of the field checks it --
+	// componentProviders does the same -- rather than each deciding for
+	// itself whether it can be trusted. An index outside the log leaves the
+	// view where it is: there is no entry to jump to.
+	entry := int(m.log.RPCSpans[idx].Entry)
+	if entry >= len(m.log.Entries) {
+		return m
+	}
 	m.view = ViewRawLog
-	m.raw.top = int(m.log.RPCSpans[idx].Entry)
+	m.raw.top = entry
 	m.selected = 0
 	m.invalidateRows()
 	return m
