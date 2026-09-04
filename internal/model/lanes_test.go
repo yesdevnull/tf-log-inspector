@@ -89,3 +89,16 @@ func TestPackLanesEmptyInput(t *testing.T) {
 		t.Errorf("got %d lanes from no spans, want 0", len(lanes))
 	}
 }
+
+// TestPeakConcurrencyHandoverBoundary verifies that a span ending exactly when
+// another begins is counted as a handover, not overlap. If the sort comparator
+// were reversed, this would fail with peak = 2 instead of 1.
+func TestPeakConcurrencyHandoverBoundary(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 500, span.FidelityReported),
+		timed(500, 1000, span.FidelityReported),
+	}
+	if got := PeakConcurrency(spans); got != 1 {
+		t.Errorf("PeakConcurrency = %d, want 1 (handover not overlap)", got)
+	}
+}
