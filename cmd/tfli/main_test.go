@@ -100,3 +100,57 @@ func TestRunWritesToOutputFile(t *testing.T) {
 		t.Error("report file does not contain the report")
 	}
 }
+
+// The -o file is the one artefact meant to leave the machine, so a failure
+// to create it must be reported rather than silently falling back to
+// standard output -- which would look like success while writing the report
+// somewhere the user was not watching.
+func TestRunReportsUnwritableOutputPath(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "no-such-dir", "report.txt")
+	var sb strings.Builder
+	err := run([]string{"--diagnose", "-o", out, filepath.Join("..", "..", "testdata", "provider-rpc.log")}, &sb, io.Discard)
+	if err == nil {
+		t.Fatal("run returned nil error for an uncreatable output file")
+	}
+	if !strings.Contains(err.Error(), out) {
+		t.Errorf("error does not name the output path: %v", err)
+	}
+	if sb.Len() != 0 {
+		t.Errorf("report was written to stdout after -o failed:\n%s", sb.String())
+	}
+}
+
+func TestRunRejectsWrongArgumentCount(t *testing.T) {
+	for name, args := range map[string][]string{
+		"none": {"--diagnose"},
+		"two":  {"--diagnose", "a.log", "b.log"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var sb strings.Builder
+			err := run(args, &sb, io.Discard)
+			if err == nil {
+				t.Fatal("run returned nil error for the wrong argument count")
+			}
+			if !strings.Contains(err.Error(), "exactly one log file") {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunPrintsVersion(t *testing.T) {
+	var sb strings.Builder
+	if err := run([]string{"--version"}, &sb, io.Discard); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.HasPrefix(sb.String(), "tfli ") {
+		t.Errorf("version output = %q, want it to start with \"tfli \"", sb.String())
+	}
+}
+
+func TestRunReportsUnknownFlag(t *testing.T) {
+	var sb strings.Builder
+	if err := run([]string{"--no-such-flag", "a.log"}, &sb, io.Discard); err == nil {
+		t.Fatal("run returned nil error for an unknown flag")
+	}
+}

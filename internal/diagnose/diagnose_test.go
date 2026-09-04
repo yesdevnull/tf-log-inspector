@@ -581,15 +581,6 @@ func TestFieldKeyDoesNotPinItsSourceMessage(t *testing.T) {
 	}
 }
 
-// TestTemplateDoesNotPinItsSourceMessage is the template-map audit the
-// review asked for. template() always routes msg's prose through
-// MaskProse, whose first step (maskQuotedSpans) unconditionally builds its
-// result via strings.Builder -- even when there is nothing to mask -- so
-// the returned prose is never a slice of msg regardless of field count.
-// This is checked directly across the field-count cases that matter: zero
-// fields (prose is the entire return value, the case
-// strings.Join(fields,"") on a single-element slice could otherwise alias),
-// one field, and several fields.
 // --- Task 2: SLOWEST RESOURCES, BY RESOURCE TYPE, actions, and the SPANS/
 // EXTRACTION/wall-clock updates that come with wiring span.UIHookBuilder
 // into the report. ---
@@ -996,6 +987,14 @@ func TestReportTopNShownWhenTruncated(t *testing.T) {
 	}
 }
 
+// A retained template must not alias its source message: a string header
+// keeps the whole backing array alive, so one template would pin an entire
+// log line for the life of the report. template() routes prose through
+// MaskProse, whose maskQuotedSpans step always builds its result via
+// strings.Builder even when there is nothing to mask, which is what breaks
+// the aliasing. The field-count cases are checked separately because zero
+// fields is the one where prose is the entire return value, and
+// strings.Join on a single-element slice can return that element unchanged.
 func TestTemplateDoesNotPinItsSourceMessage(t *testing.T) {
 	long := strings.Repeat("x", 4000)
 	cases := []string{
