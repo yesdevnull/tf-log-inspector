@@ -58,10 +58,12 @@ type Model struct {
 	pane     Pane
 	selected int
 
-	// facets is built once from the whole log's RPC spans, so a value's
-	// count always reflects the log, never the current filter -- a facet
-	// pane where narrowing the filter also shrank the other options' counts
-	// would make it hard to see what widening the filter again would show.
+	// facets is built once from the whole log -- its RPC spans for the
+	// three span dimensions, its entries for the level dimension (see
+	// levelFacet) -- so a value's count always reflects the log, never the
+	// current filter: a facet pane where narrowing the filter also shrank
+	// the other options' counts would make it hard to see what widening the
+	// filter again would show.
 	facets []model.Facet
 	// selectedFacets holds, per facet dimension name, the values the user
 	// has toggled on. Nothing selected in a dimension means unconstrained;
@@ -119,7 +121,11 @@ type facetCursor struct {
 // first; Pane's own zero value is PaneFacets, so this is set explicitly
 // rather than left to the zero value.
 func New(l *model.Log, path string) Model {
-	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: model.FacetsForSpans(l.RPCSpans)}
+	// The level dimension goes last, after the span dimensions
+	// FacetsForSpans builds: it is the one dimension drawn from entries
+	// rather than spans, and it filters only the raw log.
+	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
+	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: facets}
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
 	m.detailPaneNatural = detailNaturalWidth(l.RPCSpans)
 	return m

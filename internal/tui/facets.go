@@ -2,19 +2,60 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
-// Facet dimension names, matching model.FacetsForSpans exactly. Named
-// constants avoid the three call sites below drifting out of sync with a
-// typo in a literal string.
+// Facet dimension names. The first three match model.FacetsForSpans
+// exactly; dimLevel is this package's own, built here from the log's
+// entries (see levelFacet). Named constants avoid the call sites below
+// drifting out of sync with a typo in a literal string.
 const (
 	dimProvider = "provider"
 	dimRPC      = "rpc"
 	dimType     = "resource type"
+	dimLevel    = "level"
 )
+
+// levelFacet builds the level dimension from the log's ENTRIES rather than
+// its spans. A level is an attribute of a log line: a span is assembled
+// from several lines and carries no level of its own, which is why
+// model.FacetsForSpans cannot produce this dimension and it is built here.
+//
+// Selecting a level therefore narrows the RAW LOG only, through
+// Filter.MatchEntry. The ranked views roll up spans, and no span has a
+// level to match, so ticking TRACE leaves the providers, types and calls
+// tables exactly as they were -- not a bug, but the reason has to be
+// written down somewhere, because it is not visible from the screen.
+//
+// The dimension is present whichever view is showing, so the facet pane
+// does not reshape as the user switches between them.
+//
+// Its counts are ENTRY counts, not span counts, and like every other
+// dimension's they reflect the whole log rather than the current filter
+// (see the doc comment on Model.facets). Values are ordered count
+// descending then value ascending, the same total order
+// model.FacetsForSpans gives the span dimensions.
+func levelFacet(entries []logfmt.Entry) model.Facet {
+	counts := map[logfmt.Level]int{}
+	for _, e := range entries {
+		counts[e.Level]++
+	}
+	f := model.Facet{Name: dimLevel, Values: make([]model.FacetValue, 0, len(counts))}
+	for l, c := range counts {
+		f.Values = append(f.Values, model.FacetValue{Value: l.String(), Count: c})
+	}
+	sort.Slice(f.Values, func(i, j int) bool {
+		if f.Values[i].Count != f.Values[j].Count {
+			return f.Values[i].Count > f.Values[j].Count
+		}
+		return f.Values[i].Value < f.Values[j].Value
+	})
+	return f
+}
 
 // filter derives the model.Filter this model's facet selections represent.
 // A dimension with nothing selected contributes a nil map, so it keeps
@@ -27,7 +68,25 @@ func (m Model) filter() model.Filter {
 		Providers: m.selectedFacets[dimProvider],
 		RPCs:      m.selectedFacets[dimRPC],
 		Types:     m.selectedFacets[dimType],
+		Levels:    m.selectedLevels(),
 	}
+}
+
+// selectedLevels turns the level dimension's selected value names back into
+// the logfmt.Level values Filter.MatchEntry compares against. The names are
+// Level.String()'s own, so ParseLevel reverses them exactly, "UNKNOWN"
+// included. Nothing selected contributes a nil map, which is Filter's "no
+// opinion".
+func (m Model) selectedLevels() map[logfmt.Level]bool {
+	sel := m.selectedFacets[dimLevel]
+	if len(sel) == 0 {
+		return nil
+	}
+	levels := make(map[logfmt.Level]bool, len(sel))
+	for name := range sel {
+		levels[logfmt.ParseLevel(name)] = true
+	}
+	return levels
 }
 
 // cursorFacetValue resolves the facet pane's cursor to the dimension name
@@ -201,11 +260,12 @@ func (m Model) facetLines(w int) (lines []string, cursor, header int) {
 // end of an over-long value survives clipping (see columnKind). The rpc
 // dimension's values are plugin-protocol method names, told apart by their
 // HEAD -- PlanResourceChange and ApplyResourceChange share a 14-character
-// suffix -- while a provider address or a resource type is told apart by
-// its TAIL. This is the only place a dimension name is resolved to a kind,
-// so no two render sites can disagree about a dimension.
+// suffix -- and a level name is a single word, told apart by its head as
+// well, while a provider address or a resource type is told apart by its
+// TAIL. This is the only place a dimension name is resolved to a kind, so
+// no two render sites can disagree about a dimension.
 func facetValueKind(dim string) columnKind {
-	if dim == dimRPC {
+	if dim == dimRPC || dim == dimLevel {
 		return headIdentifierColumn
 	}
 	return tailIdentifierColumn

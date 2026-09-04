@@ -8,9 +8,9 @@ RPCS                      │                                              │
 RESOURCE TYPES            │                                              │                          
 [ ] aws_subnet  1         │                                              │                          
 [ ] …_compute_instance  1 │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
+LEVELS                    │                                              │                          
+[ ] TRACE  2              │                                              │                          
+[ ] UNKNOWN  1            │                                              │                          
                           │                                              │                          
                           │                                              │                          
                           │                                              │                          

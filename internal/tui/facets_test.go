@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
@@ -336,5 +337,84 @@ func TestDetailPaneTitleMarksFocus(t *testing.T) {
 	}
 	if got := m.renderDetail(40, 20); !strings.Contains(got, "\x1b[7m") {
 		t.Errorf("detail pane does not show that it has focus:\n%s", got)
+	}
+}
+
+// moveFacetCursorTo presses j until the facet pane's cursor sits on dim's
+// value, driving the cursor the way a user does rather than reaching into
+// the model's coordinate.
+func moveFacetCursorTo(t *testing.T, m Model, dim, value string) Model {
+	t.Helper()
+	m = focusFacets(t, m)
+	for i := 0; i < 500; i++ {
+		if d, v, ok := m.cursorFacetValue(); ok && d == dim && v == value {
+			return m
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	t.Fatalf("facet cursor never reached %s=%q", dim, value)
+	return m
+}
+
+// The spec names levels as one of the facet dimensions and its mock-up
+// draws a LEVELS section. A level belongs to an ENTRY, not to a span, so
+// the dimension is built here from the log's entries and its counts are
+// entry counts.
+func TestLevelFacetCountsEveryEntry(t *testing.T) {
+	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	var levels *model.Facet
+	for i := range m.facets {
+		if m.facets[i].Name == dimLevel {
+			levels = &m.facets[i]
+		}
+	}
+	if levels == nil {
+		t.Fatalf("no %q dimension in %v", dimLevel, m.facets)
+	}
+
+	want := map[string]int{}
+	for _, e := range m.log.Entries {
+		want[e.Level.String()]++
+	}
+	if len(want) < 2 {
+		t.Fatalf("fixture assumption changed: %d distinct levels, want at least 2 to tell a filter apart", len(want))
+	}
+	got := map[string]int{}
+	for _, v := range levels.Values {
+		got[v.Value] = v.Count
+	}
+	if len(got) != len(want) {
+		t.Errorf("level dimension has %d values, want %d: %v against %v", len(got), len(want), got, want)
+	}
+	for name, n := range want {
+		if got[name] != n {
+			t.Errorf("level %s counted %d entries, want %d", name, got[name], n)
+		}
+	}
+}
+
+// A level filters the raw log, through the same Filter.MatchEntry path the
+// model already had, and nothing else: the ranked views roll up spans, and
+// a span has no level for a filter to match.
+func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	rawBefore := m.renderRawLog(200, 100)
+	callsBefore := m.rows()
+
+	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelTrace.String())
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	rawAfter := m.renderRawLog(200, 100)
+	if rawAfter == rawBefore {
+		t.Errorf("selecting a level left the raw log unchanged:\n%s", rawAfter)
+	}
+	if !strings.Contains(rawBefore, "SYNTHESISED") {
+		t.Fatal("fixture assumption changed: the untimestamped header comment is not shown unfiltered")
+	}
+	if strings.Contains(rawAfter, "SYNTHESISED") {
+		t.Errorf("an entry outside the selected level survived the filter:\n%s", rawAfter)
+	}
+	if got := m.rows(); len(got) != len(callsBefore) {
+		t.Errorf("selecting a level changed the rollup rows from %d to %d -- a span has no level to filter on", len(callsBefore), len(got))
 	}
 }
