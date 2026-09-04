@@ -324,3 +324,28 @@ func TestUIHookBuilderDoesNotCountNormalDurationAsSaturated(t *testing.T) {
 		t.Errorf("Saturated() = %d, want 0", b.Saturated())
 	}
 }
+
+// The UI-hook builder shares the reported builder's arithmetic and so shared
+// its off-by-one: a resource whose elapsed exactly spans the offset from the
+// base started at the base, which is a zero start rather than a clamped one.
+// Terraform quantises elapsed_seconds to whole seconds, which makes exact
+// equality far likelier here than it would otherwise be.
+func TestUIHookBuilderExactBaseStartIsNotClamped(t *testing.T) {
+	in := uiLineWith("2026-09-04T09:15:00.000000+10:00", "apply_start", 0, false) + "\n" +
+		uiLineWith("2026-09-04T09:15:05.000000+10:00", "apply_complete", 5, true) + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, in, &b)
+	got := b.Spans()
+	if len(got) != 1 {
+		t.Fatalf("got %d spans, want 1", len(got))
+	}
+	if got[0].StartMs != 0 {
+		t.Errorf("StartMs = %d, want 0", got[0].StartMs)
+	}
+	if got[0].StartClamped {
+		t.Error("StartClamped = true, want false: the start is exactly the base, not clamped")
+	}
+	if got[0].DurationMs != 5000 {
+		t.Errorf("DurationMs = %d, want 5000", got[0].DurationMs)
+	}
+}

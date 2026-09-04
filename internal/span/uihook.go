@@ -136,7 +136,7 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 	}
 
 	start, clamped := uint32(0), true
-	if endMs > durationMs {
+	if endMs >= durationMs { // inclusive: an exact-base start is 0, not clamped
 		start, clamped = endMs-durationMs, false
 	}
 

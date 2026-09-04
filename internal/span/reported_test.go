@@ -205,3 +205,24 @@ func TestReportedBuilderPastCapStillCorrect(t *testing.T) {
 		t.Errorf("dedup cache holds %d entries, want %d (capped)", len(b.kept), maxDistinctValues)
 	}
 }
+
+// A span whose duration exactly equals its offset from the base started at
+// the base, so its zero start is arithmetic rather than a clamp. Reporting
+// it as clamped inflates an anomaly counter with a non-anomaly, and an
+// anomaly signal that cries wolf is worse than none.
+func TestReportedBuilderExactBaseStartIsNotClamped(t *testing.T) {
+	in := "2022-12-15T00:16:20.000Z [TRACE] provider.aws: first\n" +
+		`2022-12-15T00:16:30.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=10000` + "\n"
+	var b ReportedBuilder
+	scanInto(t, in, &b)
+	got := b.Spans()
+	if len(got) != 1 {
+		t.Fatalf("got %d spans, want 1", len(got))
+	}
+	if got[0].StartMs != 0 {
+		t.Errorf("StartMs = %d, want 0", got[0].StartMs)
+	}
+	if got[0].StartClamped {
+		t.Error("StartClamped = true, want false: the start is exactly the base, not clamped")
+	}
+}

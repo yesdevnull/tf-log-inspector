@@ -70,7 +70,7 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 	ms := uint32(ms64)
 
 	start, clamped := uint32(0), true
-	if e.TSms > ms {
+	if e.TSms >= ms { // inclusive: an exact-base start is 0, not clamped
 		start, clamped = e.TSms-ms, false
 	}
 
