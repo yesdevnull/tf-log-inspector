@@ -132,26 +132,40 @@ func (m *Model) moveFacetCursor(delta int) {
 // values and their span counts (counts always reflect the whole log, not
 // the current filter -- see the doc comment on Model.facets), at most w
 // runes wide and h lines tall. The cursor marks the value space would
-// toggle; a checkbox marks whether it is currently selected.
+// toggle -- highlighted, not just prefixed with ">", so it is actually
+// visible rather than merely inferable -- and a checkbox marks whether it is
+// currently selected.
 func (m Model) renderFacets(w, h int) string {
 	var lines []string
 	for dimIdx, f := range m.facets {
-		lines = append(lines, clipWidth(f.Name, w))
+		lines = append(lines, clipWidth(facetSectionHeader(f.Name), w))
 		for valIdx, v := range f.Values {
-			cursor := " "
-			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
-				cursor = ">"
-			}
 			check := " "
 			if m.selectedFacets[f.Name][v.Value] {
 				check = "x"
 			}
-			line := fmt.Sprintf("%s [%s] %s  %d", cursor, check, v.Value, v.Count)
-			lines = append(lines, clipWidth(line, w))
+			line := fmt.Sprintf("[%s] %s  %d", check, v.Value, v.Count)
+			line = clipWidth(line, w)
+			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
+				line = highlightLine(line, w)
+			}
+			lines = append(lines, line)
 		}
 	}
 	if len(lines) > h {
 		lines = lines[:h]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// facetSectionHeader upper-cases and pluralises a dimension name for
+// display, matching the design mock-up's PROVIDERS/LEVELS section-header
+// style rather than the lower-case singular names FacetsForSpans uses
+// internally as filter keys.
+func facetSectionHeader(name string) string {
+	upper := strings.ToUpper(name)
+	if strings.HasSuffix(upper, "S") {
+		return upper
+	}
+	return upper + "S"
 }

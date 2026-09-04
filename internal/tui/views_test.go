@@ -79,3 +79,57 @@ func TestRenderListRespectsItsWidth(t *testing.T) {
 		}
 	}
 }
+
+// Step A (task 6): without a visible highlight, enter-to-jump (task 5) is
+// unusable -- the user cannot tell which row they are about to act on.
+// New starts selection on row 0, so the header (line 0) must be plain and
+// the first data row (line 1) must carry the highlight.
+func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	lines := strings.Split(m.renderList(60, 20), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("need a header and at least one data row, got %d lines", len(lines))
+	}
+	if strings.Contains(lines[0], "\x1b[7m") {
+		t.Errorf("header row is highlighted:\n%s", lines[0])
+	}
+	if !strings.Contains(lines[1], "\x1b[7m") {
+		t.Errorf("selected row (row 0) is not highlighted:\n%s", lines[1])
+	}
+	for i := 2; i < len(lines); i++ {
+		if strings.Contains(lines[i], "\x1b[7m") {
+			t.Errorf("line %d is highlighted but is not the selected row:\n%s", i, lines[i])
+		}
+	}
+}
+
+// Step B (task 6): renderList used to always show the first h lines
+// regardless of Selected(), so selecting a row past the first screenful left
+// it off-screen. provider-rpc.log's two calls, rendered into a pane with
+// room for only one data row, forces the window to move.
+func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if len(m.rows()) != 2 {
+		t.Fatalf("fixture assumption changed: got %d calls, want 2", len(m.rows()))
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // select row 1
+	out := m.renderList(60, 2)                                           // header + 1 data row: row 0 no longer fits
+	if strings.Contains(out, "aws_subnet") {
+		t.Errorf("scrolled window still shows row 0, which should have scrolled off:\n%s", out)
+	}
+	if !strings.Contains(out, "aws_internet_gateway") {
+		t.Errorf("selected row 1 scrolled off screen instead of row 0:\n%s", out)
+	}
+}
+
+// Moving within the first screenful must not scroll: only once the
+// selection would fall off the bottom of the window should it move.
+func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	out := m.renderList(60, 20) // room for both rows; selection (row 0) is already visible
+	for _, want := range []string{"aws_subnet", "aws_internet_gateway"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("both rows should be visible in a tall enough pane, missing %q:\n%s", want, out)
+		}
+	}
+}

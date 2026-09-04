@@ -5,9 +5,7 @@
 package tui
 
 import (
-	"fmt"
 	"path/filepath"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -85,6 +83,11 @@ type Model struct {
 	// raw is the raw log view's own state: which entry sits at its top, and
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
+
+	// showFacetOverlay is whether 'f' has toggled the facet pane open below
+	// the width it would otherwise show inline at. It has no effect once the
+	// terminal is wide enough to show facets inline anyway; see layout.go.
+	showFacetOverlay bool
 
 	width, height int
 	quitting      bool
@@ -211,6 +214,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.searchAgain(-1)
 			}
+		case "f":
+			// Below the facet pane's inline width threshold, 'f' opens it as
+			// an overlay in place of the list and detail panes; see
+			// layout.go's renderPanes. Above that threshold facets are
+			// already shown inline, so this toggle simply has no visible
+			// effect until the terminal narrows.
+			m.showFacetOverlay = !m.showFacetOverlay
 		default:
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
@@ -259,32 +269,9 @@ func (m *Model) moveSelection(delta int) {
 	}
 }
 
-// View renders the header naming the file and its span counts, followed by
-// the observer-effect caveat.
-func (m Model) View() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "tfli -- %s\n", m.name)
-	fmt.Fprintf(&b, "%d RPC spans, %d UI spans\n\n", len(m.log.RPCSpans), len(m.log.UISpans))
-	writeLoggingCaveat(&b)
-	fmt.Fprintf(&b, "\nq to quit\n")
-	return b.String()
-}
-
-// writeLoggingCaveat states that every duration this interface renders was
-// measured under logging. Terraform re-logs each line of a provider's stderr
-// through its own logger, so a provider that dumps HTTP bodies at DEBUG pays
-// that cost per line: four captures of one workspace measured 24.1s with no
-// logging enabled against 522.2s with debug plus provider TRACE. A reader
-// who mistook these figures for wall-clock truth would be optimising time
-// that does not exist without the log, so the caveat travels with every
-// rendered duration rather than living only in documentation.
-func writeLoggingCaveat(b *strings.Builder) {
-	fmt.Fprintf(b, "Durations here are measured under logging, which is not\n")
-	fmt.Fprintf(b, "free: one workspace planned in 24.1s unlogged and 522.2s\n")
-	fmt.Fprintf(b, "with debug plus provider TRACE. Rankings hold, since every\n")
-	fmt.Fprintf(b, "span paid the same cost, but absolute times do not transfer\n")
-	fmt.Fprintf(b, "to an unlogged run.\n")
-}
+// View is defined in layout.go: it composes the three-pane layout (facets,
+// list, detail), degrading by width, with the header and observer-effect
+// caveat that this package's tests pin regardless of that composition.
 
 // Run opens the full-screen interface for l, loaded from path, and blocks
 // until the user quits.

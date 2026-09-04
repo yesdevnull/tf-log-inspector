@@ -54,11 +54,35 @@ func TestEscClearsAllFilters(t *testing.T) {
 	}
 }
 
+// The dimension header is upper-cased and pluralised (task 6, to match the
+// design mock-up's PROVIDERS/LEVELS section labels), so this checks case-
+// insensitively rather than pinning the exact casing.
 func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	out := m.renderFacets(30, 20)
-	if !strings.Contains(out, "provider") {
+	if !strings.Contains(strings.ToUpper(out), "PROVIDER") {
 		t.Errorf("facet pane missing the provider dimension:\n%s", out)
+	}
+}
+
+// Step A (task 6): without a visible cursor, space's "toggle whatever the
+// cursor points at" is unusable -- the user cannot tell what they are about
+// to select. two-providers.log's provider values are sorted alphabetically
+// (aws, then google), so the cursor starts on the aws value.
+func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
+	m := focusFacets(t, New(testLog(t, "two-providers.log"), "x.log"))
+	out := m.renderFacets(50, 20)
+	var highlighted []string
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(ln, "\x1b[7m") {
+			highlighted = append(highlighted, ln)
+		}
+	}
+	if len(highlighted) != 1 {
+		t.Fatalf("got %d highlighted lines, want exactly 1:\n%s", len(highlighted), out)
+	}
+	if !strings.Contains(highlighted[0], "registry.terraform.io/hashicorp/aws") {
+		t.Errorf("highlighted line is not the cursor's value:\n%s", highlighted[0])
 	}
 }
 

@@ -1,0 +1,40 @@
+tfli -- plan.log -- 2 RPC spans, 0 UI spans
+
+PROVIDERS                │ provider                                total  calls  max                                                  │ SPAN DETAIL             
+[7m[ ] registry.ter[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                                         [0m │ (no call selected)      
+[ ] registry.terraform.i │ registry.terraform.io/hashicorp/aws       5ms      1  5ms                                                  │                         
+RPCS                     │                                                                                                            │                         
+[ ] ApplyResourceChange  │                                                                                                            │                         
+RESOURCE TYPES           │                                                                                                            │                         
+[ ] aws_subnet  1        │                                                                                                            │                         
+[ ] google_compute_insta │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+                         │                                                                                                            │                         
+
+Durations here are measured under logging, which is not
+free: one workspace planned in 24.1s unlogged and 522.2s
+with debug plus provider TRACE. Rankings hold, since every
+span paid the same cost, but absolute times do not transfer
+to an unlogged run.
+
+⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit

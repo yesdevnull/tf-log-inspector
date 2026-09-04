@@ -158,16 +158,17 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 }
 
 // renderList renders the current view's rows as a table at most w runes
-// wide and h lines tall.
+// wide and h lines tall, with the row at Selected() highlighted and the
+// window scrolled just far enough to keep it visible.
 func (m Model) renderList(w, h int) string {
 	switch m.view {
 	case ViewProviders:
-		return renderTable(nil, providerColumns, m.rows(), w, h)
+		return renderTable(nil, providerColumns, m.rows(), m.selected, w, h)
 	case ViewTypes:
 		preamble := typesPreamble(m.filter().SpansMatching(m.log.UISpans))
-		return renderTable(preamble, typeColumns, m.rows(), w, h)
+		return renderTable(preamble, typeColumns, m.rows(), m.selected, w, h)
 	case ViewCalls:
-		return renderTable(nil, callColumns, m.rows(), w, h)
+		return renderTable(nil, callColumns, m.rows(), m.selected, w, h)
 	default:
 		return ""
 	}
@@ -190,10 +191,16 @@ func typesPreamble(uiSpans []span.Span) []string {
 // renderTable formats preamble lines followed by a header and data rows as a
 // table, column widths taken from the widest header or cell in each column.
 // Every line, including preamble, is clipped to w runes so a table wider
-// than its pane can never wrap into unreadable wreckage -- real column
-// degradation is Task 6's job, this only guarantees the width bound. The
-// result is capped at h lines total.
-func renderTable(preamble []string, cols []column, data []row, w, h int) string {
+// than its pane can never wrap into unreadable wreckage. That clip is a
+// safety net, not real column degradation (shrinking or dropping columns to
+// fit) -- a narrow pane against wide cell content still truncates the
+// right-hand columns wholesale rather than degrading gracefully; nothing in
+// phase 3's scope calls for more than the width guarantee.
+//
+// selected is highlighted, and the data rows are windowed so it stays
+// visible within h lines total: the preamble and header are never scrolled,
+// only the data rows beneath them are.
+func renderTable(preamble []string, cols []column, data []row, selected, w, h int) string {
 	widths := columnWidths(cols, data)
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
@@ -201,14 +208,46 @@ func renderTable(preamble []string, cols []column, data []row, w, h int) string 
 		lines = append(lines, clipWidth(p, w))
 	}
 	lines = append(lines, clipWidth(formatRow(headerCells(cols), cols, widths), w))
-	for _, r := range data {
-		lines = append(lines, clipWidth(formatRow(r.cells, cols, widths), w))
+
+	dataH := h - len(lines)
+	top, visible := scrollWindow(selected, len(data), dataH)
+	for i := top; i < top+visible; i++ {
+		line := clipWidth(formatRow(data[i].cells, cols, widths), w)
+		if i == selected {
+			line = highlightLine(line, w)
+		}
+		lines = append(lines, line)
 	}
 
 	if len(lines) > h {
 		lines = lines[:h]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// scrollWindow returns the first visible data-row index and how many rows
+// fit in dataH lines, keeping selected on screen. It pins the window to
+// whichever edge selected has crossed rather than centring it in the
+// window, so moving the selection by one row scrolls by at most one row
+// once past the first screenful, instead of jumping to keep it centred.
+func scrollWindow(selected, total, dataH int) (top, visible int) {
+	if dataH <= 0 || total == 0 {
+		return 0, 0
+	}
+	if selected >= dataH {
+		top = selected - dataH + 1
+	}
+	if top+dataH > total {
+		top = total - dataH
+	}
+	if top < 0 {
+		top = 0
+	}
+	visible = total - top
+	if visible > dataH {
+		visible = dataH
+	}
+	return top, visible
 }
 
 func headerCells(cols []column) []string {
