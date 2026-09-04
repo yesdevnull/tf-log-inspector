@@ -721,8 +721,12 @@ func TestReportExtractionGuidanceReflectsThatUIHooksAreParsed(t *testing.T) {
 	if !strings.Contains(out, "per-resource timings") {
 		t.Errorf("report does not mention per-resource timings:\n%s", out)
 	}
-	if !strings.Contains(out, "debug logging") {
-		t.Errorf("report does not mention enabling debug logging:\n%s", out)
+	// This assertion used to require the report to recommend debug logging.
+	// A real debug-enabled HCP run then measured zero RPC entries, so the
+	// recommendation was wrong and the assertion went with it: what the
+	// report must now name is the level that actually carries them.
+	if !strings.Contains(out, "TRACE") {
+		t.Errorf("report does not tell the reader which level carries RPC entries:\n%s", out)
 	}
 }
 
@@ -1016,5 +1020,59 @@ func TestTemplateDoesNotPinItsSourceMessage(t *testing.T) {
 		if withinBackingArray(got, msg) {
 			t.Errorf("template(%q, ...) = %q shares backing memory with msg -- it would pin the whole message alive", msg, got)
 		}
+	}
+}
+
+// Terraform rounds both ends of a resource's timing to the nearest second
+// before subtracting (internal/command/views/hook_json.go), so every
+// elapsed_seconds carries up to a second of error. Two rows a second apart
+// are therefore not reliably ordered, and the section must say so rather
+// than presenting a ranking the data cannot support.
+func TestReportStatesStructuredTimingResolution(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	idx := strings.Index(out, "SLOWEST RESOURCES")
+	if idx < 0 {
+		t.Fatalf("report missing SLOWEST RESOURCES section:\n%s", out)
+	}
+	if !strings.Contains(out[idx:], "whole seconds") {
+		t.Errorf("SLOWEST RESOURCES does not state the whole-second resolution of UI-hook timings:\n%s", out)
+	}
+}
+
+// The caveat belongs to UI-hook timings, so a log with no UI-hook spans
+// must not carry it -- an RPC-tier log's durations are exact milliseconds.
+func TestResolutionCaveatAbsentWithoutUIHookSpans(t *testing.T) {
+	out := render(t, build(t, "2024-02-13T12:11:28.331+0100 [TRACE] provider.aws: Received downstream response: tf_rpc=ApplyResourceChange tf_req_duration_ms=10710\n"))
+	if strings.Contains(out, "whole seconds") {
+		t.Errorf("report states the UI-hook resolution caveat on a log with no UI-hook spans:\n%s", out)
+	}
+}
+
+// A real debug-enabled HCP run measured zero response entries, zero request
+// entries and zero duration fields, because terraform-plugin-go emits every
+// one of those through logging.ProtocolTrace. The same run's raw log still
+// carried 1311 terraform.ui lines. So guidance that sends a user to debug
+// logging for RPC detail, or that claims debug replaces the JSON with text,
+// is wrong on both counts and must not be printed.
+func TestGuidanceDoesNotPromiseRPCDetailFromDebugLogging(t *testing.T) {
+	for name, in := range map[string]string{
+		"structured": threeResourceUIHookLog(),
+		"no tier":    "2024-02-13T12:11:28.331+0100 [INFO] backend/local: nothing to profile here\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := render(t, build(t, in))
+			for _, wrong := range []string{
+				"rather than JSON",
+				"enable debug logging on the run and use its raw log",
+				"provider RPC detail, enable debug logging",
+			} {
+				if strings.Contains(out, wrong) {
+					t.Errorf("guidance still claims %q, which the debug-run measurement disproved:\n%s", wrong, out)
+				}
+			}
+			if !strings.Contains(out, "TF_LOG_SDK_PROTO") {
+				t.Errorf("guidance does not name the variable that raises the protocol subsystem to TRACE:\n%s", out)
+			}
+		})
 	}
 }

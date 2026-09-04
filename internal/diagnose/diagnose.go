@@ -516,9 +516,8 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  It is info level only, so it never carries provider RPC\n")
 		fmt.Fprintf(b, "  entries -- the counters below are expected to read zero.\n")
 		fmt.Fprintf(b, "  Its per-resource timings, from Terraform's own UI hooks,\n")
-		fmt.Fprintf(b, "  appear in SLOWEST RESOURCES when this log has any. For\n")
-		fmt.Fprintf(b, "  provider RPC detail, enable debug logging on the run: the\n")
-		fmt.Fprintf(b, "  log then arrives as text rather than JSON.\n")
+		fmt.Fprintf(b, "  appear in SLOWEST RESOURCES when this log has any.\n")
+		writeRPCCaptureHint(b)
 	case structured && hasRPCEvidence:
 		fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON),\n")
 		fmt.Fprintf(b, "  but it also carries provider RPC-related entries below --\n")
@@ -527,8 +526,8 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  in SLOWEST RESOURCES when this log has any.\n")
 	case !r.TierUsable:
 		fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
-		fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
-		fmt.Fprintf(b, "  enable debug logging on the run and use its raw log.\n")
+		fmt.Fprintf(b, "  nothing to profile.\n")
+		writeRPCCaptureHint(b)
 	}
 	fmt.Fprintf(b, "  %-25s %d\n", "response entries", r.Caps.ResponseEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "request entries", r.Caps.RequestEntries)
@@ -574,6 +573,14 @@ func (r Report) Render(w io.Writer) error {
 		} else {
 			fmt.Fprintf(b, "SLOWEST RESOURCES (addresses masked)\n")
 		}
+		// Terraform rounds a resource's start and end to the nearest second
+		// before subtracting them, so these figures are whole seconds
+		// carrying up to a second of error each. Rollups over many
+		// resources survive that; ranking two rows a second apart does not,
+		// and a ranked table invites exactly that reading.
+		fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n")
+		fmt.Fprintf(b, "  neighbouring rows are not reliably ordered. Totals below\n")
+		fmt.Fprintf(b, "  are sounder than any single row.\n")
 		for _, row := range r.SlowestResources {
 			fmt.Fprintf(b, "  %8s  %-8s %-24s %s\n",
 				formatMs(uint64(row.DurationMs)), row.Action, row.ResourceType, row.MaskedAddr)
@@ -653,4 +660,19 @@ func (r Report) Render(w io.Writer) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeRPCCaptureHint explains how to capture provider RPC entries. Debug
+// logging alone does not produce them and never has: terraform-plugin-go
+// writes tf_req_duration_ms and "Sending request downstream" exclusively
+// through logging.ProtocolTrace, so both are filtered out below TRACE. A
+// real debug-enabled HCP run measured zero of each. The proto subsystem
+// takes its level from TF_LOG_SDK_PROTO and is built as its own hclog
+// logger with its own level, so it can be raised on its own rather than
+// turning all of Terraform up to TRACE.
+func writeRPCCaptureHint(b *strings.Builder) {
+	fmt.Fprintf(b, "  Provider RPC entries are emitted only at TRACE, so debug\n")
+	fmt.Fprintf(b, "  logging alone will not produce them. Set TF_LOG_SDK_PROTO=TRACE\n")
+	fmt.Fprintf(b, "  to raise the protocol subsystem on its own, or TF_LOG=TRACE\n")
+	fmt.Fprintf(b, "  for everything.\n")
 }
