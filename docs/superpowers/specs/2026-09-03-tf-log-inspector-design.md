@@ -754,10 +754,13 @@ which is only possible because HCP delivers protocol lines un-nested.
    `TF_LOG_PROVIDER_<NAME>` are different variables with confusingly similar
    names; the unsuffixed one is the gate that matters here.
 
-   The run is informative either way. If structured output survives, it was
-   *core* at TRACE that suppressed it, and one log can serve both tiers. If
-   it does not, the suppression has another cause and the one-view-per-
-   capture constraint is real.
+   A risk flagged before that run did not materialise. `log wall-clock` is
+   taken from the hclog stream whenever hclog timestamps exist, and a
+   synthetic test showed it ignoring the UI-hook stream entirely. On the real
+   combined capture it reads 522.3 s, which is right: the hclog stream
+   brackets the whole Terraform process, while `terraform.ui` covers only the
+   plan phase within it. The synthetic exaggerated the gap by separating the
+   two streams artificially. No fix needed.
 
    **The trade-off is three-way, not two-way.** Terraform core logs through
    the global logger, whose level is `TF_LOG` (`globalLogLevel`), so
@@ -771,10 +774,36 @@ which is only possible because HCP delivers protocol lines un-nested.
    |---|---|---|---|
    | debug toggle | yes (measured) | no (measured) | no (measured) |
    | `TF_LOG=TRACE` | no (measured) | yes (measured) | yes (measured) |
-   | `DEBUG` + `TF_LOG_PROVIDER`/`TF_LOG_SDK_PROTO` at TRACE | predicted yes | predicted yes | no |
+   | `DEBUG` + `TF_LOG_PROVIDER`/`TF_LOG_SDK_PROTO` at TRACE | **yes (measured)** | **yes (measured)** | **no (measured)** |
 
-   **If the core-TRACE hypothesis holds, per-resource timings and address
-   attribution are mutually exclusive.** Provider RPC timing can be added to
+   **CONFIRMED, 2026-09-04.** The third row was run: 30 MB, 38,379 entries,
+   `structured lines 1325`, `TRACE 24587`, `response duration fields 2174`,
+   `correlated req ids 2174`, `spans built 2174`, `UI-hook spans built 264`,
+   and `core vertex lines 0` / `core GRPC lines 0`. Core stayed at DEBUG and
+   the `terraform.ui` stream survived, so **core at TRACE is what suppresses
+   structured output**. This is the first log to produce spans from both
+   builders at once.
+
+   **This is the capture to standardise on.** It is the only one that answers
+   both "which resources were slow" and "which calls were slow" from a single
+   run, and at 30 MB it sits between the 17 MB debug and 37 MB full-TRACE
+   captures. Only address attribution is out of reach, and open question 2
+   never established that view 3 was worth its complexity in the first
+   place.
+
+   **The two tiers join on resource type, which weakens the case for view
+   3.** Both builders populate `Span.ResourceType` — the reported builder
+   from `tf_resource_type` (18,773 occurrences in this capture), the UI-hook
+   builder from `hook.resource.resource_type`. So a rollup can put the
+   UI-hook answer and the RPC answer side by side per type without any
+   address attribution at all: *these reads took 247 s in total, and here are
+   the RPC calls of that type and what each cost*. Address attribution is
+   only needed to distinguish two instances **of the same type**, which is a
+   narrower question than the design originally assumed and one this capture
+   cannot answer anyway. Phase 2 should build the type-level join first and
+   let it demonstrate whether the address-level view is still wanted.
+
+   **Per-resource timings and address attribution are mutually exclusive.** Provider RPC timing can be added to
    either, but no capture yields all three. That is a hard constraint on the
    TUI: view 3 and the UI-hook resource view can never be rendered from the
    same log however the interface is arranged, and it gives phase 5 a second

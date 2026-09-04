@@ -10,7 +10,23 @@ Requires Go 1.25 or later. No third-party dependencies.
 
 ## Getting a log
 
-`tfli` reads two kinds of timing, which need different capture settings.
+`tfli` reads two kinds of timing. One capture gives you both.
+
+### The recommended capture
+
+On the run, enable **Debug Logging**, and set these workspace variables:
+
+    TF_LOG_PROVIDER=TRACE
+    TF_LOG_SDK_PROTO=TRACE
+
+Then download the raw log. This yields per-resource timings from Terraform's
+own UI hooks *and* per-RPC timings from the providers, in one file. Measured
+on a real HCP run: 30 MB, 2,174 correlated RPC spans and 264 resource spans.
+
+Do not reach for `TF_LOG=TRACE` instead. It raises Terraform core as well,
+and a core-TRACE run does not contain the `terraform.ui` stream — you gain
+core's graph output and lose every per-resource timing. The sections below
+explain why.
 
 ### Per-resource timing, from a normal run
 
