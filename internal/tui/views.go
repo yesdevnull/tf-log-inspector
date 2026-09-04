@@ -50,20 +50,32 @@ var callColumns = []column{
 	{header: "provider"},
 }
 
-// rows returns the current view's rows. ViewRawLog is not a rollup and has
-// no rows of its own -- Task 5 renders it directly from m.log.Entries -- so
-// it returns nil here.
-func (m Model) rows() []row {
+// rows returns the current view's rows, restricted to the active facet
+// filter. ViewRawLog is not a rollup and has no rows of its own -- Task 5
+// renders it directly from m.log.Entries -- so it returns nil here.
+//
+// The result is cached on m (see invalidateRows) so repeated calls between
+// filter or view changes -- moveSelection calling RowCount() on every
+// arrow-key press, or a render calling rows() again after RowCount already
+// did -- reuse it rather than redoing a full RollupBy/JoinByResourceType/sort
+// each time.
+func (m *Model) rows() []row {
+	if m.rowsCached {
+		return m.rowsCache
+	}
+	f := m.filter()
+	var r []row
 	switch m.view {
 	case ViewProviders:
-		return providerRows(m.log.RPCSpans)
+		r = providerRows(f.SpansMatching(m.log.RPCSpans))
 	case ViewTypes:
-		return typeRows(m.log.RPCSpans, m.log.UISpans)
+		r = typeRows(f.SpansMatching(m.log.RPCSpans), f.SpansMatching(m.log.UISpans))
 	case ViewCalls:
-		return callRows(m.log.RPCSpans)
-	default:
-		return nil
+		r = callRows(m.log.RPCSpans, f)
 	}
+	m.rowsCache = r
+	m.rowsCached = true
+	return r
 }
 
 // providerRows ranks providers by total RPC time, as model.RollupBy already
@@ -107,14 +119,19 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	return rows
 }
 
-// callRows ranks RPC spans by duration descending, ties broken by RPC name
-// so the ordering is total. It sorts a slice of indices rather than the
-// spans themselves: m.log.RPCSpans must not be mutated, since every other
-// view and any later --profile run over the same Log reads it too.
-func callRows(rpcSpans []span.Span) []row {
-	idx := make([]int, len(rpcSpans))
-	for i := range idx {
-		idx[i] = i
+// callRows ranks the RPC spans matching f by duration descending, ties
+// broken by RPC name so the ordering is total. Each row's spanIdx indexes
+// into rpcSpans itself, never into a filtered subset, so jump-to-log (Task
+// 5) keeps landing on the right span even while a filter narrows the list.
+// It sorts a slice of indices rather than the spans themselves: m.log.RPCSpans
+// must not be mutated, since every other view and any later --profile run
+// over the same Log reads it too.
+func callRows(rpcSpans []span.Span, f model.Filter) []row {
+	idx := make([]int, 0, len(rpcSpans))
+	for i, s := range rpcSpans {
+		if f.MatchSpan(s) {
+			idx = append(idx, i)
+		}
 	}
 	sort.Slice(idx, func(i, j int) bool {
 		a, b := rpcSpans[idx[i]], rpcSpans[idx[j]]
@@ -147,7 +164,8 @@ func (m Model) renderList(w, h int) string {
 	case ViewProviders:
 		return renderTable(nil, providerColumns, m.rows(), w, h)
 	case ViewTypes:
-		return renderTable(typesPreamble(m.log.UISpans), typeColumns, m.rows(), w, h)
+		preamble := typesPreamble(m.filter().SpansMatching(m.log.UISpans))
+		return renderTable(preamble, typeColumns, m.rows(), w, h)
 	case ViewCalls:
 		return renderTable(nil, callColumns, m.rows(), w, h)
 	default:

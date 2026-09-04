@@ -60,15 +60,44 @@ type Model struct {
 	pane     Pane
 	selected int
 
+	// facets is built once from the whole log's RPC spans, so a value's
+	// count always reflects the log, never the current filter -- a facet
+	// pane where narrowing the filter also shrank the other options' counts
+	// would make it hard to see what widening the filter again would show.
+	facets []model.Facet
+	// excluded holds, per facet dimension name, the values the user has
+	// toggled off. Nothing excluded in a dimension means unconstrained;
+	// filter() turns this into the model.Filter every view is built from.
+	excluded map[string]map[string]bool
+	// facetCursor is the pane's highlighted value: which dimension (index
+	// into facets) and which value within it space would toggle. Arrow-key
+	// navigation of the facet pane is not wired in this task, so it stays
+	// fixed at the first value of the first dimension -- see the task
+	// report for why.
+	facetCursor facetCursor
+
+	// rowsCache memoises rows() for the current view and filter. Recomputing
+	// on every call would redo a full RollupBy/JoinByResourceType/sort on
+	// every arrow-key press and, once View is wired into renderList, on
+	// every render too. Anything that can change what rows() returns --
+	// the view, the filter -- must invalidate this via invalidateRows.
+	rowsCache  []row
+	rowsCached bool
+
 	width, height int
 	quitting      bool
+}
+
+// facetCursor is the coordinate of one facet value within Model.facets.
+type facetCursor struct {
+	dim, val int
 }
 
 // New builds the model for l, loaded from path. Only path's base name is
 // kept: the header names the file the user is looking at, not where it lives
 // on disk.
 func New(l *model.Log, path string) Model {
-	return Model{log: l, name: filepath.Base(path)}
+	return Model{log: l, name: filepath.Base(path), facets: model.FacetsForSpans(l.RPCSpans)}
 }
 
 // Quitting reports whether a quit key has been handled. Tests use this
@@ -116,6 +145,15 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
+		// happens to render it as " " too, but dispatching on Type is the
+		// documented, unambiguous way to recognise it.
+		if msg.Type == tea.KeySpace {
+			if m.pane == PaneFacets {
+				m.toggleSelectedFacetValue()
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -126,18 +164,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveSelection(-1)
 		case "down", "j":
 			m.moveSelection(1)
+		case "esc":
+			// Esc clears every active filter regardless of which pane has
+			// focus -- the spec binds it globally, not to the facet pane.
+			m.clearFilters()
 		default:
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
 			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
 				m.view = v
 				m.selected = 0
+				m.invalidateRows()
 			}
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	}
 	return m, nil
+}
+
+// invalidateRows drops any cached rows so the next call to rows() rebuilds
+// them from the current view and filter, rather than serving stale ones.
+func (m *Model) invalidateRows() {
+	m.rowsCache = nil
+	m.rowsCached = false
 }
 
 // moveSelection shifts the selected row by delta, clamped to the active
