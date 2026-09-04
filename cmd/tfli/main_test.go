@@ -74,14 +74,23 @@ func TestRunReportsMissingFileClearly(t *testing.T) {
 	}
 }
 
-func TestRunRequiresDiagnoseInPhase1(t *testing.T) {
+// A bare invocation (no --diagnose or --profile) now opens the TUI rather
+// than erroring. tea.NewProgram needs a terminal, so this cannot launch the
+// program in a test; instead it checks that the default case reaches
+// model.Load, by way of the load error a missing file surfaces. That error
+// is model.Load's, not the old "--diagnose or --profile" usage message this
+// test replaces.
+func TestRunWithNoModeOpensTheTUIPath(t *testing.T) {
 	var sb strings.Builder
-	err := run([]string{"some.log"}, &sb, io.Discard)
+	err := run([]string{"no-such-file.log"}, &sb, io.Discard)
 	if err == nil {
-		t.Fatal("run returned nil error when --diagnose was omitted")
+		t.Fatal("run returned nil error for a missing file")
 	}
-	if !strings.Contains(err.Error(), "--diagnose") {
-		t.Errorf("error does not mention --diagnose: %v", err)
+	if !strings.Contains(err.Error(), "no-such-file.log") {
+		t.Errorf("error does not name the file: %v", err)
+	}
+	if strings.Contains(err.Error(), "--diagnose") {
+		t.Errorf("bare invocation still routed to the old usage error: %v", err)
 	}
 }
 

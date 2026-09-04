@@ -19,6 +19,7 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/profile"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
+	"github.com/yesdevnull/tf-log-inspector/internal/tui"
 )
 
 // version is overridden at build time; the zero value is fine for go install.
@@ -66,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
 	default:
-		return errors.New("pass --diagnose or --profile <logfile>")
+		return runTUI(fs.Arg(0))
 	}
 }
 
@@ -141,4 +142,14 @@ func runProfile(path, outPath string, stdout io.Writer) error {
 	return writeReport(stdout, outPath, func(w io.Writer) error {
 		return profile.Render(w, l)
 	})
+}
+
+// runTUI loads path and opens the full-screen interface. It has no --diagnose
+// or --profile equivalent flag: passing neither is what selects it.
+func runTUI(path string) error {
+	l, err := model.Load(path)
+	if err != nil {
+		return err
+	}
+	return tui.Run(l, path)
 }
