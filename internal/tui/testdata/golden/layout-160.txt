@@ -1,16 +1,16 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                                │ provider                                total  calls  max                  │ SPAN DETAIL                             
-[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                 [0m │ (no call selected)                      
-[ ] …ry.terraform.io/hashicorp/google  1 │ registry.terraform.io/hashicorp/aws       5ms      1  5ms                  │                                         
-RPCS                                     │                                                                            │                                         
-[ ] ApplyResourceChange  2               │                                                                            │                                         
-RESOURCE TYPES                           │                                                                            │                                         
-[ ] aws_subnet  1                        │                                                                            │                                         
+[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                 [0m │ Prov  …try.terraform.io/hashicorp/google
+[ ] …ry.terraform.io/hashicorp/google  1 │ registry.terraform.io/hashicorp/aws       5ms      1  5ms                  │ Calls 1                                 
+RPCS                                     │                                                                            │ Total 8ms                               
+[ ] ApplyResourceChange  2               │                                                                            │ Max   8ms                               
+RESOURCE TYPES                           │                                                                            │ Types 1                                 
+[ ] aws_subnet  1                        │                                                                            │ RPCs  1                                 
 [ ] google_compute_instance  1           │                                                                            │                                         
-LEVELS                                   │                                                                            │                                         
-[ ] TRACE  2                             │                                                                            │                                         
-[ ] UNKNOWN  1                           │                                                                            │                                         
+LEVELS                                   │                                                                            │ Slowest                                 
+[ ] TRACE  2                             │                                                                            │ RPC   ApplyResourceChange               
+[ ] UNKNOWN  1                           │                                                                            │ Dur   8ms                               
                                          │                                                                            │                                         
                                          │                                                                            │                                         
                                          │                                                                            │                                         

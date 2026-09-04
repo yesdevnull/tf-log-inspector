@@ -264,33 +264,27 @@ func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 }
 
 // The detail pane shows the selected call's RPC, provider and duration.
+//
+// A call row IS a single span, so its pane describes that span and nothing
+// else: no group aggregate and no "Slowest" section, both of which would be
+// the same call reported twice. This is the view the rollup panes were
+// modelled on, so it is also the control -- it must render exactly what it
+// rendered before there were rollup panes at all.
 func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	want := m.log.RPCSpans[m.rows()[0].spanIdx]
-	out := m.renderDetail(80, 20) // wide enough that the full provider address is not clipped
-	for _, s := range []string{want.RPC, want.Provider} {
-		if !strings.Contains(out, s) {
-			t.Errorf("detail pane missing %q:\n%s", s, out)
+	// 80 columns is wide enough that the full provider address is not clipped.
+	got := detailBody(t, m, 80, 20)
+	for _, s := range []string{want.RPC, want.Provider, formatMs(uint64(want.DurationMs))} {
+		if !strings.Contains(got, s) {
+			t.Errorf("detail pane missing %q:\n%s", s, got)
 		}
 	}
-}
-
-// A rollup row (ViewProviders, the default view) rolls up many spans, so
-// there is no single span for the detail pane to describe. It must say so,
-// rather than picking one span and presenting its fields as the selected
-// row's: a pane showing one call's RPC and duration beside a row that
-// totals several is a wrong answer, not a missing one.
-//
-// 40 columns is wide enough for the placeholder and for an unclipped RPC
-// name, so both halves of the assertion measure what they say.
-func TestDetailPaneOnARollupRowIsHonest(t *testing.T) {
-	m := New(testLog(t, "provider-rpc.log"), "x.log")
-	out := m.renderDetail(40, 20)
-	if !strings.Contains(out, "(no call selected)") {
-		t.Errorf("detail pane does not say a rollup row has no single span to show:\n%s", out)
+	if strings.Contains(got, slowestHeading) {
+		t.Errorf("calls view detail pane carries a rollup's %q section for a row that is one span:\n%s", slowestHeading, got)
 	}
-	if rpc := m.log.RPCSpans[0].RPC; strings.Contains(out, rpc) {
-		t.Errorf("detail pane shows the span %q for a rollup row:\n%s", rpc, out)
+	if expect := strings.Join(spanDetailLines(want, 80), "\n"); got != expect {
+		t.Errorf("calls view detail pane =\n%s\nwant\n%s", got, expect)
 	}
 }
 
@@ -477,14 +471,19 @@ func layoutCentreWidth(m Model, w int) int {
 // minDetailPaneWidth exists so the detail pane always has room for its own
 // placeholder. It is only a floor if it is applied after the quarter-of-the-
 // terminal cap: at 70 columns -- one of the three widths the spec names --
-// a quarter is 17, which renders "(no call selected" with the closing paren
+// a quarter is 17, which renders "(nothing selected" with the closing paren
 // cut off, a pane too narrow to label itself.
+//
+// The raw log is the view that reaches the placeholder: it has no rows of
+// its own, so there is nothing for the pane to describe. Every other view
+// describes whatever row the cursor is on.
 func TestDetailPaneFitsItsPlaceholderAtTheNarrowestSupportedWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	if got := detailPaneWidth(m.detailPaneNatural, detailInlineWidth); got < minDetailPaneWidth {
 		t.Errorf("detail pane is %d columns at width %d, below its own minimum of %d", got, detailInlineWidth, minDetailPaneWidth)
 	}
-	if !strings.Contains(m.View(), "(no call selected)") {
+	if !strings.Contains(m.View(), noSelectionNote) {
 		t.Errorf("detail pane placeholder is cut off at %d columns:\n%s", detailInlineWidth, m.View())
 	}
 }
@@ -506,7 +505,7 @@ func TestSidePaneWidthsAreMeasuredAtLoad(t *testing.T) {
 	if got, want := m.facetPaneNatural, facetNaturalWidth(m.facets); got != want {
 		t.Errorf("facetPaneNatural = %d, want %d", got, want)
 	}
-	if got, want := m.detailPaneNatural, detailNaturalWidth(m.log.RPCSpans); got != want {
+	if got, want := m.detailPaneNatural, detailNaturalWidth(m.log); got != want {
 		t.Errorf("detailPaneNatural = %d, want %d", got, want)
 	}
 
@@ -689,5 +688,250 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	}
 	if !strings.Contains(view, "q quit") {
 		t.Errorf("a tall raw-log entry pushed the footer out of the frame:\n%s", view)
+	}
+}
+
+// detailBody is the detail pane's content without its title line, which is
+// furniture rather than data and carries the pane's focus styling.
+//
+// Every assertion about the pane is made against this rather than against a
+// composed view. The facet pane and the centre table render the same
+// provider addresses, resource types and durations at their own widths, so
+// a strings.Contains over a whole view is satisfied by a pane other than
+// the one under test -- which is exactly how a detail pane wired to the
+// wrong row goes unnoticed.
+func detailBody(t *testing.T, m Model, w, h int) string {
+	t.Helper()
+	lines := strings.Split(m.renderDetail(w, h), "\n")
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "SPAN DETAIL") {
+		t.Fatalf("detail pane does not start with its title:\n%s", strings.Join(lines, "\n"))
+	}
+	return strings.TrimRight(strings.Join(lines[1:], "\n"), " \n")
+}
+
+// selectRow moves the list cursor down to the row whose first cell is want,
+// by the same key the user presses, and reports the model with that row
+// selected.
+func selectRow(t *testing.T, m Model, want string) Model {
+	t.Helper()
+	for i, r := range m.rows() {
+		if r.cells[0] != want {
+			continue
+		}
+		for range i {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		}
+		if m.Selected() != i {
+			t.Fatalf("selection is row %d after moving to %q, want row %d", m.Selected(), want, i)
+		}
+		return m
+	}
+	t.Fatalf("no row whose first cell is %q", want)
+	return m
+}
+
+// The providers view is the view the interface OPENS on, and every one of
+// its rows is a rollup. Its detail pane describes the group: the provider,
+// its call count, total and max -- the same figures the row itself carries
+// -- plus the two facts the table has no column for, how many distinct
+// resource types and RPC methods the group spans, and then the slowest
+// single call behind it.
+//
+// The aggregate figures are taken from the SELECTED ROW's own cells rather
+// than written out again here, so the pane and the table are asserted to
+// agree rather than each asserted against a separately maintained guess.
+//
+// provider-rpc.log is the fixture because its two distinct counts DIFFER:
+// two resource types (aws_subnet, aws_internet_gateway) across one RPC name
+// (ApplyResourceChange). Were they equal, one of the two lines could be
+// reporting the other's number and nothing here would show it.
+func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	if m.ActiveView() != ViewProviders {
+		t.Fatalf("ActiveView = %v on a fresh model, want the providers view this test is about", m.ActiveView())
+	}
+	cells := m.rows()[m.Selected()].cells // providerColumns: provider, total, calls, max
+	want := strings.Join([]string{
+		"Prov  " + cells[0],
+		"Calls " + cells[2],
+		"Total " + cells[1],
+		"Max   " + cells[3],
+		"Types 2",
+		"RPCs  1",
+		"",
+		"Slowest",
+		"RPC   ApplyResourceChange",
+		"Dur   5ms",
+	}, "\n")
+	// 50 columns is wider than the longest line here, so nothing is clipped
+	// and the comparison is against the values themselves.
+	if got := detailBody(t, m, 50, 20); got != want {
+		t.Errorf("providers detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// The pane is a projection of the SELECTION, so moving the cursor must move
+// it. A pane wired to row 0, or to the whole log, renders identically
+// whatever the cursor is on -- and it renders plausible figures while doing
+// it, which is why this asserts that two rows give two different panes AND
+// that each pane carries its own row's numbers.
+//
+// two-providers.log is the fixture because its two rows carry different
+// totals (google 8ms, aws 5ms): in a fixture whose rows agree, a pane stuck
+// on row 0 is indistinguishable from one that follows the cursor.
+func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	rows := m.rows()
+	if len(rows) != 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want 2", len(rows))
+	}
+	if rows[0].cells[1] == rows[1].cells[1] {
+		t.Fatalf("fixture assumption changed: both provider rows total %q, so a pane stuck on one row is invisible here", rows[0].cells[1])
+	}
+
+	first := detailBody(t, m, 50, 20)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	second := detailBody(t, m, 50, 20)
+	if first == second {
+		t.Fatalf("the detail pane did not change when the selection moved to another provider:\n%s", first)
+	}
+	for i, got := range []string{first, second} {
+		for _, want := range []string{"Prov  " + rows[i].cells[0], "Total " + rows[i].cells[1]} {
+			if !strings.Contains(got, want) {
+				t.Errorf("detail pane for row %d is missing %q, so it describes some row other than the selected one:\n%s", i, want, got)
+			}
+		}
+	}
+}
+
+// A resource-type row spans both tiers, so its aggregate must too: the
+// UI-hook tier's resource count and total beside the RPC tier's calls,
+// total and max, under the labels the table's own header uses so the pane
+// and the table can be read against each other. Then the slowest RPC-tier
+// call for that type.
+//
+// two-tier.log's aws_instance is the row carrying both tiers: two UI-hook
+// resources totalling 5s, and two RPC calls totalling 370ms of which the
+// slowest is ApplyResourceChange at 250ms. Reading the RPC figures off the
+// UI tier, or the other way round, changes every number here.
+func TestTypesDetailPaneShowsBothTiers(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = selectRow(t, m, "aws_instance")
+	// typeColumns: resource type, UI res., UI total, RPC calls, RPC total, RPC max.
+	cells := m.rows()[m.Selected()].cells
+	if cells[1] == "0" || cells[3] == "0" {
+		t.Fatalf("fixture assumption changed: aws_instance = %v, want a row with spans in BOTH tiers", cells)
+	}
+	want := strings.Join([]string{
+		"Type      " + cells[0],
+		"UI res.   " + cells[1],
+		"UI total  " + cells[2],
+		"RPC calls " + cells[3],
+		"RPC total " + cells[4],
+		"RPC max   " + cells[5],
+		"",
+		"Slowest",
+		"RPC   ApplyResourceChange",
+		"Dur   250ms",
+	}, "\n")
+	if got := detailBody(t, m, 50, 20); got != want {
+		t.Errorf("types detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// A resource type can be seen by the UI-hook tier and never by the RPC tier
+// -- two-tier.log's local_file is exactly that -- and the pane must SAY so.
+// An omitted section, or an empty one, is indistinguishable from a pane
+// that failed to render, which is the defect class this pane already had
+// once.
+func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = selectRow(t, m, "local_file")
+	cells := m.rows()[m.Selected()].cells
+	if cells[3] != "0" {
+		t.Fatalf("fixture assumption changed: local_file has %s RPC calls, want a UI-tier-only row", cells[3])
+	}
+	want := strings.Join([]string{
+		"Type      " + cells[0],
+		"UI res.   " + cells[1],
+		"UI total  " + cells[2],
+		"RPC calls " + cells[3],
+		"RPC total " + cells[4],
+		"RPC max   " + cells[5],
+		"",
+		"Slowest",
+		"no RPC-tier calls",
+	}, "\n")
+	if got := detailBody(t, m, 50, 20); got != want {
+		t.Errorf("UI-only types detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// renderDetail truncates with lines[:h], which takes the BOTTOM of the pane
+// first. The group's aggregate is therefore rendered before the slowest
+// call: on a terminal short enough to lose one of them, the summary of the
+// row the cursor is on is what survives and the single call behind it is
+// what goes.
+//
+// The height is exactly the title plus the aggregate, so the assertion
+// measures the cut itself rather than a pane that happened to fit.
+func TestAShortDetailPaneKeepsTheAggregateAndDropsTheSlowestCall(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	if full := detailBody(t, m, 50, 20); !strings.Contains(full, slowestHeading) {
+		t.Fatalf("the slowest section is absent even at full height, so this cannot measure what a short pane drops:\n%s", full)
+	}
+	const aggregateLines = 6 // provider, calls, total, max, resource types, RPC methods
+	short := detailBody(t, m, 50, 1+aggregateLines)
+	if !strings.Contains(short, "Total 6ms") || !strings.Contains(short, "Calls 2") {
+		t.Errorf("a short detail pane dropped the group aggregate, which is the part that describes the selected row:\n%s", short)
+	}
+	if strings.Contains(short, slowestHeading) {
+		t.Errorf("a short detail pane kept the slowest call at the aggregate's expense:\n%s", short)
+	}
+}
+
+// detailNaturalWidth measures the pane once, at load, over data that cannot
+// change afterwards. It has to measure the ROLLUP views' lines as well as
+// each span's: a rollup line can be the widest the pane ever shows, and a
+// pane measured only against span detail is then too narrow for it and
+// clips content it had room for.
+//
+// structured-ui.log is the case where that bites: it carries UI-hook spans
+// only, so there is no span detail to measure at all and the measurement
+// falls to minDetailPaneWidth -- 19 columns, narrower than the resource
+// type line the types view puts in the pane.
+func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
+	l := testLog(t, "structured-ui.log")
+	if len(l.RPCSpans) != 0 {
+		t.Fatalf("fixture assumption changed: %d RPC spans, want a UI-hook-only log whose span detail measures nothing", len(l.RPCSpans))
+	}
+	m := update(t, New(l, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+
+	wantLine := "Type      " + m.rows()[m.Selected()].cells[0]
+	if got := m.detailPaneNatural; got < lipgloss.Width(wantLine) {
+		t.Errorf("detailPaneNatural = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
+	}
+	body := detailBody(t, m, detailPaneWidth(m.detailPaneNatural, 160), 20)
+	if !strings.Contains(body, wantLine) {
+		t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
+	}
+}
+
+// The placeholder now means what it says: there is no selection to
+// describe. Every view with rows describes the row the cursor is on, and
+// only the raw log -- which has no rows of its own -- reaches the
+// placeholder.
+func TestTheDetailPanePlaceholderMeansThereIsNoSelection(t *testing.T) {
+	base := New(testLog(t, "two-tier.log"), "x.log")
+	for _, key := range []rune{'1', '2', '4'} {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if got := detailBody(t, m, 50, 20); strings.Contains(got, noSelectionNote) {
+			t.Errorf("view %c has rows but its detail pane is dead:\n%s", key, got)
+		}
+	}
+	m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	if got := detailBody(t, m, 50, 20); got != noSelectionNote {
+		t.Errorf("raw log detail pane = %q, want the placeholder %q -- there is no row there to describe", got, noSelectionNote)
 	}
 }

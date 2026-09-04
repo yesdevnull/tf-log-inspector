@@ -1,16 +1,16 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                 │ provider                   total  calls  max │ SPAN DETAIL              
-[7;2m[ ] ….io/hashicorp/aws  1[0m │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ (no call selected)       
-[ ] …/hashicorp/google  1 │ …rraform.io/hashicorp/aws    5ms      1  5ms │                          
-RPCS                      │                                              │                          
-[ ] ApplyResourceChan…  2 │                                              │                          
-RESOURCE TYPES            │                                              │                          
-[ ] aws_subnet  1         │                                              │                          
+[7;2m[ ] ….io/hashicorp/aws  1[0m │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ Prov  …o/hashicorp/google
+[ ] …/hashicorp/google  1 │ …rraform.io/hashicorp/aws    5ms      1  5ms │ Calls 1                  
+RPCS                      │                                              │ Total 8ms                
+[ ] ApplyResourceChan…  2 │                                              │ Max   8ms                
+RESOURCE TYPES            │                                              │ Types 1                  
+[ ] aws_subnet  1         │                                              │ RPCs  1                  
 [ ] …_compute_instance  1 │                                              │                          
-LEVELS                    │                                              │                          
-[ ] TRACE  2              │                                              │                          
-[ ] UNKNOWN  1            │                                              │                          
+LEVELS                    │                                              │ Slowest                  
+[ ] TRACE  2              │                                              │ RPC   ApplyResourceChange
+[ ] UNKNOWN  1            │                                              │ Dur   8ms                
                           │                                              │                          
                           │                                              │                          
                           │                                              │                          

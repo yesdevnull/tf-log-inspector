@@ -22,7 +22,7 @@ const (
 // minFacetPaneWidth and minDetailPaneWidth are the floor facetPaneWidth and
 // detailPaneWidth return: enough for the facet pane's own section headers
 // ("RESOURCE TYPES" is the longest) and the detail pane's placeholder
-// ("(no call selected)"). They are real floors, applied last in
+// ("(nothing selected)"). They are real floors, applied last in
 // capPaneWidth -- a pane clamped below them shows its own furniture cut in
 // half, which tells the reader less than the couple of columns it hands
 // back to the centre pane are worth.
@@ -72,17 +72,37 @@ func facetNaturalWidth(facets []model.Facet) int {
 }
 
 // detailNaturalWidth is how wide the detail pane would have to be to show
-// the widest RPC/provider/duration/address line across EVERY RPC span, not
-// just the currently selected one, so the pane's width does not jump around
-// as the selection changes.
+// its widest line across every row of every view, not just the currently
+// selected one, so the pane's width does not jump around as the selection
+// or the view changes.
 //
-// It formats every span in the log, so like facetNaturalWidth it is
-// measured once in New over data that cannot change afterwards, not per
-// frame.
-func detailNaturalWidth(rpcSpans []span.Span) int {
+// It measures the rollup views' detail as well as each span's, because a
+// rollup line is routinely the widest the pane ever shows: a resource type
+// under the types view's ten-column label ("RPC calls") outruns a provider
+// address under the span detail's six ("Prov"), and a log carrying UI-hook
+// spans only has no span detail to measure at all -- there the whole pane
+// would otherwise be measured at minDetailPaneWidth and clip every line it
+// draws.
+//
+// It formats every span in the log and rolls the log up twice, so like
+// facetNaturalWidth it is measured once in New over data that cannot change
+// afterwards, not per frame. It measures the UNFILTERED rollups, which is
+// what makes it a load-time measurement at all: a filter can only remove
+// spans, so it can offer no group key these rows do not already carry, and
+// the identifier lines -- the wide ones -- are covered exactly. A filtered
+// sub-total can render at most one column wider than the total it came from
+// ("999ms" against "1.0s"), which clipWidth absorbs the way it absorbs any
+// other overrun.
+func detailNaturalWidth(l *model.Log) int {
 	width := minDetailPaneWidth
-	for _, s := range rpcSpans {
+	for _, s := range l.RPCSpans {
 		for _, line := range spanDetailLines(s, hugeWidth) {
+			width = max(width, lipgloss.Width(line))
+		}
+	}
+	rollups := append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...)
+	for _, r := range rollups {
+		for _, line := range rollupDetailLines(r.rollup, hugeWidth) {
 			width = max(width, lipgloss.Width(line))
 		}
 	}
@@ -516,12 +536,20 @@ func joinPanes(h int, panes ...pane) string {
 	return strings.Join(rows, "\n")
 }
 
-// renderDetail renders the detail pane: the selected row's span, when the
-// current view has one to show, at most w columns wide and h lines tall.
-// ViewRawLog and the rollup views (ViewProviders, ViewTypes) have no single
-// span behind the selection -- rows() returns nil for the former and every
-// row's spanIdx is -1 for the latter -- so both fall through to the same
-// honest placeholder rather than showing stale or zero-valued fields.
+// renderDetail renders the detail pane: what the selected row stands for,
+// at most w columns wide and h lines tall. The spec has the pane persist
+// across the views -- "there is one filter state and many projections of
+// it" -- so every view with rows describes the row its cursor is on. A call
+// row is one span and gets that span's fields; a rollup row stands for a
+// group and gets the group's aggregate and the slowest call behind it.
+//
+// The placeholder is what is left when there is genuinely nothing to
+// describe: a view with no rows at all (ViewRawLog, whose rows() is nil), or
+// a selection index outside the rows there are.
+//
+// Truncation to h takes the BOTTOM of the pane, so what a short terminal
+// drops is whatever each of those renderers put last -- for a rollup row,
+// deliberately, the slowest call rather than the group summary.
 func (m *Model) renderDetail(w, h int) string {
 	// The detail pane has no cursor of its own to mark, so its title
 	// carries the focus instead: Tab's third stop would otherwise be
@@ -533,11 +561,15 @@ func (m *Model) renderDetail(w, h int) string {
 	}
 	lines := []string{title}
 	rows := m.rows()
-	if m.selected < 0 || m.selected >= len(rows) || rows[m.selected].spanIdx < 0 {
-		lines = append(lines, clipWidth("(no call selected)", w))
-	} else {
-		s := m.log.RPCSpans[rows[m.selected].spanIdx]
-		lines = append(lines, spanDetailLines(s, w)...)
+	switch {
+	case m.selected < 0 || m.selected >= len(rows):
+		lines = append(lines, clipWidth(noSelectionNote, w))
+	case rows[m.selected].rollup != nil:
+		lines = append(lines, rollupDetailLines(rows[m.selected].rollup, w)...)
+	default:
+		// Every row is a rollup row or a call row (see row.rollup), so a row
+		// with no rollup has a real span index and this indexes in range.
+		lines = append(lines, spanDetailLines(m.log.RPCSpans[rows[m.selected].spanIdx], w)...)
 	}
 	if len(lines) > h {
 		lines = lines[:h]
@@ -576,13 +608,90 @@ func (m *Model) renderDetail(w, h int) string {
 // column. Dur is a formatted number and is never long enough to need either
 // treatment.
 func spanDetailLines(s span.Span, w int) []string {
-	lines := []string{
-		clipIdentifierField("RPC   ", s.RPC, "", w, headIdentifierColumn),
-		clipIdentifierField("Prov  ", s.Provider, "", w, tailIdentifierColumn),
-		clipWidth(fmt.Sprintf("Dur   %s", formatMs(uint64(s.DurationMs))), w),
+	fields := []detailField{
+		{label: "RPC", value: s.RPC, kind: headIdentifierColumn},
+		{label: "Prov", value: s.Provider, kind: tailIdentifierColumn},
+		{label: "Dur", value: formatMs(uint64(s.DurationMs)), kind: numericColumn},
 	}
 	if s.Fidelity == span.FidelityUIReported {
-		lines = append(lines, clipIdentifierField("Addr  ", s.Address, "", w, tailIdentifierColumn))
+		fields = append(fields, detailField{label: "Addr", value: s.Address, kind: tailIdentifierColumn})
+	}
+	return detailFieldLines(fields, w)
+}
+
+// noSelectionNote is what the detail pane says when there is no selected row
+// to describe -- a view with no rows at all, or a selection outside the rows
+// there are. It describes the absence of a SELECTION rather than asking for
+// a call to be picked: in the raw log, the one view that reaches it, there
+// is no row to pick. It is 18 display columns, so it fits the pane's own
+// floor of minDetailPaneWidth.
+const noSelectionNote = "(nothing selected)"
+
+// slowestHeading labels the second block of a rollup row's detail: the one
+// call behind the group that took longest. Without it the RPC name and
+// duration beneath read as the ROW's own figures, which for a row totalling
+// several calls is a wrong answer rather than a missing one.
+const slowestHeading = "Slowest"
+
+// noRPCCallsNote is what stands under that heading for a group with no
+// RPC-tier span -- a resource type Terraform's UI hooks reported and the
+// provider protocol never did, which testdata/two-tier.log's local_file is.
+// The section is stated as empty rather than dropped: a section that is
+// simply absent is indistinguishable from a pane that failed to render it.
+const noRPCCallsNote = "no RPC-tier calls"
+
+// rollupDetailLines formats a rollup row's detail: the group's aggregate
+// first, then the slowest single call behind it, separated by a blank line
+// and named by slowestHeading.
+//
+// That ORDER is load-bearing. renderDetail truncates from the bottom, so on
+// a terminal too short for the whole pane the group summary -- which is
+// what describes the selected row -- is what survives, and the one call
+// behind it is what goes.
+func rollupDetailLines(d *rollupDetail, w int) []string {
+	lines := append(detailFieldLines(d.aggregate, w), "", clipWidth(slowestHeading, w))
+	if d.slowest == nil {
+		return append(lines, clipWidth(noRPCCallsNote, w))
+	}
+	// The group's own identity is already the aggregate's first line, so the
+	// slowest call is named by what distinguishes it WITHIN the group: which
+	// RPC method it was, and how long it took.
+	return append(lines, detailFieldLines([]detailField{
+		{label: "RPC", value: d.slowest.RPC, kind: headIdentifierColumn},
+		{label: "Dur", value: formatMs(uint64(d.slowest.DurationMs)), kind: numericColumn},
+	}, w)...)
+}
+
+// detailLabelWidth is the floor for the label column every detail block
+// lines its values up on: the span fields' longest label ("Addr") plus two
+// spaces. A block whose own labels are wider than that -- the types view
+// heads its figures with the table's own "RPC calls" -- widens to fit them,
+// so the label and the value it labels can never run together.
+const detailLabelWidth = 6
+
+// detailFieldLines lays fields out as one labelled value per line, at most w
+// terminal columns each, with the values aligned in a common column.
+//
+// Which end of an over-long value gives way is the field's KIND, routed
+// through the same clipIdentifierField and clipValueForKind the tables and
+// the facet pane use, so a provider address clipped here keeps the tail that
+// tells it from its siblings and an RPC name keeps its head. A number is
+// never clipped by kind at all: half a number tells the reader nothing, so
+// it is left to clipWidth as the last line of defence, the same treatment
+// the tables' numeric columns get.
+func detailFieldLines(fields []detailField, w int) []string {
+	labelW := detailLabelWidth
+	for _, f := range fields {
+		labelW = max(labelW, lipgloss.Width(f.label)+1)
+	}
+	lines := make([]string, len(fields))
+	for i, f := range fields {
+		label := padRight(f.label, labelW)
+		if f.kind == numericColumn {
+			lines[i] = clipWidth(label+f.value, w)
+			continue
+		}
+		lines[i] = clipIdentifierField(label, f.value, "", w, f.kind)
 	}
 	return lines
 }

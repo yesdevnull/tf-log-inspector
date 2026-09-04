@@ -359,7 +359,7 @@ func TestFilteringClampsTheSelection(t *testing.T) {
 	if m.Selected() != 0 {
 		t.Errorf("Selected = %d after the filter narrowed the list to 1 row, want 0", m.Selected())
 	}
-	if got := m.renderDetail(60, 20); strings.Contains(got, "(no call selected)") {
+	if got := m.renderDetail(60, 20); strings.Contains(got, noSelectionNote) {
 		t.Errorf("detail pane lost its span because the selection was left past the end of the list:\n%s", got)
 	}
 }

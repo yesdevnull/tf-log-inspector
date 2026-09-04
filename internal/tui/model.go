@@ -99,12 +99,13 @@ type Model struct {
 
 	// facetPaneNatural and detailPaneNatural are how wide each side pane
 	// would have to be to show its widest line in full. Both are functions
-	// of data that never changes after New -- the log's RPC spans, and the
+	// of data that never changes after New -- the log's spans, and the
 	// facets built from them -- so both are measured there rather than per
 	// frame: measuring the detail pane means formatting every span in the
-	// log, which on a real capture is thousands of lines built and thrown
-	// away for every keystroke. Only the terminal-relative clamp
-	// (capPaneWidth) depends on the current width, and that is O(1).
+	// log and rolling it up by provider and by resource type, which on a
+	// real capture is thousands of lines built and thrown away for every
+	// keystroke. Only the terminal-relative clamp (capPaneWidth) depends on
+	// the current width, and that is O(1).
 	facetPaneNatural  int
 	detailPaneNatural int
 
@@ -149,7 +150,7 @@ func New(l *model.Log, path string) Model {
 	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: facets}
 	m.facetCursor = firstFacetCursor(facets)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
-	m.detailPaneNatural = detailNaturalWidth(l.RPCSpans)
+	m.detailPaneNatural = detailNaturalWidth(l)
 	return m
 }
 
@@ -368,7 +369,7 @@ func (m *Model) toggleFacetFocus() {
 // The clamp belongs here because everything that can shorten the list comes
 // through here: narrowing a filter can leave the selection past the end of
 // what is left, and a table whose cursor is off its own end highlights
-// nothing while the detail pane beside it falls to "(no call selected)" --
+// nothing while the detail pane beside it falls to its placeholder --
 // a list with no cursor at all until the user presses an arrow key.
 //
 // The raw log's "pattern not found" is dropped here for the same reason. It

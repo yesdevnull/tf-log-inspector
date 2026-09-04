@@ -29,6 +29,45 @@ type row struct {
 	// jump-to-log resolves a row to a span through it, so every row carries
 	// one.
 	spanIdx int
+	// rollup is what the detail pane shows for a row that stands for a
+	// GROUP of spans, and is nil for a row that is one span. Every row is
+	// exactly one of the two -- a rollup row has a rollup and spanIdx -1, a
+	// call row has a spanIdx and no rollup -- which is the invariant
+	// renderDetail dispatches on.
+	rollup *rollupDetail
+}
+
+// rollupDetail is everything the detail pane shows for a rollup row: the
+// group's own aggregate, and the slowest single RPC call behind it.
+//
+// It is recorded by the row builders, which have the group's spans in hand
+// already, rather than derived by the detail pane. renderDetail runs on
+// every frame, and re-deriving a group from a few thousand spans per
+// keystroke is the per-render cost facetNaturalWidth and detailNaturalWidth
+// were both hoisted out of the render path to avoid.
+type rollupDetail struct {
+	// aggregate is the group's own figures, in the order they are shown.
+	// The pane truncates from the BOTTOM (see renderDetail), so they come
+	// before the slowest call: on a terminal too short for both, what
+	// survives is the summary of the row the cursor is actually on.
+	aggregate []detailField
+	// slowest is the longest RPC-tier call in the group, or nil when the
+	// group has none -- a resource type the UI-hook tier saw and the RPC
+	// tier never did. The absence is rendered explicitly rather than left
+	// as a missing section, which reads as a pane that failed.
+	slowest *span.Span
+}
+
+// detailField is one labelled value of the detail pane: the label, the
+// already-formatted value, and what KIND of value it is -- which is what
+// decides the end it clips from, through the same clipValueForKind the
+// tables and the facet pane route their values through. The layout of the
+// line itself is layout.go's (see detailFieldLines), so a builder here
+// records what to show and never how wide it is.
+type detailField struct {
+	label string
+	value string
+	kind  columnKind
 }
 
 // columnKind says what a column holds. Which end of an over-long value
@@ -124,11 +163,19 @@ func (m *Model) rows() []row {
 }
 
 // providerRows ranks providers by total RPC time, as model.RollupBy already
-// orders them. No row is a single span, so every spanIdx is -1.
+// orders them. No row is a single span, so every spanIdx is -1 and every
+// row carries a rollupDetail instead.
+//
+// The detail pane's aggregate adds two facts the table has no column for:
+// how many distinct resource types and RPC methods the provider's calls
+// span. They are the reason to look at the pane over a providers row at all
+// -- the row's own four figures are already on screen beside it.
 func providerRows(rpcSpans []span.Span) []row {
 	buckets := model.RollupBy(rpcSpans, func(s span.Span) string { return s.Provider })
+	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.Provider })
 	rows := make([]row, len(buckets))
 	for i, b := range buckets {
+		g := groups[b.Key]
 		rows[i] = row{
 			cells: []string{
 				b.Key,
@@ -137,6 +184,17 @@ func providerRows(rpcSpans []span.Span) []row {
 				formatMs(uint64(b.MaxMs)),
 			},
 			spanIdx: -1,
+			rollup: &rollupDetail{
+				aggregate: []detailField{
+					{label: "Prov", value: b.Key, kind: tailIdentifierColumn},
+					{label: "Calls", value: strconv.Itoa(b.Count), kind: numericColumn},
+					{label: "Total", value: formatMs(b.TotalMs), kind: numericColumn},
+					{label: "Max", value: formatMs(uint64(b.MaxMs)), kind: numericColumn},
+					{label: "Types", value: strconv.Itoa(g.resourceTypes), kind: numericColumn},
+					{label: "RPCs", value: strconv.Itoa(g.rpcs), kind: numericColumn},
+				},
+				slowest: g.slowest,
+			},
 		}
 	}
 	return rows
@@ -144,9 +202,18 @@ func providerRows(rpcSpans []span.Span) []row {
 
 // typeRows joins the RPC and UI-hook tiers by resource type, as
 // model.JoinByResourceType already orders them. No row is a single span --
-// each is a rollup over possibly many of both -- so every spanIdx is -1.
+// each is a rollup over possibly many of both -- so every spanIdx is -1 and
+// every row carries a rollupDetail instead.
+//
+// The row spans both tiers, so its aggregate does too, under the labels
+// typeColumns heads the table with: the pane and the table then report the
+// same figure by the same name, and can be read against each other. Only
+// the RPC tier has a single slowest CALL to name -- a UI-hook span times a
+// whole resource, not a call -- and a type may have no RPC-tier span at
+// all, which groupRPCSpans reports as a nil slowest.
 func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	joined := model.JoinByResourceType(rpcSpans, uiSpans)
+	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
 		rows[i] = row{
@@ -159,9 +226,81 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				formatMs(uint64(r.RPCMaxMs)),
 			},
 			spanIdx: -1,
+			rollup: &rollupDetail{
+				aggregate: []detailField{
+					{label: "Type", value: r.ResourceType, kind: tailIdentifierColumn},
+					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
+					{label: "UI total", value: formatMs(r.UITotalMs), kind: numericColumn},
+					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
+					{label: "RPC total", value: formatMs(r.RPCTotalMs), kind: numericColumn},
+					{label: "RPC max", value: formatMs(uint64(r.RPCMaxMs)), kind: numericColumn},
+				},
+				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
+			},
 		}
 	}
 	return rows
+}
+
+// rpcGroup is what one group of RPC spans holds that a model rollup does
+// not carry: the slowest call in it, and how many distinct resource types
+// and RPC methods it spans.
+type rpcGroup struct {
+	slowest       *span.Span
+	resourceTypes int
+	rpcs          int
+}
+
+// slowestOf is the group's slowest call, and nil for a group that does not
+// exist at all. JoinByResourceType emits a row for every resource type
+// EITHER tier saw, so a UI-tier-only type has no entry here, and the caller
+// wants the same nil either way rather than a map lookup guarded at each
+// site.
+func (g *rpcGroup) slowestOf() *span.Span {
+	if g == nil {
+		return nil
+	}
+	return g.slowest
+}
+
+// groupRPCSpans collects each group's rpcGroup in a single pass over spans,
+// keyed the way model.RollupBy and model.JoinByResourceType key their own
+// groups (model.FacetKey), so a group found here is the same group the row
+// beside it was rolled up from.
+//
+// It runs once per rows() build -- which is once per view or filter change,
+// memoised on the model thereafter -- not once per frame.
+func groupRPCSpans(spans []span.Span, key func(span.Span) string) map[string]*rpcGroup {
+	groups := make(map[string]*rpcGroup)
+	seenTypes, seenRPCs := make(map[string]map[string]bool), make(map[string]map[string]bool)
+	seen := func(m map[string]map[string]bool, k, v string) bool {
+		if m[k] == nil {
+			m[k] = make(map[string]bool)
+		}
+		if m[k][v] {
+			return true
+		}
+		m[k][v] = true
+		return false
+	}
+	for i, s := range spans {
+		k := model.FacetKey(key(s))
+		g := groups[k]
+		if g == nil {
+			g = &rpcGroup{}
+			groups[k] = g
+		}
+		if g.slowest == nil || s.DurationMs > g.slowest.DurationMs {
+			g.slowest = &spans[i]
+		}
+		if !seen(seenTypes, k, model.FacetKey(s.ResourceType)) {
+			g.resourceTypes++
+		}
+		if !seen(seenRPCs, k, model.FacetKey(s.RPC)) {
+			g.rpcs++
+		}
+	}
+	return groups
 }
 
 // callRows ranks the RPC spans matching f by duration descending, ties
