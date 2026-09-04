@@ -125,3 +125,19 @@ func TestSelectionIsClampedAndResetsOnViewChange(t *testing.T) {
 		t.Errorf("Selected = %d after a view change, want 0", m.Selected())
 	}
 }
+
+// Re-pressing the key for the view already active must not zero the user's
+// scroll position: the reason selection resets on a view change -- row 40 of
+// one view is meaningless in another -- does not apply when the view has not
+// changed.
+func TestRepeatingTheActiveViewKeyDoesNotResetSelection(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.Selected() != 1 {
+		t.Fatalf("Selected = %d after moving down once, want 1", m.Selected())
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if m.Selected() != 1 {
+		t.Errorf("Selected = %d after repeating the active view's key, want 1 (unchanged)", m.Selected())
+	}
+}

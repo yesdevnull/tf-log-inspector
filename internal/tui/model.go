@@ -97,14 +97,14 @@ func (m Model) Selected() int {
 }
 
 // RowCount reports how many rows the active view holds, so selection has
-// something to clamp against. Until Task 3 builds the real per-view lists,
-// each view reports the size of the span (or entry) slice it will
-// eventually present.
+// something to clamp against. ViewRawLog has no rollup rows of its own --
+// Task 5 renders it directly from m.log.Entries -- so it is the one view
+// counted separately rather than through rows().
 func (m Model) RowCount() int {
 	if m.view == ViewRawLog {
 		return len(m.log.Entries)
 	}
-	return len(m.log.RPCSpans)
+	return len(m.rows())
 }
 
 // Init starts no commands: the model has everything it needs from New, and
@@ -129,7 +129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
-			if v, ok := viewKeys[msg.String()]; ok {
+			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
 				m.view = v
 				m.selected = 0
 			}
