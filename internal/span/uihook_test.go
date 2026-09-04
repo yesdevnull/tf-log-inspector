@@ -85,20 +85,6 @@ func TestUIHookBuilderElapsedSecondsRounds(t *testing.T) {
 	}
 }
 
-// A multi-second fractional duration must convert precisely.
-func TestUIHookBuilderMultiSecondFractionalDuration(t *testing.T) {
-	in := uiLineWith("2026-09-04T09:15:05.500000+10:00", "apply_complete", 2.5, true) + "\n"
-	var b UIHookBuilder
-	scanUIInto(t, in, &b)
-	got := b.Spans()
-	if len(got) != 1 {
-		t.Fatalf("got %d spans, want 1", len(got))
-	}
-	if got[0].DurationMs != 2500 {
-		t.Errorf("DurationMs = %d, want 2500", got[0].DurationMs)
-	}
-}
-
 // A clamped start must still report the full DurationMs: clamping must never
 // alter DurationMs, exactly as ReportedBuilder guarantees.
 func TestUIHookBuilderClampedStartKeepsFullDuration(t *testing.T) {

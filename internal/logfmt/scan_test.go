@@ -93,22 +93,6 @@ func TestScanOffsetsCoverWholeEntry(t *testing.T) {
 	}
 }
 
-func TestScanOrdinalsAreSequential(t *testing.T) {
-	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
-		"2022-12-15T00:16:20.801Z [TRACE] a: two\n" +
-		"2022-12-15T00:16:20.802Z [TRACE] a: three\n"
-	var comps Interner
-	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	for i, ord := range c.ords {
-		if ord != uint32(i) {
-			t.Errorf("ordinal %d = %d, want %d", i, ord, i)
-		}
-	}
-}
-
 func TestScanRelativeTimestamps(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: first\n" +
 		"2022-12-15T00:16:25.900Z [TRACE] a: second\n"

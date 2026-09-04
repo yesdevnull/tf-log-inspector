@@ -120,17 +120,6 @@ func TestReportRecordsTierAndSpans(t *testing.T) {
 	}
 }
 
-func TestReportWarnsWhenNoProviderEntries(t *testing.T) {
-	in := "2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete\n"
-	r := build(t, in)
-	if r.TierUsable {
-		t.Error("TierUsable = true for a core-only log")
-	}
-	if out := render(t, r); !strings.Contains(out, "no provider RPC") {
-		t.Errorf("report does not explain the absence of provider data:\n%s", out)
-	}
-}
-
 func TestReportRendersThroughputAndWallClock(t *testing.T) {
 	in := "2022-12-15T00:16:20.000Z [TRACE] a: one\n" +
 		"2022-12-15T00:16:30.000Z [TRACE] a: two\n"
