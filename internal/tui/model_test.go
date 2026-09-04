@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,12 +75,45 @@ func TestUnknownKeyIsInert(t *testing.T) {
 	}
 }
 
+// Each key is pressed from a view it is not already showing. Pressed from
+// its own view a number key is a deliberate no-op, so a test that started
+// every press from one fixed view would report "the key works" for whichever
+// key happened to name that view even if nothing bound it at all.
 func TestNumberKeysSwitchViews(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for key, want := range map[rune]View{'1': ViewProviders, '2': ViewTypes, '4': ViewCalls, '6': ViewRawLog} {
+		m := New(testLog(t, "mixed-hcp.log"), "x.log")
+		m.view = ViewRawLog
+		if want == ViewRawLog {
+			m.view = ViewProviders
+		}
+		from := m.ActiveView()
 		got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
 		if got.ActiveView() != want {
-			t.Errorf("key %q selected view %v, want %v", key, got.ActiveView(), want)
+			t.Errorf("key %q pressed in %v selected view %v, want %v", key, from, got.ActiveView(), want)
+		}
+	}
+}
+
+// New opens on the calls view: individual calls beside a facet pane that
+// filters them. Nothing else in the package asserts it, so a later change
+// could move it without a single test noticing.
+func TestNewOpensOnTheCallsView(t *testing.T) {
+	if got := New(testLog(t, "mixed-hcp.log"), "x.log").ActiveView(); got != ViewCalls {
+		t.Errorf("ActiveView = %v on a fresh model, want ViewCalls", got)
+	}
+}
+
+// Every View must have a binding: the centre pane takes its title from that
+// table and the footer takes its key hint from it, so a view added to the
+// enum and not to the table renders a nameless pane and is reachable by no
+// key at all.
+func TestEveryViewHasABinding(t *testing.T) {
+	for v := ViewProviders; v <= ViewRawLog; v++ {
+		if viewTitle(v) == "" {
+			t.Errorf("view %v has no title in views", v)
+		}
+		if !slices.ContainsFunc(views, func(b viewBinding) bool { return b.view == v }) {
+			t.Errorf("view %v has no key in views", v)
 		}
 	}
 }
@@ -309,11 +343,14 @@ func TestNarrowingTheTerminalMovesFocusOffACollapsedPane(t *testing.T) {
 func TestUpdateDrivesTheModelItWasCalledOn(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	var prog tea.Model = &m
-	next, _ := prog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	// '1' rather than '4': the model opens on the calls view, so '4' is a
+	// no-op there and the view assertion below would hold whether Update
+	// wrote to this model or to a copy of it.
+	next, _ := prog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if next != prog {
 		t.Errorf("Update returned %p, want the model it was called on (%p)", next, prog)
 	}
-	if m.ActiveView() != ViewCalls {
-		t.Errorf("ActiveView = %v on the model Update was called on, want ViewCalls", m.ActiveView())
+	if m.ActiveView() != ViewProviders {
+		t.Errorf("ActiveView = %v on the model Update was called on, want ViewProviders", m.ActiveView())
 	}
 }

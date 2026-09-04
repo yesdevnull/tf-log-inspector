@@ -161,7 +161,7 @@ func TestFTogglesTheFacetOverlayBelowInlineWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 90, Height: 40})
 	before := len(m.rows())
 	if before < 2 {
-		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a filter can be seen to narrow them", before)
+		t.Fatalf("fixture assumption changed: %d rows, want at least 2 so a filter can be seen to narrow them", before)
 	}
 	if strings.Contains(m.View(), "PROVIDERS") {
 		t.Fatalf("facets shown inline at width 90, want collapsed:\n%s", m.View())
@@ -250,7 +250,11 @@ func TestTheFacetOverlayIsNeverDrawnAtInlineWidth(t *testing.T) {
 // its share of the row -- it does not.
 func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 	const addr = "registry.terraform.io/hashicorp/google"
-	base := New(testLog(t, "two-providers.log"), "x.log")
+	// The providers view: its single text column is what gives the whole
+	// terminal width somewhere visible to go. The calls view the interface
+	// opens on splits the same width across three text columns, so nothing
+	// there renders a registry address whole at either width.
+	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 
 	const narrow = detailInlineWidth - 1
 	m := update(t, base, tea.WindowSizeMsg{Width: narrow, Height: 40})
@@ -324,6 +328,7 @@ func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 // pane renders -- it cannot fail, and so cannot report anything.
 func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	centre := centrePaneOf(m.View())
 	if !strings.Contains(centre, "…") {
 		t.Errorf("centre pane's provider column was not front-clipped at 100 columns:\n%s", centre)
@@ -746,9 +751,9 @@ func selectRow(t *testing.T, m Model, want string) Model {
 // (ApplyResourceChange). Were they equal, one of the two lines could be
 // reporting the other's number and nothing here would show it.
 func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T) {
-	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if m.ActiveView() != ViewProviders {
-		t.Fatalf("ActiveView = %v on a fresh model, want the providers view this test is about", m.ActiveView())
+		t.Fatalf("ActiveView = %v after '1', want the providers view this test is about", m.ActiveView())
 	}
 	cells := m.rows()[m.Selected()].cells // providerColumns: provider, total, calls, max
 	want := strings.Join([]string{
@@ -780,7 +785,7 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 // totals (google 8ms, aws 5ms): in a fixture whose rows agree, a pane stuck
 // on row 0 is indistinguishable from one that follows the cursor.
 func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
-	m := New(testLog(t, "two-providers.log"), "x.log")
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	rows := m.rows()
 	if len(rows) != 2 {
 		t.Fatalf("fixture assumption changed: %d provider rows, want 2", len(rows))
@@ -876,7 +881,9 @@ func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
 // The height is exactly the title plus the aggregate, so the assertion
 // measures the cut itself rather than a pane that happened to fit.
 func TestAShortDetailPaneKeepsTheAggregateAndDropsTheSlowestCall(t *testing.T) {
-	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	// A rollup row, since only a rollup pane has a slowest-call section
+	// beneath an aggregate for a short pane to choose between.
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if full := detailBody(t, m, 50, 20); !strings.Contains(full, slowestHeading) {
 		t.Fatalf("the slowest section is absent even at full height, so this cannot measure what a short pane drops:\n%s", full)
 	}
@@ -933,5 +940,102 @@ func TestTheDetailPanePlaceholderMeansThereIsNoSelection(t *testing.T) {
 	m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	if got := detailBody(t, m, 50, 20); got != noSelectionNote {
 		t.Errorf("raw log detail pane = %q, want the placeholder %q -- there is no row there to describe", got, noSelectionNote)
+	}
+}
+
+// The centre pane must name the view it is showing, in the CENTRE pane
+// specifically. A search of the whole frame would be satisfied by a facet
+// section header or a column heading, which is exactly the ambiguity this
+// title exists to remove: the pane holding a providers rollup read as a
+// second, less detailed copy of the facet pane's PROVIDERS list, and
+// nothing said the interface had other views at all.
+func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
+	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	for _, b := range views {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
+		title := strings.TrimRight(strings.SplitN(centrePaneOf(m.View()), "\n", 2)[0], " ")
+		if title != b.title {
+			t.Errorf("key %q: centre pane's first line = %q, want the view's name %q", b.key, title, b.title)
+		}
+	}
+}
+
+// The view's NAME has to survive every width the interface renders at, not
+// just the ones wide enough for three panes: it is the only thing on screen
+// that says what the rows beneath it are. The types view carries the longest
+// title, so it is the one that runs out of room first.
+func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
+	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	want := viewTitle(ViewTypes)
+	for _, w := range []int{160, 100, 99, 70, 69, 40, 20} {
+		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+		if !strings.Contains(m.View(), want) {
+			t.Errorf("width %d: the frame does not name the active view %q:\n%s", w, want, m.View())
+		}
+	}
+}
+
+// The footer has to say which number keys switch views, at the widths that
+// can hold the hints -- 100 columns is what this tool is actually run at.
+// It must name only the keys that WORK: 3 (resource addresses) and 5
+// (timeline) are specified but unimplemented, and a hint for a key that
+// does nothing is worse than no hint. The key for the view already showing
+// is left out for the same reason -- Update ignores it -- and the centre
+// pane's title names that view instead.
+func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for _, w := range []int{100, 160} {
+		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+		got := footerOf(m.View())
+		for _, want := range []string{"1 providers", "2 types", "6 raw log"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("width %d: footer %q does not offer %q", w, got, want)
+			}
+		}
+		for _, unwanted := range []string{"3 ", "5 ", "4 calls"} {
+			if strings.Contains(got, unwanted) {
+				t.Errorf("width %d: footer %q offers %q, which does nothing when pressed", w, got, unwanted)
+			}
+		}
+	}
+}
+
+// The footer is clipped from its END, and "q quit" is the one key a user
+// must not lose sight of. So the view-key hints are all-or-nothing: shown
+// only when the whole composed line fits, never appended and then cut. This
+// sweeps every width from the one the action keys alone need, in every
+// view -- the hints vary by view, so the widest composed line does too.
+func TestTheFooterNeverLosesQuitToTheViewKeys(t *testing.T) {
+	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for _, b := range views {
+		m.view = b.view
+		for w := lipgloss.Width(actionKeys()); w <= 200; w++ {
+			got := clipWidth(m.footer(w), w)
+			if !strings.Contains(got, "q quit") {
+				t.Fatalf("%s at %d columns: footer %q has lost the quit hint", b.title, w, got)
+			}
+			if n := lipgloss.Width(got); n > w {
+				t.Fatalf("%s at %d columns: footer is %d columns: %q", b.title, w, n, got)
+			}
+		}
+	}
+}
+
+// The interface opens on the calls view, so the opening screen's detail
+// pane describes a CALL -- the top row's own span -- rather than sitting on
+// the placeholder or on a group aggregate. This is the first screen a user
+// sees, and it is the one the pane was previously blank on.
+func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	rows := m.rows()
+	if len(rows) == 0 {
+		t.Fatal("fixture assumption changed: the opening view has no rows")
+	}
+	if rows[m.Selected()].spanIdx < 0 {
+		t.Fatalf("the opening screen's selected row is a rollup, not a call: %+v", rows[m.Selected()])
+	}
+	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], 50), "\n")
+	if got := detailBody(t, m, 50, 20); got != want {
+		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
 	}
 }

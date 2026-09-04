@@ -1,16 +1,16 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
-provider                       total  calls  max │ SPAN DETAIL        
-[7m…erraform.io/hashicorp/google    8ms      1  8ms[0m │ Prov  …icorp/google
-…y.terraform.io/hashicorp/aws    5ms      1  5ms │ Calls 1            
-                                                 │ Total 8ms          
-                                                 │ Max   8ms          
-                                                 │ Types 1            
-                                                 │ RPCs  1            
+CALLS                                            │ SPAN DETAIL        
+duration  RPC           resource t…  provider    │ RPC   ApplyResourc…
+[7m     8ms  ApplyResour…  …e_instance  …orp/google[0m │ Prov  …icorp/google
+     5ms  ApplyResour…  aws_subnet   …hicorp/aws │ Dur   8ms          
                                                  │                    
-                                                 │ Slowest            
-                                                 │ RPC   ApplyResourc…
-                                                 │ Dur   8ms          
+                                                 │                    
+                                                 │                    
+                                                 │                    
+                                                 │                    
+                                                 │                    
+                                                 │                    
                                                  │                    
                                                  │                    
                                                  │                    

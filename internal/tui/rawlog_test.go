@@ -276,7 +276,7 @@ func TestFailedSearchIsReportedAndClearsOnTheNextMatch(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "aws_internet_gateway")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
 		t.Errorf("footer after a successful search = %q, want the key hints back", got)
 	}
 }
@@ -409,7 +409,7 @@ func TestEscCancelsTheSearchPrompt(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "aws_internet_gateway")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
 		t.Errorf("footer = %q after Esc, want the key hints back", got)
 	}
 	if m.TopEntry() != before {
@@ -429,7 +429,7 @@ func TestEnterOnAnEmptyQueryClosesThePromptWithoutSearching(t *testing.T) {
 	m := rawLogView(t, "provider-rpc.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
 		t.Errorf("footer = %q after Enter on an empty query, want the key hints", got)
 	}
 	if m.TopEntry() != 0 {
@@ -500,6 +500,9 @@ func TestComponentProvidersSkipsASpanPointingPastTheLog(t *testing.T) {
 // covered by TestEnterOnARollupRowIsInert.
 func TestJumpToSpanIgnoresARowIndexPastTheLastSpan(t *testing.T) {
 	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	// Any view but the raw log will do; naming one states what "left alone"
+	// is measured against rather than leaning on whatever New defaults to.
+	m.view = ViewProviders
 	m.jumpToSpan(len(m.log.RPCSpans))
 	if m.ActiveView() != ViewProviders {
 		t.Errorf("view = %v after a jump to a row index past the last span, want it left alone", m.ActiveView())
@@ -519,6 +522,7 @@ func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
 		RPCSpans: []span.Span{{RPC: "ApplyResourceChange", Provider: "aws", Entry: 99}},
 	}
 	m := New(l, "x.log")
+	m.view = ViewProviders
 	m.jumpToSpan(0)
 	if m.ActiveView() != ViewProviders {
 		t.Errorf("view = %v after a jump to an out-of-range entry, want it left alone", m.ActiveView())
@@ -540,7 +544,7 @@ func TestSearchStateIsNotReportedOutsideTheRawLog(t *testing.T) {
 		t.Fatalf("footer = %q, want the miss reported in the raw log", got)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	if got := footerOf(m.View()); got != clipWidth(footerKeys(), 100) {
+	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
 		t.Errorf("footer in the calls view = %q, want the key hints", got)
 	}
 }
@@ -717,16 +721,16 @@ func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
 	if m.ActiveView() != ViewCalls {
 		t.Errorf("Enter jumped into a raw log the filter has emptied, view = %v", m.ActiveView())
 	}
-	if !strings.Contains(m.footer(), "hidden by the active filter") {
-		t.Errorf("footer = %q, want it to report the refused jump", m.footer())
+	if !strings.Contains(m.footer(m.paneWidth()), "hidden by the active filter") {
+		t.Errorf("footer = %q, want it to report the refused jump", m.footer(m.paneWidth()))
 	}
 
 	// The report describes that one keypress under that one filter, so the
 	// next key must clear it rather than leave it standing over a table the
 	// user has since moved through.
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if strings.Contains(m.footer(), "hidden by the active filter") {
-		t.Errorf("footer = %q, want the key hints back once the selection has moved", m.footer())
+	if strings.Contains(m.footer(m.paneWidth()), "hidden by the active filter") {
+		t.Errorf("footer = %q, want the key hints back once the selection has moved", m.footer(m.paneWidth()))
 	}
 }
 

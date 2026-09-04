@@ -230,7 +230,7 @@ func (m *Model) View() string {
 	if len(lines) > h-1 {
 		lines = lines[:h-1]
 	}
-	return strings.Join(append(lines, clipWidth(m.footer(), w)), "\n")
+	return strings.Join(append(lines, clipWidth(m.footer(w), w)), "\n")
 }
 
 // header names the file and its span counts.
@@ -284,7 +284,7 @@ func countMatching(f model.Filter, spans []span.Span) int {
 // A blocked jump is reported wherever it happened, which is never the raw
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
-func (m *Model) footer() string {
+func (m *Model) footer(w int) string {
 	if m.blockedJump {
 		return jumpBlockedNote
 	}
@@ -296,7 +296,7 @@ func (m *Model) footer() string {
 			return "/" + m.raw.lastQuery + "  pattern not found"
 		}
 	}
-	return footerKeys()
+	return keyHints(m.view, w)
 }
 
 // jumpBlockedNote is what the footer says when Enter refused to jump to a
@@ -306,19 +306,61 @@ func (m *Model) footer() string {
 // the key that lifts it is named.
 const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears it"
 
-// footerKeys is the key-binding hint line shown beneath the panes. It is 62
-// display columns, and like every other line in the frame it is clipped from
-// its END, so its tail is the first thing a narrow terminal takes. "q quit"
-// -- the one key a user must never lose sight of -- sits at that tail, so
-// every binding added to this line pushes it closer to the edge. That is
-// what keeps the line this terse.
+// keyHints is the footer's hint line for view v in a terminal w columns
+// wide: which number keys switch views, then which keys act.
+//
+// The two groups together are 91 to 95 display columns, depending on which
+// view's key is left out, and the action keys alone are 62. Neither fits
+// every supported width, and the line is clipped from its END, so a line
+// composed longer than w loses its tail -- which is "q quit", the one key a
+// user must never lose sight of. So the view keys are an ALL-OR-NOTHING
+// addition: they are shown only when the whole composed line fits w, and
+// dropped entirely when it does not, rather than added and then cut. Below
+// the width they fit at, the line is exactly the action keys it has always
+// been, and the view the user is in is still named by the centre pane's own
+// title (see renderCentre), which every width shows.
+//
+// That puts the view keys on screen from 95 columns up and the view's name
+// on screen at every width, which is the split the two facts deserve: the
+// name answers "what am I looking at" and has to survive anywhere, while
+// the keys answer "what else is there" and only have to be findable.
 //
 // 62 columns is not a floor anyone is protected by: renderPanes has a layout
 // for widths below detailInlineWidth and the spec defines one, so the
 // interface really does render at 60 columns, where "q quit" is already cut
 // to "q qu". Nothing should budget against 62 as though it were guaranteed.
-func footerKeys() string {
+func keyHints(v View, w int) string {
+	if line := viewKeyHints(v) + "  " + actionKeys(); lipgloss.Width(line) <= w {
+		return line
+	}
+	return actionKeys()
+}
+
+// actionKeys is the hint group for the keys that DO something to what is on
+// screen, as opposed to the ones that change which view is on screen. It is
+// 62 display columns; every binding added to it pushes "q quit" closer to
+// the edge a narrow terminal cuts from, which is what keeps it this terse.
+func actionKeys() string {
 	return "⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit"
+}
+
+// viewKeyHints is the hint group naming the number keys that switch views,
+// and the view each one switches to.
+//
+// The view the user is ALREADY in is left out. Its key is a no-op -- Update
+// only acts on a number key that names a different view -- and advertising a
+// key that does nothing is the defect this package removes wherever it finds
+// it. Leaving it out is also what keeps the group inside the footer's width
+// budget at 100 columns, and nothing is lost by it: the centre pane's title
+// names the current view already.
+func viewKeyHints(v View) string {
+	hints := make([]string, 0, len(views)-1)
+	for _, b := range views {
+		if b.view != v {
+			hints = append(hints, b.key+" "+b.name)
+		}
+	}
+	return strings.Join(hints, "  ")
 }
 
 // frameFixedLines is what a frame spends on everything but the pane row and
@@ -483,15 +525,36 @@ func (m *Model) focusablePanes(w int) []Pane {
 	return panes
 }
 
-// renderCentre renders the centre pane's content for the active view.
-// ViewRawLog is not one of renderList's rollup/call tables -- it renders
-// directly from m.log.Entries via renderRawLog -- so it is dispatched
-// separately here rather than inside renderList itself.
+// renderCentre renders the centre pane: its title, then its content for the
+// active view. ViewRawLog is not one of renderList's rollup/call tables --
+// it renders directly from m.log.Entries via renderRawLog -- so it is
+// dispatched separately here rather than inside renderList itself.
+//
+// The title is what names the view. Without it the centre pane was the only
+// one of the three carrying no label at all, so the pane holding a providers
+// rollup was indistinguishable, at a glance, from the facet pane's list of
+// providers to filter by -- and nothing on screen said the interface had
+// other views to switch to. It comes FIRST, so a pane too short for its
+// content still says what that content was, and it is clipped from its end
+// like the other panes' titles: a title is prose, told apart by its head.
+//
+// The title is not focus-marked, matching the facet pane rather than the
+// detail pane: both of those have a cursor of their own to carry focus (the
+// selected row here, the highlighted value there), and a second reverse-video
+// bar on the title would say nothing the row cursor does not already say.
+// The detail pane marks its title precisely because it has no cursor.
 func (m *Model) renderCentre(w, h int) string {
-	if m.view == ViewRawLog {
-		return m.renderRawLog(w, h)
+	if h <= 0 {
+		return ""
 	}
-	return m.renderList(w, h)
+	title := clipWidth(viewTitle(m.view), w)
+	if h == 1 {
+		return title
+	}
+	if m.view == ViewRawLog {
+		return title + "\n" + m.renderRawLog(w, h-1)
+	}
+	return title + "\n" + m.renderList(w, h-1)
 }
 
 // pane is one column of a composed pane row: its rendered content and the

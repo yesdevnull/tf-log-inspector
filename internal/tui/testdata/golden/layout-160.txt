@@ -1,16 +1,16 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
-PROVIDERS                                │ provider                                total  calls  max                  │ SPAN DETAIL                             
-[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ [7mregistry.terraform.io/hashicorp/google    8ms      1  8ms                 [0m │ Prov  …try.terraform.io/hashicorp/google
-[ ] …ry.terraform.io/hashicorp/google  1 │ registry.terraform.io/hashicorp/aws       5ms      1  5ms                  │ Calls 1                                 
-RPCS                                     │                                                                            │ Total 8ms                               
-[ ] ApplyResourceChange  2               │                                                                            │ Max   8ms                               
-RESOURCE TYPES                           │                                                                            │ Types 1                                 
-[ ] aws_subnet  1                        │                                                                            │ RPCs  1                                 
+PROVIDERS                                │ CALLS                                                                      │ SPAN DETAIL                             
+[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ duration  RPC                  resource type          provider             │ RPC   ApplyResourceChange               
+[ ] …ry.terraform.io/hashicorp/google  1 │ [7m     8ms  ApplyResourceChange  …gle_compute_instance  …io/hashicorp/google[0m │ Prov  …try.terraform.io/hashicorp/google
+RPCS                                     │      5ms  ApplyResourceChange  aws_subnet             …rm.io/hashicorp/aws │ Dur   8ms                               
+[ ] ApplyResourceChange  2               │                                                                            │                                         
+RESOURCE TYPES                           │                                                                            │                                         
+[ ] aws_subnet  1                        │                                                                            │                                         
 [ ] google_compute_instance  1           │                                                                            │                                         
-LEVELS                                   │                                                                            │ Slowest                                 
-[ ] TRACE  2                             │                                                                            │ RPC   ApplyResourceChange               
-[ ] UNKNOWN  1                           │                                                                            │ Dur   8ms                               
+LEVELS                                   │                                                                            │                                         
+[ ] TRACE  2                             │                                                                            │                                         
+[ ] UNKNOWN  1                           │                                                                            │                                         
                                          │                                                                            │                                         
                                          │                                                                            │                                         
                                          │                                                                            │                                         
@@ -37,4 +37,4 @@ with debug plus provider TRACE. Rankings hold, since every
 span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+1 providers  2 types  6 raw log  ⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit

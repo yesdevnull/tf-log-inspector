@@ -24,14 +24,61 @@ const (
 	ViewRawLog                // key 6
 )
 
-// viewKeys maps the bound number keys to the view they switch to. Keys "3"
-// and "5" are deliberately absent, so pressing them falls through to no-op
-// rather than an index lookup into unbound state.
-var viewKeys = map[string]View{
-	"1": ViewProviders,
-	"2": ViewTypes,
-	"4": ViewCalls,
-	"6": ViewRawLog,
+// viewBinding is everything the interface has to say about one view: the
+// number key that switches to it, the TITLE the centre pane wears while it
+// is showing, and the short NAME the footer's key hint calls it. All three
+// are held together so a view cannot be bound to a key it is never
+// advertised under, or advertised under a key nothing binds.
+type viewBinding struct {
+	key   string
+	view  View
+	title string
+	name  string
+}
+
+// views lists every view that has a key, in key order. It is the single
+// source of truth for what a number key does, what the centre pane calls
+// itself, and what the footer offers.
+//
+// Keys "3" (resource addresses) and "5" (timeline) are deliberately absent:
+// they are specified but unimplemented, so nothing binds them and nothing
+// advertises them. Pressing one falls through to a no-op rather than an
+// index lookup into unbound state.
+//
+// The titles deliberately do not repeat the facet pane's section headers.
+// The facet pane's PROVIDERS is a list of values to FILTER by, ranked by
+// span count; the centre pane's BY PROVIDER is a rollup ranked by total
+// time. Labelling both "PROVIDERS" is what made two different things look
+// like one thing listed twice. "BY PROVIDER" and "BY RESOURCE TYPE" are the
+// names internal/profile's report already gives those same rollups.
+var views = []viewBinding{
+	{key: "1", view: ViewProviders, title: "BY PROVIDER", name: "providers"},
+	{key: "2", view: ViewTypes, title: "BY RESOURCE TYPE", name: "types"},
+	{key: "4", view: ViewCalls, title: "CALLS", name: "calls"},
+	{key: "6", view: ViewRawLog, title: "RAW LOG", name: "raw log"},
+}
+
+// viewKeys maps the bound number keys to the view they switch to, derived
+// from views so a key can never be bound to one view and advertised as
+// another.
+var viewKeys = func() map[string]View {
+	keys := make(map[string]View, len(views))
+	for _, b := range views {
+		keys[b.key] = b.view
+	}
+	return keys
+}()
+
+// viewTitle is what the centre pane calls the view it is showing. Every
+// View value has a binding in views, so the empty fallback is unreachable;
+// TestEveryViewHasABinding is what keeps it that way when a view is added.
+func viewTitle(v View) string {
+	for _, b := range views {
+		if b.view == v {
+			return b.title
+		}
+	}
+	return ""
 }
 
 // Pane identifies which of the interface's three panes has keyboard focus.
@@ -142,12 +189,20 @@ type facetCursor struct {
 // on disk. Focus starts on PaneList, since the list is what a user looks at
 // first; Pane's own zero value is PaneFacets, so this is set explicitly
 // rather than left to the zero value.
+//
+// The opening view is ViewCalls: the individual calls, with the facet pane
+// beside them. That is the shape a reader expects of a list and a sidebar --
+// the rows are the calls, the sidebar filters them -- whereas opening on a
+// rollup put a providers table next to a PROVIDERS facet list and left the
+// sidebar's filtering role to be guessed. View's own zero value is
+// ViewProviders, so this is set explicitly rather than left to the zero
+// value.
 func New(l *model.Log, path string) Model {
 	// The level dimension goes last, after the span dimensions
 	// FacetsForSpans builds: it is the one dimension drawn from entries
 	// rather than spans, and it filters only the raw log.
 	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
-	m := Model{log: l, name: filepath.Base(path), pane: PaneList, facets: facets}
+	m := Model{log: l, name: filepath.Base(path), view: ViewCalls, pane: PaneList, facets: facets}
 	m.facetCursor = firstFacetCursor(facets)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
 	m.detailPaneNatural = detailNaturalWidth(l)

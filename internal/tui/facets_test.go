@@ -167,11 +167,14 @@ func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
 // not aws.
 func TestFacetCursorMovesAndSpaceTogglesValueUnderCursor(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
+	// The providers view is what makes one row per provider, which is what
+	// the row count below counts. It is selected here rather than assumed.
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = focusFacets(t, m)
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // move onto the second facet value
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 
-	rows := m.rows() // default view is ViewProviders
+	rows := m.rows()
 	if len(rows) != 1 {
 		t.Fatalf("got %d provider rows after selecting one value, want 1: %+v", len(rows), rows)
 	}
