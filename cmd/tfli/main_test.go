@@ -210,3 +210,68 @@ func TestRunReportsUnknownFlag(t *testing.T) {
 		t.Fatal("run returned nil error for an unknown flag")
 	}
 }
+
+// The bare invocation is the default mode, so the usage text must show it.
+// Telling a user that a mode flag is mandatory is false, and it is false
+// about the one invocation they are most likely to reach for.
+func TestUsageShowsTheBareInvocation(t *testing.T) {
+	var stderr strings.Builder
+	if err := run(nil, io.Discard, &stderr); err == nil {
+		t.Fatal("run returned nil error for no arguments")
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "Usage: tfli <logfile>") {
+		t.Errorf("usage does not show the bare invocation:\n%s", out)
+	}
+	if !strings.Contains(out, "full-screen interface") {
+		t.Errorf("usage does not say what the bare invocation does:\n%s", out)
+	}
+}
+
+// -o names an output file, and the interface writes no report at all.
+// Accepting the flag and opening the interface anyway looks exactly like a
+// report written somewhere the user was not watching, so it is refused --
+// and the interface must not open behind the refusal either.
+func TestOWithoutAModeFlagIsRejected(t *testing.T) {
+	original := runTUIFunc
+	t.Cleanup(func() { runTUIFunc = original })
+	opened := false
+	runTUIFunc = func(l *model.Log, path string) error {
+		opened = true
+		return nil
+	}
+
+	out := filepath.Join(t.TempDir(), "report.txt")
+	var sb strings.Builder
+	err := run([]string{"-o", out, filepath.Join("..", "..", "testdata", "provider-rpc.log")}, &sb, io.Discard)
+	if err == nil {
+		t.Fatal("run returned nil error for -o without a mode flag")
+	}
+	if !strings.Contains(err.Error(), "-o") {
+		t.Errorf("error does not name the flag it refused: %v", err)
+	}
+	if opened {
+		t.Error("the interface opened anyway, so -o was accepted and then ignored")
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Errorf("a file was created at %s despite the error", out)
+	}
+}
+
+// Asking for help is not a failure. flag.ErrHelp arrives from fs.Parse after
+// the usage text has already been written, so returning it prints
+// "tfli: flag: help requested" beneath the help the user asked for and exits
+// non-zero.
+func TestHelpIsNotAnError(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			var stderr strings.Builder
+			if err := run([]string{arg}, io.Discard, &stderr); err != nil {
+				t.Errorf("run(%q) = %v, want nil", arg, err)
+			}
+			if !strings.Contains(stderr.String(), "Usage: tfli") {
+				t.Errorf("run(%q) printed no usage text:\n%s", arg, stderr.String())
+			}
+		})
+	}
+}

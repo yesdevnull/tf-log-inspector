@@ -4,6 +4,11 @@
 // share back to this project. --profile reports real timing and resource
 // addresses for the user's own eyes; its output is NOT masked and must never
 // be treated as shareable the way a diagnose report is.
+//
+// A bare invocation opens the full-screen interface, which discloses more
+// again: real addresses as --profile does, plus the log's own lines rendered
+// verbatim in its raw log view. It is the easiest invocation and the least
+// shareable one.
 package main
 
 import (
@@ -38,16 +43,26 @@ func run(args []string, stdout, stderr io.Writer) error {
 	var (
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
-		outPath    = fs.String("o", "", "write the report to this file instead of standard output")
+		outPath    = fs.String("o", "", "write the --diagnose or --profile report to this file instead of standard output")
 		showVer    = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: tfli --diagnose|--profile [-o report.txt] <logfile>\n\n")
+		fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
+		fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n\n")
 		fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
+		fmt.Fprintf(stderr, "With no mode flag tfli opens the full-screen interface, which shows\n")
+		fmt.Fprintf(stderr, "real resource addresses and the log's own lines: see the README's\n")
+		fmt.Fprintf(stderr, "\"What each mode discloses\" before sharing a session.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
+		// Asking for help is not a failure. fs.Parse has already written the
+		// usage text to stderr by this point, so returning the sentinel would
+		// print "tfli: flag: help requested" beneath it and exit 1.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
@@ -67,6 +82,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
 	default:
+		// The interface writes no report, so -o names a file that would never
+		// be created. Accepting the flag and opening the interface anyway
+		// looks exactly like a report written somewhere the user was not
+		// watching, which is how people lose work.
+		if *outPath != "" {
+			return errors.New("-o writes a report, so it applies only to --diagnose or --profile")
+		}
 		return runTUI(fs.Arg(0))
 	}
 }

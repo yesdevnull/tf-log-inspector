@@ -78,10 +78,21 @@ For a local plan:
 
 ## Usage
 
+    tfli plan.log
     tfli --diagnose plan.log
     tfli --diagnose -o report.txt plan.log
     tfli --profile plan.log
     tfli --profile -o profile.txt plan.log
+
+With no mode flag, `tfli` opens the full-screen interface: facet checkboxes
+on the left, a ranked table in the centre, the selected call's detail on the
+right, and the raw log with `/` search. `q` quits. Read
+[What each mode discloses](#what-each-mode-discloses) before you share a
+session — the interface shows more of your log than either report does.
+
+`-o` writes a report, so it applies to `--diagnose` and `--profile` only;
+passing it without a mode flag is an error rather than a file that never
+appears.
 
 `--diagnose` reports the log's structure: size, levels, which extraction tier
 applies, which fields are present, and the most common message shapes.
@@ -105,7 +116,7 @@ providers ranked by total duration, the slowest individual calls and
 resources, and concurrency. Use it to find the slow resource, not to share
 the result.
 
-### What each report discloses
+### What each mode discloses
 
 `--diagnose`'s field **keys** are reported verbatim, restricted to an
 identifier charset so log content cannot pose as a key. Field **values** are
@@ -117,3 +128,15 @@ guarantee. Review a diagnose report before sharing it.
 the point of a profiler, which is useless if it cannot say which resource was
 slow. It is for your own eyes on your own machine, and unlike `--diagnose`,
 it is not safe to share.
+
+The full-screen interface (`tfli plan.log`) discloses **more than
+`--profile`**, and it sits behind the easiest invocation. Alongside the same
+real resource addresses, provider addresses and resource types, its raw log
+view renders your log's own lines **verbatim** — including whatever a
+provider logged at DEBUG, such as request and response bodies, headers and
+identifiers. Nothing in it is masked, and nothing is masked on the way to
+your screen.
+
+Treat a `tfli` session the way you would treat the log file itself: do not
+screen-share, record or screenshot one against a log you would not hand over
+whole.
