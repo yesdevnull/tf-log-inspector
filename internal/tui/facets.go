@@ -16,44 +16,18 @@ const (
 	dimType     = "resource type"
 )
 
-// filter derives the model.Filter this model's facet exclusions represent.
-// A dimension with nothing excluded contributes a nil map, so it keeps
-// Filter's own "no opinion" meaning; a dimension with every known value
-// excluded contributes a non-nil, empty map, which Filter treats as
-// matching nothing. The two must stay distinguishable, or clearing the last
-// excluded value in a dimension would look identical to never having
-// filtered it at all.
+// filter derives the model.Filter this model's facet selections represent.
+// A dimension with nothing selected contributes a nil map, so it keeps
+// Filter's own "no opinion" meaning -- an untouched facet pane must show
+// the whole log. A dimension with one or more values selected contributes
+// exactly that allow-list: a span passes only if its value for that
+// dimension was selected.
 func (m Model) filter() model.Filter {
 	return model.Filter{
-		Providers: m.includedValues(dimProvider),
-		RPCs:      m.includedValues(dimRPC),
-		Types:     m.includedValues(dimType),
+		Providers: m.selectedFacets[dimProvider],
+		RPCs:      m.selectedFacets[dimRPC],
+		Types:     m.selectedFacets[dimType],
 	}
-}
-
-// includedValues turns this model's excluded-value state for one dimension
-// into the allow-list model.Filter expects: every known value in the
-// dimension that has not been excluded. It returns nil, not an empty map,
-// when nothing in the dimension is excluded, since a nil map is what tells
-// Filter the dimension is unconstrained.
-func (m Model) includedValues(dim string) map[string]bool {
-	excluded := m.excluded[dim]
-	if len(excluded) == 0 {
-		return nil
-	}
-	included := make(map[string]bool, len(excluded))
-	for _, f := range m.facets {
-		if f.Name != dim {
-			continue
-		}
-		for _, v := range f.Values {
-			if !excluded[v.Value] {
-				included[v.Value] = true
-			}
-		}
-		break
-	}
-	return included
 }
 
 // cursorFacetValue resolves the facet pane's cursor to the dimension name
@@ -71,25 +45,27 @@ func (m Model) cursorFacetValue() (dim, val string, ok bool) {
 }
 
 // toggleSelectedFacetValue flips whether the facet pane's cursor value is
-// excluded from the filter, and invalidates any cached rows so the next
-// render reflects the change.
+// selected, and invalidates any cached rows so the next render reflects the
+// change. Selecting a value in a dimension narrows that dimension to
+// exactly the selected values; deselecting the last one in a dimension
+// returns it to unconstrained.
 func (m *Model) toggleSelectedFacetValue() {
 	dim, val, ok := m.cursorFacetValue()
 	if !ok {
 		return
 	}
-	if m.excluded == nil {
-		m.excluded = map[string]map[string]bool{}
+	if m.selectedFacets == nil {
+		m.selectedFacets = map[string]map[string]bool{}
 	}
-	inner := m.excluded[dim]
+	inner := m.selectedFacets[dim]
 	if inner == nil {
 		inner = map[string]bool{}
-		m.excluded[dim] = inner
+		m.selectedFacets[dim] = inner
 	}
 	if inner[val] {
 		delete(inner, val)
 		if len(inner) == 0 {
-			delete(m.excluded, dim)
+			delete(m.selectedFacets, dim)
 		}
 	} else {
 		inner[val] = true
@@ -97,35 +73,80 @@ func (m *Model) toggleSelectedFacetValue() {
 	m.invalidateRows()
 }
 
-// clearFilters removes every facet exclusion, restoring every view to the
+// clearFilters deselects every facet value, restoring every view to the
 // unfiltered log. Esc is bound to this per the spec's key table.
 func (m *Model) clearFilters() {
-	if len(m.excluded) == 0 {
+	if len(m.selectedFacets) == 0 {
 		return
 	}
-	m.excluded = nil
+	m.selectedFacets = nil
 	m.invalidateRows()
+}
+
+// facetFlatIndex converts the facet cursor's (dim, val) coordinate into a
+// single index over every dimension's values laid end to end, so
+// moveFacetCursor can move it with simple arithmetic rather than a
+// dimension-boundary switch in every direction.
+func (m Model) facetFlatIndex() int {
+	idx := 0
+	for d := 0; d < m.facetCursor.dim && d < len(m.facets); d++ {
+		idx += len(m.facets[d].Values)
+	}
+	return idx + m.facetCursor.val
+}
+
+// facetCursorAt is facetFlatIndex's inverse: it resolves a flat index back
+// into the (dim, val) coordinate it names.
+func (m Model) facetCursorAt(idx int) facetCursor {
+	for d, f := range m.facets {
+		if idx < len(f.Values) {
+			return facetCursor{dim: d, val: idx}
+		}
+		idx -= len(f.Values)
+	}
+	return facetCursor{}
+}
+
+// moveFacetCursor shifts the facet pane's cursor by delta through every
+// dimension's values in display order, clamped to stay within them. A log
+// with no facet values at all leaves the cursor untouched.
+func (m *Model) moveFacetCursor(delta int) {
+	total := 0
+	for _, f := range m.facets {
+		total += len(f.Values)
+	}
+	if total == 0 {
+		return
+	}
+	idx := m.facetFlatIndex() + delta
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= total {
+		idx = total - 1
+	}
+	m.facetCursor = m.facetCursorAt(idx)
 }
 
 // renderFacets renders the facet pane: each dimension's name followed by its
 // values and their span counts (counts always reflect the whole log, not
 // the current filter -- see the doc comment on Model.facets), at most w
 // runes wide and h lines tall. The cursor marks the value space would
-// toggle; an excluded value is marked separately so its absence from the
-// current filter is visible without leaving the pane.
+// toggle; a checkbox marks whether it is currently selected.
 func (m Model) renderFacets(w, h int) string {
 	var lines []string
 	for dimIdx, f := range m.facets {
 		lines = append(lines, clipWidth(f.Name, w))
 		for valIdx, v := range f.Values {
-			cursor := "  "
+			cursor := " "
 			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
-				cursor = "> "
+				cursor = ">"
 			}
-			line := fmt.Sprintf("%s%s  %d", cursor, v.Value, v.Count)
-			if m.excluded[f.Name][v.Value] {
-				line += "  (hidden)"
+			check := " "
+			if m.selectedFacets[f.Name][v.Value] {
+				check = "x"
 			}
+			line := fmt.Sprintf("%s [%s] %s  %d", cursor, check, v.Value, v.Count)
 			lines = append(lines, clipWidth(line, w))
 		}
 	}

@@ -95,9 +95,12 @@ func TestUnimplementedViewKeysAreInert(t *testing.T) {
 	}
 }
 
+// New starts focus on PaneList, so the cycle from there visits Detail, then
+// Facets, then back to List -- the same cycle order as always, just entered
+// at a different point.
 func TestTabCyclesPaneFocus(t *testing.T) {
 	m := New(testLog(t, "mixed-hcp.log"), "x.log")
-	want := []Pane{PaneList, PaneDetail, PaneFacets}
+	want := []Pane{PaneDetail, PaneFacets, PaneList}
 	for _, w := range want {
 		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
 		if m.Focus() != w {

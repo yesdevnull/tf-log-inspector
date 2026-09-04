@@ -19,10 +19,9 @@ type Facet struct {
 	Values []FacetValue
 }
 
-// Filter is a cumulative facet selection. A nil map means the dimension is
-// unconstrained -- "no opinion" -- so a zero Filter passes everything. A
-// non-nil map, even an empty one, is a deliberate choice restricting that
-// dimension to exactly its members, which may be none.
+// Filter is a cumulative facet selection. An empty or nil map means the
+// dimension is unconstrained -- "no opinion", never "match nothing", so a
+// zero Filter passes everything.
 type Filter struct {
 	Providers map[string]bool
 	RPCs      map[string]bool
@@ -30,15 +29,9 @@ type Filter struct {
 	Levels    map[logfmt.Level]bool
 }
 
-// selected reports whether a value passes one dimension. A nil map means the
-// caller has not constrained this dimension at all, so everything passes; a
-// non-nil map -- even one with zero members -- means the caller has made a
-// deliberate choice, so only its members pass. Keying off nilness rather
-// than length is what lets a facet pane express "every value in this
-// dimension is explicitly excluded" without that collapsing indistinguishably
-// into "this dimension has never been touched".
-func selected[T comparable](set map[T]bool, v T) bool {
-	if set == nil {
+// selected reports whether a value passes one dimension.
+func selected(set map[string]bool, v string) bool {
+	if len(set) == 0 {
 		return true
 	}
 	return set[v]
@@ -55,7 +48,10 @@ func (f Filter) MatchSpan(s span.Span) bool {
 // MatchEntry applies the level dimension. Span dimensions do not apply to a
 // raw entry: most entries belong to no span at all.
 func (f Filter) MatchEntry(e logfmt.Entry) bool {
-	return selected(f.Levels, e.Level)
+	if len(f.Levels) == 0 {
+		return true
+	}
+	return f.Levels[e.Level]
 }
 
 // SpansMatching returns the matching spans in their input order, which is

@@ -53,23 +53,6 @@ func TestMatchEntryFiltersByLevel(t *testing.T) {
 	}
 }
 
-// A non-nil but empty map is different from nil: it represents a dimension
-// where the caller has deliberately excluded every known value, which a
-// facet pane needs when a user unchecks the last remaining selection.
-// Collapsing that into len(set) == 0 would make it indistinguishable from a
-// dimension nobody has touched, and total exclusion would become
-// inexpressible.
-func TestNonNilEmptyMapMatchesNothing(t *testing.T) {
-	f := Filter{Providers: map[string]bool{}}
-	if f.MatchSpan(sp("t", "aws", "ReadResource", 1)) {
-		t.Error("a non-nil empty Providers map matched a span; want it to match nothing")
-	}
-	fl := Filter{Levels: map[logfmt.Level]bool{}}
-	if fl.MatchEntry(logfmt.Entry{Level: logfmt.LevelTrace}) {
-		t.Error("a non-nil empty Levels map matched an entry; want it to match nothing")
-	}
-}
-
 func TestSpansMatchingPreservesOrder(t *testing.T) {
 	spans := []span.Span{
 		sp("a", "aws", "r", 3),

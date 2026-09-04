@@ -65,15 +65,13 @@ type Model struct {
 	// pane where narrowing the filter also shrank the other options' counts
 	// would make it hard to see what widening the filter again would show.
 	facets []model.Facet
-	// excluded holds, per facet dimension name, the values the user has
-	// toggled off. Nothing excluded in a dimension means unconstrained;
+	// selectedFacets holds, per facet dimension name, the values the user
+	// has toggled on. Nothing selected in a dimension means unconstrained;
 	// filter() turns this into the model.Filter every view is built from.
-	excluded map[string]map[string]bool
+	selectedFacets map[string]map[string]bool
 	// facetCursor is the pane's highlighted value: which dimension (index
-	// into facets) and which value within it space would toggle. Arrow-key
-	// navigation of the facet pane is not wired in this task, so it stays
-	// fixed at the first value of the first dimension -- see the task
-	// report for why.
+	// into facets) and which value within it space would toggle, and what
+	// up/down/j/k move when the facet pane has focus.
 	facetCursor facetCursor
 
 	// rowsCache memoises rows() for the current view and filter. Recomputing
@@ -95,9 +93,11 @@ type facetCursor struct {
 
 // New builds the model for l, loaded from path. Only path's base name is
 // kept: the header names the file the user is looking at, not where it lives
-// on disk.
+// on disk. Focus starts on PaneList, since the list is what a user looks at
+// first; Pane's own zero value is PaneFacets, so this is set explicitly
+// rather than left to the zero value.
 func New(l *model.Log, path string) Model {
-	return Model{log: l, name: filepath.Base(path), facets: model.FacetsForSpans(l.RPCSpans)}
+	return Model{log: l, name: filepath.Base(path), pane: PaneList, facets: model.FacetsForSpans(l.RPCSpans)}
 }
 
 // Quitting reports whether a quit key has been handled. Tests use this
@@ -161,9 +161,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.pane = (m.pane + 1) % paneCount
 		case "up", "k":
-			m.moveSelection(-1)
+			m.moveCursor(-1)
 		case "down", "j":
-			m.moveSelection(1)
+			m.moveCursor(1)
 		case "esc":
 			// Esc clears every active filter regardless of which pane has
 			// focus -- the spec binds it globally, not to the facet pane.
@@ -188,6 +188,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
+}
+
+// moveCursor routes an up/down/j/k press to whichever pane has focus: the
+// list's row selection, or the facet pane's value cursor. PaneDetail has no
+// scrollable content of its own yet, so a press while it has focus is inert.
+func (m *Model) moveCursor(delta int) {
+	switch m.pane {
+	case PaneList:
+		m.moveSelection(delta)
+	case PaneFacets:
+		m.moveFacetCursor(delta)
+	}
 }
 
 // moveSelection shifts the selected row by delta, clamped to the active

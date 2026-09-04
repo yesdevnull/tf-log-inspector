@@ -23,8 +23,11 @@ func focusFacets(t *testing.T, m Model) Model {
 
 // An empty filter shows everything. Toggling one value narrows every view at
 // once -- the spec calls facets cumulative -- and toggling it back restores.
+// two-providers.log exists specifically so this has a second provider to
+// narrow away: every other RPC fixture in this repo has just one, and
+// selecting the only value present can never narrow anything.
 func TestFacetToggleFiltersEveryView(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	m := New(testLog(t, "two-providers.log"), "x.log")
 	before := len(m.rows())
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab}) // focus moves off the list
 	for m.Focus() != PaneFacets {
@@ -41,7 +44,7 @@ func TestFacetToggleFiltersEveryView(t *testing.T) {
 }
 
 func TestEscClearsAllFilters(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	m := New(testLog(t, "two-providers.log"), "x.log")
 	before := len(m.rows())
 	m = focusFacets(t, m)
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
@@ -52,10 +55,30 @@ func TestEscClearsAllFilters(t *testing.T) {
 }
 
 func TestFacetPaneShowsCountsPerValue(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	m := New(testLog(t, "two-providers.log"), "x.log")
 	out := m.renderFacets(30, 20)
 	if !strings.Contains(out, "provider") {
 		t.Errorf("facet pane missing the provider dimension:\n%s", out)
+	}
+}
+
+// The facet cursor must actually move, and space must act on whatever it
+// currently points at -- not always the first value of the first dimension.
+// two-providers.log's provider dimension has two values sorted alphabetically
+// (aws, then google), so moving down once and toggling must select google,
+// not aws.
+func TestFacetCursorMovesAndSpaceTogglesValueUnderCursor(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = focusFacets(t, m)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}) // move onto the second facet value
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	rows := m.rows() // default view is ViewProviders
+	if len(rows) != 1 {
+		t.Fatalf("got %d provider rows after selecting one value, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].cells[0] != "registry.terraform.io/hashicorp/google" {
+		t.Errorf("selected provider row = %q, want the google provider -- space acted on the wrong value", rows[0].cells[0])
 	}
 }
 
@@ -64,14 +87,14 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 // directly rather than relying on TestFacetToggleFiltersEveryView's narrowing
 // check to catch it incidentally.
 func TestRowsCacheInvalidatesOnFilterChange(t *testing.T) {
-	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	m := New(testLog(t, "two-providers.log"), "x.log")
 	warm := m.rows() // populate any cache before the filter changes
 	if len(warm) == 0 {
-		t.Fatal("need at least one row to prove filtering removes it")
+		t.Fatal("need at least one row to prove filtering narrows it")
 	}
 	m = focusFacets(t, m)
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	if got := m.rows(); len(got) != 0 {
-		t.Errorf("rows() returned %d rows after filtering to nothing, want 0 -- looks like a stale cache", len(got))
+	if got := m.rows(); len(got) >= len(warm) {
+		t.Errorf("rows() returned %d rows after filtering, want fewer than %d -- looks like a stale cache", len(got), len(warm))
 	}
 }
