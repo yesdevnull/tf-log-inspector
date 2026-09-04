@@ -37,9 +37,7 @@ type TypeRow struct {
 func JoinByResourceType(rpcSpans, uiSpans []span.Span) []TypeRow {
 	rows := make(map[string]*TypeRow)
 	get := func(k string) *TypeRow {
-		if k == "" {
-			k = noKey
-		}
+		k = FacetKey(k)
 		r := rows[k]
 		if r == nil {
 			r = &TypeRow{ResourceType: k}

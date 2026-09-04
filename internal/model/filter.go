@@ -29,12 +29,15 @@ type Filter struct {
 	Levels    map[logfmt.Level]bool
 }
 
-// selected reports whether a value passes one dimension.
+// selected reports whether a value passes one dimension. The value is
+// normalised through FacetKey, so it is compared against the same key
+// FacetsForSpans offered the user as a checkbox: a span with no value for
+// the dimension passes when "(none)" is selected, and only then.
 func selected(set map[string]bool, v string) bool {
 	if len(set) == 0 {
 		return true
 	}
-	return set[v]
+	return set[FacetKey(v)]
 }
 
 // MatchSpan applies every dimension: alternatives within one, conjunction
@@ -92,11 +95,7 @@ func FacetsForSpans(spans []span.Span) []Facet {
 	for _, d := range dims {
 		counts := map[string]int{}
 		for _, s := range spans {
-			k := d.key(s)
-			if k == "" {
-				k = noKey
-			}
-			counts[k]++
+			counts[FacetKey(d.key(s))]++
 		}
 		f := Facet{Name: d.name, Values: make([]FacetValue, 0, len(counts))}
 		for v, c := range counts {

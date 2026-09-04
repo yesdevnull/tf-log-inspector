@@ -11,6 +11,28 @@ import (
 // time -- a missing row is far harder to notice than an explicit one.
 const noKey = "(none)"
 
+// FacetKey normalises a span's value for one dimension into the key every
+// consumer of that dimension agrees on: an empty value is always "(none)".
+//
+// It is one function rather than a substitution repeated per call site
+// because the two sides have to agree exactly. FacetsForSpans OFFERS the
+// key, RollupBy and JoinByResourceType GROUP by it, and MatchSpan MATCHES
+// against it; a dimension where one of those four disagrees with the others
+// puts a checkbox with a real, positive count in front of the user that
+// selects a value no span carries. Empty values are ordinary -- a
+// provider-level RPC (GetProviderSchema, ConfigureProvider,
+// ValidateProviderConfig) belongs to no resource type at all.
+//
+// It is exported because internal/tui resolves a raw log entry's component
+// to a provider the same way, and an entry belonging to no provider has to
+// normalise to the same key the facet pane offers.
+func FacetKey(v string) string {
+	if v == "" {
+		return noKey
+	}
+	return v
+}
+
 // Bucket is one row of a rollup.
 //
 // TotalMs is widened to uint64: 2174 spans summing to 1.5e6 ms is comfortable
@@ -37,10 +59,7 @@ func RollupBy(spans []span.Span, key func(span.Span) string) []Bucket {
 	}
 	byKey := make(map[string]*Bucket)
 	for _, s := range spans {
-		k := key(s)
-		if k == "" {
-			k = noKey
-		}
+		k := FacetKey(key(s))
 		b := byKey[k]
 		if b == nil {
 			b = &Bucket{Key: k}

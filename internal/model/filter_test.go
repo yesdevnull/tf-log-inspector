@@ -93,3 +93,62 @@ func TestFacetsForSpansCountsAndOrders(t *testing.T) {
 		t.Error("no resource type facet")
 	}
 }
+
+// Every value FacetsForSpans offers must be a value MatchSpan can match,
+// and it must select exactly the spans the offered count promised. The two
+// sides are separate code, so a dimension where one normalises an empty
+// value and the other does not puts a checkbox with a real, positive count
+// in front of the user that selects nothing at all.
+//
+// A provider-level RPC (GetProviderSchema, ConfigureProvider,
+// ValidateProviderConfig) belongs to no resource type, so an empty value is
+// ordinary rather than exotic, and it is what this fixture carries.
+func TestEveryOfferedFacetValueSelectsItsAdvertisedCount(t *testing.T) {
+	spans := []span.Span{
+		sp("", "aws", "GetProviderSchema", 12),
+		sp("aws_subnet", "aws", "ApplyResourceChange", 5),
+		sp("aws_subnet", "google", "ApplyResourceChange", 3),
+	}
+	dims := map[string]func(map[string]bool) Filter{
+		"provider":      func(sel map[string]bool) Filter { return Filter{Providers: sel} },
+		"rpc":           func(sel map[string]bool) Filter { return Filter{RPCs: sel} },
+		"resource type": func(sel map[string]bool) Filter { return Filter{Types: sel} },
+	}
+	var sawNone bool
+	for _, f := range FacetsForSpans(spans) {
+		build, ok := dims[f.Name]
+		if !ok {
+			t.Fatalf("dimension %q has no filter field, so ticking it cannot be tested", f.Name)
+		}
+		for _, v := range f.Values {
+			if v.Value == FacetKey("") {
+				sawNone = true
+			}
+			got := build(map[string]bool{v.Value: true}).SpansMatching(spans)
+			if len(got) != v.Count {
+				t.Errorf("%s=%q advertises %d spans, selecting it matches %d", f.Name, v.Value, v.Count, len(got))
+			}
+		}
+	}
+	if !sawNone {
+		t.Fatalf("no %q value was offered, so the case that broke is not covered", FacetKey(""))
+	}
+}
+
+// The rollup, the join and the facet pane all label an empty key the same
+// way, so a bucket, a joined row and a checkbox for the same spans carry the
+// same name and the user can move between the three views without one of
+// them appearing to lose a row.
+func TestFacetKeyLabelsAnEmptyValueTheSameWayEverywhere(t *testing.T) {
+	spans := []span.Span{sp("", "aws", "GetProviderSchema", 12)}
+	none := FacetKey("")
+	if got := RollupBy(spans, func(s span.Span) string { return s.ResourceType }); got[0].Key != none {
+		t.Errorf("RollupBy labelled an empty key %q, want %q", got[0].Key, none)
+	}
+	if got := JoinByResourceType(spans, nil); got[0].ResourceType != none {
+		t.Errorf("JoinByResourceType labelled an empty key %q, want %q", got[0].ResourceType, none)
+	}
+	if !(Filter{Types: map[string]bool{none: true}}).MatchSpan(spans[0]) {
+		t.Errorf("MatchSpan rejected a span with an empty resource type against %q", none)
+	}
+}

@@ -1,0 +1,11 @@
+# SYNTHESISED to exercise the "(none)" facet value: a provider-level RPC
+# carries no tf_resource_type at all, because it belongs to the provider
+# rather than to any one resource -- GetProviderSchema, ConfigureProvider
+# and ValidateProviderConfig are all of this shape. Its span's ResourceType
+# is therefore empty, and the facet pane offers it as "(none)". Every other
+# RPC fixture in this repo gives every span a resource type, which is why no
+# test could tell a facet value the pane OFFERS from one the filter can
+# MATCH. Modelled on testdata/provider-rpc.log's "Received downstream
+# response" shape; values are invented and no line here is from a real run.
+2022-12-15T00:16:20.400Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=1d0e6a71-4c5b-4a2f-9e11-70a1c2b3d4e5 tf_rpc=GetProviderSchema tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=12 @module=sdk.proto
+2022-12-15T00:16:20.800Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=2634bc46-bb66-3d22-528d-d2eaf8165f52 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5 @module=sdk.proto
