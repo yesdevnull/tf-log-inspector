@@ -80,15 +80,26 @@ For a local plan:
 
     tfli --diagnose plan.log
     tfli --diagnose -o report.txt plan.log
+    tfli --profile plan.log
+    tfli --profile -o profile.txt plan.log
 
 `--diagnose` reports the log's structure: size, levels, which extraction tier
 applies, which fields are present, and the most common message shapes.
 
-### What the report discloses
+`--profile` reports where the plan spent its time: resource types and
+providers ranked by total duration, the slowest individual calls and
+resources, and concurrency. Use it to find the slow resource, not to share
+the result.
 
-Field **keys** are reported verbatim, restricted to an identifier charset so
-log content cannot pose as a key. Field **values** are never reported. Message
-shapes are reported with quoted strings, paths, resource addresses and long
-identifiers masked — a heuristic, not a guarantee.
+### What each report discloses
 
-Review the report before sharing it.
+`--diagnose`'s field **keys** are reported verbatim, restricted to an
+identifier charset so log content cannot pose as a key. Field **values** are
+never reported. Message shapes are reported with quoted strings, paths,
+resource addresses and long identifiers masked — a heuristic, not a
+guarantee. Review a diagnose report before sharing it.
+
+`--profile`'s output contains **real, unmasked resource addresses** — that is
+the point of a profiler, which is useless if it cannot say which resource was
+slow. It is for your own eyes on your own machine, and unlike `--diagnose`,
+it is not safe to share.

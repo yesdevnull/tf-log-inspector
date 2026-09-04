@@ -1,7 +1,9 @@
 // Command tfli inspects Terraform TF_LOG output.
 //
-// Phase 1 supports only --diagnose, which reports a log's structure so the
-// format can be confirmed against real data before further features are built.
+// --diagnose reports a log's structure with its content masked, safe to
+// share back to this project. --profile reports real timing and resource
+// addresses for the user's own eyes; its output is NOT masked and must never
+// be treated as shareable the way a diagnose report is.
 package main
 
 import (
@@ -14,6 +16,8 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/diagnose"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/profile"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -31,12 +35,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("tfli", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit")
+		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
+		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		outPath    = fs.String("o", "", "write the report to this file instead of standard output")
 		showVer    = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: tfli --diagnose [-o report.txt] <logfile>\n\n")
+		fmt.Fprintf(stderr, "Usage: tfli --diagnose|--profile [-o report.txt] <logfile>\n\n")
 		fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
 		fs.PrintDefaults()
@@ -53,11 +58,49 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return errors.New("expected exactly one log file argument")
 	}
-	if !*doDiagnose {
-		return errors.New("phase 1 supports only --diagnose; pass --diagnose <logfile>")
+	switch {
+	case *doDiagnose && *doProfile:
+		return errors.New("pass only one of --diagnose or --profile, not both")
+	case *doProfile:
+		return runProfile(fs.Arg(0), *outPath, stdout)
+	case *doDiagnose:
+		return runDiagnose(fs.Arg(0), *outPath, stdout)
+	default:
+		return errors.New("pass --diagnose or --profile <logfile>")
+	}
+}
+
+// writeReport sends render's output to outPath if set, otherwise to stdout.
+// Both --diagnose and --profile funnel their report through this so neither
+// mode can regress the -o handling on its own.
+func writeReport(stdout io.Writer, outPath string, render func(io.Writer) error) error {
+	w := stdout
+	var out *os.File
+	if outPath != "" {
+		var err error
+		out, err = os.Create(outPath)
+		if err != nil {
+			return fmt.Errorf("creating %s: %w", outPath, err)
+		}
+		w = out
 	}
 
-	path := fs.Arg(0)
+	renderErr := render(w)
+	if out == nil {
+		return renderErr
+	}
+	// Check Close's error too: an ENOSPC or similar surfacing only at close
+	// would otherwise silently truncate the one artefact meant to leave the
+	// machine. A Render error takes priority -- Close is still attempted, but
+	// its error is only returned when Render itself succeeded.
+	if closeErr := out.Close(); closeErr != nil && renderErr == nil {
+		return fmt.Errorf("closing %s: %w", outPath, closeErr)
+	}
+	return renderErr
+}
+
+// runDiagnose scans path and writes the masked structural report.
+func runDiagnose(path, outPath string, stdout io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
@@ -86,26 +129,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(),
 		collector, &comps, elapsed)
 
-	w := stdout
-	var out *os.File
-	if *outPath != "" {
-		out, err = os.Create(*outPath)
-		if err != nil {
-			return fmt.Errorf("creating %s: %w", *outPath, err)
-		}
-		w = out
-	}
+	return writeReport(stdout, outPath, report.Render)
+}
 
-	renderErr := report.Render(w)
-	if out == nil {
-		return renderErr
+// runProfile loads path and writes the unmasked performance report.
+func runProfile(path, outPath string, stdout io.Writer) error {
+	l, err := model.Load(path)
+	if err != nil {
+		return err
 	}
-	// Check Close's error too: an ENOSPC or similar surfacing only at close
-	// would otherwise silently truncate the one artefact meant to leave the
-	// machine. A Render error takes priority -- Close is still attempted, but
-	// its error is only returned when Render itself succeeded.
-	if closeErr := out.Close(); closeErr != nil && renderErr == nil {
-		return fmt.Errorf("closing %s: %w", *outPath, closeErr)
-	}
-	return renderErr
+	return writeReport(stdout, outPath, func(w io.Writer) error {
+		return profile.Render(w, l)
+	})
 }

@@ -85,6 +85,30 @@ func TestRunRequiresDiagnoseInPhase1(t *testing.T) {
 	}
 }
 
+func TestRunProfileOnFixture(t *testing.T) {
+	var sb strings.Builder
+	err := run([]string{"--profile", filepath.Join("..", "..", "testdata", "provider-rpc.log")}, &sb, io.Discard)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(sb.String(), "BY RESOURCE TYPE") {
+		t.Errorf("output missing BY RESOURCE TYPE:\n%s", sb.String())
+	}
+}
+
+func TestRunRejectsDiagnoseAndProfileTogether(t *testing.T) {
+	var sb strings.Builder
+	err := run([]string{"--diagnose", "--profile", filepath.Join("..", "..", "testdata", "provider-rpc.log")}, &sb, io.Discard)
+	if err == nil {
+		t.Fatal("run returned nil error for --diagnose and --profile together")
+	}
+	for _, want := range []string{"--diagnose", "--profile"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not name %q: %v", want, err)
+		}
+	}
+}
+
 func TestRunWritesToOutputFile(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "report.txt")
 	var sb strings.Builder
