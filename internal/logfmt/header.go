@@ -48,13 +48,19 @@ func ParseHeader(line string) Header {
 		h.Msg = msg
 	} else if level, msg := splitLevel(h.Msg); level != LevelUnknown {
 		// Some providers write a bare "[DEBUG] " prefix rather than a full
-		// hclog header -- the Azure SDK's convention. Terraform usually
-		// parses that level and re-logs at it, so the outer level already
-		// agrees and nothing is lost by stripping the duplicate; where it
-		// disagrees the provider's own level is again the meaningful one.
-		// Only a recognised level name is peeled, so a message opening with
-		// some other bracketed token keeps it.
-		h.Level = level
+		// hclog header -- the Azure SDK's convention. Only a recognised
+		// level name is peeled, so a message opening with some other
+		// bracketed token keeps it.
+		//
+		// The prefix is stripped but the level is deliberately NOT taken
+		// from it. A bare prefix is indistinguishable from a message that
+		// genuinely opens by quoting a level, and the two want opposite
+		// treatment: taking the level would relabel a TRACE line as ERROR
+		// on the strength of its own text. Terraform reaches this line
+		// having already parsed the provider's level and re-logged at it --
+		// which is why azurerm's outer level and bare prefix agree in the
+		// sample log -- so taking it buys nothing and risks a new error
+		// where keeping it merely preserves the status quo.
 		h.Msg = msg
 	}
 	return h

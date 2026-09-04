@@ -158,3 +158,17 @@ func TestParseHeaderPeelsBareProviderLevelPrefix(t *testing.T) {
 		t.Errorf("Comp = %q, want the outer provider component", h.Comp)
 	}
 }
+
+// A bare bracketed level is stripped for legibility but never believed: a
+// message that opens by quoting a level reads identically to a provider's
+// own prefix, and relabelling a TRACE entry as ERROR on the strength of its
+// text would invent a severity the log never claimed.
+func TestParseHeaderBareLevelPrefixDoesNotOverrideLevel(t *testing.T) {
+	h := ParseHeader(`2026-09-04T09:15:02.113+1000 [TRACE] provider.x: [ERROR] downstream call failed`)
+	if h.Level != LevelTrace {
+		t.Errorf("Level = %v, want the outer TRACE kept", h.Level)
+	}
+	if h.Msg != "downstream call failed" {
+		t.Errorf("Msg = %q, want the bracket stripped", h.Msg)
+	}
+}
