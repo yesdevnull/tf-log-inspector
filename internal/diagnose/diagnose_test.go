@@ -744,6 +744,73 @@ func TestReportWallClockUnavailableWhenNeitherSourceExists(t *testing.T) {
 	}
 }
 
+// --- Task 2 fix round 1. ---
+
+// Finding 1: SLOWEST RESOURCES' address column must show real, differing
+// structure per row (module depth, indexing, whether it's a data source),
+// not the same decorative "<addr>" for every row -- that defeats the whole
+// point of choosing a ranked list over aggregates-only.
+func TestReportSlowestResourcesShowsAddressStructureNotJustAddrPlaceholder(t *testing.T) {
+	out := render(t, build(t, threeResourceUIHookLog()))
+	if !strings.Contains(out, `module.<m>["<k>"].data.local_file.<name>`) {
+		t.Errorf("report does not show the masked-but-structured local_file address:\n%s", out)
+	}
+	if !strings.Contains(out, "aws_instance.<name>") {
+		t.Errorf("report does not show the masked-but-structured aws_instance address:\n%s", out)
+	}
+	if strings.Count(out, "<addr>") > 0 {
+		t.Errorf("report still uses the decorative <addr> placeholder for a UI-hook address:\n%s", out)
+	}
+}
+
+// Finding 2: a predominantly structured log must explain why its RPC-related
+// counters read zero even when a tier was selected (ui-reported, because it
+// had UI-hook completions) -- not only in the NONE USABLE case.
+func TestReportExplainsStructuredLogEvenWhenTierUsable(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	if !r.TierUsable {
+		t.Fatal("TierUsable = false, want true for a log with UI-hook completions")
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "structured output (terraform.ui JSON)") {
+		t.Errorf("report does not explain the structured-output log even though a tier was selected:\n%s", out)
+	}
+	if !strings.Contains(out, "provider RPC") {
+		t.Errorf("report does not explain why the provider RPC counters read zero:\n%s", out)
+	}
+}
+
+// Finding 3: a structured entry always has an empty message by design (Scan
+// never gives Entry a structured line's content), so that empty shape must
+// never be counted or printed as a message template -- on a structured-only
+// log it would otherwise be the only row MESSAGE TEMPLATES ever shows.
+func TestReportDoesNotCountEmptyMessageTemplate(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	if _, ok := r.templateCount[""]; ok {
+		t.Error("an empty message template was counted")
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "MESSAGE TEMPLATES (content masked, recurring only, top 0)\n  none\n") {
+		t.Errorf("report does not render an empty MESSAGE TEMPLATES section for an all-structured log:\n%s", out)
+	}
+}
+
+// Finding 4: COMPONENTS' header count must match the rows actually shown
+// beneath it. A purely structured log never calls Interner.Intern at all (no
+// entry has a component to intern), so comps.Len() alone is 0 even though
+// every entry's masked component was genuinely "(none)" and is shown as
+// such below the header.
+func TestReportDistinctCompsConsistentForPureStructuredLog(t *testing.T) {
+	r := build(t, threeResourceUIHookLog())
+	if r.DistinctComps != 1 {
+		t.Errorf("DistinctComps = %d, want 1 (one genuine (none) component)", r.DistinctComps)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "COMPONENTS (1 distinct, recurring only, top 1)\n         3  (none)\n") {
+		t.Errorf("report's COMPONENTS header is inconsistent with the row shown beneath it:\n%s", out)
+	}
+}
+
 func TestTemplateDoesNotPinItsSourceMessage(t *testing.T) {
 	long := strings.Repeat("x", 4000)
 	cases := []string{

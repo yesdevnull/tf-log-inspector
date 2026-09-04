@@ -79,7 +79,15 @@ func (c *Collector) bump(m map[string]uint64, key string) {
 func (c *Collector) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {
 	c.bump(c.compCount, MaskComponent(c.comps.Lookup(e.Comp)))
 	c.bumpFieldKeys(f)
-	c.bump(c.templates, template(msg, f))
+	// A structured-output line always has an empty msg and no fields (Scan
+	// never gives Entry a structured line's content -- see the doc comment
+	// on logfmt.StructuredSink), so template(msg, f) is "" for every one of
+	// them by design, not by coincidence. That is not a message shape worth
+	// reporting: on a structured-only log it would otherwise be the *only*
+	// row MESSAGE TEMPLATES ever shows.
+	if t := template(msg, f); t != "" {
+		c.bump(c.templates, t)
+	}
 }
 
 // bumpFieldKeys credits each distinct key on this entry once, even if the
@@ -220,13 +228,23 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
 	topTemplates, withheldTemplates := recurringTopN(c.templates, maxTemplates)
 
-	// comps.Len() always includes the Interner's pre-seeded "" at id 0 (see
-	// Interner.init), whether or not any line actually lacked a component --
-	// so it overcounts by one unless a "(none)" component was genuinely seen.
-	// c.compCount[""] records that case: it is only populated when an entry's
-	// masked component was empty.
+	// comps.Len() always includes the Interner's pre-seeded "" at id 0 once
+	// Intern has been called at least once (see Interner.init) -- so it
+	// overcounts by one unless a "(none)" component was genuinely seen.
+	// c.compCount[""] records that case: it is only populated when an
+	// entry's masked component was empty. But Interner.init is lazy: a log
+	// that never calls Intern at all -- every entry structured-output, so
+	// Collector only ever Looks up id 0 and never interns a real component
+	// -- leaves comps.Len() at 0 even though id 0 ("no component") was
+	// still seen on every entry and is credited in compCount[""]. That
+	// pre-seeded slot is real whenever compCount[""] is populated, so it is
+	// added back rather than only ever subtracted.
 	distinctComps := comps.Len()
-	if _, sawNone := c.compCount[""]; !sawNone && distinctComps > 0 {
+	_, sawNone := c.compCount[""]
+	switch {
+	case sawNone && distinctComps == 0:
+		distinctComps = 1
+	case !sawNone && distinctComps > 0:
 		distinctComps--
 	}
 
@@ -279,7 +297,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 			DurationMs:   s.DurationMs,
 			Action:       s.RPC,
 			ResourceType: s.ResourceType,
-			MaskedAddr:   MaskProse(s.Address),
+			MaskedAddr:   MaskAddress(s.Address),
 		})
 
 		rt, ok := typeTotals[s.ResourceType]
@@ -436,21 +454,29 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  %-25s %s\n", "selected tier", r.Tier)
 	} else {
 		fmt.Fprintf(b, "  %-25s NONE USABLE\n", "selected tier")
-		structured := r.Stats.PhysicalLines > 0 &&
-			float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
-		if structured {
-			fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON).\n")
-			fmt.Fprintf(b, "  Structured output gives per-resource timings, which this\n")
-			fmt.Fprintf(b, "  tool parses into the SLOWEST RESOURCES section below when\n")
-			fmt.Fprintf(b, "  present. It is info level only, though, so it never\n")
-			fmt.Fprintf(b, "  contains provider RPC timings. For those, enable\n")
-			fmt.Fprintf(b, "  debug logging on the run: the log then arrives as text\n")
-			fmt.Fprintf(b, "  rather than JSON, with RPC detail this tool also parses.\n")
-		} else {
-			fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
-			fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
-			fmt.Fprintf(b, "  enable debug logging on the run and use its raw log.\n")
-		}
+	}
+	// The structured-output guidance below is about explaining the shape of
+	// the input, not about whether a tier was selected -- a majority-
+	// structured log reads as broken (every RPC-related counter at zero)
+	// without it, whether or not UI-hook completions happened to make the
+	// ui-reported tier usable. So this is decided independently of
+	// r.TierUsable, unlike the plain "nothing to profile" guidance below it,
+	// which only makes sense once no tier at all could be selected.
+	structured := r.Stats.PhysicalLines > 0 &&
+		float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
+	switch {
+	case structured:
+		fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON).\n")
+		fmt.Fprintf(b, "  It is info level only, so it never carries provider RPC\n")
+		fmt.Fprintf(b, "  entries -- the counters below are expected to read zero.\n")
+		fmt.Fprintf(b, "  Its per-resource timings, from Terraform's own UI hooks,\n")
+		fmt.Fprintf(b, "  appear in SLOWEST RESOURCES when this log has any. For\n")
+		fmt.Fprintf(b, "  provider RPC detail, enable debug logging on the run: the\n")
+		fmt.Fprintf(b, "  log then arrives as text rather than JSON.\n")
+	case !r.TierUsable:
+		fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
+		fmt.Fprintf(b, "  nothing to profile. If the plan ran on HCP Terraform,\n")
+		fmt.Fprintf(b, "  enable debug logging on the run and use its raw log.\n")
 	}
 	fmt.Fprintf(b, "  %-25s %d\n", "response entries", r.Caps.ResponseEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "request entries", r.Caps.RequestEntries)

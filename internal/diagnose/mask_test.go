@@ -213,6 +213,68 @@ func TestMaskComponentMasksForbiddenCharset(t *testing.T) {
 	}
 }
 
+// --- Fix round 1, Finding 1: MaskAddress is segment-aware, so a masked
+// address still shows its structure -- module depth, indexing, whether it
+// is a data source -- without disclosing any name, key or count value.
+
+func TestMaskAddressPreservesStructureAndMasksIdentifyingSegments(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// The exact shape from testdata/structured-ui.log.
+		{`module.module_name["key"].data.local_file.thing`, `module.<m>["<k>"].data.local_file.<name>`},
+		// No module, no data source: just TYPE.NAME.
+		{`aws_instance.example`, `aws_instance.<name>`},
+		// A count index (numeric, unquoted) rather than a for_each key.
+		{`aws_instance.example[0]`, `aws_instance.<name>[<k>]`},
+		// Nested modules, the second one indexed.
+		{`module.a.module.b[0].aws_instance.foo`, `module.<m>.module.<m>[<k>].aws_instance.<name>`},
+		// A data source with no module.
+		{`data.local_file.thing`, `data.local_file.<name>`},
+	}
+	for _, c := range cases {
+		if got := MaskAddress(c.in); got != c.want {
+			t.Errorf("MaskAddress(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The property that matters most: no real segment from the fixture's
+// addresses survives, however MaskAddress arrives at its output.
+func TestMaskAddressLeaksNoRealSegment(t *testing.T) {
+	addrs := []string{
+		`module.module_name["key"].data.local_file.thing`,
+		`aws_instance.example`,
+	}
+	leaks := []string{"module_name", "key", "thing", "example"}
+	for _, addr := range addrs {
+		got := MaskAddress(addr)
+		for _, leak := range leaks {
+			if strings.Contains(got, leak) {
+				t.Errorf("MaskAddress(%q) = %q, still contains %q", addr, got, leak)
+			}
+		}
+	}
+}
+
+func TestMaskAddressKeepsResourceTypeVerbatim(t *testing.T) {
+	// The type is a public provider schema name and is already shown
+	// unmasked in its own column wherever this is used -- masking it here
+	// too would be both inconsistent and useless.
+	got := MaskAddress(`module.m["key"].data.local_file.thing`)
+	if !strings.Contains(got, "local_file") {
+		t.Errorf("MaskAddress = %q, lost the resource type", got)
+	}
+}
+
+func TestMaskAddressTooShortMasksWholesale(t *testing.T) {
+	// Shorter than any real Terraform address (which is always at least
+	// TYPE.NAME) -- an unanticipated shape must mask wholesale, not be
+	// disclosed verbatim.
+	got := MaskAddress("secretvalue")
+	if strings.Contains(got, "secretvalue") {
+		t.Errorf("MaskAddress(%q) = %q, leaked an unparseable address", "secretvalue", got)
+	}
+}
+
 func TestMaskComponentKeepsGenuinePathShapedNames(t *testing.T) {
 	// backend/local and dag/walk are genuine Terraform core component names.
 	// Keeping "/" unmasked is deliberate: it is what makes them survive.

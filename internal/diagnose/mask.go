@@ -153,3 +153,110 @@ func hasDigit(s string) bool {
 	}
 	return false
 }
+
+// MaskAddress masks a Terraform resource address's identifying segments
+// while preserving its structure. Terraform's address grammar (simplified,
+// per the "hook.resource.addr" field span.UIHookBuilder reads) is:
+//
+//	("module" "." NAME ["[" INDEX "]"] ".")*  ["data" "."]  TYPE "." NAME ["[" INDEX "]"]
+//
+// The structural keywords "module" and "data" are kept verbatim, as is the
+// resource type -- a public provider schema name, never customer data, and
+// already shown unmasked in its own column wherever this is used. Every
+// module name masks to "<m>", the final instance name masks to "<name>",
+// and any for_each/count index inside "[...]" masks to "<k>" while keeping
+// its brackets (and quotes, for a string key) so indexing stays visible.
+// This is deliberately more conservative than masking only the leaf name:
+// module names and index keys are exactly where free-form customer content
+// (environment names, account ids, per-item keys) lives.
+//
+// A shape that does not parse as at least TYPE.NAME -- shorter than any
+// real Terraform address can be -- masks wholesale rather than risk
+// disclosing an unanticipated shape.
+func MaskAddress(addr string) string {
+	segs := splitAddressSegments(addr)
+
+	var out []string
+	i := 0
+	for i+1 < len(segs) && segs[i] == "module" {
+		_, index := splitSegmentIndex(segs[i+1])
+		out = append(out, "module", "<m>"+maskIndex(index))
+		i += 2
+	}
+	if i < len(segs) && segs[i] == "data" {
+		out = append(out, "data")
+		i++
+	}
+
+	if len(segs)-i < 2 {
+		// Not enough segments left for TYPE.NAME: an unanticipated shape,
+		// masked wholesale rather than disclosed.
+		for ; i < len(segs); i++ {
+			out = append(out, "<addr>")
+		}
+		return strings.Join(out, ".")
+	}
+
+	typeName, typeIndex := splitSegmentIndex(segs[i])
+	out = append(out, typeName+maskIndex(typeIndex))
+	i++
+
+	_, nameIndex := splitSegmentIndex(segs[i])
+	out = append(out, "<name>"+maskIndex(nameIndex))
+	i++
+
+	for ; i < len(segs); i++ {
+		out = append(out, "<addr>")
+	}
+	return strings.Join(out, ".")
+}
+
+// splitAddressSegments splits addr on "." at bracket depth zero. A dot
+// cannot be trusted as a segment separator inside "[...]": a for_each key
+// can itself contain a literal dot.
+func splitAddressSegments(addr string) []string {
+	var segs []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(addr); i++ {
+		switch addr[i] {
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		case '.':
+			if depth == 0 {
+				segs = append(segs, addr[start:i])
+				start = i + 1
+			}
+		}
+	}
+	segs = append(segs, addr[start:])
+	return segs
+}
+
+// splitSegmentIndex splits a segment like `module_name["key"]` into its bare
+// name and its bracketed index text (including the brackets), or "" if the
+// segment carries no index.
+func splitSegmentIndex(seg string) (name, index string) {
+	if i := strings.IndexByte(seg, '['); i >= 0 && strings.HasSuffix(seg, "]") {
+		return seg[:i], seg[i:]
+	}
+	return seg, ""
+}
+
+// maskIndex masks the content of a bracketed index, keeping the brackets --
+// and the quotes, for a string key -- so whether a resource is indexed
+// stays visible without disclosing the key or count value itself.
+func maskIndex(index string) string {
+	if index == "" {
+		return ""
+	}
+	inner := index[1 : len(index)-1]
+	if strings.HasPrefix(inner, `"`) && strings.HasSuffix(inner, `"`) {
+		return `["<k>"]`
+	}
+	return "[<k>]"
+}
