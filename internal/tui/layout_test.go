@@ -778,7 +778,9 @@ func selectRow(t *testing.T, m Model, want string) Model {
 }
 
 // A providers row is a rollup, and its detail pane describes the GROUP: the
-// provider, its call count, total and max, plus the two facts the table has
+// provider, its total, call count and max -- in the order the providers
+// TABLE puts those same four columns in, so the row and the pane beside it
+// read as one sequence -- plus the two facts the table has
 // no column for -- how many distinct resource types and RPC methods the
 // group spans -- and then which single call behind it took longest.
 //
@@ -798,8 +800,8 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 	}
 	want := strings.Join([]string{
 		"Prov  registry.terraform.io/hashicorp/aws",
-		"Calls 2",
 		"Total 6ms",
+		"Calls 2",
 		"Max   5ms",
 		"Types 2",
 		"RPCs  1",
@@ -810,6 +812,17 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 	// and the comparison is against the values themselves.
 	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("providers detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// A rollup row can be built carrying no detail, and detailNaturalWidth
+// hands every rollup row in the log to rollupDetailSections without asking
+// whether it has any. Its neighbour one level down (slowestOf) deliberately
+// tolerates a nil group, so these two must agree on what a missing group
+// means rather than one degrading while the other panics mid-measurement.
+func TestARollupWithNoDetailProducesNoSections(t *testing.T) {
+	if got := rollupDetailSections(nil, 40); got != nil {
+		t.Errorf("rollupDetailSections(nil) = %v, want no sections", got)
 	}
 }
 
@@ -880,8 +893,8 @@ func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 	want := []string{
 		strings.Join([]string{
 			"Prov  registry.terraform.io/hashicorp/google",
-			"Calls 1",
 			"Total 8ms",
+			"Calls 1",
 			"Max   8ms",
 			"Types 1",
 			"RPCs  1",
@@ -890,8 +903,8 @@ func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 		}, "\n"),
 		strings.Join([]string{
 			"Prov  registry.terraform.io/hashicorp/aws",
-			"Calls 1",
 			"Total 5ms",
+			"Calls 1",
 			"Max   5ms",
 			"Types 1",
 			"RPCs  1",

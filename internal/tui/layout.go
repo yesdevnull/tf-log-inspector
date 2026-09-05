@@ -799,7 +799,16 @@ const noRPCCallsNote = "no RPC-tier calls"
 // whole (see fitDetailSections), and that ORDER is load-bearing: what a
 // pane too short for both keeps is the summary of the row the cursor is
 // actually on, and what it gives up is the one call behind it.
+//
+// A nil rollup gets no sections, matching slowestOf one level down rather
+// than contradicting it: a row that is not a rollup describes no group, and
+// the two functions the pane is built from must agree on what a missing
+// group means. detailNaturalWidth hands it every rollup row in the log
+// without asking, and a row can be built with no detail at all.
 func rollupDetailSections(d *rollupDetail, w int) []detailSection {
+	if d == nil {
+		return nil
+	}
 	return []detailSection{
 		detailFieldLines(d.aggregate, w),
 		{"", slowestLine(d.slowest, w)},

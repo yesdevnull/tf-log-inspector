@@ -8,6 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // The ranking IS the providers view: a table holding the right numbers in
@@ -250,6 +252,53 @@ func TestCallsViewRanksByDurationAndCarriesSpanIndex(t *testing.T) {
 		b := m.log.RPCSpans[rows[i].spanIdx].DurationMs
 		if a < b {
 			t.Errorf("rows not ranked by duration descending at %d: %d then %d", i, a, b)
+		}
+	}
+}
+
+// "Which call was slowest" is answered twice on one screen -- by the calls
+// table's top row, and by the Slowest line of every rollup pane -- and the
+// two must answer it the same way. The calls table breaks a duration tie by
+// RPC name ascending, so a rollup that kept whichever equal call the log
+// recorded FIRST would name one call while the table ranked another above
+// it, both correct by their own rule and visibly contradicting each other.
+//
+// The two spans are built here rather than loaded, because the tie is the
+// whole case: no fixture has two calls of equal duration in one group, and
+// the earlier-logged one carries the alphabetically LATER name so that log
+// order and the ranking rule disagree.
+func TestTheSlowestCallAgreesWithTheCallsRanking(t *testing.T) {
+	const provider = "registry.terraform.io/hashicorp/aws"
+	spans := []span.Span{
+		{RPC: "PlanResourceChange", Provider: provider, ResourceType: "aws_subnet", DurationMs: 25},
+		{RPC: "ApplyResourceChange", Provider: provider, ResourceType: "aws_subnet", DurationMs: 25},
+	}
+
+	calls := callRows(spans, model.Filter{})
+	if len(calls) != 2 {
+		t.Fatalf("callRows returned %d rows, want 2", len(calls))
+	}
+	top := spans[calls[0].spanIdx].RPC
+	if top != "ApplyResourceChange" {
+		t.Fatalf("the calls view ranks %q first, so this no longer exercises a tie broken against log order", top)
+	}
+
+	for _, c := range []struct {
+		name string
+		rows []row
+	}{
+		{"providers", providerRows(spans)},
+		{"types", typeRows(spans, nil)},
+	} {
+		if len(c.rows) != 1 {
+			t.Fatalf("%s view returned %d rows, want the one group both spans fall in", c.name, len(c.rows))
+		}
+		slowest := c.rows[0].rollup.slowest
+		if slowest == nil {
+			t.Fatalf("%s view: the group names no slowest call", c.name)
+		}
+		if slowest.RPC != top {
+			t.Errorf("%s view names %q slowest while the calls table ranks %q first -- one screen, two answers", c.name, slowest.RPC, top)
 		}
 	}
 }

@@ -246,10 +246,13 @@ func unhandledView(v View) string {
 // orders them. No row is a single span, so every spanIdx is -1 and every
 // row carries a rollupDetail instead.
 //
-// The detail pane's aggregate adds two facts the table has no column for:
-// how many distinct resource types and RPC methods the provider's calls
-// span. They are the reason to look at the pane over a providers row at all
-// -- the row's own four figures are already on screen beside it.
+// The aggregate repeats the table's four figures IN THE TABLE'S OWN ORDER
+// (provider, total, calls, max), the way the types builder repeats its
+// table's, so a reader moving between the row and the pane beside it is
+// reading the same sequence twice rather than matching label to label. It
+// then adds the two facts the table has no column for: how many distinct
+// resource types and RPC methods the provider's calls span, which are the
+// reason to look at the pane over a providers row at all.
 func providerRows(rpcSpans []span.Span) []row {
 	buckets := model.RollupBy(rpcSpans, func(s span.Span) string { return s.Provider })
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.Provider })
@@ -266,8 +269,8 @@ func providerRows(rpcSpans []span.Span) []row {
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "Prov", value: b.Key, kind: tailIdentifierColumn},
-					{label: "Calls", value: strconv.Itoa(b.Count), kind: numericColumn},
 					{label: "Total", value: formatMs(b.TotalMs), kind: numericColumn},
+					{label: "Calls", value: strconv.Itoa(b.Count), kind: numericColumn},
 					{label: "Max", value: formatMs(uint64(b.MaxMs)), kind: numericColumn},
 					{label: "Types", value: strconv.Itoa(g.resourceTypes), kind: numericColumn},
 					{label: "RPCs", value: strconv.Itoa(g.rpcs), kind: numericColumn},
@@ -320,6 +323,24 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	return rows
 }
 
+// rankedBefore reports whether a comes before b when RPC spans are ranked
+// by how long they took: longer first, ties broken by RPC name ascending so
+// the ordering is total rather than left to whichever span the log happened
+// to record first.
+//
+// It is the one rule for the question, shared by the calls table (which
+// sorts by it) and by each rollup group's slowest call (which is its
+// maximum). Two rules would let one screen answer "which call was slowest"
+// two ways: in a group whose two longest calls are equal, the detail pane
+// would name the earlier-logged one while the calls table ranked the other
+// above it.
+func rankedBefore(a, b span.Span) bool {
+	if a.DurationMs != b.DurationMs {
+		return a.DurationMs > b.DurationMs
+	}
+	return a.RPC < b.RPC
+}
+
 // rpcGroup is what one group of RPC spans holds that a model rollup does
 // not carry: the slowest call in it, and how many distinct resource types
 // and RPC methods it spans.
@@ -368,7 +389,7 @@ func groupRPCSpans(spans []span.Span, key func(span.Span) string) map[string]*rp
 			g = &rpcGroup{}
 			groups[k] = g
 		}
-		if g.slowest == nil || s.DurationMs > g.slowest.DurationMs {
+		if g.slowest == nil || rankedBefore(s, *g.slowest) {
 			g.slowest = &spans[i]
 		}
 		if !seen(seenTypes, k, model.FacetKey(s.ResourceType)) {
@@ -381,8 +402,9 @@ func groupRPCSpans(spans []span.Span, key func(span.Span) string) map[string]*rp
 	return groups
 }
 
-// callRows ranks the RPC spans matching f by duration descending, ties
-// broken by RPC name so the ordering is total. Each row's spanIdx indexes
+// callRows ranks the RPC spans matching f by rankedBefore -- duration
+// descending, ties broken by RPC name -- so the ordering is total. Each
+// row's spanIdx indexes
 // into rpcSpans itself, never into a filtered subset, so jump-to-log keeps
 // landing on the right span even while a filter narrows the list.
 // It sorts a slice of indices rather than the spans themselves: m.log.RPCSpans
@@ -396,11 +418,7 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 		}
 	}
 	sort.Slice(idx, func(i, j int) bool {
-		a, b := rpcSpans[idx[i]], rpcSpans[idx[j]]
-		if a.DurationMs != b.DurationMs {
-			return a.DurationMs > b.DurationMs
-		}
-		return a.RPC < b.RPC
+		return rankedBefore(rpcSpans[idx[i]], rpcSpans[idx[j]])
 	})
 
 	rows := make([]row, len(idx))

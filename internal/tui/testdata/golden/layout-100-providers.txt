@@ -2,8 +2,8 @@ tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                 │ BY PROVIDER                                  │ GROUP DETAIL             
 [7;2m[ ] ….io/hashicorp/aws  1[0m │ provider                   total  calls  max │ Prov  …o/hashicorp/google
-[ ] …/hashicorp/google  1 │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ Calls 1                  
-RPCS                      │ …rraform.io/hashicorp/aws    5ms      1  5ms │ Total 8ms                
+[ ] …/hashicorp/google  1 │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ Total 8ms                
+RPCS                      │ …rraform.io/hashicorp/aws    5ms      1  5ms │ Calls 1                  
 [ ] ApplyResourceChan…  2 │                                              │ Max   8ms                
 RESOURCE TYPES            │                                              │ Types 1                  
 [ ] aws_subnet  1         │                                              │ RPCs  1                  
