@@ -257,3 +257,44 @@ func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 		t.Errorf("Stalls = %+v, want %+v", got, want)
 	}
 }
+
+// A zero-duration span's interval [StartMs, EndMs) is empty, so it must
+// never win Blocking once it has both started and ended -- even when the
+// genuinely running span sharing the window also happens to report
+// DurationMs 0, as a StartClamped span can (see PeakConcurrency's doc
+// comment). A liveness bookkeeping scheme that leaves the elapsed span
+// marked "running" would let it win the tie, pointing the annotation at a
+// span whose interval had already elapsed instead of the one still going.
+func TestStallsIgnoresElapsedZeroDurationSpansWhenChoosingBlocking(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 30, EndMs: 30, DurationMs: 0}, // elapsed by t=30; contributes nothing
+		{StartMs: 0, EndMs: 100, DurationMs: 0}, // genuinely running throughout
+	}
+	got, err := Stalls(spans, 2, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 0, EndMs: 100, Idle: 1, Blocking: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (the elapsed zero-duration span must not win Blocking)", got, want)
+	}
+}
+
+// A tie in DurationMs between two spans running throughout the same window
+// must resolve deterministically towards the lower span index, not
+// however Go's map iteration order happens to land.
+func TestStallsBreaksDurationTiesTowardsTheLowerIndex(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 200, DurationMs: 200},
+		{StartMs: 0, EndMs: 200, DurationMs: 200},
+		{StartMs: 0, EndMs: 100, DurationMs: 100},
+	}
+	got, err := Stalls(spans, 3, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 100, EndMs: 200, Idle: 1, Blocking: 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v", got, want)
+	}
+}

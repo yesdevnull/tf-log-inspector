@@ -80,6 +80,38 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 	return lanes, nil
 }
 
+// spanEvent is one span's start or end instant in a half-open-interval
+// sweep: delta is +1 at StartMs and -1 at EndMs. idx is the span's index in
+// the slice spanEvents was built from; PeakConcurrency ignores it, Stalls
+// needs it to know which span opened or closed.
+type spanEvent struct {
+	at    uint32
+	delta int
+	idx   int
+}
+
+// spanEvents returns spans' start and end events, sorted by time with ends
+// before starts at the same instant: a span ending exactly as another
+// begins is a handover, not overlap. PeakConcurrency's peak sweep and
+// Stalls' idle sweep both depend on this exact ordering, so it is built
+// once here rather than duplicated -- the zero-duration and StartClamped
+// edge cases documented below are subtle enough that two independently
+// maintained copies of this ordering is exactly where they would drift out
+// of step with each other.
+func spanEvents(spans []span.Span) []spanEvent {
+	events := make([]spanEvent, 0, len(spans)*2)
+	for i, s := range spans {
+		events = append(events, spanEvent{s.StartMs, 1, i}, spanEvent{s.EndMs, -1, i})
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].at != events[j].at {
+			return events[i].at < events[j].at
+		}
+		return events[i].delta < events[j].delta
+	})
+	return events
+}
+
 // PeakConcurrency is the largest number of spans in flight at once, computed
 // by sweeping start and end events. It is the headline number for whether a
 // plan was slow because of work or because of waiting: summed span time
@@ -114,24 +146,8 @@ func PeakConcurrency(spans []span.Span) (int, error) {
 		return 0, err
 	}
 
-	type event struct {
-		at    uint32
-		delta int
-	}
-	events := make([]event, 0, len(spans)*2)
-	for _, s := range spans {
-		events = append(events, event{s.StartMs, 1}, event{s.EndMs, -1})
-	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].at != events[j].at {
-			return events[i].at < events[j].at
-		}
-		// Ends before starts at the same instant: a span ending exactly as
-		// another begins is a handover, not overlap.
-		return events[i].delta < events[j].delta
-	})
 	var cur, peak int
-	for _, e := range events {
+	for _, e := range spanEvents(spans) {
 		cur += e.delta
 		if cur > peak {
 			peak = cur
@@ -165,40 +181,27 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 		return nil, err
 	}
 
-	type event struct {
-		at    uint32
-		delta int
-		idx   int
-	}
-	events := make([]event, 0, len(spans)*2)
-	for i, s := range spans {
-		events = append(events, event{s.StartMs, 1, i}, event{s.EndMs, -1, i})
-	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].at != events[j].at {
-			return events[i].at < events[j].at
-		}
-		// Ends before starts at the same instant, as PeakConcurrency does:
-		// a span ending exactly as another begins is a handover, not overlap.
-		return events[i].delta < events[j].delta
-	})
+	events := spanEvents(spans)
 
 	var raw []Stall
-	// running is indexed by span, not a map, so a tie in DurationMs breaks
+	// open is indexed by span, not a map, so a tie in DurationMs breaks
 	// towards the lowest span index deterministically rather than however
-	// Go's map iteration happens to land.
-	running := make([]bool, len(spans))
+	// Go's map iteration happens to land. It counts each span's net
+	// start/end deltas rather than recording a bool, so a zero-duration
+	// span -- whose start and end land in the same sweep batch -- nets to
+	// 0 and reads as not running regardless of which of its two events the
+	// tie-break in spanEvents happens to order first. A bool keyed by
+	// last-write-wins got this wrong: it left such a span marked running
+	// for the rest of the sweep, which matters once a genuinely live span
+	// also has DurationMs 0 (StartClamped spans do, per PeakConcurrency's
+	// doc comment) and the two tie for Blocking.
+	open := make([]int, len(spans))
 	var runningCount int
 	for i := 0; i < len(events); {
 		at := events[i].at
 		for i < len(events) && events[i].at == at {
-			if events[i].delta > 0 {
-				running[events[i].idx] = true
-				runningCount++
-			} else {
-				running[events[i].idx] = false
-				runningCount--
-			}
+			open[events[i].idx] += events[i].delta
+			runningCount += events[i].delta
 			i++
 		}
 		if i == len(events) {
@@ -216,8 +219,8 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 			continue
 		}
 		blocking := -1
-		for idx, live := range running {
-			if live && (blocking == -1 || spans[idx].DurationMs > spans[blocking].DurationMs) {
+		for idx, o := range open {
+			if o > 0 && (blocking == -1 || spans[idx].DurationMs > spans[blocking].DurationMs) {
 				blocking = idx
 			}
 		}
