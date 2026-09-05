@@ -964,6 +964,33 @@ func stallLane(lanes []model.Lane, idx int) int {
 	return -1
 }
 
+// callStartedBefore reports whether any span begins before ms. It tells
+// stallAnnotation's two all-idle windows apart: a window is the gap before
+// any provider call only when no call has started by the time it ends, and
+// is a window between calls otherwise.
+//
+// It asks the spans rather than testing the window's own start against
+// zero, because a window beginning at 0 can still hold a call that
+// completed inside it. A zero-extent span occupies no instant and so is
+// never running (see model.PeakConcurrency), which leaves model.Stalls
+// reporting nothing running across a stretch a call finished in. The
+// UI-hook tier makes that the ordinary shape rather than an edge case:
+// Terraform rounds hook timings to whole seconds, so every resource that
+// refreshed in "0s" produces one, and the lane row draws it as a lit
+// column the reader can see inside the window. "Before any call" over a
+// window with a bar in it is a line the picture beneath it contradicts.
+//
+// A zero-extent span is still a CALL, which is why the other clause stays
+// true of the same window: something did run in there, instantaneously.
+func callStartedBefore(spans []span.Span, ms uint32) bool {
+	for _, s := range spans {
+		if s.StartMs < ms {
+			return true
+		}
+	}
+	return false
+}
+
 // stallAnnotation renders the windows model.Stalls found beneath the lanes
 // and axis, naming each by the lane label the reader already sees the bars
 // under -- "waiting on aws/1" points at exactly one bar, the way naming the
@@ -990,8 +1017,8 @@ func stallLane(lanes []model.Lane, idx int) int {
 //     and is named for it ("nothing running, 0s–3.0s — before any call").
 //     It appears on nearly every capture, so wording it as a mid-plan
 //     collapse would tell every reader their plan fell over at the start.
-//     model.Stall documents why Blocking -1 at StartMs 0 is that window and
-//     can be no other.
+//     Which of the two an all-idle window is comes from the spans, not
+//     from its own start: see callStartedBefore.
 //
 // The lane comes FIRST on a blocked wait, ahead of the window and the
 // concurrency figure, because the line is clipped from its end
@@ -1099,7 +1126,7 @@ func (m *Model) stallAnnotation(w int) string {
 		window := formatMs(uint64(s.StartMs)) + "–" + formatMs(uint64(s.EndMs))
 		var line string
 		switch {
-		case s.Blocking < 0 && s.StartMs == 0:
+		case s.Blocking < 0 && !callStartedBefore(spans, s.EndMs):
 			line = nothingRunningClause + ", " + window + beforeAnyCallClause
 		case s.Blocking < 0:
 			line = nothingRunningClause + ", " + window + betweenCallsClause

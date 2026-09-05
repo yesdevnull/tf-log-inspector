@@ -575,8 +575,25 @@ read from the log. There is no worker identifier in the log format, and none is
 needed: packing depends only on start and end times, so the timeline behaves
 identically at every extraction tier.
 
-Below the lanes, a **stall annotation** identifies windows where concurrency
-collapsed — for example `3 lanes idle 04:11:20–04:11:44 waiting on aws/1`.
+Below the lanes sits a **busy summary** — `busy 7.5s of 9.0s (83%)`, the union
+of the spans' intervals against the window the axis draws — and beneath it a
+**stall annotation** naming the windows where concurrency collapsed, longest
+first: `waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2`. A window with
+nothing running anywhere has no lane to blame and says so instead — `nothing
+running, 0s–1.0s — before any call` for Terraform core's start-up, `— between
+calls` for a mid-plan collapse. (Both examples are `testdata/timeline.log`.)
+
+The stall line states **concurrency, not a count of rows**. Idle capacity is
+measured against the spans' own peak concurrency, which is what "work or
+waiting" turns on, while the rows this view draws are packed per provider: a
+provider that has finished still holds a row that is no longer capacity a
+later window can leave idle. "N lanes idle" would therefore make a claim about
+the screen that its number is not entitled to make — "no stalls" beside a
+visibly blank row, or "2 lanes idle" on a five-row timeline.
+
+Windows are given as **offsets, not wall-clock times**. Span times are
+milliseconds from a per-builder zero point (see `span.Span`), so rendering a
+time of day out of one would invent a fact the log does not carry.
 
 This view exists to answer the one question a ranked list cannot: whether an
 eight-minute plan was eight minutes of work, or ninety seconds of work and six
@@ -585,12 +602,17 @@ minutes of waiting. Those have different causes and different fixes.
 **Added 2026-09-04:** lane packing and peak concurrency (phase 2's
 `model.PackLanes` and `model.PeakConcurrency`, both consumed here) use
 half-open interval semantics: a span occupies `[StartMs, EndMs)`. A
-zero-duration span, or one whose start was clamped to zero because its
-reported duration exceeded its offset from the log's first entry, has an
-empty interval that overlaps nothing -- so it correctly contributes nothing
-to peak concurrency, even nested inside spans that are genuinely running.
-`PackLanes` still gives such a span its own lane, because this view needs a
-row to draw every span in regardless of whether it overlaps anything. The
+zero-duration span has an empty interval that overlaps nothing -- so it
+correctly contributes nothing to peak concurrency, even nested inside spans
+that are genuinely running. A span whose start was clamped to zero because
+its reported duration exceeded its offset from the log's first entry is a
+separate degenerate case and not this one: a start is clamped only where
+that offset is less than the duration, so a clamped span's `DurationMs` is
+at least 1 and its interval `[0, EndMs)` is empty only where the span closed
+on the log's very first timestamped entry.
+`PackLanes` still gives a zero-extent span its own lane, because this view
+needs a row to draw every span in regardless of whether it overlaps
+anything. The
 consequence: `PackLanes`' lane count can legitimately exceed
 `PeakConcurrency`'s peak. That is not a bug for this view to reconcile or
 surface as a discrepancy -- the two numbers answer different questions, and

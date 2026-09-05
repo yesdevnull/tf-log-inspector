@@ -842,6 +842,38 @@ func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
 	}
 }
 
+// TestALeadingWindowContainingACompletedCallIsNotTheLeadingGap covers the
+// window a zero-extent span sits inside. A span with StartMs == EndMs
+// occupies no instant, so model.Stalls never counts it as running (see
+// model.PeakConcurrency) and reports the stretch around it as all-idle --
+// but a call did complete in there, and the lane row draws a lit column at
+// it. Wording that window "before any call" contradicts the bar the reader
+// can see inside it.
+//
+// The UI-hook tier makes this the ordinary case rather than an edge one:
+// Terraform rounds hook timings to whole seconds, so every resource that
+// refreshed in "0s" produces a zero-extent span.
+//
+// The spans are the UI tier's because that is the tier that produces them,
+// and the window is 3 seconds so it clears stallAnnotation's 1s floor
+// instead of being filtered out the way testdata/structured-ui.log's own
+// 886ms leading window is.
+func TestALeadingWindowContainingACompletedCallIsNotTheLeadingGap(t *testing.T) {
+	m := update(t, New(&model.Log{UISpans: []span.Span{
+		{Provider: "aws", ResourceType: "aws_instance", Address: "aws_instance.web", StartMs: 500, EndMs: 500, DurationMs: 0, Fidelity: span.FidelityUIReported},
+		{Provider: "aws", ResourceType: "aws_vpc", Address: "aws_vpc.main", StartMs: 3000, EndMs: 13000, DurationMs: 10000, Fidelity: span.FidelityUIReported},
+	}}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	got := m.stallAnnotation(80)
+	if strings.Contains(got, beforeAnyCallClause) {
+		t.Errorf("stallAnnotation = %q, but a call completed at 500ms, inside the window it calls the gap before any call", got)
+	}
+	want := []string{"nothing running, 0s–3.0s" + betweenCallsClause}
+	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
+		t.Errorf("stallAnnotation = %v, want %v", lines, want)
+	}
+}
+
 // topStallsModel is a model over synthetic spans producing FIVE separate
 // waits of distinct duration (10s, 8s, 6s, 4s, 2s), all clearing
 // stallAnnotation's threshold: one aws call running for the whole window,

@@ -187,14 +187,20 @@ type Stall struct {
 	// Consumers must handle it: indexing spans with -1 panics, and looking
 	// -1 up in a lane finds none. See Stalls for why such windows are
 	// reported rather than skipped.
-	// Blocking -1 together with StartMs 0 identifies one particular window
-	// and no other: the elapsed capture time before any span started. Every
-	// span's StartMs is at or after 0, so a window with nothing running
-	// that begins at 0 precedes every span by construction, while any
-	// LATER all-idle window begins at the instant some span ended and so
-	// has a non-zero start. A consumer wanting to explain core start-up
-	// separately from a mid-run collapse can therefore derive it, rather
-	// than needing a flag here that Stalls would have to keep in step.
+	// StartMs settles only one direction of "was this before any span
+	// ran". A window beginning after 0 begins at the instant some span
+	// ended, so it always has a call behind it. A window beginning AT 0
+	// begins at or before every span, since every span's StartMs is at or
+	// after 0 -- but that does not make it a window no span ran in: a
+	// zero-extent span occupies no instant and so is never counted as
+	// running (see PeakConcurrency), which lets such a window merge
+	// straight past a call that completed inside it. The UI-hook tier
+	// produces that routinely, emitting a zero-extent span for every
+	// resource Terraform reports as taking 0s. A consumer wanting to
+	// explain core start-up separately from a mid-run collapse must
+	// therefore ask whether any span STARTS before the window ends, which
+	// it can derive from the same spans it passed in, rather than needing
+	// a flag here that Stalls would have to keep in step.
 	Blocking int
 }
 
