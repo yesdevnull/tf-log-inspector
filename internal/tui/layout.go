@@ -298,7 +298,7 @@ func (m *Model) footer(w int) string {
 			return "/" + m.raw.lastQuery + "  pattern not found"
 		}
 	}
-	return keyHints(m.view, w)
+	return m.keyHints(w)
 }
 
 // jumpBlockedNote is what the footer says when Enter refused to jump to a
@@ -331,19 +331,44 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // for widths below detailInlineWidth and the spec defines one, so the
 // interface really does render at 60 columns, where "q quit" is already cut
 // to "q qu". Nothing should budget against 62 as though it were guaranteed.
-func keyHints(v View, w int) string {
-	if line := viewKeyHints(v) + "  " + actionKeys(); lipgloss.Width(line) <= w {
+func (m *Model) keyHints(w int) string {
+	action := m.actionKeys()
+	if line := viewKeyHints(m.view) + "  " + action; lipgloss.Width(line) <= w {
 		return line
 	}
-	return actionKeys()
+	return action
 }
+
+// openHint names the key that jumps from the selected row to the log entry
+// that closed its span.
+const openHint = "⏎ open"
 
 // actionKeys is the hint group for the keys that DO something to what is on
 // screen, as opposed to the ones that change which view is on screen. It is
-// 62 display columns; every binding added to it pushes "q quit" closer to
-// the edge a narrow terminal cuts from, which is what keeps it this terse.
-func actionKeys() string {
-	return "⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit"
+// 62 display columns with the open hint and 52 without; every binding added
+// to it pushes "q quit" closer to the edge a narrow terminal cuts from,
+// which is what keeps it this terse.
+//
+// The open hint is shown only where Enter has something to open. Enter
+// resolves the SELECTED ROW to the log entry that closed its span, and a
+// rollup row stands for a group and resolves to no single span -- so in the
+// two rollup views the key returns immediately, and in the raw log there is
+// no row to press it over at all. Advertising a key that does nothing is
+// the defect this package removes wherever it finds it, and this hint stood
+// in three of the four views.
+//
+// It asks selectedRowOpens, which is built on the same row.isCall the Enter
+// handler asks, so the footer cannot come to advertise a key the handler
+// has stopped acting on. It does NOT ask which pane has focus: Enter is
+// inert from the detail pane the way space is inert outside the facet pane,
+// and "␣ facet" is shown regardless for the same reason -- a hint that
+// flickered as Tab moved would describe the keyboard rather than the view.
+func (m *Model) actionKeys() string {
+	keys := []string{"⇥ pane", "␣ facet"}
+	if m.selectedRowOpens() {
+		keys = append(keys, openHint)
+	}
+	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
 }
 
 // viewKeyHints is the hint group naming the number keys that switch views,
@@ -672,11 +697,10 @@ const (
 // alt screen.
 func (m *Model) selectedDetail(w int) (string, []detailSection) {
 	nothing := []detailSection{{clipWidth(noSelectionNote, w)}}
-	rows := m.rows()
-	if m.selected < 0 || m.selected >= len(rows) {
+	r, ok := m.selectedRow()
+	if !ok {
 		return noSelectionTitle, nothing
 	}
-	r := rows[m.selected]
 	if s, ok := m.spanForRow(r); ok {
 		return spanDetailTitle, []detailSection{spanDetailLines(s, w)}
 	}

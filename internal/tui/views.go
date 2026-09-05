@@ -242,6 +242,28 @@ func unhandledView(v View) string {
 	return fmt.Sprintf("tui: view %d has no rows or columns; add it to rows() and renderList()", v)
 }
 
+// selectedRow is the row the list cursor is on, and reports whether there is
+// one. A view with no rows, or a selection outside the rows there are, gets
+// false -- the single bounds check for the question, so the detail pane,
+// the Enter handler and the footer's open hint cannot disagree about which
+// row is selected or whether one is.
+func (m *Model) selectedRow() (row, bool) {
+	rows := m.rows()
+	if m.selected < 0 || m.selected >= len(rows) {
+		return row{}, false
+	}
+	return rows[m.selected], true
+}
+
+// selectedRowOpens reports whether Enter has anything to open: whether the
+// selected row is one span rather than a group of them. It is what the
+// footer's open hint is shown on, so the hint and the handler ask the same
+// question of the same row.
+func (m *Model) selectedRowOpens() bool {
+	r, ok := m.selectedRow()
+	return ok && r.isCall()
+}
+
 // providerRows ranks providers by total RPC time, as model.RollupBy already
 // orders them. No row is a single span, so every spanIdx is -1 and every
 // row carries a rollupDetail instead.

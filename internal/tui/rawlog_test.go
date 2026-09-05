@@ -278,7 +278,7 @@ func TestFailedSearchIsReportedAndClearsOnTheNextMatch(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "aws_internet_gateway")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
+	if got := footerOf(m.View()); got != clipWidth(m.keyHints(100), 100) {
 		t.Errorf("footer after a successful search = %q, want the key hints back", got)
 	}
 }
@@ -411,7 +411,7 @@ func TestEscCancelsTheSearchPrompt(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "aws_internet_gateway")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
+	if got := footerOf(m.View()); got != clipWidth(m.keyHints(100), 100) {
 		t.Errorf("footer = %q after Esc, want the key hints back", got)
 	}
 	if m.TopEntry() != before {
@@ -431,7 +431,7 @@ func TestEnterOnAnEmptyQueryClosesThePromptWithoutSearching(t *testing.T) {
 	m := rawLogView(t, "provider-rpc.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
+	if got := footerOf(m.View()); got != clipWidth(m.keyHints(100), 100) {
 		t.Errorf("footer = %q after Enter on an empty query, want the key hints", got)
 	}
 	if m.TopEntry() != 0 {
@@ -546,7 +546,7 @@ func TestSearchStateIsNotReportedOutsideTheRawLog(t *testing.T) {
 		t.Fatalf("footer = %q, want the miss reported in the raw log", got)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	if got := footerOf(m.View()); got != clipWidth(keyHints(m.ActiveView(), 100), 100) {
+	if got := footerOf(m.View()); got != clipWidth(m.keyHints(100), 100) {
 		t.Errorf("footer in the calls view = %q, want the key hints", got)
 	}
 }

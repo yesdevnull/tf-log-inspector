@@ -1341,6 +1341,45 @@ func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 	}
 }
 
+// A key hint must name a key that does something. Enter resolves the
+// selected row to the log entry that closed its span, and a ROLLUP row
+// stands for a group and resolves to none, so in the two rollup views Enter
+// returns immediately -- and in the raw log there is no row to press it
+// over. The hint stood in all four views regardless.
+//
+// Whether Enter does anything is MEASURED here by pressing it and seeing
+// whether the view moved, rather than listed as views this test believes
+// are inert: a list would go stale the day Enter learns to act on a rollup,
+// and would go stale silently, which is how the hint came to be wrong in
+// the first place.
+func TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens(t *testing.T) {
+	base := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if base.Focus() != PaneList {
+		t.Fatalf("focus = %v, want the list so Enter is handled", base.Focus())
+	}
+	var sawBoth [2]bool
+	for _, b := range views {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
+		got := footerOf(m.View())
+		opens := update(t, m, tea.KeyMsg{Type: tea.KeyEnter}).ActiveView() != m.ActiveView()
+		if opens {
+			sawBoth[0] = true
+		} else {
+			sawBoth[1] = true
+		}
+		if strings.Contains(got, "⏎ open") != opens {
+			verb := "does not offer"
+			if !opens {
+				verb = "offers"
+			}
+			t.Errorf("%s view: Enter opens = %v, but the footer %s the open hint: %q", b.name, opens, verb, got)
+		}
+	}
+	if !sawBoth[0] || !sawBoth[1] {
+		t.Fatalf("Enter behaved the same way in every view, so this cannot tell a conditional hint from an unconditional one")
+	}
+}
+
 // The footer is clipped from its END, and "q quit" is the one key a user
 // must not lose sight of. So the view-key hints are all-or-nothing: shown
 // only when the whole composed line fits, never appended and then cut. This
@@ -1349,8 +1388,11 @@ func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 func TestTheFooterNeverLosesQuitToTheViewKeys(t *testing.T) {
 	m := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, b := range views {
-		m.view = b.view
-		for w := lipgloss.Width(actionKeys()); w <= 200; w++ {
+		// setView rather than an assignment: it resets the selection and
+		// rebuilds the row cache, and the footer's own open hint is a
+		// function of the selected row.
+		m.setView(b.view)
+		for w := lipgloss.Width(m.actionKeys()); w <= 200; w++ {
 			got := clipWidth(m.footer(w), w)
 			if !strings.Contains(got, "q quit") {
 				t.Fatalf("%s at %d columns: footer %q has lost the quit hint", b.title, w, got)

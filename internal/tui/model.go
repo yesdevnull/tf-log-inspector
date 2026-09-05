@@ -315,10 +315,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// indexing RPCSpans, so the two cannot disagree about which
 			// rows carry a span.
 			if m.pane == PaneList {
-				if rows := m.rows(); m.selected >= 0 && m.selected < len(rows) {
-					if r := rows[m.selected]; r.isCall() {
-						m.jumpToSpan(r.spanIdx)
-					}
+				if r, ok := m.selectedRow(); ok && r.isCall() {
+					m.jumpToSpan(r.spanIdx)
 				}
 			}
 		case "pgdown":
