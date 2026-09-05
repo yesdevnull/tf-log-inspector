@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -51,7 +52,25 @@ const (
 // the other needs a different capture -- and collapsing them into the same
 // tierUI-with-nothing-in-it result would make tierNone unreachable and the
 // two states indistinguishable on screen.
+//
+// The result is cached on m (see timelineSpansCache), alongside the lanes
+// packed from it, because a single frame asks for it five times over and
+// each answer runs the filter over the whole tier into a fresh
+// full-capacity slice. Every caller must reach this through a POINTER, or
+// it fills a cache on a copy that is immediately discarded -- the hazard
+// rowsCache's own doc comment describes.
 func (m *Model) timelineSpans() (timelineTier, []span.Span) {
+	if !m.timelineSpansCached {
+		m.timelineTierCache, m.timelineSpansCache = m.filteredTimelineSpans()
+		m.timelineSpansCached = true
+	}
+	return m.timelineTierCache, m.timelineSpansCache
+}
+
+// filteredTimelineSpans is timelineSpans' answer built from scratch. It is
+// separate only so the cache above it is one branch rather than three
+// returns each having to remember to fill it.
+func (m *Model) filteredTimelineSpans() (timelineTier, []span.Span) {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
 		return tierNone, nil
 	}
@@ -102,34 +121,36 @@ func timelineWallClockMs(spans []span.Span) uint32 {
 }
 
 // timelineLanes packs the timeline's current tier and active filter's spans
-// into lanes, the same packing renderTimeline draws and the lane/span cursor
-// (see timelineState) moves over. It is the one place PackLanes is called
-// for the timeline, so the renderer and the cursor cannot disagree about how
-// many lanes there are or which spans sit in which.
+// into lanes (see packLanesByProvider), the same packing renderTimeline
+// draws and the lane/span cursor (see timelineState) moves over. It is the
+// one place the timeline's lanes are packed, so the renderer and the cursor
+// cannot disagree about how many lanes there are or which spans sit in
+// which.
 //
 // The result is cached on m (see timelineLanesCache), the same reason
 // rowsCache exists: one keystroke's render/Update cycle calls this from
 // renderTimeline, selectedRowOpens (via jumpTarget), selectedDetail (via
-// selectedTimelineSpanValue) and clampTimelineSelection, and PackLanes sorts
-// the tier's filtered spans on every call. Every caller must reach this
-// through a pointer, or it fills a cache on a copy that is immediately
-// discarded, the same hazard rowsCache's own doc comment describes.
+// selectedTimelineSpanValue) and clampTimelineSelection, and each packing
+// sorts every span it is handed. Every caller must reach this through a
+// pointer, or it fills a cache on a copy that is immediately discarded, the
+// same hazard rowsCache's own doc comment describes.
 //
-// INVARIANT, because the cache is only half of a pair: a model.Lane holds
-// INDICES into the slice timelineSpans() returns, and that slice is NOT
-// cached -- it is rebuilt on every call. The two agree only because both are
-// pure functions of the same filter state and invalidateRows clears this
-// cache whenever that state changes. A cached lane read against a span slice
-// built from different filter state indexes the wrong spans, and nothing
-// would report it: the detail pane would describe one span while Enter
-// jumped to another. Anything that changes what timelineSpans() returns must
-// therefore go through invalidateRows.
+// INVARIANT: a model.Lane holds INDICES into the slice timelineSpans()
+// returns, so the two must always be the same generation. That pairing is
+// structural rather than incidental -- both are cached on m, filled and
+// dropped together by the same invalidateRows -- so a caller cannot hold a
+// cached lane against a freshly rebuilt span slice. The failure it rules
+// out is silent: a lane read against spans built from different filter
+// state indexes the wrong spans, and the detail pane would describe one
+// call while Enter jumped to another with nothing on screen saying so.
+// Anything that changes what timelineSpans() returns must still go through
+// invalidateRows, which is what keeps both halves in step.
 func (m *Model) timelineLanes() []model.Lane {
 	if m.timelineLanesCached {
 		return m.timelineLanesCache
 	}
 	_, spans := m.timelineSpans()
-	lanes, err := model.PackLanes(spans)
+	lanes, err := packLanesByProvider(spans)
 	if err != nil {
 		// timelineSpans hands PackLanes spans of a single tier by
 		// construction, so ErrMixedTimelines reaching here means that
@@ -142,6 +163,61 @@ func (m *Model) timelineLanes() []model.Lane {
 	m.timelineLanesCache = lanes
 	m.timelineLanesCached = true
 	return lanes
+}
+
+// packLanesByProvider packs EACH PROVIDER's spans into its own lanes, as
+// the design spec specifies, and concatenates the results.
+//
+// Packing the tier as one set is greedy on timing alone, so two providers
+// whose calls merely happen not to overlap share a lane -- and on a real
+// multi-provider capture most lanes end up that way. Such a lane belongs to
+// no provider, which leaves the stall annotation naming a row and blaming
+// nobody ("waiting on mixed/2"). That destroys the annotation's whole
+// justification for naming lanes rather than spans: "waiting on aws/1"
+// earns its place by pointing at exactly one bar a reader can go and look
+// at. The cost is rows: a provider whose calls never overlap anything still
+// gets a row of its own, so the timeline is taller than the log's peak
+// concurrency. That is the honest picture -- those really are separate
+// providers' calls -- and it is why model.Stalls measures idle lanes
+// against the spans' own peak rather than against this count.
+//
+// Providers are packed in ascending order of the label they are drawn under
+// (laneLabelProvider), so the rows are in a stable order a reader can
+// predict and no map iteration order reaches the screen. Grouping is on
+// that same label rather than on the raw provider address, so that two
+// addresses sharing a short name cannot produce two different lanes both
+// labelled "aws/1"; the label already cannot tell them apart, and a lane
+// the reader cannot name is what this function exists to avoid.
+//
+// The returned indices are remapped from each group back into spans, so a
+// lane resolves against the tier's own slice, as every caller reads it.
+func packLanesByProvider(spans []span.Span) ([]model.Lane, error) {
+	grouped := make(map[string][]int)
+	for i, s := range spans {
+		p := laneLabelProvider(s.Provider)
+		grouped[p] = append(grouped[p], i)
+	}
+
+	var lanes []model.Lane
+	for _, provider := range slices.Sorted(maps.Keys(grouped)) {
+		idx := grouped[provider]
+		group := make([]span.Span, len(idx))
+		for i, s := range idx {
+			group[i] = spans[s]
+		}
+		packed, err := model.PackLanes(group)
+		if err != nil {
+			return nil, err
+		}
+		for _, lane := range packed {
+			mapped := make([]int, len(lane.Spans))
+			for i, g := range lane.Spans {
+				mapped[i] = idx[g]
+			}
+			lanes = append(lanes, model.Lane{Spans: mapped})
+		}
+	}
+	return lanes, nil
 }
 
 // clampTimelineSelection brings the lane and within-lane span cursors back
@@ -222,56 +298,35 @@ func (m *Model) selectedTimelineSpanValue() (span.Span, bool) {
 	return spans[idx], true
 }
 
-// mixedProviderLabel is a lane's provider bucket when its packed spans come
-// from more than one provider (see laneProvider). It is counted as its own
-// series by laneLabels, the same as any other provider name: a second mixed
-// lane is "mixed/2", not a second "mixed/1".
-const mixedProviderLabel = "mixed"
-
-// laneProvider is a lane's provider bucket: the provider its packed spans
-// belong to, or mixedProviderLabel when they belong to more than one.
-//
-// PackLanes packs purely by timing, with no notion of provider, so two
-// different providers' spans can land in one lane whenever their intervals
-// happen not to overlap. Naming such a lane after only its first span's
-// provider would misattribute every OTHER span in it to a provider it is
-// not from, so this reports "mixed" instead: a fixed-width, honest answer
-// over a guess that is wrong as often as it is right.
-func laneProvider(spans []span.Span, lane model.Lane) string {
-	provider := laneLabelProvider(spans[lane.Spans[0]].Provider)
-	for _, idx := range lane.Spans[1:] {
-		if laneLabelProvider(spans[idx].Provider) != provider {
-			return mixedProviderLabel
-		}
-	}
-	return provider
-}
-
 // laneLabels derives every lane's left-hand identifier in one pass over
-// lanes, in order: each lane's provider bucket (laneProvider), followed by
-// a running, PER-PROVIDER ordinal, e.g. "aws/2" for aws's second lane.
+// lanes, in order: the lane's provider, followed by a running,
+// PER-PROVIDER ordinal, e.g. "aws/2" for aws's second lane.
 //
-// The ordinal counts occurrences of that lane's own bucket among the lanes
-// seen so far, not the lane's position in the slice: with lanes ["aws",
-// "google", "aws"], the third lane is "aws/2", not "aws/3" -- aws only has
-// two lanes. This is what makes the label answer "which of THIS provider's
-// lanes is this" rather than "which row is this", the distinction Task 7's
-// stall text ("...waiting on aws/1") depends on: a reader matching that text
-// to a bar is looking for aws's own first lane, wherever it sits among rows
-// google or azurerm also occupy.
+// A lane's provider is read from any one of its spans, because
+// packLanesByProvider gives a lane only one provider's spans -- the label
+// is a fact about the lane rather than a summary of it.
+//
+// The ordinal counts occurrences of that lane's own provider among the
+// lanes seen so far, not the lane's position in the slice: with lanes
+// ["aws", "aws", "google"], the third lane is "google/1", not "google/3" --
+// google only has one lane. This is what makes the label answer "which of
+// THIS provider's lanes is this" rather than "which row is this", the
+// distinction the stall text ("...waiting on aws/1") depends on: a reader
+// matching that text to a bar is looking for aws's own first lane, wherever
+// it sits among the rows google or azurerm also occupy.
 func laneLabels(spans []span.Span, lanes []model.Lane) []string {
 	labels := make([]string, len(lanes))
 	counts := make(map[string]int, len(lanes))
 	for i, lane := range lanes {
-		provider := laneProvider(spans, lane)
+		provider := laneLabelProvider(spans[lane.Spans[0]].Provider)
 		counts[provider]++
 		labels[i] = fmt.Sprintf("%s/%d", provider, counts[provider])
 	}
 	return labels
 }
 
-// laneLabelProvider shortens a span's provider to the identifier laneProvider
-// shows: the last "/"-separated segment, which is the provider's short type
+// laneLabelProvider shortens a span's provider to the identifier a lane is
+// grouped and labelled by: the last "/"-separated segment, which is the provider's short type
 // name ("aws") whichever tier the span comes from -- the RPC tier's Provider
 // is the full registry address ("registry.terraform.io/hashicorp/aws") and
 // the UI tier's is already that short name with no "/" to split on, so one
@@ -287,11 +342,10 @@ func laneLabelProvider(provider string) string {
 }
 
 // maxLaneLabelWidth caps how much of the pane's width the label column may
-// claim, so a lane holding a long provider name -- or "mixed" -- cannot
-// squeeze the bar area, the point of this view, down to nothing. Provider
-// names are short, closed-vocabulary slugs ("aws", "google", "kubernetes"),
-// so this is a defensive ceiling rather than a width real logs are expected
-// to reach.
+// claim, so a lane holding a long provider name cannot squeeze the bar
+// area, the point of this view, down to nothing. Provider names are short,
+// closed-vocabulary slugs ("aws", "google", "kubernetes"), so this is a
+// defensive ceiling rather than a width real logs are expected to reach.
 const maxLaneLabelWidth = 12
 
 // laneLabelWidth is the label column's width for one render: wide enough for
@@ -309,8 +363,8 @@ func laneLabelWidth(labels []string) int {
 }
 
 // renderTimeline renders the timeline view's centre-pane content: one
-// labelled lane bar per lane PackLanes packs the active tier's spans into
-// (see timelineLanes), then the time axis, then the stall annotation (see
+// labelled lane bar per lane the active tier's spans pack into (see
+// timelineLanes), then the time axis, then the stall annotation (see
 // stallAnnotation) naming the windows model.Stalls found beneath it.
 //
 // A log with neither span tier gets the same capture guidance the table
@@ -394,6 +448,20 @@ func (m *Model) renderTimeline(w, h int) string {
 	annotationLines := strings.Split(m.stallAnnotation(w), "\n")
 	if room := max(h-1-min(1, len(lanes)), 0); len(annotationLines) > room {
 		annotationLines = annotationLines[:room]
+		// The cut is marked the same way the detail pane marks its own
+		// height cut (see detailCutMark), and for the stronger version of
+		// the same reason: the stalls are ordered longest first, so what a
+		// short pane drops is the tail of the ranking, and an annotation
+		// that merely stopped early would read as the whole of what there
+		// was to report. The mark takes the last line it has room for
+		// rather than being added beside them, since by definition there is
+		// no room to add one.
+		//
+		// A pane with no annotation room at all cannot say so -- the same
+		// unmarked case fitDetailSections has at a height of one line.
+		if room > 0 {
+			annotationLines[room-1] = clipWidth(detailCutMark, w)
+		}
 	}
 
 	dataH := h - 1 - len(annotationLines)
@@ -564,10 +632,10 @@ const maxStallsShown = 3
 // one.
 //
 // Measured against testdata/timeline.log, a 9s window: 5% is 450ms, so the
-// 1s floor governs. That drops the fixture's two ~500ms handover stalls
+// 1s floor governs. That drops the fixture's three 500ms handover slivers
 // (see model.Stalls' own merge-then-threshold doc comment) and keeps its
-// one genuine 5s solo window -- exactly the distinction this annotation
-// exists to draw.
+// 5s solo window and the 1s of core start-up before either provider was
+// called -- exactly the distinction this annotation exists to draw.
 func stallThresholdMs(wallClock uint32) uint32 {
 	return max(wallClock/20, 1000)
 }
@@ -578,6 +646,11 @@ func stallThresholdMs(wallClock uint32) uint32 {
 // model.Stalls produced from the very spans lanes was packed from, but is
 // reported rather than assumed so a broken invariant fails visibly instead
 // of indexing lanes with a value that silently means something else.
+//
+// It is never asked about model.Stall's own -1 -- the sentinel for a window
+// with nothing running at all. That is a legitimate value with its own
+// wording (see stallAnnotation), which is decided before a lane is looked
+// for, so a negative answer HERE still means only one thing.
 func stallLane(lanes []model.Lane, idx int) int {
 	for i, lane := range lanes {
 		if slices.Contains(lane.Spans, idx) {
@@ -593,7 +666,35 @@ func stallLane(lanes []model.Lane, idx int) int {
 // blocking span's RPC and resource type would not once a lane has packed
 // more than one call sharing that name. At most maxStallsShown, longest
 // first: the pane's height is finite, and a screenful of short stalls is
-// noise beside the one that mattered.
+// noise beside the one that mattered. A list SHORTENED to that few carries
+// detailCutMark, so that what was left out is visible rather than silently
+// absent -- see the mark's own doc comment, and writeSlowestCalls in
+// internal/profile, which states the same rule as "(top N)" only when it
+// actually truncated.
+//
+// Three kinds of window are worded differently, because they are three
+// different findings:
+//
+//   - A blocked wait names the lane still working, which is where a reader
+//     goes to look ("1 lane idle 3.3s–20.0s waiting on aws/1").
+//   - A window with nothing running anywhere has no lane to blame, and
+//     says so ("2 lanes idle 5.5s–9.0s — nothing running"): the time is
+//     not in the providers, so tuning provider parallelism will not touch
+//     it.
+//   - The window BEFORE any provider call is that same finding about
+//     Terraform core starting up -- loading plugins, fetching schemas --
+//     and is named for it ("2 lanes idle 0ms–3.0s — before any provider
+//     call"). It appears on nearly every capture, so wording it as a
+//     mid-plan collapse would tell every reader their plan fell over at
+//     the start. model.Stall documents why Blocking -1 at StartMs 0 is
+//     that window and can be no other.
+//
+// The idle count is capacity the log actually used at once (model.Stalls
+// measures against the spans' peak), which can be fewer than the rows
+// drawn: packing per provider opens a row for a provider whose calls never
+// overlap anything. So the count is left as a plain "N lanes idle" rather
+// than claimed as "ALL N lanes", which would be a statement about the rows
+// on screen that this number is not entitled to make.
 //
 // Offsets are rendered with formatMs, the same duration formatter every
 // other number in this package uses, rather than a wall-clock time: span
@@ -612,7 +713,7 @@ func (m *Model) stallAnnotation(w int) string {
 
 	lanes := m.timelineLanes()
 	wallClock := timelineWallClockMs(spans)
-	stalls, err := model.Stalls(spans, len(lanes), stallThresholdMs(wallClock))
+	stalls, err := model.Stalls(spans, stallThresholdMs(wallClock))
 	if err != nil {
 		// timelineSpans hands a single tier's spans by construction, the
 		// same guarantee timelineLanes leans on for PackLanes -- see its
@@ -636,7 +737,8 @@ func (m *Model) stallAnnotation(w int) string {
 		// sweep, not a property this function should expose.
 		return stalls[i].StartMs < stalls[j].StartMs
 	})
-	if len(stalls) > maxStallsShown {
+	truncated := len(stalls) > maxStallsShown
+	if truncated {
 		stalls = stalls[:maxStallsShown]
 	}
 
@@ -649,32 +751,50 @@ func (m *Model) stallAnnotation(w int) string {
 	// on screen.
 	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
-	lines := make([]string, len(stalls))
+	lines := make([]string, 0, len(stalls)+1)
 	for i, s := range stalls {
-		l := stallLane(lanes, s.Blocking)
-		if l < 0 {
-			// model.Stalls produced Blocking as an index into the very
-			// spans slice lanes was packed from, so every stall's blocking
-			// span must sit in exactly one lane -- the same invariant the
-			// panic above relies on for model.Stalls itself. Failing
-			// loudly here matches that convention, rather than naming a
-			// stall's lane "?", which would read as a deliberate answer
-			// instead of the broken guarantee it would actually be.
-			panic(fmt.Sprintf("tui: stallAnnotation: span %d (stall %d's Blocking) is not in any lane", s.Blocking, i))
-		}
 		unit := "lanes"
 		if s.Idle == 1 {
 			unit = "lane"
 		}
+		// Every line opens on the same clause -- how much capacity sat
+		// idle, and over which window -- so the three endings below are the
+		// only thing a reader has to tell apart, and the offsets land in
+		// the same place on each line to be read against the axis above.
+		window := fmt.Sprintf("%d %s idle %s–%s", s.Idle, unit, formatMs(uint64(s.StartMs)), formatMs(uint64(s.EndMs)))
+		var line string
+		switch {
+		case s.Blocking < 0 && s.StartMs == 0:
+			line = window + " — before any provider call"
+		case s.Blocking < 0:
+			line = window + " — nothing running"
+		default:
+			l := stallLane(lanes, s.Blocking)
+			if l < 0 {
+				// model.Stalls produced Blocking as an index into the very
+				// spans slice lanes was packed from, so every stall's
+				// blocking span must sit in exactly one lane -- the same
+				// invariant the panic above relies on for model.Stalls
+				// itself. Failing loudly here matches that convention,
+				// rather than naming a stall's lane "?", which would read
+				// as a deliberate answer instead of the broken guarantee it
+				// would actually be.
+				panic(fmt.Sprintf("tui: stallAnnotation: span %d (stall %d's Blocking) is not in any lane", s.Blocking, i))
+			}
+			line = window + " waiting on " + clipValueForKind(labels[l], labelW, tailIdentifierColumn)
+		}
 		// clipValueEnd rather than clipWidth: this line's payload is its
-		// TAIL -- which lane the idle ones waited on -- and clipWidth cuts
-		// with no marker, so a pane too narrow for the whole sentence would
-		// otherwise render "2 lanes idle 3.3s–9.0s waiting" as though that
-		// were all there was to say. The head is what survives the cut,
-		// since the offsets locate the window on the axis directly above;
-		// the ellipsis is what tells the reader a lane name was named and
-		// they have not seen it.
-		lines[i] = clipValueEnd(fmt.Sprintf("%d %s idle %s–%s waiting on %s", s.Idle, unit, formatMs(uint64(s.StartMs)), formatMs(uint64(s.EndMs)), clipValueForKind(labels[l], labelW, tailIdentifierColumn)), w)
+		// TAIL -- which lane the idle ones waited on, or that there was no
+		// lane to wait on -- and clipWidth cuts with no marker, so a pane
+		// too narrow for the whole sentence would otherwise render "2 lanes
+		// idle 3.3s–9.0s waiting" as though that were all there was to say.
+		// The head is what survives the cut, since the offsets locate the
+		// window on the axis directly above; the ellipsis is what tells the
+		// reader something was said that they have not seen.
+		lines = append(lines, clipValueEnd(line, w))
+	}
+	if truncated {
+		lines = append(lines, clipWidth(detailCutMark, w))
 	}
 	return strings.Join(lines, "\n")
 }

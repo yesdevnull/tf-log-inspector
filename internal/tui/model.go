@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // View identifies which of the top-level views the interface is showing.
@@ -161,16 +162,30 @@ type Model struct {
 	rowsCache  []row
 	rowsCached bool
 
-	// timelineLanesCache memoises timelineLanes() (PackLanes over the
-	// current tier and filter's spans) the same way rowsCache memoises
-	// rows(), and for the same reason: one render/keystroke cycle now calls
-	// it from renderTimeline, the footer's open hint, the detail pane and
-	// the cursor's own clamp, and PackLanes sorts the tier's filtered spans
-	// on every call -- on a real capture that is thousands of spans sorted
-	// several times over for one keystroke. Anything that can change what
-	// timelineLanes() returns -- the filter, since the tier itself is a
-	// property of the log (see timelineSpans) -- must invalidate this via
+	// timelineSpansCache and timelineTierCache memoise timelineSpans() --
+	// which tier the timeline draws, and that tier's spans under the active
+	// filter -- and timelineLanesCache memoises the lanes packed from them.
+	// They are one cache in two parts and are filled, served and dropped
+	// together, because a model.Lane holds INDICES into the span slice: a
+	// lane read against a slice built from different filter state indexes
+	// the wrong spans, and nothing would report it -- the detail pane would
+	// describe one call while Enter jumped to another.
+	//
+	// Both exist for the same reason rowsCache does. One render/keystroke
+	// cycle calls timelineSpans() from the pane title, renderTimeline, the
+	// stall annotation, the detail pane and Enter's jump target, and every
+	// call runs the filter over the whole tier into a fresh
+	// full-capacity slice; timelineLanes() is called nearly as often and
+	// sorts what it is given. On a real capture that is thousands of spans
+	// copied and sorted several times over for one keystroke.
+	//
+	// Anything that can change what timelineSpans() returns -- the filter,
+	// since the tier itself is a property of the log rather than of the
+	// selection (see timelineSpans) -- must invalidate these via
 	// invalidateRows.
+	timelineTierCache   timelineTier
+	timelineSpansCache  []span.Span
+	timelineSpansCached bool
 	timelineLanesCache  []model.Lane
 	timelineLanesCached bool
 
@@ -520,6 +535,9 @@ func (m *Model) setView(v View) {
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
+	m.timelineTierCache = tierNone
+	m.timelineSpansCache = nil
+	m.timelineSpansCached = false
 	m.timelineLanesCache = nil
 	m.timelineLanesCached = false
 	m.raw.notFound = false

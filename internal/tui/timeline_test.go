@@ -159,57 +159,83 @@ func TestLaneLabelsNameEachLaneByItsProvider(t *testing.T) {
 }
 
 // TestLaneLabelsNumberEachProviderIndependently is the case Task 6's review
-// found the plain row-index numbering got wrong: with lanes ["aws",
-// "google", "aws"] in that order, the THIRD lane must read "aws/2" -- aws's
-// own second lane -- not "aws/3", which would count google's lane as one of
-// aws's own. A reader (and Task 7's stall text, which names a lane like
-// "aws/1") is looking for a provider's Nth lane, not the Nth row.
+// found the plain row-index numbering got wrong: the ordinal counts a
+// provider's OWN lanes, so with lanes ["aws", "aws", "google"] the third
+// reads "google/1" -- google's first lane -- not "google/3", which would
+// count aws's two lanes as google's own. A reader (and the stall text,
+// which names a lane like "aws/1") is looking for a provider's Nth lane,
+// not the Nth row.
 func TestLaneLabelsNumberEachProviderIndependently(t *testing.T) {
 	spans := laneLabelSpans(
 		"registry.terraform.io/hashicorp/aws",
-		"registry.terraform.io/hashicorp/google",
 		"registry.terraform.io/hashicorp/aws",
+		"registry.terraform.io/hashicorp/google",
 	)
 	lanes := []model.Lane{{Spans: []int{0}}, {Spans: []int{1}}, {Spans: []int{2}}}
 	got := laneLabels(spans, lanes)
-	want := []string{"aws/1", "google/1", "aws/2"}
+	want := []string{"aws/1", "aws/2", "google/1"}
 	if !slices.Equal(got, want) {
 		t.Errorf("laneLabels = %v, want %v", got, want)
 	}
 }
 
-// TestLaneLabelsReportMixedForALaneSpanningProviders checks the case
-// PackLanes can produce and this package must decide something for: it
-// packs purely on timing, with no notion of provider, so two different
-// providers' spans can land in the same lane whenever their intervals do
-// not overlap. Naming just the first span's provider would misattribute
-// every other span in the lane to a provider it is not from, so the label
-// says "mixed" instead.
-func TestLaneLabelsReportMixedForALaneSpanningProviders(t *testing.T) {
-	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google")
-	lanes := []model.Lane{{Spans: []int{0, 1}}}
-	got := laneLabels(spans, lanes)
-	want := []string{"mixed/1"}
-	if !slices.Equal(got, want) {
-		t.Errorf("laneLabels = %v, want %v", got, want)
+// TestTimelineLanesPackEachProviderSeparately pins the rule the design spec
+// states: lanes are packed over EACH PROVIDER's spans, not over the tier's
+// whole set. These two calls never overlap, so packing on timing alone fits
+// both in one lane -- a row that belongs to neither provider, and that the
+// stall annotation could then only name after a provider neither of them
+// is. "waiting on aws/1" pointing at exactly one bar is the annotation's
+// whole justification for naming lanes at all, so the packing has to keep
+// a lane nameable.
+func TestTimelineLanesPackEachProviderSeparately(t *testing.T) {
+	m := New(&model.Log{RPCSpans: []span.Span{
+		{Provider: "registry.terraform.io/hashicorp/aws", RPC: "PlanResourceChange", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: "registry.terraform.io/hashicorp/google", RPC: "PlanResourceChange", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
+	}}, "x.log")
+	lanes := m.timelineLanes()
+	if len(lanes) != 2 {
+		t.Fatalf("two non-overlapping providers packed into %d lanes, want one lane each", len(lanes))
+	}
+	_, spans := m.timelineSpans()
+	if got := laneLabels(spans, lanes); !slices.Equal(got, []string{"aws/1", "google/1"}) {
+		t.Errorf("laneLabels = %v, want [aws/1 google/1]", got)
 	}
 }
 
-// TestLaneLabelsNumberMixedLanesAsTheirOwnSeries checks that "mixed" is
-// counted the same way every other provider bucket is: a second mixed lane
-// is "mixed/2", not a second "mixed/1" -- laneLabels treats it as one more
-// bucket among the others, not as a special case exempt from numbering.
-func TestLaneLabelsNumberMixedLanesAsTheirOwnSeries(t *testing.T) {
-	spans := laneLabelSpans(
-		"registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google", // lane 0: mixed
-		"registry.terraform.io/hashicorp/aws",                                           // lane 1: aws
-		"registry.terraform.io/hashicorp/google", "registry.terraform.io/hashicorp/aws", // lane 2: mixed
-	)
-	lanes := []model.Lane{{Spans: []int{0, 1}}, {Spans: []int{2}}, {Spans: []int{3, 4}}}
-	got := laneLabels(spans, lanes)
-	want := []string{"mixed/1", "aws/1", "mixed/2"}
-	if !slices.Equal(got, want) {
-		t.Errorf("laneLabels = %v, want %v", got, want)
+// TestTimelineLanesKeepEveryLaneIndexPointingAtItsOwnSpan is the aliasing
+// hazard per-provider packing introduces: model.Lane holds indices into the
+// slice PackLanes was given, and packing per provider gives it one GROUP at
+// a time, so an unmapped index would resolve, in the tier's own span slice,
+// to whichever span happened to sit at that position -- the detail pane
+// describing one call while Enter jumped to another, with nothing on screen
+// saying so.
+//
+// The fixture interleaves the providers (google, aws, google) so that group
+// positions and tier positions disagree for every span but the first, and
+// leaves the two google calls non-overlapping so google's own lane holds
+// two of them.
+func TestTimelineLanesKeepEveryLaneIndexPointingAtItsOwnSpan(t *testing.T) {
+	m := New(&model.Log{RPCSpans: []span.Span{
+		{Provider: "registry.terraform.io/hashicorp/google", RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: "registry.terraform.io/hashicorp/aws", RPC: "PlanResourceChange", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: "registry.terraform.io/hashicorp/google", RPC: "ApplyResourceChange", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
+	}}, "x.log")
+
+	lanes := m.timelineLanes()
+	_, spans := m.timelineSpans()
+	labels := laneLabels(spans, lanes)
+	if !slices.Equal(labels, []string{"aws/1", "google/1"}) {
+		t.Fatalf("lane labels = %v, want [aws/1 google/1]: providers are concatenated in ascending label order", labels)
+	}
+	for i, lane := range lanes {
+		for _, idx := range lane.Spans {
+			if got := laneLabelProvider(spans[idx].Provider); !strings.HasPrefix(labels[i], got+"/") {
+				t.Errorf("lane %q holds span %d, whose provider is %q", labels[i], idx, got)
+			}
+		}
+	}
+	if got := len(lanes[1].Spans); got != 2 {
+		t.Errorf("google's lane holds %d spans, want its 2 non-overlapping calls", got)
 	}
 }
 
@@ -565,12 +591,11 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 // states, and the frame states again when it shortens the logging caveat
 // rather than the footer.
 //
-// timeline-many-stalls.log reports maxStallsShown stalls, which is exactly
-// what a four-line pane has room for once the axis has taken its line: the
-// case where an unreserved lane row is lost entirely.
+// everyKindOfWaitModel reports maxStallsShown stalls, which is exactly what
+// a four-line pane has room for once the axis has taken its line: the case
+// where an unreserved lane row is lost entirely.
 func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing.T) {
-	m := update(t, New(testLog(t, "timeline-many-stalls.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m := everyKindOfWaitModel(t)
 	if got := len(strings.Split(m.stallAnnotation(40), "\n")); got != maxStallsShown {
 		t.Fatalf("fixture assumption changed: stallAnnotation is %d lines, want maxStallsShown (%d)", got, maxStallsShown)
 	}
@@ -589,6 +614,40 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 	row := padRight(labels[0], labelW) + " " + laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
 	if want := cursorBar(row, 40, true); lines[0] != want {
 		t.Errorf("first line = %q, want lane 0's bar %q: the annotation must not consume the last lane row", lines[0], want)
+	}
+}
+
+// TestRenderTimelineMarksAnAnnotationCutForHeight checks the other end of
+// that trade: the lane row a short pane keeps is taken out of the
+// annotation's own room, so stalls the annotation had to say go unsaid --
+// and an annotation that simply stopped early would read as the whole of
+// what there was to report. This package already refuses that equivalence
+// for the detail pane (see detailCutMark), and the stall list is where it
+// matters most: the reason to look at this view is the LONGEST wait, and a
+// silent cut is indistinguishable from there being no more.
+//
+// The same pane and height TestRenderTimelineKeepsALaneRowWhenThe
+// AnnotationWouldFillThePane uses, looked at from the annotation's end.
+func TestRenderTimelineMarksAnAnnotationCutForHeight(t *testing.T) {
+	m := everyKindOfWaitModel(t)
+	full := strings.Split(m.stallAnnotation(40), "\n")
+
+	lines := strings.Split(m.renderTimeline(40, 4), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	// One lane row, the axis, then whatever annotation room is left.
+	shown := lines[2:]
+	if len(shown) >= len(full) {
+		t.Fatalf("annotation was not cut at h=4 (%d of %d lines shown), so this test asserts nothing", len(shown), len(full))
+	}
+	if got := shown[len(shown)-1]; got != detailCutMark {
+		t.Errorf("last annotation line = %q, want %q: %d of %d stalls went unsaid with nothing marking it", got, detailCutMark, len(full)-len(shown), len(full))
+	}
+	// The cut takes the line it marks, so the stalls above it survive
+	// intact rather than the mark replacing the longest one.
+	if shown[0] != full[0] {
+		t.Errorf("first annotation line = %q, want the longest stall %q", shown[0], full[0])
 	}
 }
 
@@ -689,34 +748,135 @@ func TestStallAnnotationMarksATruncatedLine(t *testing.T) {
 	}
 }
 
-// TestStallAnnotationShowsAtMostTheTopFewByDuration checks the two things
-// maxStallsShown exists for: the stalls kept are the LONGEST by duration,
-// not the first chronologically, and no more than maxStallsShown are shown
-// even when every stall in the log clears the threshold.
-// timeline-many-stalls.log's four solo windows (5.7s, 5s, 4s, 2s, longest
-// first) all clear it, and its own doc comment explains why
-// testdata/timeline.log cannot exercise this: that fixture has only one
-// surviving stall, so it never touches the sort or the truncation at all.
-func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
+// TestStallAnnotationReportsOneContinuousWaitAsOneStall is
+// timeline-many-stalls.log's real shape: google's single call finishes at
+// 3.3s and nothing of google's runs again, while aws hands over from one
+// call to the next four times before the log ends at 20.0s. That is ONE
+// 16.7-second wait behind one lane, and the annotation must say so.
+//
+// It was previously reported as three separate waits (3.3s-9.0s, 9.0s-14.0s,
+// 14.0s-18.0s) with the fourth fragment dropped under the threshold, which
+// both spent three lines on one fact and understated the wait by the two
+// seconds the dropped fragment covered. A reader deciding whether to tune
+// provider parallelism is looking at how long the wait was; three numbers
+// that each understate it are worse than no annotation.
+//
+// The 3-second window before aws's first call is the fixture's only other
+// wait, and reads as core start-up rather than a mid-plan collapse (see
+// TestStallAnnotationNamesEachKindOfWaitDistinctly).
+func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 	m := update(t, New(testLog(t, "timeline-many-stalls.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 
 	got := m.stallAnnotation(80)
-	lines := strings.Split(got, "\n")
-	if len(lines) != maxStallsShown {
-		t.Fatalf("stallAnnotation produced %d lines, want %d (maxStallsShown): %q", len(lines), maxStallsShown, got)
+	want := []string{
+		"1 lane idle 3.3s–20.0s waiting on aws/1",
+		"2 lanes idle 0ms–3.0s — before any provider call",
 	}
+	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
+		t.Errorf("stallAnnotation = %v, want %v (one continuous wait, longest first)", lines, want)
+	}
+	// The old three-line form's own boundaries. Each was a handover INSIDE
+	// the blocking lane, not the end of the wait, so any of them surfacing
+	// again means the merge has come apart.
+	for _, boundary := range []string{"3.3s–9.0s", "9.0s–14.0s", "14.0s–18.0s", "18.0s–20.0s"} {
+		if strings.Contains(got, boundary) {
+			t.Errorf("stallAnnotation reports %s, a handover inside the blocking lane, as the end of a wait: %q", boundary, got)
+		}
+	}
+	// Nothing was dropped here, so nothing may claim it was: the cut mark
+	// and its absence are what tell a complete list from a shortened one.
+	if strings.Contains(got, detailCutMark) {
+		t.Errorf("stallAnnotation marks a cut over a fixture with %d stalls: %q", len(want), got)
+	}
+}
+
+// everyKindOfWaitModel is a model over synthetic spans producing one wait
+// of each kind the annotation words differently, and nothing else: three
+// seconds before either provider's first call, six seconds of aws and
+// google running together, eleven seconds in which nothing runs at all, and
+// ten seconds of aws running alone. Every one of them clears the
+// annotation's threshold, and there are exactly maxStallsShown of them, so
+// nothing is dropped.
+//
+// No log fixture carries all three, and one that did would be a fourth
+// fixture to keep in step with three tests. The spans are what the
+// annotation reads; a fixture would only be a longer way to write them.
+func everyKindOfWaitModel(t *testing.T) Model {
+	t.Helper()
+	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
+	return update(t, New(&model.Log{RPCSpans: []span.Span{
+		{Provider: aws, RPC: "PlanResourceChange", StartMs: 3000, EndMs: 9000, DurationMs: 6000, Fidelity: span.FidelityReported},
+		{Provider: google, RPC: "PlanResourceChange", StartMs: 3000, EndMs: 9000, DurationMs: 6000, Fidelity: span.FidelityReported},
+		{Provider: aws, RPC: "ApplyResourceChange", StartMs: 20000, EndMs: 30000, DurationMs: 10000, Fidelity: span.FidelityReported},
+	}}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+// TestStallAnnotationNamesEachKindOfWaitDistinctly pins the three things a
+// stall line can be.
+//
+// They are different findings and must not be worded the same. A blocked
+// wait names the lane to go and look at. A mid-plan window with nothing
+// running anywhere says the time is not in the providers at all, so there
+// is no lane to blame and no provider parallelism to tune -- and the
+// leading window says that about Terraform core starting up, which appears
+// on nearly EVERY capture and would read as a plan that collapsed at its
+// start if it were worded as a mid-plan dead window.
+func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
+	m := everyKindOfWaitModel(t)
+	want := []string{
+		"2 lanes idle 9.0s–20.0s — nothing running",
+		"1 lane idle 20.0s–30.0s waiting on aws/1",
+		"2 lanes idle 0ms–3.0s — before any provider call",
+	}
+	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
+		t.Errorf("stallAnnotation = %v, want %v", lines, want)
+	}
+}
+
+// topStallsModel is a model over synthetic spans producing FIVE separate
+// waits of distinct duration (10s, 8s, 6s, 4s, 2s), all clearing
+// stallAnnotation's threshold: one aws call running for the whole window,
+// and five google calls punctuating it, so each gap between google's calls
+// is its own stall with aws to blame and no two gaps can merge.
+//
+// It is synthetic rather than a log fixture because no fixture produces
+// more than maxStallsShown genuinely separate stalls -- the one that used
+// to appear to (timeline-many-stalls.log) was reporting four fragments of a
+// single wait, which is the defect
+// TestStallAnnotationReportsOneContinuousWaitAsOneStall now pins the fix for.
+func topStallsModel(t *testing.T) Model {
+	t.Helper()
+	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
+	spans := []span.Span{{Provider: aws, RPC: "ApplyResourceChange", StartMs: 0, EndMs: 40000, DurationMs: 40000, Fidelity: span.FidelityReported}}
+	for _, g := range [][2]uint32{{0, 2000}, {12000, 14000}, {22000, 24000}, {30000, 32000}, {36000, 38000}} {
+		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: g[0], EndMs: g[1], DurationMs: g[1] - g[0], Fidelity: span.FidelityReported})
+	}
+	return update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+// TestStallAnnotationShowsAtMostTheTopFewByDuration checks the two things
+// maxStallsShown exists for: the stalls kept are the LONGEST by duration,
+// not the first chronologically, and no more than maxStallsShown are shown
+// even when every stall in the log clears the threshold.
+func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
+	m := topStallsModel(t)
+	got := m.stallAnnotation(80)
+	lines := strings.Split(got, "\n")
 
 	want := []string{
-		"1 lane idle 3.3s–9.0s waiting on aws/1",
-		"1 lane idle 9.0s–14.0s waiting on aws/1",
-		"1 lane idle 14.0s–18.0s waiting on aws/1",
+		"1 lane idle 2.0s–12.0s waiting on aws/1",
+		"1 lane idle 14.0s–22.0s waiting on aws/1",
+		"1 lane idle 24.0s–30.0s waiting on aws/1",
+		detailCutMark,
 	}
 	if !slices.Equal(lines, want) {
-		t.Errorf("stallAnnotation = %v, want %v (the fixture's three longest solo windows, longest first)", lines, want)
+		t.Fatalf("stallAnnotation = %v, want %v (the three longest, longest first, and a mark for the rest)", lines, want)
 	}
-	if strings.Contains(got, "18.0s–20.0s") {
-		t.Errorf("stallAnnotation names the fixture's shortest (2s) stall, which maxStallsShown should have dropped: %q", got)
+	for _, dropped := range []string{"32.0s–36.0s", "38.0s–40.0s"} {
+		if strings.Contains(got, dropped) {
+			t.Errorf("stallAnnotation names the %s stall, which maxStallsShown should have dropped: %q", dropped, got)
+		}
 	}
 }
 
@@ -745,9 +905,10 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	}
 
 	// h=4 gives renderTimeline one line for the axis and one for the stall
-	// annotation -- the fixture's five spans fully overlap, so no lane is
-	// ever idle and stallAnnotation reports "no stalls" in a single line
-	// -- leaving two lane rows, fewer than the fixture's five lanes. With
+	// annotation -- the fixture's five spans fully overlap and run to the
+	// end of the log, so the only wait it has is the second of capture time
+	// before the first of them starts, which is one line -- leaving two
+	// lane rows, fewer than the fixture's five lanes. With
 	// the cursor on lane 4 (0-based) and a two-row window, scrollWindow's
 	// own pin-to-edge rule puts the window at lanes [3, 4]: lanes 0-2 must
 	// have scrolled off, and the cursor's own lane 4 must be the LAST lane

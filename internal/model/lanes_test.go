@@ -168,7 +168,7 @@ func TestStallsFindsTheWindowWhereOnlyOneSpanRan(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
 		{StartMs: 0, EndMs: 80, DurationMs: 80, RPC: "ReadResource"},
 	}
-	got, err := Stalls(spans, 3, 50)
+	got, err := Stalls(spans, 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestStallsIgnoresWindowsBelowTheThreshold(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 		{StartMs: 0, EndMs: 90, DurationMs: 90},
 	}
-	got, err := Stalls(spans, 2, 50)
+	got, err := Stalls(spans, 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestStallsRefusesMixedTimelines(t *testing.T) {
 		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityReported},
 		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityUIReported},
 	}
-	if _, err := Stalls(spans, 2, 0); !errors.Is(err, ErrMixedTimelines) {
+	if _, err := Stalls(spans, 0); !errors.Is(err, ErrMixedTimelines) {
 		t.Errorf("Stalls over mixed fidelities = %v, want ErrMixedTimelines", err)
 	}
 }
@@ -207,7 +207,7 @@ func TestStallsReportsNoStallWhenEverySpanRunsThroughout(t *testing.T) {
 		{StartMs: 0, EndMs: 500, DurationMs: 500},
 		{StartMs: 0, EndMs: 500, DurationMs: 500},
 	}
-	got, err := Stalls(spans, 2, 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestStallsReportsWindowsWhereNothingWasRunning(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 		{StartMs: 200, EndMs: 260, DurationMs: 60},
 	}
-	got, err := Stalls(spans, 2, 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 		{StartMs: 30, EndMs: 60, DurationMs: 30},
 		{StartMs: 0, EndMs: 10, DurationMs: 10},
 	}
-	got, err := Stalls(spans, 3, 50)
+	got, err := Stalls(spans, 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestStallsIgnoresElapsedZeroDurationSpansWhenChoosingBlocking(t *testing.T)
 		{StartMs: 0, EndMs: 100, DurationMs: 0}, // genuinely running throughout
 		{StartMs: 0, EndMs: 20, DurationMs: 20}, // the second lane's work
 	}
-	got, err := Stalls(spans, 2, 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestStallsBreaksDurationTiesTowardsTheLowerIndex(t *testing.T) {
 		{StartMs: 0, EndMs: 200, DurationMs: 200},
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 	}
-	got, err := Stalls(spans, 3, 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestStallsDoesNotCountTheLaneAZeroDurationSpanOpens(t *testing.T) {
 		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
 		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
 	}
-	if got, err := Stalls(busy, 3, 1000); err != nil {
+	if got, err := Stalls(busy, 1000); err != nil {
 		t.Fatalf("Stalls: %v", err)
 	} else if len(got) != 0 {
 		t.Fatalf("Stalls over three spans that all run throughout = %+v, want none", got)
@@ -354,7 +354,7 @@ func TestStallsDoesNotCountTheLaneAZeroDurationSpanOpens(t *testing.T) {
 	if len(lanes) != 4 {
 		t.Fatalf("PackLanes packed %d lanes, want 4 -- this test's premise is that the zero-duration span opens a fourth", len(lanes))
 	}
-	got, err := Stalls(withZero, len(lanes), 1000)
+	got, err := Stalls(withZero, 1000)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestStallsMergesOneWaitAcrossHandoversInsideTheBlockingLane(t *testing.T) {
 	if len(lanes) != 2 {
 		t.Fatalf("PackLanes packed %d lanes, want 2 -- every aws span reuses lane 0", len(lanes))
 	}
-	got, err := Stalls(spans, len(lanes), 1000)
+	got, err := Stalls(spans, 1000)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
 		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
 	}
-	got, err := Stalls(spans, 2, 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
 		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
 	}
-	if got, err := Stalls(atZero, 2, 0); err != nil {
+	if got, err := Stalls(atZero, 0); err != nil {
 		t.Fatalf("Stalls: %v", err)
 	} else if len(got) != 0 {
 		t.Errorf("Stalls = %+v, want none: work starts at the log's zero point, so there is no window before it", got)
@@ -450,7 +450,7 @@ func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 		dur := uint32(r.IntN(400))
 		spans[i] = span.Span{StartMs: start, EndMs: start + dur, DurationMs: dur}
 	}
-	got, err := Stalls(spans, len(spans), 0)
+	got, err := Stalls(spans, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}

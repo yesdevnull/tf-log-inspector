@@ -187,6 +187,14 @@ type Stall struct {
 	// Consumers must handle it: indexing spans with -1 panics, and looking
 	// -1 up in a lane finds none. See Stalls for why such windows are
 	// reported rather than skipped.
+	// Blocking -1 together with StartMs 0 identifies one particular window
+	// and no other: the elapsed capture time before any span started. Every
+	// span's StartMs is at or after 0, so a window with nothing running
+	// that begins at 0 precedes every span by construction, while any
+	// LATER all-idle window begins at the instant some span ended and so
+	// has a non-zero start. A consumer wanting to explain core start-up
+	// separately from a mid-run collapse can therefore derive it, rather
+	// than needing a flag here that Stalls would have to keep in step.
 	Blocking int
 }
 
@@ -215,23 +223,26 @@ func outranksAsBlocking(spans []span.Span, a, b int) bool {
 // the span still running while the others are not.
 //
 // The capacity idle lanes are counted against is the spans' own peak
-// concurrency, not the caller's lane count. PackLanes gives a zero-extent
-// span a lane of its own so the timeline has a row to draw it in (see
-// PeakConcurrency), and that lane can hold work in no window at all:
-// counting it as capacity reports the entire run as idle off the back of
-// one instantaneous span, which the UI-hook tier emits by the dozen. For
-// spans with a non-empty extent the two numbers agree anyway -- greedy
-// packing in start order needs exactly as many lanes as the deepest
-// overlap -- so nothing is lost by measuring against the spans.
+// concurrency. Stalls takes no lane count from the caller, because there is
+// no lane count a correct caller could pass that would change the answer: a
+// lane holds one span at a time, so however a caller chooses to pack these
+// spans into rows it needs at least as many rows as the deepest overlap,
+// and a ceiling at or above the peak never bites. Deriving the capacity
+// here instead also keeps the number honest where a lane count would not
+// be. PackLanes gives a zero-extent span a lane of its own so the timeline
+// has a row to draw it in (see PeakConcurrency), and that lane can hold
+// work in no window at all: counted as capacity it reports the entire run
+// as idle off the back of one instantaneous span, which the UI-hook tier
+// emits by the dozen.
 //
-// lanes is kept as a ceiling on that capacity, so Stalls never reports more
-// idle lanes than the caller has rows to show them in. A caller passing
-// len(PackLanes(spans)) can only ever pass a number at or above the peak,
-// so the cap does not bite there; it is what stops a caller drawing a
-// narrower timeline from being told about lanes it does not have.
+// The consequence a caller must word its output for: capacity is what a
+// stall's Idle is measured against, so Idle can be smaller than the number
+// of rows the caller draws -- a caller packing each provider's spans
+// separately opens a row for a provider whose calls never overlap anything,
+// and that row is real but is not capacity the log ever used at once.
 //
-// minMs is the caller's own noise threshold; Stalls invents neither it nor
-// the lane count. Windows are merged before minMs is applied, because a
+// minMs is the caller's own noise threshold; Stalls does not invent it.
+// Windows are merged before minMs is applied, because a
 // stall split by a handover is still one stall: thresholding first drops
 // both halves of a genuine wait that only looks short in pieces.
 //
@@ -253,7 +264,7 @@ func outranksAsBlocking(spans []span.Span, a, b int) bool {
 // An annotation silent about it contradicts the picture it sits under.
 // Such a window can never merge into a blocked one, since idle is the full
 // capacity when nothing runs and strictly less whenever something does.
-func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
+func Stalls(spans []span.Span, minMs uint32) ([]Stall, error) {
 	if len(spans) == 0 {
 		return nil, nil
 	}
@@ -262,7 +273,7 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 	}
 
 	events := spanEvents(spans)
-	capacity := min(lanes, peakFromEvents(events))
+	capacity := peakFromEvents(events)
 
 	// order lists spans best-blocker first and rank is its inverse, so the
 	// blocking span of a window is the lowest rank still running: running

@@ -5,7 +5,7 @@ PROVIDERS                                │ TIMELINE (rpc)                     
 [ ] …ry.terraform.io/hashicorp/google  1 │ google/1           ████████████████                                        │ Prov  …gistry.terraform.io/hashicorp/aws
 RPCS                                     │          0s                                                           9.0s │ Dur   2.0s                              
 [ ] ApplyResourceChange  3               │ 1 lane idle 4.0s–9.0s waiting on aws/1                                     │                                         
-RESOURCE TYPES                           │                                                                            │                                         
+RESOURCE TYPES                           │ 2 lanes idle 0ms–1.0s — before any provider call                           │                                         
 [ ] aws_instance  1                      │                                                                            │                                         
 [ ] aws_subnet  1                        │                                                                            │                                         
 [ ] google_compute_instance  1           │                                                                            │                                         

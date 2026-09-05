@@ -1,25 +1,23 @@
-# SYNTHESISED to exercise the stall annotation's own truncation and
-# ordering: four solo stall windows of DISTINCT duration (5.7s, 5s, 4s,
-# 2s), back to back with no gap between them, all comfortably clearing
-# stallAnnotation's 1s/5% threshold. The annotation shows only the top
-# three by duration, so this fixture pins that the correct three survive
-# (5.7s, 5s, 4s) and the shortest (2s) is the one dropped -- a distinction
-# testdata/timeline.log cannot exercise, since it clears the threshold
-# with only one stall. All boundary times are round multiples of 100ms so
-# formatMs's one-decimal rendering has nothing to round.
+# SYNTHESISED to exercise the stall annotation over a wait that is split
+# by handovers inside the lane doing the blocking. One short google call
+# runs early and google never runs again; four aws calls then hand over to
+# each other back to back until the log ends. google's lane is therefore
+# idle continuously from 3.3s to 20.0s -- ONE 16.7-second wait -- even
+# though four different aws spans block it in turn, and the annotation
+# must report it as one wait of that length rather than as the four
+# fragments the sweep sees. It also carries the window before any provider
+# call at all: 3.0s of capture time in which Terraform core was starting
+# up, which is a wait of a different kind and is worded as one.
 #
-# The one aws span opened before the google span ends up as PackLanes'
-# lane 0, and every later aws span reuses that same lane -- PackLanes
-# checks lanes in order and lane 0 is always free again by the time the
-# next aws span starts -- so lane 0 stays aws-only and every stall here
-# names "aws/1", not "mixed/1" (a mixed lane is what an earlier, less
-# careful version of this fixture produced when the SHORT google span was
-# opened first instead of the long-running aws sequence: PackLanes then
-# reused google's lane for the LATER aws spans, since it freed up first,
-# which would have made this fixture assert something other than what it
-# was built to test). The google span's own lane is never reused, since
-# lane 0 is always tried first and always available by the time anything
-# else needs a lane.
+# Boundary times are round multiples of 100ms so formatMs's one-decimal
+# rendering has nothing to round. The 3.0s-3.1s sliver before the google
+# call opens is below the annotation's 1s/5% threshold and is dropped,
+# which is why the reported wait starts at 3.3s and not at 3.0s.
+#
+# Lanes are packed per provider, so aws's four calls share one lane and
+# google's single call has its own: the annotation names "aws/1", and
+# providers are concatenated in ascending label order, so aws is the first
+# row and google the second.
 #
 # The line shape is testdata/two-providers.log's "Received downstream
 # response" verbatim. The first line is not itself a response: it anchors

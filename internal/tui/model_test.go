@@ -333,6 +333,27 @@ func TestRenderFillsTheRowsCacheOnTheModelItRendered(t *testing.T) {
 	}
 }
 
+// The timeline's filtered span slice is cached the same way and needs the
+// same guarantee, for a stronger reason than cost alone: the packed lanes
+// beside it hold INDICES into that slice, so a render filling one cache on
+// a copy while the other survives on the live model is how the two come
+// apart. Observed the same way -- once the tier is cached, swapping the log
+// out cannot change what the next caller sees.
+func TestRenderFillsTheTimelineSpansCacheOnTheModelItRendered(t *testing.T) {
+	live := liveModel(t, "timeline.log", tea.WindowSizeMsg{Width: 160, Height: 40}, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	_, want := live.timelineSpans()
+	if len(want) == 0 {
+		t.Fatal("fixture has no timed spans, so a stale slice could not be told from a freshly built one")
+	}
+
+	live.timelineSpansCache, live.timelineSpansCached = nil, false
+	_ = live.View()
+	live.log = &model.Log{} // a rebuild would now find no spans at all
+	if _, got := live.timelineSpans(); len(got) != len(want) {
+		t.Errorf("timelineSpans returned %d spans after a render, want the cached %d -- the render cached into a copy", len(got), len(want))
+	}
+}
+
 func TestRowCountFillsTheRowsCacheOnTheModelItCounted(t *testing.T) {
 	live := liveModel(t, "two-providers.log")
 
