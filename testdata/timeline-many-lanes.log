@@ -1,0 +1,19 @@
+# SYNTHESISED to exercise the swimlane timeline's lane-scrolling window: five
+# RPC spans that all cover the exact same interval, so PackLanes' greedy
+# packing (a span goes into the first lane whose last span has already
+# finished) cannot reuse any earlier lane for a later span and opens a new
+# one each time -- five fully-overlapping spans force five lanes,
+# deterministically, rather than leaving the count to depend on a packing
+# heuristic this fixture would then have to explain. The line shape is
+# testdata/two-providers.log's "Received downstream response" verbatim. The
+# first line is not itself a response: it exists only to anchor the
+# scanner's base clock a few seconds before the first real span, so that
+# span's start is not clamped to zero by ReportedBuilder (see the doc
+# comment on span.Span). Values are invented; no line here is from a real
+# run.
+2026-09-05T03:00:00.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Configuring provider client @module=sdk.proto
+2026-09-05T03:00:06.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-1111-4a1b-8c2d-000000000001 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
+2026-09-05T03:00:06.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-2222-4a1b-8c2d-000000000002 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
+2026-09-05T03:00:06.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-3333-4a1b-8c2d-000000000003 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
+2026-09-05T03:00:06.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-4444-4a1b-8c2d-000000000004 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
+2026-09-05T03:00:06.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-5555-4a1b-8c2d-000000000005 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto

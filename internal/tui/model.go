@@ -158,6 +158,19 @@ type Model struct {
 	rowsCache  []row
 	rowsCached bool
 
+	// timelineLanesCache memoises timelineLanes() (PackLanes over the
+	// current tier and filter's spans) the same way rowsCache memoises
+	// rows(), and for the same reason: one render/keystroke cycle now calls
+	// it from renderTimeline, the footer's open hint, the detail pane and
+	// the cursor's own clamp, and PackLanes sorts the tier's filtered spans
+	// on every call -- on a real capture that is thousands of spans sorted
+	// several times over for one keystroke. Anything that can change what
+	// timelineLanes() returns -- the filter, since the tier itself is a
+	// property of the log (see timelineSpans) -- must invalidate this via
+	// invalidateRows.
+	timelineLanesCache  []model.Lane
+	timelineLanesCached bool
+
 	// facetPaneNatural and detailPaneNatural are how wide each side pane
 	// would have to be to show its widest line in full. Both are functions
 	// of data that never changes after New -- the log's spans, and the
@@ -496,6 +509,8 @@ func (m *Model) setView(v View) {
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
+	m.timelineLanesCache = nil
+	m.timelineLanesCached = false
 	m.raw.notFound = false
 	m.clampSelection()
 	m.clampTimelineSelection()

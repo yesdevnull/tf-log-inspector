@@ -104,7 +104,18 @@ func timelineWallClockMs(spans []span.Span) uint32 {
 // (see timelineState) moves over. It is the one place PackLanes is called
 // for the timeline, so the renderer and the cursor cannot disagree about how
 // many lanes there are or which spans sit in which.
+//
+// The result is cached on m (see timelineLanesCache), the same reason
+// rowsCache exists: one keystroke's render/Update cycle calls this from
+// renderTimeline, selectedRowOpens (via jumpTarget), selectedDetail (via
+// selectedTimelineSpanValue) and clampTimelineSelection, and PackLanes sorts
+// the tier's filtered spans on every call. Every caller must reach this
+// through a pointer, or it fills a cache on a copy that is immediately
+// discarded, the same hazard rowsCache's own doc comment describes.
 func (m *Model) timelineLanes() []model.Lane {
+	if m.timelineLanesCached {
+		return m.timelineLanesCache
+	}
 	_, spans := m.timelineSpans()
 	lanes, err := model.PackLanes(spans)
 	if err != nil {
@@ -116,6 +127,8 @@ func (m *Model) timelineLanes() []model.Lane {
 		// view was never built.
 		panic(fmt.Sprintf("tui: timelineLanes: %v", err))
 	}
+	m.timelineLanesCache = lanes
+	m.timelineLanesCached = true
 	return lanes
 }
 
@@ -197,33 +210,55 @@ func (m *Model) selectedTimelineSpanValue() (span.Span, bool) {
 	return spans[idx], true
 }
 
-// mixedProviderLabel is a lane's label when its packed spans come from more
-// than one provider (see laneLabel).
+// mixedProviderLabel is a lane's provider bucket when its packed spans come
+// from more than one provider (see laneProvider). It is counted as its own
+// series by laneLabels, the same as any other provider name: a second mixed
+// lane is "mixed/2", not a second "mixed/1".
 const mixedProviderLabel = "mixed"
 
-// laneLabel is a lane's left-hand identifier: the provider its spans belong
-// to and its one-based position among the lanes drawn, e.g. "aws/2" --
-// one-based to match how a reader counts rows by eye rather than the
-// zero-based index PackLanes returns.
+// laneProvider is a lane's provider bucket: the provider its packed spans
+// belong to, or mixedProviderLabel when they belong to more than one.
 //
 // PackLanes packs purely by timing, with no notion of provider, so two
 // different providers' spans can land in one lane whenever their intervals
 // happen not to overlap. Naming such a lane after only its first span's
 // provider would misattribute every OTHER span in it to a provider it is
-// not from, so laneLabel reports "mixed" instead: a fixed-width, honest
-// answer over a guess that is wrong as often as it is right.
-func laneLabel(spans []span.Span, lane model.Lane, n int) string {
+// not from, so this reports "mixed" instead: a fixed-width, honest answer
+// over a guess that is wrong as often as it is right.
+func laneProvider(spans []span.Span, lane model.Lane) string {
 	provider := laneLabelProvider(spans[lane.Spans[0]].Provider)
 	for _, idx := range lane.Spans[1:] {
 		if laneLabelProvider(spans[idx].Provider) != provider {
-			provider = mixedProviderLabel
-			break
+			return mixedProviderLabel
 		}
 	}
-	return fmt.Sprintf("%s/%d", provider, n)
+	return provider
 }
 
-// laneLabelProvider shortens a span's provider to the identifier laneLabel
+// laneLabels derives every lane's left-hand identifier in one pass over
+// lanes, in order: each lane's provider bucket (laneProvider), followed by
+// a running, PER-PROVIDER ordinal, e.g. "aws/2" for aws's second lane.
+//
+// The ordinal counts occurrences of that lane's own bucket among the lanes
+// seen so far, not the lane's position in the slice: with lanes ["aws",
+// "google", "aws"], the third lane is "aws/2", not "aws/3" -- aws only has
+// two lanes. This is what makes the label answer "which of THIS provider's
+// lanes is this" rather than "which row is this", the distinction Task 7's
+// stall text ("...waiting on aws/1") depends on: a reader matching that text
+// to a bar is looking for aws's own first lane, wherever it sits among rows
+// google or azurerm also occupy.
+func laneLabels(spans []span.Span, lanes []model.Lane) []string {
+	labels := make([]string, len(lanes))
+	counts := make(map[string]int, len(lanes))
+	for i, lane := range lanes {
+		provider := laneProvider(spans, lane)
+		counts[provider]++
+		labels[i] = fmt.Sprintf("%s/%d", provider, counts[provider])
+	}
+	return labels
+}
+
+// laneLabelProvider shortens a span's provider to the identifier laneProvider
 // shows: the last "/"-separated segment, which is the provider's short type
 // name ("aws") whichever tier the span comes from -- the RPC tier's Provider
 // is the full registry address ("registry.terraform.io/hashicorp/aws") and
@@ -274,7 +309,7 @@ func laneLabelWidth(labels []string) int {
 // separates for the same reason; see timelineSpans for why they can never
 // collapse into each other.
 //
-// Each lane's row is its label (laneLabel), padded to the widest label
+// Each lane's row is its label (laneLabels), padded to the widest label
 // drawn, then its bar over whatever width is left of w -- laneBar is tested
 // at exact widths and does not itself know about the label, so this is the
 // one place that width is divided between the two. The selected lane is
@@ -309,10 +344,7 @@ func (m *Model) renderTimeline(w, h int) string {
 	lanes := m.timelineLanes()
 	wallClock := timelineWallClockMs(spans)
 
-	labels := make([]string, len(lanes))
-	for i, lane := range lanes {
-		labels[i] = laneLabel(spans, lane, i+1)
-	}
+	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := max(w-labelW-1, 0)
 

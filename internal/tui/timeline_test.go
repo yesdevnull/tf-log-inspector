@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -134,8 +135,8 @@ func TestTimelineDetailPaneShowsAddressForAUIHookSpan(t *testing.T) {
 	}
 }
 
-// laneLabelSpans builds a minimal span slice for laneLabel tests: only
-// Provider matters to it, so every other field is left zero.
+// laneLabelSpans builds a minimal span slice for laneLabels tests: only
+// Provider matters to them, so every other field is left zero.
 func laneLabelSpans(providers ...string) []span.Span {
 	spans := make([]span.Span, len(providers))
 	for i, p := range providers {
@@ -144,29 +145,71 @@ func laneLabelSpans(providers ...string) []span.Span {
 	return spans
 }
 
-// TestLaneLabelNamesTheProviderAndLaneNumber checks the one-provider case:
-// the label is the provider's short name (the last "/"-segment of a
-// registry address) and the lane's one-based position.
-func TestLaneLabelNamesTheProviderAndLaneNumber(t *testing.T) {
-	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/aws")
-	got := laneLabel(spans, model.Lane{Spans: []int{0, 1}}, 2)
-	if want := "aws/2"; got != want {
-		t.Errorf("laneLabel = %q, want %q", got, want)
+// TestLaneLabelsNameEachLaneByItsProvider checks the one-provider-per-lane
+// case: each label is that lane's provider's short name (the last
+// "/"-segment of a registry address).
+func TestLaneLabelsNameEachLaneByItsProvider(t *testing.T) {
+	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google")
+	lanes := []model.Lane{{Spans: []int{0}}, {Spans: []int{1}}}
+	got := laneLabels(spans, lanes)
+	want := []string{"aws/1", "google/1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("laneLabels = %v, want %v", got, want)
 	}
 }
 
-// TestLaneLabelReportsMixedForALaneSpanningProviders checks the case
+// TestLaneLabelsNumberEachProviderIndependently is the case Task 6's review
+// found the plain row-index numbering got wrong: with lanes ["aws",
+// "google", "aws"] in that order, the THIRD lane must read "aws/2" -- aws's
+// own second lane -- not "aws/3", which would count google's lane as one of
+// aws's own. A reader (and Task 7's stall text, which names a lane like
+// "aws/1") is looking for a provider's Nth lane, not the Nth row.
+func TestLaneLabelsNumberEachProviderIndependently(t *testing.T) {
+	spans := laneLabelSpans(
+		"registry.terraform.io/hashicorp/aws",
+		"registry.terraform.io/hashicorp/google",
+		"registry.terraform.io/hashicorp/aws",
+	)
+	lanes := []model.Lane{{Spans: []int{0}}, {Spans: []int{1}}, {Spans: []int{2}}}
+	got := laneLabels(spans, lanes)
+	want := []string{"aws/1", "google/1", "aws/2"}
+	if !slices.Equal(got, want) {
+		t.Errorf("laneLabels = %v, want %v", got, want)
+	}
+}
+
+// TestLaneLabelsReportMixedForALaneSpanningProviders checks the case
 // PackLanes can produce and this package must decide something for: it
 // packs purely on timing, with no notion of provider, so two different
 // providers' spans can land in the same lane whenever their intervals do
 // not overlap. Naming just the first span's provider would misattribute
 // every other span in the lane to a provider it is not from, so the label
 // says "mixed" instead.
-func TestLaneLabelReportsMixedForALaneSpanningProviders(t *testing.T) {
+func TestLaneLabelsReportMixedForALaneSpanningProviders(t *testing.T) {
 	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google")
-	got := laneLabel(spans, model.Lane{Spans: []int{0, 1}}, 1)
-	if want := "mixed/1"; got != want {
-		t.Errorf("laneLabel = %q, want %q", got, want)
+	lanes := []model.Lane{{Spans: []int{0, 1}}}
+	got := laneLabels(spans, lanes)
+	want := []string{"mixed/1"}
+	if !slices.Equal(got, want) {
+		t.Errorf("laneLabels = %v, want %v", got, want)
+	}
+}
+
+// TestLaneLabelsNumberMixedLanesAsTheirOwnSeries checks that "mixed" is
+// counted the same way every other provider bucket is: a second mixed lane
+// is "mixed/2", not a second "mixed/1" -- laneLabels treats it as one more
+// bucket among the others, not as a special case exempt from numbering.
+func TestLaneLabelsNumberMixedLanesAsTheirOwnSeries(t *testing.T) {
+	spans := laneLabelSpans(
+		"registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google", // lane 0: mixed
+		"registry.terraform.io/hashicorp/aws",                                           // lane 1: aws
+		"registry.terraform.io/hashicorp/google", "registry.terraform.io/hashicorp/aws", // lane 2: mixed
+	)
+	lanes := []model.Lane{{Spans: []int{0, 1}}, {Spans: []int{2}}, {Spans: []int{3, 4}}}
+	got := laneLabels(spans, lanes)
+	want := []string{"mixed/1", "aws/1", "mixed/2"}
+	if !slices.Equal(got, want) {
+		t.Errorf("laneLabels = %v, want %v", got, want)
 	}
 }
 
@@ -409,7 +452,7 @@ func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
 }
 
 // TestRenderTimelineDrawsOneRowPerLanePlusTheAxis pins the composition this
-// package owns: laneBar, timeAxis and laneLabel are tested in isolation
+// package owns: laneBar, timeAxis and laneLabels are tested in isolation
 // elsewhere, so this checks only that renderTimeline stacks one labelled bar
 // per lane, in PackLanes' order (via timelineLanes), with the axis -- indented
 // to sit under the bar area, past the label column every lane row reserves --
@@ -430,10 +473,7 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 
 	_, spans := m.timelineSpans()
 	wallClock := timelineWallClockMs(spans)
-	labels := make([]string, len(lanes))
-	for i, lane := range lanes {
-		labels[i] = laneLabel(spans, lane, i+1)
-	}
+	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 
@@ -465,14 +505,76 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 
 	lanes := m.timelineLanes()
 	_, spans := m.timelineSpans()
-	labels := make([]string, len(lanes))
-	for i, lane := range lanes {
-		labels[i] = laneLabel(spans, lane, i+1)
-	}
+	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	want := strings.Repeat(" ", labelW+1) + timeAxis(timelineWallClockMs(spans), barW)
 	if lines[0] != want {
 		t.Errorf("renderTimeline(h=1) = %q, want the axis alone: %q", lines[0], want)
+	}
+}
+
+// TestTimelineLaneRowsScrollToKeepTheCursorOnScreen checks the scrolling
+// renderTimeline gained when the lane cursor was added: the previous code
+// always drew lanes[:laneRows] -- the first screenful, full stop -- so
+// moving the cursor past it left the highlighted row off the visible pane
+// entirely. timeline-many-lanes.log packs into five lanes (verified below
+// against PackLanes rather than assumed); a pane with room for three of them
+// must scroll to keep the LAST one, where the cursor is moved to, on screen.
+func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-many-lanes.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	lanes := m.timelineLanes()
+	if len(lanes) != 5 {
+		t.Fatalf("timeline-many-lanes.log packs into %d lanes, want 5 (see the fixture's own doc comment)", len(lanes))
+	}
+
+	for i := 0; i < len(lanes)-1; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.timeline.lane != len(lanes)-1 {
+		t.Fatalf("lane = %d after moving to the last lane, want %d", m.timeline.lane, len(lanes)-1)
+	}
+
+	// h=4 gives renderTimeline three lane rows plus the axis -- fewer than
+	// the fixture's five lanes. With the cursor on lane 4 (0-based) and a
+	// three-row window, scrollWindow's own pin-to-edge rule puts the window
+	// at lanes [2, 3, 4]: lanes 0 and 1 must have scrolled off, and the
+	// cursor's own lane 4 must be the LAST row drawn, ahead of the axis.
+	got := m.renderTimeline(40, 4)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4 (3 lane rows plus the axis)", len(lines))
+	}
+
+	_, spans := m.timelineSpans()
+	wallClock := timelineWallClockMs(spans)
+	labels := laneLabels(spans, lanes)
+	labelW := laneLabelWidth(labels)
+	barW := 40 - labelW - 1
+	rowContent := func(i int) string {
+		return padRight(labels[i], labelW) + " " + laneBar(spans, lanes[i], wallClock, barW)
+	}
+
+	wantVisible := []int{2, 3, 4}
+	var scratch []byte
+	for row, laneIdx := range wantVisible {
+		want := rowContent(laneIdx)
+		if laneIdx == m.timeline.lane {
+			want = cursorBar(want, 40, true)
+		}
+		if lines[row] != want {
+			t.Errorf("row %d = %q, want lane %d's row %q", row, lines[row], laneIdx, want)
+		}
+	}
+	for _, hidden := range []int{0, 1} {
+		want, _ := logfmt.StripANSI(rowContent(hidden), scratch)
+		for _, line := range lines[:3] {
+			if stripped, s := logfmt.StripANSI(line, scratch); stripped == want {
+				scratch = s
+				t.Errorf("lane %d is still visible at %q; it should have scrolled off to keep the cursor's lane on screen", hidden, line)
+			}
+		}
 	}
 }
