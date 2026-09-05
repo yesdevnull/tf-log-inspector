@@ -914,6 +914,13 @@ func clipWidth(s string, w int) string {
 // from this function so the two cannot drift apart again). A reader
 // matching that window to the axis above it should not have to work out
 // that they are the same instant.
+//
+// The profile and diagnose report surfaces use their own formatters
+// (in internal/profile and internal/diagnose) and still render an exact
+// zero as "0ms", creating a surface difference for that value. The
+// difference is not reconciled: --profile's output is held byte-identical,
+// and changing it to match would be a deliberate change to a report format
+// for a cosmetic gain.
 func formatMs(ms uint64) string {
 	if ms == 0 {
 		return "0s"
