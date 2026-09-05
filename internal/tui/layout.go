@@ -216,6 +216,14 @@ const (
 // continuing from wherever the first line left off, cutting "q quit" away
 // again on exactly the terminals this task widened the footer to keep it
 // on.
+//
+// The footer is never given more than h-1 of those lines, so the header
+// always keeps at least one -- the h == 1 guard above already refuses to
+// let the footer push the header off the only line there is, and a
+// two-line footer must not undo that one line later at h == 2. What gives
+// way is the view-key line, not the action line: a footer trimmed to one
+// line keeps its LAST line, the same line a single-line footer always was
+// before this task split it in two, so "q quit" survives here as well.
 func (m *Model) View() string {
 	w, h := m.paneWidth(), m.height
 	if h <= 0 {
@@ -241,6 +249,9 @@ func (m *Model) View() string {
 	lines = append(lines, "")
 
 	footerLines := strings.Split(m.footer(w), "\n")
+	if avail := h - 1; len(footerLines) > avail {
+		footerLines = footerLines[len(footerLines)-avail:]
+	}
 	if room := h - len(footerLines); len(lines) > room {
 		lines = lines[:room]
 	}

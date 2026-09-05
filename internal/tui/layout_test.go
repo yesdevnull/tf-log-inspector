@@ -133,6 +133,25 @@ func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
 	}
 }
 
+// At h == 1 View returns just the header (see the guard at the top of
+// View): a frame that showed only key hints could belong to any file at
+// all. That principle does not stop applying at h == 2 just because there
+// is now room for a footer line beside it -- the two-line footer must give
+// up its second line rather than push the header out, since a two-line
+// frame naming no file is the same failure the h == 1 guard exists to
+// prevent.
+func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 2})
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("View() at height 2 is %d lines, want 2:\n%s", len(lines), view)
+	}
+	if !strings.HasPrefix(lines[0], "tfli -- x.log") {
+		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
+	}
+}
+
 // Golden files lock the layout at the three widths the spec names. They use
 // two-providers.log, not mixed-hcp.log: a golden commits whatever the view
 // renders into the repository, and two-providers.log is wholly synthesised
