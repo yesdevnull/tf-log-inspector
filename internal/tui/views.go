@@ -214,10 +214,32 @@ func (m *Model) rows() []row {
 		r = typeRows(f.SpansMatching(m.log.RPCSpans), m.uiFilter().SpansMatching(m.log.UISpans))
 	case ViewCalls:
 		r = callRows(m.log.RPCSpans, f)
+	case ViewRawLog:
+		// The raw log renders straight from m.log.Entries and has no rows
+		// of its own, so nil is its answer rather than an omission.
+		r = nil
+	default:
+		panic(unhandledView(m.view))
 	}
 	m.rowsCache = r
 	m.rowsCached = true
 	return r
+}
+
+// unhandledView is the message for a View that reached a switch with no case
+// for it. That can only happen by adding a value to the View enum and not to
+// the switches that project it -- Update reaches views through viewKeys,
+// which holds only bound keys -- so it is a programming error, and this
+// package treats those loudly.
+//
+// Degrading instead is what the dead pane was: rows() returning nil and
+// renderList returning "" compose a centre pane titled with the new view and
+// holding nothing, beside a detail pane saying nothing is selected and a
+// footer advertising the key that got there. Nothing on screen, and nothing
+// in the test suite, says the view was never built -- and views 3 (resource
+// addresses) and 5 (timeline) are specified and waiting to be added.
+func unhandledView(v View) string {
+	return fmt.Sprintf("tui: view %d has no rows or columns; add it to rows() and renderList()", v)
 }
 
 // providerRows ranks providers by total RPC time, as model.RollupBy already
@@ -440,7 +462,10 @@ func (m *Model) renderList(w, h int) string {
 	case ViewCalls:
 		cols = callColumns
 	default:
-		return ""
+		// ViewRawLog never reaches here -- renderCentre routes it to
+		// renderRawLog -- so anything landing in this case is a view with
+		// no table of its own. See unhandledView.
+		panic(unhandledView(m.view))
 	}
 	return renderTable(preamble, cols, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 }

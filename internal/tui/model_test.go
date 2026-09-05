@@ -107,14 +107,66 @@ func TestNewOpensOnTheCallsView(t *testing.T) {
 // table and the footer takes its key hint from it, so a view added to the
 // enum and not to the table renders a nameless pane and is reachable by no
 // key at all.
+//
+// The sweep is bounded by viewCount, the sentinel at the end of the enum,
+// rather than by ViewRawLog: a view added AFTER the last named one would
+// otherwise fall outside the very test meant to catch it.
+//
+// Two views bound to one KEY is the same defect from the other side.
+// viewKeys is built by writing each binding into a map, so a repeated key
+// silently keeps the last one and the earlier view becomes unreachable --
+// with its own hint still advertised in the footer, naming a key that
+// switches to something else.
 func TestEveryViewHasABinding(t *testing.T) {
-	for v := ViewProviders; v <= ViewRawLog; v++ {
+	for v := View(0); v < viewCount; v++ {
 		if viewTitle(v) == "" {
 			t.Errorf("view %v has no title in views", v)
 		}
 		if !slices.ContainsFunc(views, func(b viewBinding) bool { return b.view == v }) {
 			t.Errorf("view %v has no key in views", v)
 		}
+	}
+	seen := make(map[string]View, len(views))
+	for _, b := range views {
+		if other, dup := seen[b.key]; dup {
+			t.Errorf("key %q is bound to both %v and %v; only the last survives viewKeys", b.key, other, b.view)
+		}
+		seen[b.key] = b.view
+	}
+	if len(viewKeys) != len(views) {
+		t.Errorf("viewKeys has %d entries for %d bindings -- a key is bound twice", len(viewKeys), len(views))
+	}
+}
+
+// A view the centre pane cannot build rows for, or cannot choose columns
+// for, must fail where a developer sees it. Left to degrade, the two
+// switches return nil and "": the frame then renders a centre pane titled
+// with the new view and holding nothing, a detail pane saying nothing is
+// selected, and a footer advertising the key that got there -- a dead pane
+// that looks like a rendering fault and passes every test in this package.
+// Views 3 and 5 are specified and unbuilt, so this is one edit away.
+//
+// A View outside the enum stands in for that view here: Update can never
+// produce one (viewKeys holds only bound keys), so it is the same
+// programming error reached without editing the enum.
+func TestAnUnhandledViewFailsLoudly(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		call func(m *Model)
+	}{
+		{"rows", func(m *Model) { m.rows() }},
+		{"renderList", func(m *Model) { m.renderList(80, 20) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := New(testLog(t, "provider-rpc.log"), "x.log")
+			m.view = viewCount // past every view the switches handle
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s returned quietly for an unhandled view, leaving a dead pane to render", c.name)
+				}
+			}()
+			c.call(&m)
+		})
 	}
 }
 

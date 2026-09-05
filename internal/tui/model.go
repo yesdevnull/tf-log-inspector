@@ -22,6 +22,13 @@ const (
 	ViewTypes                 // key 2
 	ViewCalls                 // key 4
 	ViewRawLog                // key 6
+
+	// viewCount is not a view: it is how many values View has, kept at the
+	// END of the enum so that adding a view above it grows the count
+	// without anyone remembering to. Sweeps over every view bound
+	// themselves to this rather than to the last named view, which a view
+	// added after it would slip past.
+	viewCount
 )
 
 // viewBinding is everything the interface has to say about one view: the
