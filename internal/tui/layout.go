@@ -842,10 +842,11 @@ const detailLabelWidth = 6
 // Which end of an over-long value gives way is the field's KIND, routed
 // through the same clipIdentifierField and clipValueForKind the tables and
 // the facet pane use, so a provider address clipped here keeps the tail that
-// tells it from its siblings and an RPC name keeps its head. A number is
-// never clipped by kind at all: half a number tells the reader nothing, so
-// it is left to clipWidth as the last line of defence, the same treatment
-// the tables' numeric columns get.
+// tells it from its siblings, an RPC name keeps its head, and a number is
+// not clipped by kind at all -- left whole for clipWidth beneath, so what
+// gives way is its tail rather than the digits carrying its magnitude.
+// Every kind goes through the one call: the taxonomy owns the exemption,
+// not this render site.
 func detailFieldLines(fields []detailField, w int) []string {
 	labelW := detailLabelWidth
 	for _, f := range fields {
@@ -853,12 +854,7 @@ func detailFieldLines(fields []detailField, w int) []string {
 	}
 	lines := make([]string, len(fields))
 	for i, f := range fields {
-		label := padRight(f.label, labelW)
-		if f.kind == numericColumn {
-			lines[i] = clipWidth(label+f.value, w)
-			continue
-		}
-		lines[i] = clipIdentifierField(label, f.value, "", w, f.kind)
+		lines[i] = clipIdentifierField(padRight(f.label, labelW), f.value, "", w, f.kind)
 	}
 	return lines
 }

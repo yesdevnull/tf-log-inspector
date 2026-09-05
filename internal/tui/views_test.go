@@ -465,6 +465,33 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 	}
 }
 
+// clipValueForKind is where the columnKind taxonomy becomes a clip
+// DIRECTION, and it has to answer for all three kinds. numericColumn's
+// contract is that a number is never clipped by kind at all -- half a number
+// tells the reader nothing -- and a fall-through that front-clipped one
+// would cut it from the end that carries its magnitude, turning "742.4s"
+// into a tail that reads as a smaller number rather than as a cut one.
+//
+// All three kinds are asserted together at one width too narrow for the
+// value, so the function is pinned as a total mapping rather than as two
+// cases and a default.
+func TestClipValueForKindClipsEachKindFromItsOwnEnd(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		value string
+		kind  columnKind
+		want  string
+	}{
+		{"a number is not clipped at all", "742.4s", numericColumn, "742.4s"},
+		{"a tail-distinguished identifier keeps its tail", "hashicorp/aws", tailIdentifierColumn, "…/aws"},
+		{"a head-distinguished identifier keeps its head", "ApplyResourceChange", headIdentifierColumn, "Appl…"},
+	} {
+		if got := clipValueForKind(c.value, 5, c.kind); got != c.want {
+			t.Errorf("%s: clipValueForKind(%q, 5) = %q, want %q", c.name, c.value, got, c.want)
+		}
+	}
+}
+
 // clipWidth and padRight measure display columns, so the value taxonomy
 // must too: a double-width rune is one rune but two columns, and a value
 // "clipped to fit" by rune count still overruns the column it was clipped

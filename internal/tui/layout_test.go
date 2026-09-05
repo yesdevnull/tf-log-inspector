@@ -565,6 +565,29 @@ func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	}
 }
 
+// A detail pane too narrow for a labelled number must cut the number's TAIL,
+// never its head: "742.4s" front-clipped to "…2.4s" reads as a smaller
+// number rather than as a cut one, and nothing on the line says which. The
+// pane is routinely this narrow -- 19 columns at 70 terminal columns, which
+// is one of the three widths the spec names.
+//
+// The direction is clipValueForKind's, taken from the field's kind, so this
+// pins the render site against the taxonomy rather than against a branch of
+// its own.
+func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
+	fields := []detailField{
+		{label: "Total", value: "742.4s", kind: numericColumn},
+		{label: "Prov", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
+	}
+	got := detailFieldLines(fields, 10)
+	if want := "Total 742."; got[0] != want {
+		t.Errorf("numeric line at 10 columns = %q, want %q -- a number keeps its head", got[0], want)
+	}
+	if want := "Prov  …aws"; got[1] != want {
+		t.Errorf("identifier line at 10 columns = %q, want %q -- an identifier keeps its tail", got[1], want)
+	}
+}
+
 // A ranked table narrowed to twelve rows looks exactly like a log that only
 // ever had twelve calls in it, and nothing else on screen says otherwise. So
 // while a filter is active the header reports the matching count against the

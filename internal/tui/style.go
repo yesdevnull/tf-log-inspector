@@ -129,24 +129,46 @@ func clipValueEnd(s string, w int) string {
 // clipValueForKind clips s to at most w terminal columns from whichever end its kind
 // says may give way: a tail-distinguished value keeps its tail
 // (clipValueFront), a head-distinguished one keeps its head
-// (clipValueEnd). Both mark the cut with an ellipsis at the end they cut
-// from. This is the single place the taxonomy in columnKind is turned into
-// a clip direction, so a table cell, a facet value and a detail field all
-// agree on what happens to a given kind of value.
+// (clipValueEnd), and a NUMBER gives way at neither -- it is returned whole,
+// however narrow w is. Both clips mark the cut with an ellipsis at the end
+// they cut from.
+//
+// This is the single place the taxonomy in columnKind is turned into a clip
+// direction, so a table cell, a facet value and a detail field all agree on
+// what happens to a given kind of value -- which means it has to answer for
+// every kind, numericColumn included. Left to fall through, a number would
+// be cut from the FRONT, the one end that carries its magnitude: "742.4s"
+// rendered as "…2.4s" reads as a smaller number rather than as a cut one.
+// Callers keep a number inside its space by other means -- the tables
+// reserve numeric columns at their full natural width (fitColumnWidths),
+// and clipWidth is the last line of defence beneath every composed line.
+//
+// The switch names every kind columnKind has. Front-clipping is left as the
+// default rather than spelled as its own case because tailIdentifierColumn
+// is columnKind's ZERO VALUE: a kind added later and forgotten here then
+// gets the conservative treatment -- clipped, marked, tail preserved --
+// rather than escaping the clip altogether, which is the same reasoning
+// that makes it the zero value.
 func clipValueForKind(s string, w int, kind columnKind) string {
-	if kind == headIdentifierColumn {
+	switch kind {
+	case headIdentifierColumn:
 		return clipValueEnd(s, w)
+	case numericColumn:
+		return s
+	default:
+		return clipValueFront(s, w)
 	}
-	return clipValueFront(s, w)
 }
 
-// clipIdentifierField formats prefix + an identifier value, clipped via
+// clipIdentifierField formats prefix + a value, clipped via
 // clipValueForKind to leave room for prefix and suffix, + suffix, at most w
 // terminal columns total. Shared by every render site that shows one labelled
-// identifier value on its own line -- a facet value's checkbox and count,
-// the detail pane's Prov and Addr fields -- so the budgeting arithmetic
-// exists in one place rather than being reimplemented at each. Which end of
-// the value gives way is the caller's kind, not this function's choice.
+// value on its own line -- a facet value's checkbox and count, every field
+// of the detail pane -- so the budgeting arithmetic exists in one place
+// rather than being reimplemented at each. Which end of the value gives way,
+// or whether it gives way at all, is the caller's kind and not this
+// function's choice: a numeric field passes through untouched and is held to
+// w by the closing clipWidth alone.
 //
 // Width is display columns throughout, the same measure clipWidth and
 // padRight use: a taxonomy that clipped by rune count beneath a safety net
