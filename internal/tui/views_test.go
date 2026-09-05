@@ -235,7 +235,7 @@ func TestTypesViewStatesUIHookResolution(t *testing.T) {
 }
 
 func TestCallsViewRanksByDurationAndCarriesSpanIndex(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	rows := m.rows()
 	if len(rows) == 0 {
 		t.Fatal("calls view has no rows")
@@ -295,7 +295,7 @@ func TestTheDetailPaneDegradesOnARowThatNamesNoSpan(t *testing.T) {
 		{"the sentinel index with no rollup", row{cells: []string{"x"}, spanIdx: noSpanIdx}},
 		{"an index past the RPC spans", row{cells: []string{"x"}, spanIdx: 1 << 20}},
 	} {
-		m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+		m := callsModel(t, "provider-rpc.log", "x.log")
 		m.rowsCache, m.rowsCached, m.selected = []row{c.r}, true, 0
 		if got := detailBody(t, m, noSelectionTitle, 50, 20); got != noSelectionNote {
 			t.Errorf("%s: detail pane = %q, want the placeholder %q", c.name, got, noSelectionNote)
@@ -348,7 +348,7 @@ func TestRowCountMatchesRowsLength(t *testing.T) {
 // the selected row's ANSI escapes take up none, so counting their runes
 // would flag a row that is exactly as wide as its neighbours.
 func TestRenderListRespectsItsWidth(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "mixed-hcp.log", "x.log")
 	for _, line := range strings.Split(m.renderList(60, 20), "\n") {
 		if lipgloss.Width(line) > 60 {
 			t.Errorf("line exceeds the given width of 60: %q", line)
@@ -361,7 +361,7 @@ func TestRenderListRespectsItsWidth(t *testing.T) {
 // New starts selection on row 0, so the header (line 0) must be plain and
 // the first data row (line 1) must carry the highlight.
 func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	lines := strings.Split(m.renderList(60, 20), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("need a header and at least one data row, got %d lines", len(lines))
@@ -390,7 +390,7 @@ func TestRenderListHighlightsTheSelectedRow(t *testing.T) {
 // substring is not a safe way to tell the rows apart at width 60 --
 // duration is numeric and never clipped.
 func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	if len(m.rows()) != 2 {
 		t.Fatalf("fixture assumption changed: got %d calls, want 2", len(m.rows()))
 	}
@@ -409,7 +409,7 @@ func TestRenderListScrollsToKeepSelectionVisible(t *testing.T) {
 // TestRenderListScrollsToKeepSelectionVisible for why duration, not
 // resource type, identifies the row.
 func TestRenderListDoesNotScrollWithinTheFirstScreenful(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	out := m.renderList(60, 20) // room for both rows; selection (row 0) is already visible
 	for _, want := range []string{"5ms", "1ms"} {
 		if !strings.Contains(out, want) {

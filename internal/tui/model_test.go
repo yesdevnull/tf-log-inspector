@@ -31,6 +31,25 @@ func testLog(t *testing.T, name string) *model.Log {
 	return l
 }
 
+// callsModel is a fresh model showing the CALLS view, for the many tests
+// whose subject is something other than which view is on -- a jump, a clip,
+// a facet, a pane width -- but which need call rows to work with.
+//
+// It asserts the view rather than pressing the key for it. New opens on the
+// calls view, so a '4' press there changes nothing: it reads as "put this
+// model on the calls view" while doing no such thing, and the day the
+// opening view moves it silently stops putting the model anywhere. The
+// assertion holds whatever New opens on, and says so where the model is
+// built.
+func callsModel(t *testing.T, fixture, name string) Model {
+	t.Helper()
+	m := New(testLog(t, fixture), name)
+	if m.ActiveView() != ViewCalls {
+		t.Fatalf("model opened on %v, but this test needs the calls view", m.ActiveView())
+	}
+	return m
+}
+
 func TestViewNamesTheFileAndSpanCounts(t *testing.T) {
 	m := New(testLog(t, "provider-rpc.log"), "provider-rpc.log")
 	out := m.View()
@@ -202,7 +221,7 @@ func TestTabCyclesPaneFocus(t *testing.T) {
 // detail pane's own contents with it, since the pane describes whatever the
 // list has selected.
 func TestArrowKeysAreInertWhileTheDetailPaneHasFocus(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	if m.RowCount() < 2 {
 		t.Fatalf("fixture assumption changed: %d call rows, want at least 2 so a selection has somewhere to move", m.RowCount())
@@ -251,7 +270,7 @@ func TestSelectionIsClampedAndResetsOnViewChange(t *testing.T) {
 // one view is meaningless in another -- does not apply when the view has not
 // changed.
 func TestRepeatingTheActiveViewKeyDoesNotResetSelection(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if m.Selected() != 1 {
 		t.Fatalf("Selected = %d after moving down once, want 1", m.Selected())
@@ -277,7 +296,7 @@ func TestRepeatingTheActiveViewKeyDoesNotResetSelection(t *testing.T) {
 // through invalidateRows, which refills it as a side effect of clamping the
 // selection.
 func TestRenderFillsTheRowsCacheOnTheModelItRendered(t *testing.T) {
-	live := liveModel(t, "two-providers.log", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	live := liveModel(t, "two-providers.log")
 	want := live.RowCount()
 	if want == 0 {
 		t.Fatal("fixture has no calls, so a stale count could not be told from a freshly built one")
@@ -292,7 +311,7 @@ func TestRenderFillsTheRowsCacheOnTheModelItRendered(t *testing.T) {
 }
 
 func TestRowCountFillsTheRowsCacheOnTheModelItCounted(t *testing.T) {
-	live := liveModel(t, "two-providers.log", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	live := liveModel(t, "two-providers.log")
 
 	live.rowsCache, live.rowsCached = nil, false
 	want := live.RowCount()
@@ -394,10 +413,13 @@ func TestNarrowingTheTerminalMovesFocusOffACollapsedPane(t *testing.T) {
 // to one silently rewrote the other's ranked numbers.
 func TestUpdateDrivesTheModelItWasCalledOn(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
+	// The starting view is set here, to one the keypress below will move
+	// the model OFF. Left at whatever New opens on, the assertion is
+	// satisfied by a model that was already showing the view being asserted
+	// -- so it would hold whether Update wrote to this model, to a copy of
+	// it, or to nothing at all.
+	m.view = ViewRawLog
 	var prog tea.Model = &m
-	// '1' rather than '4': the model opens on the calls view, so '4' is a
-	// no-op there and the view assertion below would hold whether Update
-	// wrote to this model or to a copy of it.
 	next, _ := prog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if next != prog {
 		t.Errorf("Update returned %p, want the model it was called on (%p)", next, prog)

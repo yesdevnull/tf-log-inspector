@@ -349,7 +349,7 @@ func TestFacetPaneWindowsAroundTheCursor(t *testing.T) {
 // its placeholder -- a list with no cursor at all until the user presses an
 // arrow key.
 func TestFilteringClampsTheSelection(t *testing.T) {
-	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "two-providers.log", "x.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if m.Selected() != 1 {
 		t.Fatalf("Selected = %d, want the second call selected before the filter narrows the list", m.Selected())
@@ -476,7 +476,7 @@ func TestLevelFacetCountsEveryEntry(t *testing.T) {
 // fixture -- unlike one where every entry shares the span's level -- can
 // actually tell that regression apart from correct behaviour.
 func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
-	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "multiline-body.log", "x.log")
 	callsBefore := m.rows()
 	if len(callsBefore) == 0 {
 		t.Fatal("fixture assumption changed: no call rows to compare the rollup baseline against")
@@ -539,7 +539,7 @@ func TestTickingAFacetValueListsItsAdvertisedCount(t *testing.T) {
 			// A fresh model per value: selectedFacets is a map, so a
 			// toggle applied to one model is visible to any other sharing
 			// it, and each value must be measured on its own.
-			m := update(t, New(testLog(t, "provider-level-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+			m := callsModel(t, "provider-level-rpc.log", "x.log")
 			m = moveFacetCursorTo(t, m, f.Name, v.Value)
 			m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 			if got := len(m.rows()); got != v.Count {

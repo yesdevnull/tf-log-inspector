@@ -275,7 +275,7 @@ func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 // modelled on, so it is also the control -- it must render exactly what it
 // rendered before there were rollup panes at all.
 func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	want := m.log.RPCSpans[m.rows()[0].spanIdx]
 	// 80 columns is wide enough that the full provider address is not clipped.
 	got := detailBody(t, m, spanDetailTitle, 80, 20)
@@ -363,7 +363,7 @@ func TestProvidersViewAt100ColumnsKeepsNumbersAndFrontClipsTheProvider(t *testin
 // widths, so a search of the whole composed view can be satisfied by a pane
 // other than the one under test.
 func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T) {
-	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "two-providers.log", "plan.log")
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	rows := m.rows()
 	if len(rows) != 2 {
@@ -415,7 +415,7 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 // would satisfy a search of the whole composed view whatever the calls
 // table rendered.
 func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
-	m := update(t, New(testLog(t, "two-rpcs.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "two-rpcs.log", "plan.log")
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	rows := m.rows()
 	if len(rows) != 2 {
@@ -868,7 +868,7 @@ func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 // so a pane stuck on either row fails here rather than matching on the
 // field the two happen to share.
 func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
-	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "two-providers.log", "x.log")
 	if got := len(m.rows()); got != 2 {
 		t.Fatalf("fixture assumption changed: %d call rows, want 2", got)
 	}

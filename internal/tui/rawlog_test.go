@@ -13,7 +13,7 @@ import (
 
 // The whole point: from a slow call, land on the log lines that produced it.
 func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	rows := m.rows()
 	if len(rows) < 2 {
 		t.Fatal("need at least two calls to prove the jump targets the selected one")
@@ -708,7 +708,7 @@ func TestAnEmptyRawLogWithNoFilterDoesNotBlameAFilter(t *testing.T) {
 // its comment header is UNKNOWN, so selecting UNKNOWN hides every call's
 // entry while leaving both calls on screen to press Enter over.
 func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m := callsModel(t, "provider-rpc.log", "x.log")
 	m = moveFacetCursorTo(t, m, dimLevel, "UNKNOWN")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}) // hand the keyboard back to the list
