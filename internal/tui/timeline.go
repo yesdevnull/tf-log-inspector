@@ -300,7 +300,8 @@ func laneLabelWidth(labels []string) int {
 
 // renderTimeline renders the timeline view's centre-pane content: one
 // labelled lane bar per lane PackLanes packs the active tier's spans into
-// (see timelineLanes), followed by the time axis.
+// (see timelineLanes), then the time axis, then the stall annotation (see
+// stallAnnotation) naming the windows model.Stalls found beneath it.
 //
 // A log with neither span tier gets capture guidance in place of any bars
 // (noTimedSpansNote); a tier that exists but whose filter hides every span
@@ -326,11 +327,15 @@ func laneLabelWidth(labels []string) int {
 // The lane rows are windowed around the lane cursor by the same
 // scrollWindow the centre table uses for its own row cursor, so a log with
 // more lanes than the pane is tall keeps the selected one on screen instead
-// of always showing the first screenful. The axis is always the LAST line,
-// indented under the bar area by the same label width the lane rows reserve
-// so it still names both ends of what the bars above it are measuring
-// against, and is never dropped for want of height -- it is the one thing
-// every lane bar is drawn relative to.
+// of always showing the first screenful. The axis, indented under the bar
+// area by the same label width the lane rows reserve so it still names
+// both ends of what the bars above it are measuring against, is never
+// dropped for want of height -- it is the one thing every lane bar is
+// drawn relative to. It is no longer the LAST line once there is a stall
+// to report, though: the annotation reserves its own room below the axis
+// (see the comment on that reservation, below) and is appended after it,
+// so on any pane tall enough to show both, the axis sits second-to-last
+// and the annotation's line or lines close the pane instead.
 func (m *Model) renderTimeline(w, h int) string {
 	if h <= 0 {
 		return ""
