@@ -374,7 +374,7 @@ const spanCursorHint = "↔ span"
 
 // actionKeys is the hint group for the keys that DO something to what is on
 // screen, as opposed to the ones that change which view is on screen. It is
-// 52 display columns bare, 62 with the open hint, and 70 in the timeline at
+// 54 display columns bare, 62 with the open hint, and 70 in the timeline at
 // a width that draws the detail pane, which carries both that and the span
 // hint; every binding added to it pushes "q quit" closer to the edge a
 // narrow terminal cuts from, which is what keeps it this terse.
@@ -407,9 +407,9 @@ const spanCursorHint = "↔ span"
 // which is exactly what this group refuses. It costs nothing to drop: the
 // keys still drive Enter's jump target at every width, and a reader who
 // cannot see what they select has no use for being told they exist. That it
-// also gives "q quit" its place back on a 60-column terminal -- the hint
-// this file's own comments call non-negotiable, and the reason the footer
-// was split in two at all -- is the consequence, not the reason.
+// drops the line from 70 columns to 62 at a 60-column terminal -- moving the
+// clip off the middle of "Esc clear", though "q quit" is still cut short
+// there, to "q qu" -- is the consequence, not the reason.
 //
 // Each hint asks a predicate built on the same state its key handler reads
 // -- selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans

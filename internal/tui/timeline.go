@@ -762,7 +762,7 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 // any font that has it, rather than as four unrelated marks a reader has to
 // learn an order for.
 //
-// Each is one display column. U+2591 is East Asian width class Narrow;
+// Each is one display column. U+2591 is East Asian width class Neutral;
 // U+2592, U+2593 and U+2588 are Ambiguous, the same class as the │ and ─
 // this package already renders at one column each (see paneSepWidth), and
 // the same class the bar's previous single glyph was. Width is measured
