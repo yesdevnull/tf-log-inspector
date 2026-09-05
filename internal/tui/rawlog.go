@@ -45,12 +45,17 @@ func (m Model) TopEntry() int {
 }
 
 // jumpToSpan switches to the raw log view positioned at the entry that
-// closed the RPC span at idx. idx is a rollup row's spanIdx, which is -1 for
-// a row that represents many spans rather than one (every ViewProviders and
-// ViewTypes row); jumpToSpan leaves m unchanged for those, since there is no
-// single span to jump to.
-func (m *Model) jumpToSpan(idx int) {
-	if idx < 0 || idx >= len(m.log.RPCSpans) {
+// closed the span at idx in spans. idx is a rollup row's spanIdx, which is
+// -1 for a row that represents many spans rather than one (every
+// ViewProviders and ViewTypes row); jumpToSpan leaves m unchanged for those,
+// since there is no single span to jump to.
+//
+// spans is the slice idx indexes into: the table views always jump from
+// m.log.RPCSpans, but the timeline may be drawing the UI tier instead (see
+// timelineSpans), so the caller hands over whichever slice its own index
+// names rather than this function assuming one.
+func (m *Model) jumpToSpan(spans []span.Span, idx int) {
+	if idx < 0 || idx >= len(spans) {
 		return
 	}
 	// Span.Entry indexes the same log's Entries, but nothing revalidates it
@@ -58,7 +63,7 @@ func (m *Model) jumpToSpan(idx int) {
 	// componentProviders does the same -- rather than each deciding for
 	// itself whether it can be trusted. An index outside the log leaves the
 	// view where it is: there is no entry to jump to.
-	entry := int(m.log.RPCSpans[idx].Entry)
+	entry := int(spans[idx].Entry)
 	if entry >= len(m.log.Entries) {
 		return
 	}

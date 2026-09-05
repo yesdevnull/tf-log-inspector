@@ -4,10 +4,171 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+// timelineModel is a model showing the timeline over timeline.log, sized so
+// every pane is drawn. Each test starts from its own, because Model is
+// driven through a pointer and shares its filter maps when copied.
+func timelineModel(t *testing.T) Model {
+	t.Helper()
+	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+func TestTimelineCursorStopsAtTheLastLane(t *testing.T) {
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	lanes := m.timelineLanes()
+	if m.timeline.lane != len(lanes)-1 {
+		t.Errorf("lane = %d after walking off the end, want %d", m.timeline.lane, len(lanes)-1)
+	}
+}
+
+func TestTimelineCursorStopsAtTheLastSpanInALane(t *testing.T) {
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	}
+	lanes := m.timelineLanes()
+	if last := len(lanes[m.timeline.lane].Spans) - 1; m.timeline.span != last {
+		t.Errorf("span = %d after walking off the end, want %d", m.timeline.span, last)
+	}
+}
+
+func TestChangingLanesClampsTheSpanCursor(t *testing.T) {
+	// Step deep into a long lane, then move to a shorter one. Leaving the
+	// index where it was would point past the end of the new lane, and
+	// every reader of it would have to bounds-check for itself.
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	lanes := m.timelineLanes()
+	if m.timeline.span >= len(lanes[m.timeline.lane].Spans) {
+		t.Errorf("span = %d in a lane of %d spans", m.timeline.span, len(lanes[m.timeline.lane].Spans))
+	}
+	if _, ok := m.selectedTimelineSpan(); !ok {
+		t.Error("selectedTimelineSpan reports nothing selected in a non-empty lane")
+	}
+}
+
+func TestAFilterThatEmptiesTheTimelineSelectsNothing(t *testing.T) {
+	m := timelineModel(t)
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+	m.invalidateRows()
+	if idx, ok := m.selectedTimelineSpan(); ok {
+		t.Errorf("selectedTimelineSpan = (%d, true) over an empty timeline, want ok == false", idx)
+	}
+}
+
+func TestEnterFromTheTimelineOpensTheSelectedSpanInTheRawLog(t *testing.T) {
+	m := timelineModel(t)
+	idx, ok := m.selectedTimelineSpan()
+	if !ok {
+		t.Fatal("nothing selected on a timeline with spans")
+	}
+	_, spans := m.timelineSpans()
+	want := int(spans[idx].Entry)
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("view = %v after Enter, want ViewRawLog", m.view)
+	}
+	if m.TopEntry() != want {
+		t.Errorf("top entry = %d, want %d (the entry that closed the selected span)", m.TopEntry(), want)
+	}
+}
+
+// TestTimelineDetailPaneShowsTheSelectedSpan checks that the detail pane
+// beside the timeline describes the span the cursor is on, the same way it
+// describes a call row's span in the table views
+// (TestDetailPaneShowsTheSelectedSpan).
+func TestTimelineDetailPaneShowsTheSelectedSpan(t *testing.T) {
+	m := timelineModel(t)
+	idx, ok := m.selectedTimelineSpan()
+	if !ok {
+		t.Fatal("nothing selected on a timeline with spans")
+	}
+	_, spans := m.timelineSpans()
+	want := spans[idx]
+
+	// 80 columns is wide enough that the full provider address is not
+	// clipped, matching TestDetailPaneShowsTheSelectedSpan.
+	got := detailBody(t, m, spanDetailTitle, 80, 20)
+	for _, s := range []string{want.RPC, want.Provider, formatMs(uint64(want.DurationMs))} {
+		if !strings.Contains(got, s) {
+			t.Errorf("timeline detail pane missing %q:\n%s", s, got)
+		}
+	}
+}
+
+// TestTimelineDetailPaneShowsAddressForAUIHookSpan checks the timeline's own
+// reachable path to spanDetailLines' UI-hook branch: structured-ui.log has
+// no RPC spans, so the timeline falls back to the UI tier (see
+// timelineSpans), and its cursor's selected span is a UI-hook span whose
+// detail must carry its resource address.
+func TestTimelineDetailPaneShowsAddressForAUIHookSpan(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	idx, ok := m.selectedTimelineSpan()
+	if !ok {
+		t.Fatal("nothing selected on a timeline with spans")
+	}
+	_, spans := m.timelineSpans()
+	want := spans[idx]
+	if want.Fidelity != span.FidelityUIReported {
+		t.Fatalf("selected span fidelity = %v, want FidelityUIReported", want.Fidelity)
+	}
+
+	got := detailBody(t, m, spanDetailTitle, 80, 20)
+	if !strings.Contains(got, want.Address) {
+		t.Errorf("timeline detail pane omits the UI-hook span's address %q:\n%s", want.Address, got)
+	}
+}
+
+// laneLabelSpans builds a minimal span slice for laneLabel tests: only
+// Provider matters to it, so every other field is left zero.
+func laneLabelSpans(providers ...string) []span.Span {
+	spans := make([]span.Span, len(providers))
+	for i, p := range providers {
+		spans[i] = span.Span{Provider: p}
+	}
+	return spans
+}
+
+// TestLaneLabelNamesTheProviderAndLaneNumber checks the one-provider case:
+// the label is the provider's short name (the last "/"-segment of a
+// registry address) and the lane's one-based position.
+func TestLaneLabelNamesTheProviderAndLaneNumber(t *testing.T) {
+	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/aws")
+	got := laneLabel(spans, model.Lane{Spans: []int{0, 1}}, 2)
+	if want := "aws/2"; got != want {
+		t.Errorf("laneLabel = %q, want %q", got, want)
+	}
+}
+
+// TestLaneLabelReportsMixedForALaneSpanningProviders checks the case
+// PackLanes can produce and this package must decide something for: it
+// packs purely on timing, with no notion of provider, so two different
+// providers' spans can land in the same lane whenever their intervals do
+// not overlap. Naming just the first span's provider would misattribute
+// every other span in the lane to a provider it is not from, so the label
+// says "mixed" instead.
+func TestLaneLabelReportsMixedForALaneSpanningProviders(t *testing.T) {
+	spans := laneLabelSpans("registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google")
+	got := laneLabel(spans, model.Lane{Spans: []int{0, 1}}, 1)
+	if want := "mixed/1"; got != want {
+		t.Errorf("laneLabel = %q, want %q", got, want)
+	}
+}
 
 func TestTimelineDrawsTheRPCTierWhenTheLogHasOne(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
@@ -248,38 +409,52 @@ func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
 }
 
 // TestRenderTimelineDrawsOneRowPerLanePlusTheAxis pins the composition this
-// task owns: laneBar and timeAxis are tested in isolation above, so this
-// checks only that renderTimeline stacks one bar per lane, in PackLanes'
-// order, with the axis as the final line.
+// package owns: laneBar, timeAxis and laneLabel are tested in isolation
+// elsewhere, so this checks only that renderTimeline stacks one labelled bar
+// per lane, in PackLanes' order (via timelineLanes), with the axis -- indented
+// to sit under the bar area, past the label column every lane row reserves --
+// as the final line.
+//
+// Cursor styling is stripped before comparing: lane 0 carries the cursor by
+// default, and the point of this test is the composition, not cursorBar's own
+// escape sequences.
 func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
 	got := m.renderTimeline(40, 10)
 	lines := strings.Split(got, "\n")
 
-	_, spans := m.timelineSpans()
-	lanes, err := model.PackLanes(spans)
-	if err != nil {
-		t.Fatalf("PackLanes: %v", err)
-	}
+	lanes := m.timelineLanes()
 	if len(lines) != len(lanes)+1 {
 		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane plus the axis)", len(lines), len(lanes)+1)
 	}
+
+	_, spans := m.timelineSpans()
 	wallClock := timelineWallClockMs(spans)
+	labels := make([]string, len(lanes))
 	for i, lane := range lanes {
-		if want := laneBar(spans, lane, wallClock, 40); lines[i] != want {
-			t.Errorf("lane %d = %q, want %q", i, lines[i], want)
+		labels[i] = laneLabel(spans, lane, i+1)
+	}
+	labelW := laneLabelWidth(labels)
+	barW := 40 - labelW - 1
+
+	var scratch []byte
+	for i, lane := range lanes {
+		want := padRight(labels[i], labelW) + " " + laneBar(spans, lane, wallClock, barW)
+		var got string
+		got, scratch = logfmt.StripANSI(lines[i], scratch)
+		if got != want {
+			t.Errorf("lane %d = %q, want %q", i, got, want)
 		}
 	}
-	if want := timeAxis(wallClock, 40); lines[len(lines)-1] != want {
-		t.Errorf("last line = %q, want the time axis %q", lines[len(lines)-1], want)
+	if want := strings.Repeat(" ", labelW+1) + timeAxis(wallClock, barW); lines[len(lines)-1] != want {
+		t.Errorf("last line = %q, want the indented time axis %q", lines[len(lines)-1], want)
 	}
 }
 
-// TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit checks the one piece of
-// height budgeting this task does: with no cursor yet to decide which lane
-// matters most (task 6 adds that), a pane too short for every lane still
-// keeps the axis rather than losing it to whichever lane happened to come
-// last.
+// TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit checks that a pane too
+// short for every lane still keeps the axis rather than losing it to
+// whichever lane happened to come last -- the axis is what every lane bar is
+// drawn against, so it survives ahead of any of them.
 func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
 	got := m.renderTimeline(40, 1)
@@ -287,8 +462,17 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("renderTimeline(h=1) produced %d lines, want 1", len(lines))
 	}
+
+	lanes := m.timelineLanes()
 	_, spans := m.timelineSpans()
-	if want := timeAxis(timelineWallClockMs(spans), 40); lines[0] != want {
+	labels := make([]string, len(lanes))
+	for i, lane := range lanes {
+		labels[i] = laneLabel(spans, lane, i+1)
+	}
+	labelW := laneLabelWidth(labels)
+	barW := 40 - labelW - 1
+	want := strings.Repeat(" ", labelW+1) + timeAxis(timelineWallClockMs(spans), barW)
+	if lines[0] != want {
 		t.Errorf("renderTimeline(h=1) = %q, want the axis alone: %q", lines[0], want)
 	}
 }

@@ -357,12 +357,11 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	}
 }
 
-// spanDetailLines is unit-tested directly against a UI-hook span: no
-// current view lets a user select one interactively -- row.spanIdx only
-// ever indexes m.log.RPCSpans, and a UI-hook span lives only in
-// m.log.UISpans -- but the formatting logic itself must be correct per the
-// spec ("for a UI-hook span its unmasked address"), ready for whichever
-// later task makes one selectable.
+// spanDetailLines is unit-tested directly against a UI-hook span, rather
+// than only through the timeline that can now select one: the formatting
+// logic is what the spec's own requirement ("for a UI-hook span its
+// unmasked address") is about, and a direct test of it does not depend on
+// which view's cursor happens to reach it.
 func TestSpanDetailLinesShowsAddressForUIHookSpans(t *testing.T) {
 	s := span.Span{RPC: "create", Provider: "aws", DurationMs: 2500, Fidelity: span.FidelityUIReported, Address: "aws_instance.example"}
 	out := strings.Join(spanDetailLines(s, 60), "\n")

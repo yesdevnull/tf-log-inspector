@@ -358,20 +358,22 @@ const openHint = "⏎ open"
 // to it pushes "q quit" closer to the edge a narrow terminal cuts from,
 // which is what keeps it this terse.
 //
-// The open hint is shown only where Enter has something to open. Enter
-// resolves the SELECTED ROW to the log entry that closed its span, and a
-// rollup row stands for a group and resolves to no single span -- so in the
-// two rollup views the key returns immediately, and in the raw log there is
-// no row to press it over at all. Advertising a key that does nothing is
-// the defect this package removes wherever it finds it, and this hint stood
-// in three of the four views.
+// The open hint is shown only where Enter has something to open: a call
+// row's own span in the table views, or the timeline's selected span, which
+// has no row of its own. A rollup row stands for a group and resolves to no
+// single span, so in the two rollup views the key returns immediately, and
+// in the raw log there is no row or span to press it over at all.
+// Advertising a key that does nothing is the defect this package removes
+// wherever it finds it, and this hint stood in three of the four views
+// before it was added.
 //
-// It asks selectedRowOpens, which is built on the same row.isCall the Enter
-// handler asks, so the footer cannot come to advertise a key the handler
-// has stopped acting on. It does NOT ask which pane has focus: Enter is
-// inert from the detail pane the way space is inert outside the facet pane,
-// and "␣ facet" is shown regardless for the same reason -- a hint that
-// flickered as Tab moved would describe the keyboard rather than the view.
+// It asks selectedRowOpens, which is built on jumpTarget -- the single
+// predicate the Enter handler asks too -- so the footer cannot come to
+// advertise a key the handler has stopped acting on. It does NOT ask which
+// pane has focus: Enter is inert from the detail pane the way space is
+// inert outside the facet pane, and "␣ facet" is shown regardless for the
+// same reason -- a hint that flickered as Tab moved would describe the
+// keyboard rather than the view.
 func (m *Model) actionKeys() string {
 	keys := []string{"⇥ pane", "␣ facet"}
 	if m.selectedRowOpens() {
@@ -705,19 +707,30 @@ const (
 	noSelectionTitle = "DETAIL"
 )
 
-// selectedDetail is the detail pane's title and body sections for the row
-// the cursor is on, derived TOGETHER from one dispatch on that row's kind so
-// the heading and what it heads cannot disagree.
+// selectedDetail is the detail pane's title and body sections for whatever
+// the centre pane's cursor is on, derived TOGETHER from one dispatch so the
+// heading and what it heads cannot disagree.
 //
-// The span branch dispatches on spanForRow -- built on the same row.isCall
-// predicate Enter asks before jumping -- rather than on the absence of a
-// rollup. A row that is neither a call nor a rollup cannot be built (see
-// callRow and rollupRow), and is reported here as nothing to describe
-// rather than indexed into RPCSpans on the strength of a spanIdx that says
-// it names no span: a degraded pane instead of a panic mid-frame inside the
-// alt screen.
+// The timeline has no rows of its own (see rows()), so it is dispatched on
+// selectedTimelineSpanValue rather than a row: a hit there is always a
+// single span, since a lane packs spans rather than groups of them, so
+// there is no rollup case to consider.
+//
+// Everywhere else, the span branch dispatches on spanForRow -- built on the
+// same row.isCall predicate Enter asks before jumping -- rather than on the
+// absence of a rollup. A row that is neither a call nor a rollup cannot be
+// built (see callRow and rollupRow), and is reported here as nothing to
+// describe rather than indexed into RPCSpans on the strength of a spanIdx
+// that says it names no span: a degraded pane instead of a panic mid-frame
+// inside the alt screen.
 func (m *Model) selectedDetail(w int) (string, []detailSection) {
 	nothing := []detailSection{{clipWidth(noSelectionNote, w)}}
+	if m.view == ViewTimeline {
+		if s, ok := m.selectedTimelineSpanValue(); ok {
+			return spanDetailTitle, []detailSection{spanDetailLines(s, w)}
+		}
+		return noSelectionTitle, nothing
+	}
 	r, ok := m.selectedRow()
 	if !ok {
 		return noSelectionTitle, nothing
@@ -781,16 +794,15 @@ func fitDetailSections(title string, sections []detailSection, w, h int) []strin
 // on Address being non-empty, documents that this is a property of the
 // span's kind rather than an incidental absence.
 //
-// The UI-hook branch is scaffolding, not dead code: the spec requires the
-// detail pane to show a UI-hook span's unmasked address, but no view in
-// this package currently exposes an individual UI-hook span for selection
-// -- row.spanIdx only ever indexes m.log.RPCSpans (a pre-existing
-// constraint this package does not redefine), and every FidelityUIReported
-// span lives in m.log.UISpans instead. So this branch is unreachable
-// through any keypress today; it is unit-tested directly
-// (TestSpanDetailLinesShowsAddressForUIHookSpans) rather than end to end,
-// and stays that way until some view exposes an individual UI-hook span for
-// selection.
+// The UI-hook branch is reached through the timeline, whose cursor can
+// select an individual span from m.log.UISpans (via
+// selectedTimelineSpanValue) whenever the log has no RPC spans to draw
+// instead (see timelineSpans). row.spanIdx, by contrast, only ever indexes
+// m.log.RPCSpans -- a pre-existing constraint this package does not
+// redefine for the table views -- so a table row can never carry a
+// UI-hook span. TestSpanDetailLinesShowsAddressForUIHookSpans keeps its own
+// direct unit coverage of the formatting regardless of which caller reaches
+// it.
 //
 // RPC, Prov and Addr are all identifier values, and all three go through
 // clipIdentifierField, each clipped from the end its kind allows (see

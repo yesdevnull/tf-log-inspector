@@ -174,11 +174,9 @@ type Model struct {
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
 
-	// timeline is the timeline view's own state. It carries no cursor yet --
-	// that is task 6's addition, see timeline.go and Task 6's brief -- so it
-	// is declared here only so this task's rendering has a field on Model to
-	// grow into rather than task 6 having to add the field AND the pane in
-	// one change.
+	// timeline is the timeline view's own state: which lane the cursor is on,
+	// and which of that lane's spans is selected within it. See
+	// timelineState in timeline.go.
 	timeline timelineState
 
 	// blockedJump records that the last Enter refused to jump because the
@@ -321,17 +319,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// focus -- the spec binds it globally, not to the facet pane.
 			m.clearFilters()
 		case "enter":
-			// Enter jumps from a call row -- currently only ViewCalls' rows
-			// are calls -- to the log entry that closed its span. A rollup
-			// row stands for a group and resolves to no single span, so
-			// there is nothing to jump to and the view stays where it is.
-			// row.isCall is the same question the detail pane asks before
-			// indexing RPCSpans, so the two cannot disagree about which
-			// rows carry a span.
+			// Enter jumps to the log entry that closed the selected span: a
+			// call row's own span in the table views -- a rollup row stands
+			// for a group and resolves to no single span, so there is
+			// nothing to jump to there -- or the timeline's selected span,
+			// which has no row at all. jumpTarget is the single predicate
+			// for what that is, asked here and by the footer's open hint
+			// (selectedRowOpens), so the two cannot disagree about what
+			// Enter does.
 			if m.pane == PaneList {
-				if r, ok := m.selectedRow(); ok && r.isCall() {
-					m.jumpToSpan(r.spanIdx)
+				if spans, idx, ok := m.jumpTarget(); ok {
+					m.jumpToSpan(spans, idx)
 				}
+			}
+		case "left", "h":
+			// Left/right step through the selected lane's spans, in start
+			// order. Bound only in the timeline, with the list pane
+			// focused, the same way pgup/pgdown are bound only in the raw
+			// log: elsewhere there is no within-lane cursor for them to
+			// move.
+			if m.view == ViewTimeline && m.pane == PaneList {
+				m.moveTimelineSpan(-1)
+			}
+		case "right", "l":
+			if m.view == ViewTimeline && m.pane == PaneList {
+				m.moveTimelineSpan(1)
 			}
 		case "pgdown":
 			if m.view == ViewRawLog {
@@ -475,11 +487,18 @@ func (m *Model) setView(v View) {
 // so the footer would otherwise keep asserting a miss for a search that no
 // longer describes what is on screen -- and keep the key hints hidden in the
 // one view where n and N matter most.
+//
+// The timeline's lane and span cursors are clamped here too, for the same
+// reason the row selection is: a filter change can shrink or empty the lane
+// the cursor was on, whether or not the timeline is the view currently on
+// screen, and clampTimelineSelection is what keeps it pointing at something
+// that still exists.
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
 	m.raw.notFound = false
 	m.clampSelection()
+	m.clampTimelineSelection()
 }
 
 // moveCursor routes an up/down/j/k press to whichever pane has focus: the
@@ -488,17 +507,22 @@ func (m *Model) invalidateRows() {
 // inert.
 //
 // What the centre pane's cursor IS depends on the view: the rollup and call
-// views have a selected row, while the raw log has none -- it renders from
-// its top entry and nothing there reads the selection -- so in that view a
-// press scrolls the pane instead.
+// views have a selected row, the raw log has none -- it renders from its top
+// entry and nothing there reads the selection -- so in that view a press
+// scrolls the pane instead, and the timeline has a lane cursor of its own
+// (see timelineState), which up/down move between lanes rather than through
+// rows.
 func (m *Model) moveCursor(delta int) {
 	switch m.pane {
 	case PaneList:
-		if m.view == ViewRawLog {
+		switch m.view {
+		case ViewRawLog:
 			m.scrollRawLog(delta)
-			return
+		case ViewTimeline:
+			m.moveTimelineLane(delta)
+		default:
+			m.moveSelection(delta)
 		}
-		m.moveSelection(delta)
 	case PaneFacets:
 		m.moveFacetCursor(delta)
 	}

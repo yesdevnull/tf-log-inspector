@@ -262,13 +262,41 @@ func (m *Model) selectedRow() (row, bool) {
 	return rows[m.selected], true
 }
 
-// selectedRowOpens reports whether Enter has anything to open: whether the
-// selected row is one span rather than a group of them. It is what the
-// footer's open hint is shown on, so the hint and the handler ask the same
-// question of the same row.
+// selectedRowOpens reports whether Enter has anything to open: a call row's
+// own span in the table views, or the timeline's selected span, which has no
+// row at all. It is what the footer's open hint is shown on, built on
+// jumpTarget, so the hint and the Enter handler cannot come to disagree
+// about what there is to open.
 func (m *Model) selectedRowOpens() bool {
+	_, _, ok := m.jumpTarget()
+	return ok
+}
+
+// jumpTarget resolves what Enter would jump to right now: the span slice and
+// the index within it jumpToSpan should be given, and whether there is one
+// at all. It is the single predicate both selectedRowOpens (the footer's
+// open hint) and the Enter handler ask, generalising row.isCall -- which
+// answers the question for one table row -- over the timeline, which has no
+// rows of its own and resolves through selectedTimelineSpan instead.
+//
+// Like selectedRow, it does not consider which pane has focus: the footer's
+// hint is shown for whatever the cursor is on regardless of which pane the
+// keyboard is currently in (see actionKeys), and the Enter handler applies
+// its own pane check before acting on this.
+func (m *Model) jumpTarget() (spans []span.Span, idx int, ok bool) {
+	if m.view == ViewTimeline {
+		idx, ok := m.selectedTimelineSpan()
+		if !ok {
+			return nil, 0, false
+		}
+		_, spans := m.timelineSpans()
+		return spans, idx, true
+	}
 	r, ok := m.selectedRow()
-	return ok && r.isCall()
+	if !ok || !r.isCall() {
+		return nil, 0, false
+	}
+	return m.log.RPCSpans, r.spanIdx, true
 }
 
 // providerRows ranks providers by total RPC time, as model.RollupBy already

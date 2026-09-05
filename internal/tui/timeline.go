@@ -11,10 +11,12 @@ import (
 
 // timelineState is the timeline view's own state, kept as its own struct as
 // rawLogState is, so the view's concerns stay grouped with the file that
-// owns them. It carries nothing yet: task 6 adds the lane and within-lane
-// span cursor (see task 6's brief), which this task deliberately does not
-// build.
-type timelineState struct{}
+// owns them: which lane the cursor is on, and which of that lane's spans is
+// selected within it.
+type timelineState struct {
+	lane int
+	span int // index into the selected lane's Spans, not into the span slice
+}
 
 // timelineTier is which of the log's two span sets the timeline draws.
 // model.PackLanes refuses a slice mixing fidelities (see the doc comment on
@@ -45,9 +47,8 @@ const (
 // filter hid them" rather than "this log was never captured with timing".
 // Those are different states for a reader to act on -- one clears with Esc,
 // the other needs a different capture -- and collapsing them into the same
-// tierUI-with-nothing-in-it result (which this function returned before this
-// case was split out) would have made tierNone unreachable and the two
-// states indistinguishable on screen.
+// tierUI-with-nothing-in-it result would make tierNone unreachable and the
+// two states indistinguishable on screen.
 func (m *Model) timelineSpans() (timelineTier, []span.Span) {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
 		return tierNone, nil
@@ -98,9 +99,171 @@ func timelineWallClockMs(spans []span.Span) uint32 {
 	return wallClock
 }
 
-// renderTimeline renders the timeline view's centre-pane content: one lane
-// bar per lane PackLanes packs the active tier's spans into, followed by the
-// time axis.
+// timelineLanes packs the timeline's current tier and active filter's spans
+// into lanes, the same packing renderTimeline draws and the lane/span cursor
+// (see timelineState) moves over. It is the one place PackLanes is called
+// for the timeline, so the renderer and the cursor cannot disagree about how
+// many lanes there are or which spans sit in which.
+func (m *Model) timelineLanes() []model.Lane {
+	_, spans := m.timelineSpans()
+	lanes, err := model.PackLanes(spans)
+	if err != nil {
+		// timelineSpans hands PackLanes spans of a single tier by
+		// construction, so ErrMixedTimelines reaching here means that
+		// guarantee broke somewhere upstream -- a programming error to fail
+		// loudly on, the same treatment unhandledView gives its own
+		// can't-happen case, rather than a blank pane that looks like this
+		// view was never built.
+		panic(fmt.Sprintf("tui: timelineLanes: %v", err))
+	}
+	return lanes
+}
+
+// clampTimelineSelection brings the lane and within-lane span cursors back
+// inside the current tier and filter's lanes: the lane cursor to the last
+// lane when it sits past the end (or 0 for no lanes at all, the same
+// past-then-back-to-zero shape clampSelection uses for an empty row list),
+// and the span cursor to the last span of whichever lane that leaves it on.
+//
+// Both are clamped from the one place because changing lanes changes what
+// the span cursor is clamped against -- a lane's own span count has nothing
+// to do with the one the cursor just left -- and because a filter change can
+// shrink or empty the very lane the cursor was on, which invalidateRows must
+// catch the same way it catches a row selection run off the end of a
+// shortened table.
+func (m *Model) clampTimelineSelection() {
+	lanes := m.timelineLanes()
+	if last := len(lanes) - 1; m.timeline.lane > last {
+		m.timeline.lane = last
+	}
+	if m.timeline.lane < 0 {
+		m.timeline.lane = 0
+	}
+	spanCount := 0
+	if m.timeline.lane < len(lanes) {
+		spanCount = len(lanes[m.timeline.lane].Spans)
+	}
+	if last := spanCount - 1; m.timeline.span > last {
+		m.timeline.span = last
+	}
+	if m.timeline.span < 0 {
+		m.timeline.span = 0
+	}
+}
+
+// moveTimelineLane shifts the lane cursor by delta, clamping it to the
+// current lane range and the within-lane span cursor to whichever lane that
+// leaves it on.
+func (m *Model) moveTimelineLane(delta int) {
+	m.timeline.lane += delta
+	m.clampTimelineSelection()
+}
+
+// moveTimelineSpan shifts the within-lane span cursor by delta, clamping it
+// to the selected lane's own span range.
+func (m *Model) moveTimelineSpan(delta int) {
+	m.timeline.span += delta
+	m.clampTimelineSelection()
+}
+
+// selectedTimelineSpan resolves the timeline's cursor to one span and its
+// index in the tier's span slice, and reports whether there is one -- false
+// for a lane cursor or span cursor outside the current lanes, which is where
+// both sit when a filter has emptied the timeline (see
+// clampTimelineSelection).
+func (m *Model) selectedTimelineSpan() (idx int, ok bool) {
+	lanes := m.timelineLanes()
+	if m.timeline.lane < 0 || m.timeline.lane >= len(lanes) {
+		return 0, false
+	}
+	spans := lanes[m.timeline.lane].Spans
+	if m.timeline.span < 0 || m.timeline.span >= len(spans) {
+		return 0, false
+	}
+	return spans[m.timeline.span], true
+}
+
+// selectedTimelineSpanValue resolves the timeline's cursor to the actual
+// span.Span it names. selectedTimelineSpan itself reports only the index
+// into the tier's span slice, which is what jumpTarget needs to hand
+// jumpToSpan; the detail pane (selectedDetail) wants the span's own fields
+// instead, the way spanForRow does for a table row.
+func (m *Model) selectedTimelineSpanValue() (span.Span, bool) {
+	idx, ok := m.selectedTimelineSpan()
+	if !ok {
+		return span.Span{}, false
+	}
+	_, spans := m.timelineSpans()
+	return spans[idx], true
+}
+
+// mixedProviderLabel is a lane's label when its packed spans come from more
+// than one provider (see laneLabel).
+const mixedProviderLabel = "mixed"
+
+// laneLabel is a lane's left-hand identifier: the provider its spans belong
+// to and its one-based position among the lanes drawn, e.g. "aws/2" --
+// one-based to match how a reader counts rows by eye rather than the
+// zero-based index PackLanes returns.
+//
+// PackLanes packs purely by timing, with no notion of provider, so two
+// different providers' spans can land in one lane whenever their intervals
+// happen not to overlap. Naming such a lane after only its first span's
+// provider would misattribute every OTHER span in it to a provider it is
+// not from, so laneLabel reports "mixed" instead: a fixed-width, honest
+// answer over a guess that is wrong as often as it is right.
+func laneLabel(spans []span.Span, lane model.Lane, n int) string {
+	provider := laneLabelProvider(spans[lane.Spans[0]].Provider)
+	for _, idx := range lane.Spans[1:] {
+		if laneLabelProvider(spans[idx].Provider) != provider {
+			provider = mixedProviderLabel
+			break
+		}
+	}
+	return fmt.Sprintf("%s/%d", provider, n)
+}
+
+// laneLabelProvider shortens a span's provider to the identifier laneLabel
+// shows: the last "/"-separated segment, which is the provider's short type
+// name ("aws") whichever tier the span comes from -- the RPC tier's Provider
+// is the full registry address ("registry.terraform.io/hashicorp/aws") and
+// the UI tier's is already that short name with no "/" to split on, so one
+// rule serves both. An empty provider is normalised through model.FacetKey
+// to the same "(none)" the facet pane and the rollups already use for one,
+// rather than a bare label that would render as little more than "/N".
+func laneLabelProvider(provider string) string {
+	provider = model.FacetKey(provider)
+	if slash := strings.LastIndex(provider, "/"); slash >= 0 {
+		return provider[slash+1:]
+	}
+	return provider
+}
+
+// maxLaneLabelWidth caps how much of the pane's width the label column may
+// claim, so a lane holding a long provider name -- or "mixed" -- cannot
+// squeeze the bar area, the point of this view, down to nothing. Provider
+// names are short, closed-vocabulary slugs ("aws", "google", "kubernetes"),
+// so this is a defensive ceiling rather than a width real logs are expected
+// to reach.
+const maxLaneLabelWidth = 12
+
+// laneLabelWidth is the label column's width for one render: wide enough for
+// the widest of labels, capped at maxLaneLabelWidth. It is computed over
+// EVERY lane, not just the ones a short pane currently has room to draw, so
+// scrolling the lane cursor through a log with lanes numbered into double or
+// triple digits does not shift the column width -- and so the bar area --
+// out from under the rows already on screen.
+func laneLabelWidth(labels []string) int {
+	w := 0
+	for _, l := range labels {
+		w = max(w, lipgloss.Width(l))
+	}
+	return min(w, maxLaneLabelWidth)
+}
+
+// renderTimeline renders the timeline view's centre-pane content: one
+// labelled lane bar per lane PackLanes packs the active tier's spans into
+// (see timelineLanes), followed by the time axis.
 //
 // A log with neither span tier gets capture guidance in place of any bars
 // (noTimedSpansNote); a tier that exists but whose filter hides every span
@@ -111,11 +274,26 @@ func timelineWallClockMs(spans []span.Span) uint32 {
 // separates for the same reason; see timelineSpans for why they can never
 // collapse into each other.
 //
-// The axis is always the LAST line, and is never dropped for want of
-// height: this task builds no cursor yet (see Model.timeline, timelineState
-// and task 6), so there is no notion yet of which lane to keep on screen
-// when they do not all fit, and dropping the axis instead would lose the
-// one thing every lane bar is drawn against.
+// Each lane's row is its label (laneLabel), padded to the widest label
+// drawn, then its bar over whatever width is left of w -- laneBar is tested
+// at exact widths and does not itself know about the label, so this is the
+// one place that width is divided between the two. The selected lane is
+// drawn as the cursor bar (see cursorBar), the same reverse-video treatment
+// the table views give their selected row, styled or dimmed by whether the
+// list pane has focus; the within-lane span cursor has no glyph of its own
+// in the bar -- a packed lane already draws several spans as one lit column
+// (see laneBar), so a marker on individual columns would often point at
+// spans it cannot tell apart -- and is instead named in the detail pane
+// beside it.
+//
+// The lane rows are windowed around the lane cursor by the same
+// scrollWindow the centre table uses for its own row cursor, so a log with
+// more lanes than the pane is tall keeps the selected one on screen instead
+// of always showing the first screenful. The axis is always the LAST line,
+// indented under the bar area by the same label width the lane rows reserve
+// so it still names both ends of what the bars above it are measuring
+// against, and is never dropped for want of height -- it is the one thing
+// every lane bar is drawn relative to.
 func (m *Model) renderTimeline(w, h int) string {
 	if h <= 0 {
 		return ""
@@ -128,30 +306,27 @@ func (m *Model) renderTimeline(w, h int) string {
 		return clipWidth(noMatchNote, w)
 	}
 
-	lanes, err := model.PackLanes(spans)
-	if err != nil {
-		// timelineSpans hands PackLanes spans of a single tier by
-		// construction, so ErrMixedTimelines reaching here means that
-		// guarantee broke somewhere upstream -- a programming error to fail
-		// loudly on, the same treatment unhandledView gives its own
-		// can't-happen case, rather than a blank pane that looks like this
-		// view was never built.
-		panic(fmt.Sprintf("tui: renderTimeline: %v", err))
-	}
+	lanes := m.timelineLanes()
 	wallClock := timelineWallClockMs(spans)
 
-	laneRows := len(lanes)
-	if laneRows > h-1 {
-		laneRows = h - 1
+	labels := make([]string, len(lanes))
+	for i, lane := range lanes {
+		labels[i] = laneLabel(spans, lane, i+1)
 	}
-	if laneRows < 0 {
-		laneRows = 0
+	labelW := laneLabelWidth(labels)
+	barW := max(w-labelW-1, 0)
+
+	top, visible := scrollWindow(m.timeline.lane, len(lanes), h-1)
+	lines := make([]string, 0, visible+1)
+	for i := top; i < top+visible; i++ {
+		line := padRight(clipValueForKind(labels[i], labelW, tailIdentifierColumn), labelW) + " " + laneBar(spans, lanes[i], wallClock, barW)
+		line = clipWidth(line, w)
+		if i == m.timeline.lane {
+			line = cursorBar(line, w, m.pane == PaneList)
+		}
+		lines = append(lines, line)
 	}
-	lines := make([]string, 0, laneRows+1)
-	for _, lane := range lanes[:laneRows] {
-		lines = append(lines, clipWidth(laneBar(spans, lane, wallClock, w), w))
-	}
-	lines = append(lines, clipWidth(timeAxis(wallClock, w), w))
+	lines = append(lines, clipWidth(strings.Repeat(" ", labelW+1)+timeAxis(wallClock, barW), w))
 	return strings.Join(lines, "\n")
 }
 

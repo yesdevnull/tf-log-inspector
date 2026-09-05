@@ -515,7 +515,7 @@ func TestJumpToSpanIgnoresARowIndexPastTheLastSpan(t *testing.T) {
 	// Any view but the raw log will do; naming one states what "left alone"
 	// is measured against rather than leaning on whatever New defaults to.
 	m.view = ViewProviders
-	m.jumpToSpan(len(m.log.RPCSpans))
+	m.jumpToSpan(m.log.RPCSpans, len(m.log.RPCSpans))
 	if m.ActiveView() != ViewProviders {
 		t.Errorf("view = %v after a jump to a row index past the last span, want it left alone", m.ActiveView())
 	}
@@ -535,7 +535,7 @@ func TestJumpToSpanIgnoresAnOutOfRangeEntryIndex(t *testing.T) {
 	}
 	m := New(l, "x.log")
 	m.view = ViewProviders
-	m.jumpToSpan(0)
+	m.jumpToSpan(l.RPCSpans, 0)
 	if m.ActiveView() != ViewProviders {
 		t.Errorf("view = %v after a jump to an out-of-range entry, want it left alone", m.ActiveView())
 	}
