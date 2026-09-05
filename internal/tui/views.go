@@ -583,6 +583,48 @@ func clipEachWidth(lines []string, w int) string {
 	return strings.Join(out, "\n")
 }
 
+// wrapToWidth greedily breaks one line of prose into lines of at most w
+// display columns, splitting on spaces. It exists for the blocks that
+// COMPETE for pane height with the content they annotate: a caveat
+// pre-wrapped to a fixed narrow width spends the same number of lines in a
+// 74-column pane as in a 44-column one, and every line it spends there is a
+// line of the thing it was explaining (see clampedStartNote, and
+// captureGuidance for the opposite case, where a fixed wrap is the right
+// answer).
+//
+// Every returned line is guaranteed to fit w, so a caller can append the
+// result to a pane without a further clip. A single word wider than w --
+// which no prose in this package has, but which a narrow enough pane
+// manufactures out of any word -- is clipped with clipValueEnd rather than
+// left to overflow, so the cut carries a marker instead of being made
+// silently by the pane's own last-resort clip.
+//
+// Width is display columns via lipgloss.Width throughout, the measure every
+// other width in this package uses; a rune count would wrap a line of
+// double-width characters to twice the pane.
+func wrapToWidth(s string, w int) []string {
+	if w <= 0 {
+		return nil
+	}
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case line == "":
+			line = word
+		case lipgloss.Width(line)+1+lipgloss.Width(word) <= w:
+			line += " " + word
+		default:
+			lines = append(lines, clipValueEnd(line, w))
+			line = word
+		}
+	}
+	if line != "" {
+		lines = append(lines, clipValueEnd(line, w))
+	}
+	return lines
+}
+
 // typesPreamble states the UI-hook resolution caveat above the types table,
 // but only when UI-hook figures are actually present to rank -- a log with
 // RPC spans only has nothing to caveat. Terraform rounds a resource's start

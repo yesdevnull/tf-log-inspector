@@ -4,8 +4,9 @@ TIMELINE (rpc)
 [7maws/1    [0m     ░███████████     ░████████████████████████████
 google/1         ▒██████████▓                               
          0s                                             9.0s
-concurrency dropped to 1 of 2, 4.0s–9.0s — waiting on aws/1
-nothing running at all, 0s–1.0s — before any provider call
+busy 7.5s of 9.0s (83%)
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2
+nothing running, 0s–1.0s — before any call
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s
@@ -14,4 +15,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  4 calls  6 raw log
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q qu
+⇥ pane  ␣ facet  ⏎ open  ↔ span  f facets  / search  Esc cle

@@ -638,7 +638,7 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 // AnnotationWouldFillThePane uses, looked at from the annotation's end.
 func TestRenderTimelineMarksAnAnnotationCutForHeight(t *testing.T) {
 	m := everyKindOfWaitModel(t)
-	full := strings.Split(m.stallAnnotation(40), "\n")
+	full := m.timelineNotes(40)
 
 	lines := strings.Split(m.renderTimeline(40, 4), "\n")
 	if len(lines) != 4 {
@@ -650,12 +650,12 @@ func TestRenderTimelineMarksAnAnnotationCutForHeight(t *testing.T) {
 		t.Fatalf("annotation was not cut at h=4 (%d of %d lines shown), so this test asserts nothing", len(shown), len(full))
 	}
 	if got := shown[len(shown)-1]; got != detailCutMark {
-		t.Errorf("last annotation line = %q, want %q: %d of %d stalls went unsaid with nothing marking it", got, detailCutMark, len(full)-len(shown), len(full))
+		t.Errorf("last annotation line = %q, want %q: %d of %d notes went unsaid with nothing marking it", got, detailCutMark, len(full)-len(shown), len(full))
 	}
-	// The cut takes the line it marks, so the stalls above it survive
-	// intact rather than the mark replacing the longest one.
+	// The cut takes the line it marks, so the notes above it survive
+	// intact rather than the mark replacing the first of them.
 	if shown[0] != full[0] {
-		t.Errorf("first annotation line = %q, want the longest stall %q", shown[0], full[0])
+		t.Errorf("first annotation line = %q, want the head of the block %q", shown[0], full[0])
 	}
 }
 
@@ -666,7 +666,7 @@ func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
 	// finish; that span is what the annotation must name.
 	m := timelineModel(t)
 	got := m.stallAnnotation(80)
-	if !strings.Contains(got, "concurrency dropped to") {
+	if !strings.Contains(got, "concurrency 1 of 2") {
 		t.Fatalf("stallAnnotation says nothing about capacity going unused: %q", got)
 	}
 	if !strings.Contains(got, "waiting on") {
@@ -778,8 +778,8 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 
 	got := m.stallAnnotation(80)
 	want := []string{
-		"concurrency dropped to 1 of 2, 3.3s–20.0s — waiting on aws/1",
-		"nothing running at all, 0s–3.0s — before any provider call",
+		"waiting on aws/1, 3.3s–20.0s — concurrency 1 of 2",
+		"nothing running, 0s–3.0s — before any call",
 	}
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v (one continuous wait, longest first)", lines, want)
@@ -833,9 +833,9 @@ func everyKindOfWaitModel(t *testing.T) Model {
 func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
 	m := everyKindOfWaitModel(t)
 	want := []string{
-		"nothing running at all, 9.0s–20.0s — between provider calls",
-		"concurrency dropped to 1 of 2, 20.0s–30.0s — waiting on aws/1",
-		"nothing running at all, 0s–3.0s — before any provider call",
+		"nothing running, 9.0s–20.0s — between calls",
+		"waiting on aws/1, 20.0s–30.0s — concurrency 1 of 2",
+		"nothing running, 0s–3.0s — before any call",
 	}
 	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
@@ -873,9 +873,9 @@ func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
 	lines := strings.Split(got, "\n")
 
 	want := []string{
-		"concurrency dropped to 1 of 2, 2.0s–12.0s — waiting on aws/1",
-		"concurrency dropped to 1 of 2, 14.0s–22.0s — waiting on aws/1",
-		"concurrency dropped to 1 of 2, 24.0s–30.0s — waiting on aws/1",
+		"waiting on aws/1, 2.0s–12.0s — concurrency 1 of 2",
+		"waiting on aws/1, 14.0s–22.0s — concurrency 1 of 2",
+		"waiting on aws/1, 24.0s–30.0s — concurrency 1 of 2",
 		detailCutMark,
 	}
 	if !slices.Equal(lines, want) {
@@ -912,19 +912,18 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 		t.Fatalf("lane = %d after moving to the last lane, want %d", m.timeline.lane, len(lanes)-1)
 	}
 
-	// h=4 gives renderTimeline one line for the axis and one for the stall
-	// annotation -- the fixture's five spans fully overlap and run to the
-	// end of the log, so the only wait it has is the second of capture time
-	// before the first of them starts, which is one line -- leaving two
-	// lane rows, fewer than the fixture's five lanes. With
+	// h=5 gives renderTimeline one line for the axis and two for the notes
+	// -- the busy summary, then the fixture's only wait, the second of
+	// capture time before its five fully-overlapping spans start -- leaving
+	// two lane rows, fewer than the fixture's five lanes. With
 	// the cursor on lane 4 (0-based) and a two-row window, scrollWindow's
 	// own pin-to-edge rule puts the window at lanes [3, 4]: lanes 0-2 must
 	// have scrolled off, and the cursor's own lane 4 must be the LAST lane
-	// row drawn, ahead of the axis and the annotation.
-	got := m.renderTimeline(40, 4)
+	// row drawn, ahead of the axis and the notes.
+	got := m.renderTimeline(40, 5)
 	lines := strings.Split(got, "\n")
-	if len(lines) != 4 {
-		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4 (2 lane rows, the axis, and the stall annotation)", len(lines))
+	if len(lines) != 5 {
+		t.Fatalf("renderTimeline(h=5) produced %d lines, want 5 (2 lane rows, the axis, and two note lines)", len(lines))
 	}
 
 	_, spans := m.timelineSpans()
@@ -958,8 +957,8 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 			}
 		}
 	}
-	if want := m.stallAnnotation(40); lines[3] != want {
-		t.Errorf("last line = %q, want the stall annotation %q", lines[3], want)
+	if want := m.timelineNotes(40); !slices.Equal(lines[3:], want) {
+		t.Errorf("the lines beneath the axis are %q, want the notes %q", lines[3:], want)
 	}
 }
 
@@ -1160,5 +1159,244 @@ func TestTheAnnotationSpellsZeroTheWayTheAxisDoes(t *testing.T) {
 	}
 	if axis := timeAxis(9000, 40); !strings.HasPrefix(axis, "0s") {
 		t.Errorf("timeAxis no longer opens on 0s: %q", axis)
+	}
+}
+
+// TestTheTimelineReportsHowMuchOfTheWindowWasBusy covers the hole the stall
+// list structurally cannot: timeline-dense-lane.log is 2.4s of work spread
+// over a 180s window, and every stall rule is correctly silent about it --
+// concurrency never drops below its peak of 1, and no single gap reaches
+// the threshold. "no stalls" on a run that was 98% idle answers the one
+// question this view exists for wrongly.
+func TestTheTimelineReportsHowMuchOfTheWindowWasBusy(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-dense-lane.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	notes := m.timelineNotes(80)
+	if len(notes) == 0 {
+		t.Fatal("the timeline draws no notes at all")
+	}
+	if !slices.Contains(notes, stallAnnotationNoStalls) {
+		t.Fatalf("this fixture is meant to have no stalls, so it no longer exercises the defect: %q", notes)
+	}
+	const want = "busy 2.4s of 180.0s (1%)"
+	if notes[0] != want {
+		t.Errorf("first note = %q, want %q -- 60 calls of 40ms over a 180s window", notes[0], want)
+	}
+}
+
+// The summary sits ABOVE the stall list, so a pane too short for both keeps
+// the headline figure and gives up the ranked detail beneath it.
+func TestTheBusySummarySitsAboveTheStallList(t *testing.T) {
+	m := timelineModel(t)
+	notes := m.timelineNotes(80)
+	if len(notes) < 2 {
+		t.Fatalf("timeline.log is meant to carry both a summary and stalls, got %q", notes)
+	}
+	if !strings.HasPrefix(notes[0], "busy ") {
+		t.Errorf("notes[0] = %q, want the busy summary first", notes[0])
+	}
+	if !strings.Contains(notes[1], "concurrency") {
+		t.Errorf("notes[1] = %q, want the stall list beneath the summary", notes[1])
+	}
+}
+
+// The union, not the sum: two spans overlapping cover less wall clock than
+// their durations add to, and a summary claiming more busy time than the
+// window holds would be arithmetic nobody could check against the bars.
+func TestTheBusySummaryNeverExceedsTheWindow(t *testing.T) {
+	for _, name := range []string{"timeline.log", "timeline-dense-lane.log", "timeline-many-lanes.log", "timeline-many-stalls.log", "two-tier.log"} {
+		m := update(t, New(testLog(t, name), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+		_, spans := m.timelineSpans()
+		busy, err := model.BusyMs(spans)
+		if err != nil {
+			t.Fatalf("%s: BusyMs: %v", name, err)
+		}
+		if window := timelineWallClockMs(spans); busy > window {
+			t.Errorf("%s: busy %dms exceeds the %dms window the axis draws", name, busy, window)
+		}
+	}
+}
+
+// TestTheClampedStartNoteUsesThePaneItIsGiven covers a caveat that was
+// pre-wrapped to 40 columns and so spent five lines of a twelve-line pane
+// however wide the pane actually was. Chrome never displaces content here,
+// so the note wraps to the width it has.
+func TestTheClampedStartNoteUsesThePaneItIsGiven(t *testing.T) {
+	for _, w := range []int{44, 60, 74, 160} {
+		lines := wrapToWidth(clampedStartNote, w)
+		for i, l := range lines {
+			if n := lipgloss.Width(l); n > w {
+				t.Errorf("width %d: line %d is %d columns: %q", w, i, n, l)
+			}
+			if i == len(lines)-1 {
+				continue
+			}
+			// Greedy wrap: no line but the last may have had room for the
+			// first word of the one below it, or the note is still wrapped
+			// narrower than the pane it was handed.
+			next, _, _ := strings.Cut(lines[i+1], " ")
+			if lipgloss.Width(l)+1+lipgloss.Width(next) <= w {
+				t.Errorf("width %d: line %d (%q) had room for %q from the line below", w, i, l, next)
+			}
+		}
+	}
+	if got := len(wrapToWidth(clampedStartNote, 44)); got > 3 {
+		t.Errorf("the clamped-start note is %d lines in a 44-column pane, want at most 3 of the twelve a pane has", got)
+	}
+	if got := len(wrapToWidth(clampedStartNote, 160)); got != 1 {
+		t.Errorf("the clamped-start note is %d lines in a 160-column pane, want 1", got)
+	}
+}
+
+// A pane with lanes to draw always draws at least one of them, however much
+// the notes beneath would like the room.
+func TestTheNotesNeverTakeTheLastLaneRow(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-clamped-start.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	for h := 2; h <= 14; h++ {
+		lines := strings.Split(m.renderTimeline(44, h), "\n")
+		if len(lines) > h {
+			t.Fatalf("h=%d: renderTimeline produced %d lines", h, len(lines))
+		}
+		bar, _ := logfmt.StripANSI(lines[0], nil)
+		if !strings.ContainsAny(bar, "░▒▓█") {
+			t.Errorf("h=%d: the first line is not a lane bar, so the notes took the last row: %q", h, bar)
+		}
+	}
+}
+
+// commonCentrePaneWidth is what the centre pane measures at the 100-column
+// terminal this tool is actually run at: two side panes capped at a quarter
+// of the width each, and two pane separators. It is the NARROWEST centre
+// pane any supported terminal width produces -- 70 columns gives 48 and 160
+// gives 74 -- so it is the width a line has to survive to survive at all.
+const commonCentrePaneWidth = 44
+
+// TestTheStallLineKeepsTheLaneNameAtTheCommonPaneWidth is why the wording
+// changed. The line ran to 59 columns with the lane name at its END, and
+// the end is what clipValueEnd cuts: at 44 columns it rendered as "…
+// waiting on aws…" and lost the one thing it names a lane FOR. Naming a
+// lane a reader can go and find is the annotation's whole justification for
+// naming lanes rather than spans.
+func TestTheStallLineKeepsTheLaneNameAtTheCommonPaneWidth(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		m     Model
+		label string
+	}{
+		{"a short provider name", timelineModel(t), "aws/1"},
+		{"a name longer than the label column", longLabelStallModel(t), "…workspace/1"},
+	} {
+		got := tc.m.stallAnnotation(commonCentrePaneWidth)
+		if !strings.Contains(got, "waiting on "+tc.label) {
+			t.Errorf("%s: stallAnnotation at %d columns = %q, which no longer names the lane %q", tc.name, commonCentrePaneWidth, got, tc.label)
+		}
+		for _, line := range strings.Split(got, "\n") {
+			if n := lipgloss.Width(line); n > commonCentrePaneWidth {
+				t.Errorf("%s: line %q is %d columns, want at most %d", tc.name, line, n, commonCentrePaneWidth)
+			}
+		}
+	}
+}
+
+// The two lines with no lane to name have no variable-width payload in
+// them, so unlike a blocked wait they can be held to the common pane width
+// whole: what a cut would take is the clause telling the two apart.
+func TestTheAllIdleStallLinesFitTheCommonPaneWidth(t *testing.T) {
+	m := everyKindOfWaitModel(t)
+	lines := strings.Split(m.stallAnnotation(commonCentrePaneWidth), "\n")
+	var idle []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, nothingRunningClause) {
+			idle = append(idle, l)
+		}
+	}
+	if len(idle) != 2 {
+		t.Fatalf("got %d all-idle lines in %q, want 2 (a mid-plan window and the leading gap)", len(idle), lines)
+	}
+	for _, l := range idle {
+		if strings.HasSuffix(l, "…") {
+			t.Errorf("line %q is cut at %d columns, losing the clause that tells it from the other kind of dead window", l, commonCentrePaneWidth)
+		}
+	}
+	if idle[0] == idle[1] {
+		t.Errorf("both all-idle lines read %q, so the mid-plan window and the leading gap are indistinguishable", idle[0])
+	}
+}
+
+// unevenLanesModel is a model over two providers whose lanes hold different
+// numbers of calls at different times: aws twice, google four times. It is
+// the shape that tells a cursor carried by ORDINAL from one carried by
+// time -- aws's second call is google's fourth in time, but google's second
+// by index.
+func unevenLanesModel(t *testing.T) Model {
+	t.Helper()
+	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
+	spans := []span.Span{
+		{Provider: aws, RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: aws, RPC: "ReadResource", StartMs: 30000, EndMs: 31000, DurationMs: 1000, Fidelity: span.FidelityReported},
+	}
+	for _, at := range []uint32{0, 10000, 20000, 30000} {
+		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: at, EndMs: at + 1000, DurationMs: 1000, Fidelity: span.FidelityReported})
+	}
+	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+// TestChangingLanesKeepsTheCursorWhereTheReaderWasLooking covers a cursor
+// that carried its ORDINAL across a lane change: on lane 0's third call,
+// ↓ landed on lane 1's third call, an unrelated call at an unrelated time.
+// The cursor drives the detail pane and Enter's jump target, so what it
+// lands on has to be what the reader was looking at.
+func TestChangingLanesKeepsTheCursorWhereTheReaderWasLooking(t *testing.T) {
+	m := unevenLanesModel(t)
+	lanes := m.timelineLanes()
+	if len(lanes) != 2 || len(lanes[0].Spans) != 2 || len(lanes[1].Spans) != 4 {
+		t.Fatalf("lanes hold %d and %d spans, want 2 and 4", len(lanes[0].Spans), len(lanes[1].Spans))
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	from, ok := m.selectedTimelineSpanValue()
+	if !ok || from.StartMs != 30000 {
+		t.Fatalf("selected span starts at %dms, want the 30s call in aws's lane", from.StartMs)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	got, ok := m.selectedTimelineSpanValue()
+	if !ok {
+		t.Fatal("nothing selected after moving to a lane with spans in it")
+	}
+	if got.StartMs != 30000 {
+		t.Errorf("after ↓ the cursor is on the call starting at %dms, want the 30s one nearest where it was", got.StartMs)
+	}
+	if m.timeline.span != 3 {
+		t.Errorf("span index = %d, want 3 -- the ordinal was carried across instead of the time", m.timeline.span)
+	}
+
+	// And back the other way, where the ordinal would now run off the end
+	// of the shorter lane and be clamped to it rather than chosen.
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if back, _ := m.selectedTimelineSpanValue(); back.StartMs != 30000 {
+		t.Errorf("after ↑ the cursor is on the call starting at %dms, want the 30s one", back.StartMs)
+	}
+}
+
+// A lane change that lands on the same lane -- the cursor already at the
+// end -- must leave the within-lane cursor alone, or ↓ at the bottom would
+// quietly re-seek it.
+func TestALaneChangeThatGoesNowhereLeavesTheSpanCursorAlone(t *testing.T) {
+	m := unevenLanesModel(t)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	for i := 0; i < 3; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	}
+	if m.timeline.span != 3 {
+		t.Fatalf("span = %d after stepping to the end of lane 1, want 3", m.timeline.span)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.timeline.span != 3 {
+		t.Errorf("span = %d after ↓ on the last lane, want it left at 3", m.timeline.span)
 	}
 }

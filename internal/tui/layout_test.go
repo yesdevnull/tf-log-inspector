@@ -1536,3 +1536,98 @@ func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 		t.Errorf("an unclamped span's detail claims a clamped start:\n%s", out)
 	}
 }
+
+// TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress covers a pane that
+// was never sized against the only per-resource identifier the UI tier has.
+// detailNaturalWidth measured spanDetailLines over l.RPCSpans alone, which
+// was complete while the Addr line was unreachable; the timeline now selects
+// UI-tier spans and renders it. On structured-ui.log the pane measured 25
+// columns and front-clipped every module path to its tail, so two distinct
+// modules' resources rendered as identical text -- with 135 columns of
+// terminal to spare and maxDetailPaneWidth nowhere near reached.
+func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
+	l := testLog(t, "structured-ui.log")
+	if len(l.UISpans) == 0 {
+		t.Fatal("structured-ui.log carries no UI-hook spans, so it no longer exercises this")
+	}
+	var widest string
+	for _, s := range l.UISpans {
+		for _, line := range spanDetailLines(s, hugeWidth) {
+			if lipgloss.Width(line) > lipgloss.Width(widest) {
+				widest = line
+			}
+		}
+	}
+	if !strings.HasPrefix(widest, "Addr") {
+		t.Fatalf("the widest UI-hook detail line is %q, not an address, so this asserts nothing", widest)
+	}
+	if got := detailNaturalWidth(l); got < lipgloss.Width(widest) {
+		t.Errorf("detailNaturalWidth = %d, want at least %d for %q", got, lipgloss.Width(widest), widest)
+	}
+}
+
+// The measurement has to reach the SCREEN, not just the function: a pane
+// measured wide enough that the terminal-relative clamp then throws away is
+// no fix. 160 columns leaves maxDetailPaneWidth reachable.
+func TestTheTimelineDetailPaneShowsAWholeUIHookAddress(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	s, ok := m.selectedTimelineSpanValue()
+	if !ok {
+		t.Fatal("nothing selected on a timeline with spans")
+	}
+	if !strings.Contains(m.View(), s.Address) {
+		t.Errorf("the frame does not carry the selected resource's address %q in full:\n%s", s.Address, m.View())
+	}
+}
+
+// TestTheFooterOffersTheSpanKeysOnlyWhereTheyStep covers the inverse of the
+// defect TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens covers: a working
+// key advertised nowhere. ←/→ (and h/l) are the only way to select any span
+// in a lane but the first, and they drive both the detail pane and Enter's
+// jump target -- on a real capture a lane holds hundreds of spans and only
+// the first was reachable without knowing the keys exist.
+//
+// Whether they step is MEASURED by pressing → and seeing whether the
+// selection moved, rather than listed as views this test believes are
+// inert, the same way the open hint's own test measures Enter.
+func TestTheFooterOffersTheSpanKeysOnlyWhereTheyStep(t *testing.T) {
+	base := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	var sawBoth [2]bool
+	for _, b := range views {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
+		got := footerOf(m.View())
+		before := m.timeline
+		steps := update(t, m, tea.KeyMsg{Type: tea.KeyRight}).timeline != before
+		if steps {
+			sawBoth[0] = true
+		} else {
+			sawBoth[1] = true
+		}
+		if strings.Contains(got, spanCursorHint) != steps {
+			verb := "does not offer"
+			if !steps {
+				verb = "offers"
+			}
+			t.Errorf("%s view: → steps = %v, but the footer %s %q: %q", b.name, steps, verb, spanCursorHint, got)
+		}
+	}
+	if !sawBoth[0] || !sawBoth[1] {
+		t.Fatalf("→ behaved the same way in every view, so this cannot tell a conditional hint from an unconditional one")
+	}
+}
+
+// The action line is clipped from its end, so every hint added to it pushes
+// "q quit" towards the edge. 70 columns is detailInlineWidth, the narrowest
+// width that still draws every kind of pane, and the action line fitted it
+// exactly at 62 columns before the span hint was added.
+func TestTheActionLineStillFitsTheNarrowestThreePaneWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 70, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if !strings.Contains(m.actionKeys(), spanCursorHint) {
+		t.Fatalf("the timeline's action keys do not carry the span hint, so this asserts nothing: %q", m.actionKeys())
+	}
+	if n := lipgloss.Width(m.actionKeys()); n > detailInlineWidth {
+		t.Errorf("the timeline's action line is %d columns, more than the %d a %d-column terminal gives it: %q", n, detailInlineWidth, detailInlineWidth, m.actionKeys())
+	}
+}

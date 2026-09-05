@@ -90,6 +90,14 @@ right, and the raw log with `/` search. `q` quits. Read
 [What each mode discloses](#what-each-mode-discloses) before you share a
 session — the interface shows more of your log than either report does.
 
+Key `5` swaps the centre table for a timeline: one bar per lane of concurrent
+work, shaded by how busy each column of it was, with the idle time between
+calls left as the blank space it is. Beneath it sit how much of the run had
+anything running at all, and the longest waits. `↑`/`↓` move between lanes,
+and `←`/`→` (or `h`/`l`) step along the selected one call by call — the
+detail pane follows the step, and `⏎` opens that call's own line in the raw
+log.
+
 `-o` writes a report, so it applies to `--diagnose` and `--profile` only;
 passing it without a mode flag is an error rather than a file that never
 appears.

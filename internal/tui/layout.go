@@ -79,10 +79,16 @@ func facetNaturalWidth(facets []model.Facet) int {
 // It measures the rollup views' detail as well as each span's, because a
 // rollup line is routinely the widest the pane ever shows: a resource type
 // under the types view's ten-column label ("RPC calls") outruns a provider
-// address under the span detail's six ("Prov"), and a log carrying UI-hook
-// spans only has no span detail to measure at all -- there the whole pane
-// would otherwise be measured at minDetailPaneWidth and clip every line it
-// draws.
+// address under the span detail's six ("Prov").
+//
+// BOTH span tiers are measured. A UI-hook span's detail carries an Addr
+// line (see spanDetailLines) that no RPC span has, and it is the widest
+// line this pane draws for such a log -- a resource address runs to a whole
+// module path where a provider address is one registry slug. The timeline's
+// cursor selects UI-tier spans directly (selectedTimelineSpanValue), so a
+// log carrying UI-hook spans only would otherwise be measured off its
+// rollups alone and front-clip every address it drew, collapsing distinct
+// module paths to identical text with terminal width to spare.
 //
 // It formats every span in the log and rolls the log up twice, so like
 // facetNaturalWidth it is measured once in New over data that cannot change
@@ -95,9 +101,11 @@ func facetNaturalWidth(facets []model.Facet) int {
 // other overrun.
 func detailNaturalWidth(l *model.Log) int {
 	width := minDetailPaneWidth
-	for _, s := range l.RPCSpans {
-		for _, line := range spanDetailLines(s, hugeWidth) {
-			width = max(width, lipgloss.Width(line))
+	for _, spans := range [][]span.Span{l.RPCSpans, l.UISpans} {
+		for _, s := range spans {
+			for _, line := range spanDetailLines(s, hugeWidth) {
+				width = max(width, lipgloss.Width(line))
+			}
 		}
 	}
 	rollups := append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...)
@@ -352,11 +360,24 @@ func (m *Model) keyHints(w int) string {
 // that closed its span.
 const openHint = "⏎ open"
 
+// spanCursorHint names the keys that step the timeline's cursor along the
+// selected lane (←/→, and h/l beside them).
+//
+// It is six display columns -- the arrows are written as one ↔ rather than
+// as "←→", and the noun is the pane's own word for what is selected (SPAN
+// DETAIL) -- because the action line fitted a 70-column terminal exactly at
+// 62 columns and the line is clipped from its END, where "q quit" is. Six
+// columns plus the two-space separator lands it on 70 exactly; seven would
+// have cost the quit hint its last letter at the narrowest width that still
+// draws all three panes.
+const spanCursorHint = "↔ span"
+
 // actionKeys is the hint group for the keys that DO something to what is on
 // screen, as opposed to the ones that change which view is on screen. It is
-// 62 display columns with the open hint and 52 without; every binding added
-// to it pushes "q quit" closer to the edge a narrow terminal cuts from,
-// which is what keeps it this terse.
+// 52 display columns bare, 62 with the open hint, and 70 in the timeline,
+// which carries both that and the span hint; every binding added to it
+// pushes "q quit" closer to the edge a narrow terminal cuts from, which is
+// what keeps it this terse.
 //
 // The open hint is shown only where Enter has something to open: a call
 // row's own span in the table views, or the timeline's selected span, which
@@ -367,17 +388,30 @@ const openHint = "⏎ open"
 // wherever it finds it, and this hint stood in three of the four views
 // before it was added.
 //
-// It asks selectedRowOpens, which is built on jumpTarget -- the single
-// predicate the Enter handler asks too -- so the footer cannot come to
-// advertise a key the handler has stopped acting on. It does NOT ask which
-// pane has focus: Enter is inert from the detail pane the way space is
-// inert outside the facet pane, and "␣ facet" is shown regardless for the
-// same reason -- a hint that flickered as Tab moved would describe the
-// keyboard rather than the view.
+// The span hint is the SAME rule read the other way: a working key
+// advertised nowhere. ←/→ (and h/l) are the only way to reach any span in a
+// lane but the first, and they choose what the detail pane describes and
+// what Enter jumps to, so a reader who does not know they exist sees one
+// span of the hundreds a real lane holds. It is shown where those keys
+// actually step -- the timeline, on a lane holding more than one span (see
+// selectedLaneStepsThroughSpans) -- and nowhere else, since no other view
+// has a within-lane cursor for them to move.
+//
+// Both ask a predicate built on the same state their key handler reads --
+// selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
+// through timelineLanes -- so the footer cannot come to advertise a key the
+// handler has stopped acting on. Neither asks which pane has focus: Enter
+// is inert from the detail pane the way space is inert outside the facet
+// pane, and "␣ facet" is shown regardless for the same reason -- a hint
+// that flickered as Tab moved would describe the keyboard rather than the
+// view.
 func (m *Model) actionKeys() string {
 	keys := []string{"⇥ pane", "␣ facet"}
 	if m.selectedRowOpens() {
 		keys = append(keys, openHint)
+	}
+	if m.selectedLaneStepsThroughSpans() {
+		keys = append(keys, spanCursorHint)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
 }

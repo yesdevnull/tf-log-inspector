@@ -4,9 +4,9 @@ PROVIDERS                 │ TIMELINE (rpc)                               │ S
 [7;2m[ ] ….io/hashicorp/aws  2[0m │ [7maws/1    [0m   ░███████▓   ▒███████████████████ │ RPC   ApplyResourceChange
 [ ] …/hashicorp/google  1 │ google/1      ░███████▒                      │ Prov  …m.io/hashicorp/aws
 RPCS                      │          0s                             9.0s │ Dur   2.0s               
-[ ] ApplyResourceChan…  3 │ concurrency dropped to 1 of 2, 4.0s–9.0s — … │                          
-RESOURCE TYPES            │ nothing running at all, 0s–1.0s — before an… │                          
-[ ] aws_instance  1       │                                              │                          
+[ ] ApplyResourceChan…  3 │ busy 7.5s of 9.0s (83%)                      │                          
+RESOURCE TYPES            │ waiting on aws/1, 4.0s–9.0s — concurrency 1… │                          
+[ ] aws_instance  1       │ nothing running, 0s–1.0s — before any call   │                          
 [ ] aws_subnet  1         │                                              │                          
 [ ] …_compute_instance  1 │                                              │                          
 LEVELS                    │                                              │                          
@@ -37,4 +37,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  4 calls  6 raw log
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+⇥ pane  ␣ facet  ⏎ open  ↔ span  f facets  / search  Esc clear  q quit

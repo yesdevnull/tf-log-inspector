@@ -379,3 +379,59 @@ func lowestRankRunning(order []int, running []uint64) int {
 	}
 	return -1
 }
+
+// BusyMs is how much of the run had ANY span running: the total length of
+// the union of the spans' [StartMs, EndMs) intervals. Against the same
+// wall-clock window PeakConcurrency's callers scale their axes to, it
+// answers the question a stall list structurally cannot -- whether an
+// eight-minute plan was eight minutes of work or ninety seconds of work and
+// six minutes of waiting -- for a log whose idle time is spread thinly
+// rather than gathered into windows long enough to clear a stall threshold.
+// Rate-limited polling is the ordinary shape that produces one: sixty short
+// calls three seconds apart never drop the concurrency and never open a
+// long enough gap, so every stall rule is silent while the run is 98% idle.
+//
+// It is a UNION, not a sum of durations. Two spans running [0,10) and
+// [5,15) cover fifteen milliseconds between them, not the twenty their
+// durations add to: the five they share is one stretch of busy wall clock,
+// and summing would report more work than the window has room for. That is
+// also why this cannot be derived from the rollups, which sum.
+//
+// A zero-duration span contributes nothing, the empty interval [t, t)
+// containing no millisecond -- the same answer PeakConcurrency gives one,
+// and for the same reason. It also cannot interrupt a span that genuinely
+// is running: the sweep applies every event at one instant before measuring
+// the stretch that follows, so an instantaneous span nested inside a long
+// one nets to zero and leaves the long one running, the netting Stalls'
+// own open counter documents.
+//
+// It rejects a mixed-fidelity slice for the same reason PackLanes does: see
+// sameFidelity.
+func BusyMs(spans []span.Span) (uint32, error) {
+	if len(spans) == 0 {
+		return 0, nil
+	}
+	if err := sameFidelity(spans); err != nil {
+		return 0, err
+	}
+
+	events := spanEvents(spans)
+	var busy uint32
+	var running int
+	for i := 0; i < len(events); {
+		at := events[i].at
+		for i < len(events) && events[i].at == at {
+			running += events[i].delta
+			i++
+		}
+		if i == len(events) {
+			// Nothing is running after the last event -- every span that
+			// opened has closed -- so there is no stretch left to measure.
+			break
+		}
+		if running > 0 {
+			busy += events[i].at - at
+		}
+	}
+	return busy, nil
+}

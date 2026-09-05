@@ -483,3 +483,103 @@ func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 		}
 	}
 }
+
+// BusyMs is the union of the spans' intervals, not the sum of their
+// durations: two spans overlapping by 5ms cover 15ms between them, and a
+// sum would report 20ms of work in a 15ms window.
+func TestBusyMsCountsOverlappingSpansOnce(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 10, span.FidelityReported),
+		timed(5, 15, span.FidelityReported),
+	}
+	got, err := BusyMs(spans)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 15 {
+		t.Errorf("BusyMs = %d, want 15 -- the union of [0,10) and [5,15), not the 20ms their durations sum to", got)
+	}
+}
+
+func TestBusyMsLeavesOutTheGapsBetweenSpans(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 40, span.FidelityReported),
+		timed(3000, 3040, span.FidelityReported),
+	}
+	got, err := BusyMs(spans)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 80 {
+		t.Errorf("BusyMs = %d, want 80 -- the 2.96s between the two calls is idle, not busy", got)
+	}
+}
+
+func TestBusyMsCountsANestedSpanOnce(t *testing.T) {
+	// A span wholly inside another adds nothing: the window it covers was
+	// already busy.
+	spans := []span.Span{
+		timed(0, 100, span.FidelityReported),
+		timed(20, 30, span.FidelityReported),
+	}
+	got, err := BusyMs(spans)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 100 {
+		t.Errorf("BusyMs = %d, want 100 -- a nested span covers time already counted", got)
+	}
+}
+
+// A zero-duration span has the empty interval [t, t), so it covers no
+// millisecond at all -- the same treatment PeakConcurrency gives one, and
+// the UI-hook tier emits them by the dozen.
+func TestBusyMsIgnoresZeroDurationSpans(t *testing.T) {
+	spans := []span.Span{
+		timed(50, 50, span.FidelityUIReported),
+		timed(60, 60, span.FidelityUIReported),
+	}
+	got, err := BusyMs(spans)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("BusyMs = %d, want 0 -- a zero-extent span covers no time", got)
+	}
+}
+
+// A zero-duration span sitting inside a running one must not close it: the
+// sweep nets its start and end at the same instant, the way Stalls does.
+func TestBusyMsKeepsARunningSpanBusyAcrossAZeroDurationOne(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 100, span.FidelityReported),
+		timed(50, 50, span.FidelityReported),
+	}
+	got, err := BusyMs(spans)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 100 {
+		t.Errorf("BusyMs = %d, want 100 -- an instantaneous span inside a running one does not end it", got)
+	}
+}
+
+func TestBusyMsRefusesAMixedFidelitySlice(t *testing.T) {
+	spans := []span.Span{
+		timed(0, 100, span.FidelityReported),
+		timed(0, 100, span.FidelityUIReported),
+	}
+	if _, err := BusyMs(spans); !errors.Is(err, ErrMixedTimelines) {
+		t.Errorf("BusyMs over mixed fidelities = %v, want ErrMixedTimelines", err)
+	}
+}
+
+func TestBusyMsOfNoSpansIsZero(t *testing.T) {
+	got, err := BusyMs(nil)
+	if err != nil {
+		t.Fatalf("BusyMs: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("BusyMs = %d, want 0", got)
+	}
+}

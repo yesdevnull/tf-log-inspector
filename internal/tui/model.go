@@ -410,8 +410,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f":
 			m.toggleFacetFocus()
 		default:
-			// Keys "3" and "5" are not in viewKeys, so pressing them lands
-			// here and does nothing -- they are unbound, not broken.
+			// Key "3" (resource addresses) is not in viewKeys, so pressing
+			// it lands here and does nothing -- it is unbound, not broken.
 			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
 				m.setView(v)
 			}

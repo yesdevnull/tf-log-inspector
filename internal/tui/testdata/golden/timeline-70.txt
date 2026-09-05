@@ -4,9 +4,9 @@ TIMELINE (rpc)                                   │ SPAN DETAIL
 [7maws/1    [0m    ▒████████    ▒█████████████████████ │ RPC   ApplyResourc…
 google/1       ▒████████░                        │ Prov  …ashicorp/aws
          0s                                 9.0s │ Dur   2.0s         
-concurrency dropped to 1 of 2, 4.0s–9.0s — wait… │                    
-nothing running at all, 0s–1.0s — before any pr… │                    
-                                                 │                    
+busy 7.5s of 9.0s (83%)                          │                    
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2 │                    
+nothing running, 0s–1.0s — before any call       │                    
                                                  │                    
                                                  │                    
                                                  │                    
@@ -37,4 +37,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  4 calls  6 raw log
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+⇥ pane  ␣ facet  ⏎ open  ↔ span  f facets  / search  Esc clear  q quit
