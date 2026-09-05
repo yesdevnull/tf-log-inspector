@@ -1,0 +1,22 @@
+# SYNTHESISED to exercise a provider address that is NOT in registry form.
+# terraform-plugin-sdk reports a bare "provider" for tf_provider_addr when a
+# provider is served without a ProviderAddr in its ServeOpts (measured on
+# terraform-provider-github v6.3.1 across 1,104 lines of a real HCP log), and
+# internal/span substitutes the component name in its place -- so this log's
+# one RPC provider is "provider.terraform-provider-github_v6.3.1", which has
+# no "/" and so no derivable provider type.
+#
+# It carries UI-hook spans under two DIFFERENT implied providers (github and
+# local) so that a rule deriving a type from that address anyway would be
+# visible: no UI provider can equal any segment of it, so both rows' figures
+# would go to zero at once.
+#
+# The hclog lines follow testdata/provider-rpc.log's "Received downstream
+# response" shape; the terraform.ui JSON lines follow
+# testdata/two-tier.log's apply_start/apply_complete shape. Values are
+# invented; no line here is from a real run.
+{"@level":"info","@message":"github_repository.app: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.100000+10:00","hook":{"resource":{"addr":"github_repository.app","module":"","resource":"github_repository.app","implied_provider":"github","resource_type":"github_repository","resource_name":"app","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"github_repository.app: Creation complete after 4s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:06.100000+10:00","hook":{"resource":{"addr":"github_repository.app","module":"","resource":"github_repository.app","implied_provider":"github","resource_type":"github_repository","resource_name":"app","resource_key":null},"action":"create","elapsed_seconds":4,"id_key":"id","id_value":"r-1"},"type":"apply_complete"}
+{"@level":"info","@message":"local_file.config: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.200000+10:00","hook":{"resource":{"addr":"local_file.config","module":"","resource":"local_file.config","implied_provider":"local","resource_type":"local_file","resource_name":"config","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"local_file.config: Creation complete after 1s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.200000+10:00","hook":{"resource":{"addr":"local_file.config","module":"","resource":"local_file.config","implied_provider":"local","resource_type":"local_file","resource_name":"config","resource_key":null},"action":"create","elapsed_seconds":1,"id_key":"id","id_value":"f-1"},"type":"apply_complete"}
+2026-09-04T09:15:06.400+1000 [TRACE] provider.terraform-provider-github_v6.3.1: Received downstream response: tf_req_id=1a2b3c4d-0001-4a1b-8c2d-000000000001 tf_resource_type=github_repository tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=provider tf_req_duration_ms=3800 @caller=github.com/hashicorp/terraform-plugin-go@v0.23.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2026-09-04T09:15:06.399+1000

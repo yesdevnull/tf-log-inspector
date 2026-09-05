@@ -76,25 +76,66 @@ func (m Model) filter() model.Filter {
 	}
 }
 
-// uiFilter is the filter as it applies to the UI-hook tier: the resource
-// type dimension, and only that one.
+// uiFilter is the filter as it applies to the UI-hook tier: resource type
+// as the facet pane offers it, and provider TRANSLATED into the vocabulary
+// this tier speaks.
 //
 // The two tiers do not share a vocabulary. A UI-hook span's provider is
-// Terraform's implied provider ("aws") and its RPC is a hook action
+// Terraform's implied provider ("azurerm") and its RPC is a hook action
 // ("create"); an RPC-tier span's are the full registry address
-// ("registry.terraform.io/hashicorp/aws") and a plugin-protocol method
+// ("registry.terraform.io/hashicorp/azurerm") and a plugin-protocol method
 // ("ApplyResourceChange"). The facet pane is built from the RPC tier, so
-// the only provider or RPC value it can offer is one no UI-hook span
-// carries -- and applying it to the UI tier matches nothing, zeroing every
-// UI figure on screen.
+// every checkbox it offers is in the RPC tier's words, and applying one to
+// the UI tier verbatim matches nothing -- zeroing every UI figure on
+// screen, which is a zero meaning "you cannot see this" where the reader
+// reads "there was none".
 //
-// A zero that means "you cannot see this" where the reader reads "there was
-// none" is the wrong-number class this tool exists to avoid, so those two
-// dimensions are not applied to this tier at all. Resource type is kept
-// because it is the field that means the same thing on both sides -- the
-// reason model.JoinByResourceType keys on it and on nothing else.
+// Resource type needs no translation: it is the field that means the same
+// thing on both sides, the reason model.JoinByResourceType keys on it and
+// on nothing else. Provider is translated by uiProviderTypes. RPC is not
+// applied at all: "create" and "ApplyResourceChange" name different things
+// -- a hook's action against a plugin-protocol method -- and no rule
+// relates them, so there is nothing to translate.
 func (m Model) uiFilter() model.Filter {
-	return model.Filter{Types: m.filter().Types}
+	f := m.filter()
+	return model.Filter{Providers: uiProviderTypes(f.Providers), Types: f.Types}
+}
+
+// uiProviderTypes turns the selected RPC-tier provider ADDRESSES into the
+// provider TYPE names the UI-hook tier carries, so a provider ticked in the
+// facet pane narrows both tiers to the same provider.
+//
+// A UI-hook span's provider is hook.resource.implied_provider, which is the
+// provider's type name ("azurerm"), and a registry address
+// ("registry.terraform.io/hashicorp/azurerm") ends in that same type name.
+// So the last "/"-separated segment of a selected address is the value the
+// UI tier would spell it with, and a UI span passes when its provider is
+// the type of ANY selected address.
+//
+// LIMITATION -- not every provider address is in registry form. A provider
+// served without a ProviderAddr reports a bare "provider" for
+// tf_provider_addr, and internal/span substitutes the component name in its
+// place, producing addresses like
+// "provider.terraform-provider-github_v6.3.1" whose last segment is not a
+// type name at all. Nothing here can derive a type from one, so a selection
+// containing such an address does not narrow the UI tier on its account:
+// it matches every UI provider rather than excluding rows on a derivation
+// that cannot be trusted. Since the values within a dimension are
+// alternatives, one such address makes the whole dimension unconstrained
+// for this tier.
+func uiProviderTypes(selected map[string]bool) map[string]bool {
+	if len(selected) == 0 {
+		return nil
+	}
+	types := make(map[string]bool, len(selected))
+	for addr := range selected {
+		slash := strings.LastIndex(addr, "/")
+		if slash < 0 {
+			return nil
+		}
+		types[addr[slash+1:]] = true
+	}
+	return types
 }
 
 // selectedLevels turns the level dimension's selected value names back into

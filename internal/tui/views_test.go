@@ -73,18 +73,22 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 // span carries Terraform's implied provider ("aws") and a hook action
 // ("create"), an RPC-tier span the full registry address and a
 // plugin-protocol method. The facet pane is built from the RPC tier, so the
-// only provider checkbox on offer is one no UI-hook span can match --
-// applying it to the UI tier zeroed every UI figure on screen.
+// only provider checkbox on offer is one no UI-hook span carries verbatim --
+// and applying it verbatim zeroed every UI figure on screen, a zero meaning
+// "you cannot see this" where the reader reads "there was none".
 //
-// A zero that means "you cannot see this" where the reader reads "there was
-// none" is the wrong-number class this tool exists to avoid, and it came
-// with its own signals suppressed: the resolution caveat vanishes with the
-// UI rows, and the header's UI count agreed with the zeroes.
+// The two provider vocabularies are relatable, so the checkbox is
+// TRANSLATED rather than dropped: a UI-hook span's provider is the
+// provider's type name, and a registry address ends in that same type name
+// (see uiProviderTypes). Ticking one provider must therefore keep the UI
+// figures of the resource types that provider serves AND remove the rows
+// belonging to other providers -- rows that do not match the ticked filter,
+// each carrying zeroes in every RPC column.
 //
-// Resource type is the field that means the same thing on both sides, so it
-// is the one dimension that still applies. two-tier.log's aws_instance has
-// figures in both tiers, which is what makes the difference visible.
-func TestAProviderFacetDoesNotZeroTheUITier(t *testing.T) {
+// two-tier.log is both cases in one fixture: aws_instance has figures in
+// both tiers under the ticked provider, and local_file is a UI-only type
+// under a different one.
+func TestAProviderFacetTranslatesIntoTheUITiersVocabulary(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
@@ -96,20 +100,58 @@ func TestAProviderFacetDoesNotZeroTheUITier(t *testing.T) {
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 	// Cells in typeColumns' order: resource type, UI res., UI total,
 	// RPC calls, RPC total, RPC max.
-	for _, want := range [][]string{
-		{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0ms", "0ms"},       // UI tier only
-	} {
-		got, _ := paneRowStartingWith(t, centre, want[0])
-		if !slices.Equal(got, want) {
-			t.Errorf("with a provider ticked, types row for %s = %v, want %v -- the UI tier speaks a different provider vocabulary and must not be filtered by it:\n%s", want[0], got, want, centre)
-		}
+	want := []string{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}
+	got, _ := paneRowStartingWith(t, centre, want[0])
+	if !slices.Equal(got, want) {
+		t.Errorf("with the aws provider ticked, types row for aws_instance = %v, want %v -- the UI tier spells this provider \"aws\" and must still be counted:\n%s", got, want, centre)
+	}
+	if _, _, ok := findPaneRow(centre, "local_file"); ok {
+		t.Errorf("local_file belongs to the local provider but survived an aws-only filter:\n%s", centre)
 	}
 	if !strings.Contains(centre, "whole seconds") {
 		t.Errorf("the UI-hook resolution caveat went with the UI figures, so nothing on screen qualifies them:\n%s", centre)
 	}
-	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "3 of 3 UI spans") {
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 3 UI spans") {
 		t.Errorf("header = %q, want it to count the UI spans the types view actually shows", header)
+	}
+}
+
+// Not every provider address is in registry form. A provider served without
+// a ProviderAddr reports a bare "provider" for tf_provider_addr, and
+// internal/span substitutes the component name -- giving
+// "provider.terraform-provider-github_v6.3.1", whose last segment is a
+// binary name, not a provider type.
+//
+// No type can be derived from it, so ticking it must not narrow the UI tier
+// at all: excluding rows on an untrustworthy derivation is the same wrong
+// answer as excluding them on an untranslated one. bare-provider-addr.log
+// carries UI-hook spans under two different implied providers, so a rule
+// that derived a type from that address anyway would zero both rows at
+// once.
+func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
+	m := update(t, New(testLog(t, "bare-provider-addr.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	const bare = "provider.terraform-provider-github_v6.3.1"
+	if strings.Contains(bare, "/") {
+		t.Fatalf("fixture assumption changed: %q has a %q, so a provider type could be derived from it", bare, "/")
+	}
+	m = moveFacetCursorTo(t, m, dimProvider, bare)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+	// Cells in typeColumns' order: resource type, UI res., UI total,
+	// RPC calls, RPC total, RPC max.
+	for _, want := range [][]string{
+		{"github_repository", "1", "4.0s", "1", "3.8s", "3.8s"}, // both tiers
+		{"local_file", "1", "1.0s", "0", "0ms", "0ms"},          // UI tier only
+	} {
+		got, _ := paneRowStartingWith(t, centre, want[0])
+		if !slices.Equal(got, want) {
+			t.Errorf("with a non-registry provider ticked, types row for %s = %v, want %v -- no provider type can be derived from it, so it must exclude no UI row:\n%s", want[0], got, want, centre)
+		}
+	}
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 2 UI spans") {
+		t.Errorf("header = %q, want every UI span still counted", header)
 	}
 }
 
@@ -161,16 +203,26 @@ func TestATypeFacetNarrowsBothTiers(t *testing.T) {
 // at either end of that row.
 func paneRowStartingWith(t *testing.T, pane, want string) (cells []string, line int) {
 	t.Helper()
+	cells, line, ok := findPaneRow(pane, want)
+	if !ok {
+		t.Fatalf("no row starting with %q in:\n%s", want, pane)
+	}
+	return cells, line
+}
+
+// findPaneRow is paneRowStartingWith without the assertion, for the callers
+// that are checking a row is ABSENT -- a filter that removed it -- where a
+// miss is the expected outcome rather than a failed fixture assumption.
+func findPaneRow(pane, want string) (cells []string, line int, ok bool) {
 	var scratch []byte
 	for i, ln := range strings.Split(pane, "\n") {
 		var plain string
 		plain, scratch = logfmt.StripANSI(ln, scratch)
 		if f := strings.Fields(plain); len(f) > 0 && f[0] == want {
-			return f, i
+			return f, i, true
 		}
 	}
-	t.Fatalf("no row starting with %q in:\n%s", want, pane)
-	return nil, 0
+	return nil, 0, false
 }
 
 // UI-hook figures are whole seconds carrying up to a second of error each, so
