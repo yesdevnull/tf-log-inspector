@@ -149,22 +149,33 @@ func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
 	}
 }
 
-// A span whose start is clamped contributes duration but no measurable
-// concurrency (see writeConcurrency), which can make peak concurrency read
-// as unexpectedly low next to a nonzero span count. The report must explain
-// that, but only when it is actually true.
+// A span whose start is clamped overlaps less of the run than its reported
+// duration suggests (see writeConcurrency), which can make peak concurrency
+// read low next to the durations in the tables above. The report must
+// explain that, but only when it is actually true.
+//
+// The span here has the shape testdata/timeline-clamped-start.log produces:
+// 45s reported, clamped to the extent [0, 2000) because the log's first
+// entry is only 2s behind it. It runs for two full seconds, so it plainly
+// does contribute concurrency, and a note claiming it contributes none
+// would be false for every clamped span except one that closed on the log's
+// very first timestamped entry.
 func TestReportNotesClampedStartsUnderConcurrency(t *testing.T) {
 	l := &model.Log{
 		RPCSpans: []span.Span{
-			{DurationMs: 12, StartMs: 0, EndMs: 0, StartClamped: true, RPC: "PlanResourceChange", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_subnet"},
+			{DurationMs: 45000, StartMs: 0, EndMs: 2000, StartClamped: true, RPC: "GetProviderSchema", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_instance"},
 		},
 	}
 	var sb strings.Builder
 	if err := Render(&sb, l); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if !strings.Contains(sb.String(), "clamped") {
-		t.Errorf("report does not explain a clamped start:\n%s", sb.String())
+	out := sb.String()
+	if !strings.Contains(out, "clamped") {
+		t.Errorf("report does not explain a clamped start:\n%s", out)
+	}
+	if strings.Contains(out, "no measurable concurrency") {
+		t.Errorf("report claims a clamped span contributes no measurable concurrency, but this one runs for two seconds:\n%s", out)
 	}
 }
 

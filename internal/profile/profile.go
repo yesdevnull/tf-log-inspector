@@ -298,17 +298,19 @@ func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) error {
 	if clamped {
 		// A span whose reported duration exceeds its offset from the log's
 		// first entry has its start clamped to zero (span.Span.StartClamped),
-		// which collapses its timeline extent to zero even though its
-		// reported duration is not. Such a span contributes duration but no
-		// measurable concurrency -- see PeakConcurrency's doc comment on why
-		// a zero-extent span overlaps nothing -- which can otherwise make
-		// peak concurrency read as unexpectedly low, or even zero, next to a
-		// nonzero span count. The number above is correct; this only
-		// explains it.
+		// which shortens its timeline extent to [0, EndMs) while the duration
+		// printed beside it stays as reported. It therefore overlaps less of
+		// the run than that duration suggests, and peak concurrency can read
+		// low against the totals in the tables above. It contributes no
+		// concurrency at all only in the one case where it closed on the
+		// log's first timestamped entry, leaving an extent of [0, 0) -- see
+		// PeakConcurrency's doc comment on why a zero-extent span overlaps
+		// nothing. The number above is correct; this only explains it.
 		fmt.Fprintf(b, "  Note: one or more spans have a clamped start -- a span\n")
 		fmt.Fprintf(b, "  whose reported duration exceeds its offset from the\n")
 		fmt.Fprintf(b, "  log's first entry has its start clamped to zero, so it\n")
-		fmt.Fprintf(b, "  contributes duration but no measurable concurrency.\n")
+		fmt.Fprintf(b, "  overlaps less of the run than its reported duration\n")
+		fmt.Fprintf(b, "  would suggest.\n")
 	}
 	fmt.Fprintf(b, "  summed span time     %s\n", formatMs(summed))
 	if wallClock > 0 {
