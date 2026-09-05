@@ -119,6 +119,70 @@ func TestCallsViewRanksByDurationAndCarriesSpanIndex(t *testing.T) {
 	}
 }
 
+// row carries both a span index and a rollup, and "exactly one of the two"
+// was stated only in a doc comment. The constructors are what make it true:
+// rollupRow derives the sentinel index rather than asking each caller to
+// remember it, and a caller that forgot would leave a group row indexing
+// whichever span sits at index 0 -- rendering that span's RPC, provider and
+// duration as the GROUP's own figures, which is a wrong answer rather than
+// a missing one.
+func TestEveryRowIsExactlyACallOrARollup(t *testing.T) {
+	for _, fixture := range []string{"two-tier.log", "two-providers.log", "provider-rpc.log", "mixed-hcp.log", "structured-ui.log"} {
+		for _, key := range []rune{'1', '2', '4'} {
+			m := update(t, New(testLog(t, fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+			for i, r := range m.rows() {
+				if r.isCall() == (r.rollup != nil) {
+					t.Errorf("%s view %c row %d: isCall=%v with rollup=%v, want exactly one of the two", fixture, key, i, r.isCall(), r.rollup != nil)
+				}
+				if r.isCall() && r.spanIdx >= len(m.log.RPCSpans) {
+					t.Errorf("%s view %c row %d: spanIdx %d is past the %d RPC spans it indexes", fixture, key, i, r.spanIdx, len(m.log.RPCSpans))
+				}
+			}
+		}
+	}
+}
+
+// A row that is neither -- no rollup, and a span index that names no span --
+// must leave the pane saying it has nothing to describe. renderDetail
+// reached RPCSpans through a comment asserting such a row could not exist,
+// on the very line that indexed a slice with a field allowed to hold the
+// sentinel; the index is out of range, so the frame panics inside the alt
+// screen and takes the user's terminal with it.
+//
+// The rows are installed through the memoised cache, which is what rows()
+// serves and what renderDetail reads, so this exercises the real render
+// path rather than a function called with a hand-made argument.
+func TestTheDetailPaneDegradesOnARowThatNamesNoSpan(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    row
+	}{
+		{"the sentinel index with no rollup", row{cells: []string{"x"}, spanIdx: noSpanIdx}},
+		{"an index past the RPC spans", row{cells: []string{"x"}, spanIdx: 1 << 20}},
+	} {
+		m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+		m.rowsCache, m.rowsCached, m.selected = []row{c.r}, true, 0
+		if got := detailBody(t, m, noSelectionTitle, 50, 20); got != noSelectionNote {
+			t.Errorf("%s: detail pane = %q, want the placeholder %q", c.name, got, noSelectionNote)
+		}
+	}
+}
+
+// Enter and the detail pane must ask the same question of the same field.
+// Enter jumps a row to the log entry that closed its span, which only a
+// call row has; asked of the rollup field instead, the two could disagree
+// about which rows carry one.
+func TestEnterDoesNotJumpFromARollupRow(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	if r := m.rows()[m.Selected()]; r.isCall() {
+		t.Fatalf("fixture assumption changed: the selected providers row is a call, not a rollup: %+v", r)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ActiveView() != ViewProviders {
+		t.Errorf("Enter on a rollup row switched to %v; a group resolves to no single entry to jump to", m.ActiveView())
+	}
+}
+
 // RowCount is what clamps the selection, so it must be the active view's own
 // row count and not a count borrowed from another slice.
 //
@@ -267,7 +331,7 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 		{header: "resource type", kind: tailIdentifierColumn},
 		{header: "n", kind: numericColumn},
 	}
-	data := []row{{cells: []string{"registry.terraform.io/hashicorp/aws", "1"}, spanIdx: -1}}
+	data := []row{rollupRow([]string{"registry.terraform.io/hashicorp/aws", "1"}, nil)}
 
 	lines := strings.Split(renderTable(nil, cols, data, "", -1, true, 12, 10), "\n")
 	if len(lines) != 2 {

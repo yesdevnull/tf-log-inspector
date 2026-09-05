@@ -25,16 +25,73 @@ type row struct {
 	// says so where a quietly missing column would not.
 	cells []string
 	// spanIdx is the index into m.log.RPCSpans that this row represents, or
-	// -1 when the row is a rollup rather than a single span. The raw log's
-	// jump-to-log resolves a row to a span through it, so every row carries
-	// one.
+	// noSpanIdx when the row is a rollup rather than a single span. The raw
+	// log's jump-to-log resolves a row to a span through it, so every row
+	// carries one. Ask isCall before indexing with it.
 	spanIdx int
 	// rollup is what the detail pane shows for a row that stands for a
 	// GROUP of spans, and is nil for a row that is one span. Every row is
 	// exactly one of the two -- a rollup row has a rollup and spanIdx -1, a
-	// call row has a spanIdx and no rollup -- which is the invariant
-	// renderDetail dispatches on.
+	// call row has a spanIdx and no rollup.
+	//
+	// Rows are built through callRow and rollupRow rather than as literals,
+	// so that invariant is established by construction instead of being
+	// restated at each site; isCall is the one question anything asks of it.
 	rollup *rollupDetail
+}
+
+// callRow builds the row standing for ONE span: its display cells, and the
+// index into m.log.RPCSpans of the span it is.
+func callRow(cells []string, spanIdx int) row {
+	return row{cells: cells, spanIdx: spanIdx}
+}
+
+// rollupRow builds the row standing for a GROUP of spans: its display cells,
+// and what the detail pane shows for the group.
+//
+// The sentinel spanIdx is DERIVED here rather than asked of each caller. A
+// rollup row resolves to no single span, and a caller that forgot the
+// sentinel would leave a row indexing whichever span happens to sit at
+// index 0 -- rendering that span's RPC, provider and duration as the
+// selected GROUP's own figures.
+func rollupRow(cells []string, d *rollupDetail) row {
+	return row{cells: cells, spanIdx: noSpanIdx, rollup: d}
+}
+
+// noSpanIdx is the spanIdx of a row that stands for no single span. It is
+// deliberately outside the range of any slice, so a row carrying it can only
+// be used to index m.log.RPCSpans by a caller that failed to ask isCall
+// first -- and that failure is a panic at the first frame rather than a
+// plausible wrong answer.
+const noSpanIdx = -1
+
+// isCall reports whether the row stands for one span, and so whether
+// spanIdx may be used to index m.log.RPCSpans.
+//
+// It is the single predicate for the question, asked by the detail pane
+// (which span's fields to show) and by Enter (which span to jump to). Those
+// two once asked it of different fields -- spanIdx against rollup -- and
+// two questions that must agree, asked of two fields, are two questions
+// that can disagree.
+func (r row) isCall() bool {
+	return r.spanIdx >= 0
+}
+
+// spanForRow resolves a row to the span it stands for, and reports whether
+// there is one. A rollup row stands for no single span and gets false.
+//
+// A call row's index is checked against the slice it indexes as well --
+// the same both-ends check jumpToSpan makes of its own argument, since
+// Span.Entry taught this package that an index carried in a struct is
+// worth revalidating at the point of use. renderDetail runs on every
+// frame, so an index out of range there is a panic inside the alt screen,
+// which leaves the user's terminal wrecked; a pane that says it has
+// nothing to describe costs them one pane.
+func (m *Model) spanForRow(r row) (span.Span, bool) {
+	if !r.isCall() || r.spanIdx >= len(m.log.RPCSpans) {
+		return span.Span{}, false
+	}
+	return m.log.RPCSpans[r.spanIdx], true
 }
 
 // rollupDetail is everything the detail pane shows for a rollup row: the
@@ -47,14 +104,15 @@ type row struct {
 // were both hoisted out of the render path to avoid.
 type rollupDetail struct {
 	// aggregate is the group's own figures, in the order they are shown.
-	// The pane truncates from the BOTTOM (see renderDetail), so they come
-	// before the slowest call: on a terminal too short for both, what
-	// survives is the summary of the row the cursor is actually on.
+	// It is the pane's FIRST section, so a pane too short for the whole of
+	// a rollup's detail keeps this and drops the slowest call beneath it
+	// (see fitDetailSections): what survives is the summary of the row the
+	// cursor is actually on.
 	aggregate []detailField
 	// slowest is the longest RPC-tier call in the group, or nil when the
 	// group has none -- a resource type the UI-hook tier saw and the RPC
 	// tier never did. The absence is rendered explicitly rather than left
-	// as a missing section, which reads as a pane that failed.
+	// as a missing line, which reads as a pane that failed.
 	slowest *span.Span
 }
 
@@ -176,15 +234,14 @@ func providerRows(rpcSpans []span.Span) []row {
 	rows := make([]row, len(buckets))
 	for i, b := range buckets {
 		g := groups[b.Key]
-		rows[i] = row{
-			cells: []string{
+		rows[i] = rollupRow(
+			[]string{
 				b.Key,
 				formatMs(b.TotalMs),
 				strconv.Itoa(b.Count),
 				formatMs(uint64(b.MaxMs)),
 			},
-			spanIdx: -1,
-			rollup: &rollupDetail{
+			&rollupDetail{
 				aggregate: []detailField{
 					{label: "Prov", value: b.Key, kind: tailIdentifierColumn},
 					{label: "Calls", value: strconv.Itoa(b.Count), kind: numericColumn},
@@ -195,7 +252,7 @@ func providerRows(rpcSpans []span.Span) []row {
 				},
 				slowest: g.slowest,
 			},
-		}
+		)
 	}
 	return rows
 }
@@ -216,8 +273,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
-		rows[i] = row{
-			cells: []string{
+		rows[i] = rollupRow(
+			[]string{
 				r.ResourceType,
 				strconv.Itoa(r.UIResources),
 				formatMs(r.UITotalMs),
@@ -225,8 +282,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				formatMs(r.RPCTotalMs),
 				formatMs(uint64(r.RPCMaxMs)),
 			},
-			spanIdx: -1,
-			rollup: &rollupDetail{
+			&rollupDetail{
 				aggregate: []detailField{
 					{label: "Type", value: r.ResourceType, kind: tailIdentifierColumn},
 					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
@@ -237,7 +293,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				},
 				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
 			},
-		}
+		)
 	}
 	return rows
 }
@@ -328,15 +384,12 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 	rows := make([]row, len(idx))
 	for i, si := range idx {
 		s := rpcSpans[si]
-		rows[i] = row{
-			cells: []string{
-				formatMs(uint64(s.DurationMs)),
-				s.RPC,
-				s.ResourceType,
-				s.Provider,
-			},
-			spanIdx: si,
-		}
+		rows[i] = callRow([]string{
+			formatMs(uint64(s.DurationMs)),
+			s.RPC,
+			s.ResourceType,
+			s.Provider,
+		}, si)
 	}
 	return rows
 }

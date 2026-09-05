@@ -300,13 +300,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// focus -- the spec binds it globally, not to the facet pane.
 			m.clearFilters()
 		case "enter":
-			// Enter jumps from a span-bearing row -- currently only
-			// ViewCalls' rows carry a real spanIdx -- to the log entry that
-			// closed it. A rollup row (spanIdx -1) has no single span to
-			// jump to, so jumpToSpan leaves m unchanged for those.
+			// Enter jumps from a call row -- currently only ViewCalls' rows
+			// are calls -- to the log entry that closed its span. A rollup
+			// row stands for a group and resolves to no single span, so
+			// there is nothing to jump to and the view stays where it is.
+			// row.isCall is the same question the detail pane asks before
+			// indexing RPCSpans, so the two cannot disagree about which
+			// rows carry a span.
 			if m.pane == PaneList {
 				if rows := m.rows(); m.selected >= 0 && m.selected < len(rows) {
-					m.jumpToSpan(rows[m.selected].spanIdx)
+					if r := rows[m.selected]; r.isCall() {
+						m.jumpToSpan(r.spanIdx)
+					}
 				}
 			}
 		case "pgdown":

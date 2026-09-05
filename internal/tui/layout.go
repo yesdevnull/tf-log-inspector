@@ -102,8 +102,10 @@ func detailNaturalWidth(l *model.Log) int {
 	}
 	rollups := append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...)
 	for _, r := range rollups {
-		for _, line := range rollupDetailLines(r.rollup, hugeWidth) {
-			width = max(width, lipgloss.Width(line))
+		for _, s := range rollupDetailSections(r.rollup, hugeWidth) {
+			for _, line := range s {
+				width = max(width, lipgloss.Width(line))
+			}
 		}
 	}
 	return width
@@ -599,6 +601,16 @@ func joinPanes(h int, panes ...pane) string {
 	return strings.Join(rows, "\n")
 }
 
+// detailSection is one block of the detail pane's body: lines a short pane
+// keeps or drops TOGETHER.
+//
+// The unit exists because the pane's lines are not independent of each
+// other. A heading with nothing beneath it reads as a pane that failed to
+// render, and a labelled figure whose label survived while its number was
+// cut away reads as a complete answer to the question the label asks --
+// which is worse, because nothing on screen says the number is missing.
+type detailSection []string
+
 // renderDetail renders the detail pane: what the selected row stands for,
 // at most w columns wide and h lines tall. The spec has the pane persist
 // across the views -- "there is one filter state and many projections of
@@ -610,34 +622,111 @@ func joinPanes(h int, panes ...pane) string {
 // describe: a view with no rows at all (ViewRawLog, whose rows() is nil), or
 // a selection index outside the rows there are.
 //
-// Truncation to h takes the BOTTOM of the pane, so what a short terminal
-// drops is whatever each of those renderers put last -- for a rollup row,
-// deliberately, the slowest call rather than the group summary.
+// The title and the body come from one dispatch (selectedDetail) and the
+// height budget is applied by another (fitDetailSections); all this adds is
+// the focus marking, which belongs to neither.
 func (m *Model) renderDetail(w, h int) string {
+	if h <= 0 {
+		return ""
+	}
+	title, sections := m.selectedDetail(w)
 	// The detail pane has no cursor of its own to mark, so its title
 	// carries the focus instead: Tab's third stop would otherwise be
 	// invisible, leaving the user no way to tell that the keyboard had
 	// moved off the list.
-	title := clipWidth("SPAN DETAIL", w)
+	line := clipWidth(title, w)
 	if m.pane == PaneDetail {
-		title = cursorBar(title, w, true)
+		line = cursorBar(line, w, true)
 	}
-	lines := []string{title}
+	return strings.Join(fitDetailSections(line, sections, w, h), "\n")
+}
+
+// The detail pane's titles, one per KIND of row it can be describing.
+//
+// The title is derived from the row rather than fixed, because it is a
+// claim ABOUT what is beneath it. Headed SPAN DETAIL over a group's
+// aggregate, the pane presents "Total 742.4s" -- 874 calls added together
+// -- as though it were one span's figure: a plausible number attached to
+// the wrong noun, which is this tool's worst output class. It is the same
+// defect the centre pane's own view title exists to prevent, one pane to
+// the left, and the same argument slowestHeading already makes one level
+// down.
+const (
+	spanDetailTitle   = "SPAN DETAIL"
+	rollupDetailTitle = "GROUP DETAIL"
+	// noSelectionTitle heads a pane with no row to describe, so it claims
+	// nothing about a span or a group: there is neither.
+	noSelectionTitle = "DETAIL"
+)
+
+// selectedDetail is the detail pane's title and body sections for the row
+// the cursor is on, derived TOGETHER from one dispatch on that row's kind so
+// the heading and what it heads cannot disagree.
+//
+// The span branch dispatches on spanForRow -- built on the same row.isCall
+// predicate Enter asks before jumping -- rather than on the absence of a
+// rollup. A row that is neither a call nor a rollup cannot be built (see
+// callRow and rollupRow), and is reported here as nothing to describe
+// rather than indexed into RPCSpans on the strength of a spanIdx that says
+// it names no span: a degraded pane instead of a panic mid-frame inside the
+// alt screen.
+func (m *Model) selectedDetail(w int) (string, []detailSection) {
+	nothing := []detailSection{{clipWidth(noSelectionNote, w)}}
 	rows := m.rows()
-	switch {
-	case m.selected < 0 || m.selected >= len(rows):
-		lines = append(lines, clipWidth(noSelectionNote, w))
-	case rows[m.selected].rollup != nil:
-		lines = append(lines, rollupDetailLines(rows[m.selected].rollup, w)...)
-	default:
-		// Every row is a rollup row or a call row (see row.rollup), so a row
-		// with no rollup has a real span index and this indexes in range.
-		lines = append(lines, spanDetailLines(m.log.RPCSpans[rows[m.selected].spanIdx], w)...)
+	if m.selected < 0 || m.selected >= len(rows) {
+		return noSelectionTitle, nothing
+	}
+	r := rows[m.selected]
+	if s, ok := m.spanForRow(r); ok {
+		return spanDetailTitle, []detailSection{spanDetailLines(s, w)}
+	}
+	if r.rollup != nil {
+		return rollupDetailTitle, rollupDetailSections(r.rollup, w)
+	}
+	return noSelectionTitle, nothing
+}
+
+// detailCutMark is the last line of a detail pane that had more to show
+// than h lines to show it in. The pane marks a value clipped for WIDTH with
+// an ellipsis (see clipValueFront); a pane clipped for HEIGHT that marked
+// nothing would leave the two cuts telling the reader different amounts
+// about themselves, and the height cut is the one that can remove a whole
+// figure rather than the tail of one.
+const detailCutMark = "…"
+
+// fitDetailSections composes a title and body sections into at most h
+// lines, marking any cut with detailCutMark.
+//
+// The FIRST section is always appended: it describes the selected row
+// itself, so a pane with room for anything at all shows as much of it as
+// fits, clipped by line as a last resort. Every LATER section is kept or
+// dropped whole -- the height is checked before it is appended, not after
+// -- so a pane cannot end on a heading with nothing under it, or on a
+// figure's label with the figure gone.
+//
+// The title survives every cut, since it names the pane and carries its
+// focus (see renderDetail). At h of 1 that leaves no line for the mark, and
+// a one-line pane is the one case where a cut goes unmarked.
+func fitDetailSections(title string, sections []detailSection, w, h int) []string {
+	lines := []string{title}
+	cut := false
+	for i, s := range sections {
+		if i > 0 && len(lines)+len(s) > h {
+			cut = true
+			break
+		}
+		lines = append(lines, s...)
+	}
+	if cut {
+		lines = append(lines, clipWidth(detailCutMark, w))
 	}
 	if len(lines) > h {
 		lines = lines[:h]
+		if h > 1 {
+			lines[h-1] = clipWidth(detailCutMark, w)
+		}
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // spanDetailLines formats one span's detail fields: RPC, provider and
@@ -690,39 +779,54 @@ func spanDetailLines(s span.Span, w int) []string {
 // floor of minDetailPaneWidth.
 const noSelectionNote = "(nothing selected)"
 
-// slowestHeading labels the second block of a rollup row's detail: the one
-// call behind the group that took longest. Without it the RPC name and
-// duration beneath read as the ROW's own figures, which for a row totalling
-// several calls is a wrong answer rather than a missing one.
+// slowestHeading labels the one call behind a rollup row's group that took
+// longest. Without it the RPC name beside it reads as the ROW's own, which
+// for a row totalling several calls is a wrong answer rather than a missing
+// one.
 const slowestHeading = "Slowest"
 
-// noRPCCallsNote is what stands under that heading for a group with no
+// noRPCCallsNote is what stands under that label for a group with no
 // RPC-tier span -- a resource type Terraform's UI hooks reported and the
 // provider protocol never did, which testdata/two-tier.log's local_file is.
-// The section is stated as empty rather than dropped: a section that is
+// The absence is stated rather than left as a dropped line: a line that is
 // simply absent is indistinguishable from a pane that failed to render it.
 const noRPCCallsNote = "no RPC-tier calls"
 
-// rollupDetailLines formats a rollup row's detail: the group's aggregate
-// first, then the slowest single call behind it, separated by a blank line
-// and named by slowestHeading.
+// rollupDetailSections formats a rollup row's detail: the group's aggregate,
+// then the one call behind it that took longest, separated by a blank line.
 //
-// That ORDER is load-bearing. renderDetail truncates from the bottom, so on
-// a terminal too short for the whole pane the group summary -- which is
-// what describes the selected row -- is what survives, and the one call
-// behind it is what goes.
-func rollupDetailLines(d *rollupDetail, w int) []string {
-	lines := append(detailFieldLines(d.aggregate, w), "", clipWidth(slowestHeading, w))
-	if d.slowest == nil {
-		return append(lines, clipWidth(noRPCCallsNote, w))
+// They are two SECTIONS because a short pane keeps or drops the second
+// whole (see fitDetailSections), and that ORDER is load-bearing: what a
+// pane too short for both keeps is the summary of the row the cursor is
+// actually on, and what it gives up is the one call behind it.
+func rollupDetailSections(d *rollupDetail, w int) []detailSection {
+	return []detailSection{
+		detailFieldLines(d.aggregate, w),
+		{"", slowestLine(d.slowest, w)},
 	}
-	// The group's own identity is already the aggregate's first line, so the
-	// slowest call is named by what distinguishes it WITHIN the group: which
-	// RPC method it was, and how long it took.
-	return append(lines, detailFieldLines([]detailField{
-		{label: "RPC", value: d.slowest.RPC, kind: headIdentifierColumn},
-		{label: "Dur", value: formatMs(uint64(d.slowest.DurationMs)), kind: numericColumn},
-	}, w)...)
+}
+
+// slowestLine names the group's longest RPC-tier call, or states that the
+// group has none.
+//
+// It names the call and stops there. The call's DURATION is by construction
+// the same number as the aggregate's Max ("RPC max" in the types view) two
+// lines above it -- model.RollupBy's MaxMs and groupRPCSpans' slowest run
+// over the same spans under the same key, so they cannot differ -- and one
+// figure shown twice under two labels invites the reader to treat them as
+// two independent measurements. Which RPC method it was is the fact this
+// line adds; the group's own identity is already the aggregate's first line.
+//
+// The RPC name and the no-calls note are both told apart by their HEAD, so
+// both end-clip: see columnKind.
+func slowestLine(slowest *span.Span, w int) string {
+	value := noRPCCallsNote
+	if slowest != nil {
+		value = slowest.RPC
+	}
+	return detailFieldLines([]detailField{
+		{label: slowestHeading, value: value, kind: headIdentifierColumn},
+	}, w)[0]
 }
 
 // detailLabelWidth is the floor for the label column every detail block

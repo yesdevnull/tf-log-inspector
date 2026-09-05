@@ -278,7 +278,7 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	want := m.log.RPCSpans[m.rows()[0].spanIdx]
 	// 80 columns is wide enough that the full provider address is not clipped.
-	got := detailBody(t, m, 80, 20)
+	got := detailBody(t, m, spanDetailTitle, 80, 20)
 	for _, s := range []string{want.RPC, want.Provider, formatMs(uint64(want.DurationMs))} {
 		if !strings.Contains(got, s) {
 			t.Errorf("detail pane missing %q:\n%s", s, got)
@@ -682,8 +682,11 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 
 	view := m.View()
-	if strings.Contains(view, "SPAN DETAIL") {
-		t.Fatalf("width %d still draws the detail pane, so this is not the single-pane branch:\n%s", detailInlineWidth-1, view)
+	// The pane separator, rather than any one pane's title: the titles vary
+	// with the row the cursor is on, and this has to fail when a second
+	// pane is drawn whatever that pane says about itself.
+	if strings.Contains(view, paneSep) {
+		t.Fatalf("width %d still draws a second pane, so this is not the single-pane branch:\n%s", detailInlineWidth-1, view)
 	}
 	if n := len(strings.Split(view, "\n")); n != h {
 		t.Errorf("View() is %d lines at height %d", n, h)
@@ -699,17 +702,23 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 // detailBody is the detail pane's content without its title line, which is
 // furniture rather than data and carries the pane's focus styling.
 //
+// It asserts the title on the way past, and every caller states which one it
+// expects. The title is a claim about the body -- SPAN DETAIL over a group's
+// aggregate presents a sum of several calls as one call's figure -- so a
+// helper that stripped whatever title it found would leave that claim
+// checked by nothing.
+//
 // Every assertion about the pane is made against this rather than against a
 // composed view. The facet pane and the centre table render the same
 // provider addresses, resource types and durations at their own widths, so
 // a strings.Contains over a whole view is satisfied by a pane other than
 // the one under test -- which is exactly how a detail pane wired to the
 // wrong row goes unnoticed.
-func detailBody(t *testing.T, m Model, w, h int) string {
+func detailBody(t *testing.T, m Model, wantTitle string, w, h int) string {
 	t.Helper()
 	lines := strings.Split(m.renderDetail(w, h), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], "SPAN DETAIL") {
-		t.Fatalf("detail pane does not start with its title:\n%s", strings.Join(lines, "\n"))
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], wantTitle) {
+		t.Fatalf("detail pane is not headed %q:\n%s", wantTitle, strings.Join(lines, "\n"))
 	}
 	return strings.TrimRight(strings.Join(lines[1:], "\n"), " \n")
 }
@@ -735,16 +744,15 @@ func selectRow(t *testing.T, m Model, want string) Model {
 	return m
 }
 
-// The providers view is the view the interface OPENS on, and every one of
-// its rows is a rollup. Its detail pane describes the group: the provider,
-// its call count, total and max -- the same figures the row itself carries
-// -- plus the two facts the table has no column for, how many distinct
-// resource types and RPC methods the group spans, and then the slowest
-// single call behind it.
+// A providers row is a rollup, and its detail pane describes the GROUP: the
+// provider, its call count, total and max, plus the two facts the table has
+// no column for -- how many distinct resource types and RPC methods the
+// group spans -- and then which single call behind it took longest.
 //
-// The aggregate figures are taken from the SELECTED ROW's own cells rather
-// than written out again here, so the pane and the table are asserted to
-// agree rather than each asserted against a separately maintained guess.
+// Every figure is written out as a literal. Reading the expectation off the
+// selected row's own cells, as this once did, asserts only that the pane
+// agrees with the table: a rollup that miscounted would produce a matching
+// pair of wrong numbers and pass.
 //
 // provider-rpc.log is the fixture because its two distinct counts DIFFER:
 // two resource types (aws_subnet, aws_internet_gateway) across one RPC name
@@ -755,22 +763,19 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 	if m.ActiveView() != ViewProviders {
 		t.Fatalf("ActiveView = %v after '1', want the providers view this test is about", m.ActiveView())
 	}
-	cells := m.rows()[m.Selected()].cells // providerColumns: provider, total, calls, max
 	want := strings.Join([]string{
-		"Prov  " + cells[0],
-		"Calls " + cells[2],
-		"Total " + cells[1],
-		"Max   " + cells[3],
+		"Prov  registry.terraform.io/hashicorp/aws",
+		"Calls 2",
+		"Total 6ms",
+		"Max   5ms",
 		"Types 2",
 		"RPCs  1",
 		"",
-		"Slowest",
-		"RPC   ApplyResourceChange",
-		"Dur   5ms",
+		"Slowest ApplyResourceChange",
 	}, "\n")
 	// 50 columns is wider than the longest line here, so nothing is clipped
 	// and the comparison is against the values themselves.
-	if got := detailBody(t, m, 50, 20); got != want {
+	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("providers detail pane =\n%s\n\nwant\n%s", got, want)
 	}
 }
@@ -778,33 +783,95 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 // The pane is a projection of the SELECTION, so moving the cursor must move
 // it. A pane wired to row 0, or to the whole log, renders identically
 // whatever the cursor is on -- and it renders plausible figures while doing
-// it, which is why this asserts that two rows give two different panes AND
-// that each pane carries its own row's numbers.
+// it.
 //
-// two-providers.log is the fixture because its two rows carry different
-// totals (google 8ms, aws 5ms): in a fixture whose rows agree, a pane stuck
-// on row 0 is indistinguishable from one that follows the cursor.
+// Each row's pane is asserted WHOLE, against literals. Checking only Prov
+// and Total leaves Types, RPCs and the Slowest line free to come from some
+// other row, or from the log at large, with every checked line still
+// correct -- and the group lookup behind those three is a different lookup
+// from the one behind the aggregate.
+//
+// two-providers.log is the fixture because its two rows differ in every
+// figure (google 8ms on google_compute_instance, aws 5ms on aws_subnet): in
+// a fixture whose rows agree, a pane stuck on row 0 is indistinguishable
+// from one that follows the cursor.
 func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	rows := m.rows()
-	if len(rows) != 2 {
-		t.Fatalf("fixture assumption changed: %d provider rows, want 2", len(rows))
+	if got := len(m.rows()); got != 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want 2", got)
 	}
-	if rows[0].cells[1] == rows[1].cells[1] {
-		t.Fatalf("fixture assumption changed: both provider rows total %q, so a pane stuck on one row is invisible here", rows[0].cells[1])
+	want := []string{
+		strings.Join([]string{
+			"Prov  registry.terraform.io/hashicorp/google",
+			"Calls 1",
+			"Total 8ms",
+			"Max   8ms",
+			"Types 1",
+			"RPCs  1",
+			"",
+			"Slowest ApplyResourceChange",
+		}, "\n"),
+		strings.Join([]string{
+			"Prov  registry.terraform.io/hashicorp/aws",
+			"Calls 1",
+			"Total 5ms",
+			"Max   5ms",
+			"Types 1",
+			"RPCs  1",
+			"",
+			"Slowest ApplyResourceChange",
+		}, "\n"),
 	}
+	for i := range want {
+		if i > 0 {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		}
+		if m.Selected() != i {
+			t.Fatalf("selection is row %d, want row %d", m.Selected(), i)
+		}
+		if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want[i] {
+			t.Errorf("detail pane on row %d =\n%s\n\nwant\n%s", i, got, want[i])
+		}
+	}
+}
 
-	first := detailBody(t, m, 50, 20)
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	second := detailBody(t, m, 50, 20)
-	if first == second {
-		t.Fatalf("the detail pane did not change when the selection moved to another provider:\n%s", first)
+// The same for CALL rows, in the view the interface now opens on. Nothing
+// pinned the calls-view pane against a moving cursor at all, so a pane
+// hard-wired to rows[0] rendered a real span's RPC, provider and duration
+// as the figures of whichever row the user had actually selected.
+//
+// two-providers.log is the fixture because its two calls differ in BOTH
+// fields the span pane can tell rows apart by -- provider and duration --
+// so a pane stuck on either row fails here rather than matching on the
+// field the two happen to share.
+func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if got := len(m.rows()); got != 2 {
+		t.Fatalf("fixture assumption changed: %d call rows, want 2", got)
 	}
-	for i, got := range []string{first, second} {
-		for _, want := range []string{"Prov  " + rows[i].cells[0], "Total " + rows[i].cells[1]} {
-			if !strings.Contains(got, want) {
-				t.Errorf("detail pane for row %d is missing %q, so it describes some row other than the selected one:\n%s", i, want, got)
-			}
+	// The calls view ranks by duration descending: the 8ms google call
+	// first, then the 5ms aws one.
+	want := []string{
+		strings.Join([]string{
+			"RPC   ApplyResourceChange",
+			"Prov  registry.terraform.io/hashicorp/google",
+			"Dur   8ms",
+		}, "\n"),
+		strings.Join([]string{
+			"RPC   ApplyResourceChange",
+			"Prov  registry.terraform.io/hashicorp/aws",
+			"Dur   5ms",
+		}, "\n"),
+	}
+	for i := range want {
+		if i > 0 {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		}
+		if m.Selected() != i {
+			t.Fatalf("selection is row %d, want row %d", m.Selected(), i)
+		}
+		if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want[i] {
+			t.Errorf("calls detail pane on row %d =\n%s\n\nwant\n%s", i, got, want[i])
 		}
 	}
 }
@@ -822,25 +889,98 @@ func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 func TestTypesDetailPaneShowsBothTiers(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = selectRow(t, m, "aws_instance")
-	// typeColumns: resource type, UI res., UI total, RPC calls, RPC total, RPC max.
-	cells := m.rows()[m.Selected()].cells
-	if cells[1] == "0" || cells[3] == "0" {
-		t.Fatalf("fixture assumption changed: aws_instance = %v, want a row with spans in BOTH tiers", cells)
-	}
 	want := strings.Join([]string{
-		"Type      " + cells[0],
-		"UI res.   " + cells[1],
-		"UI total  " + cells[2],
-		"RPC calls " + cells[3],
-		"RPC total " + cells[4],
-		"RPC max   " + cells[5],
+		"Type      aws_instance",
+		"UI res.   2",
+		"UI total  5.0s",
+		"RPC calls 2",
+		"RPC total 370ms",
+		"RPC max   250ms",
 		"",
-		"Slowest",
-		"RPC   ApplyResourceChange",
-		"Dur   250ms",
+		"Slowest ApplyResourceChange",
 	}, "\n")
-	if got := detailBody(t, m, 50, 20); got != want {
+	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("types detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// The pane describes the SELECTED group, not the log. two-tier.log's
+// aws_subnet is the only row in any fixture whose own slowest call is not
+// also the whole log's slowest: one 40ms call, against aws_instance's
+// 250ms. A rollup wired to the log at large, or to the first group it
+// found, renders every other row correctly and only this one wrong.
+//
+// The pane's own figures cannot show that on their own -- both groups'
+// slowest call is an ApplyResourceChange, so the folded Slowest line reads
+// the same either way -- which is why the group lookup is also asserted
+// directly, against the row's RPC max, by
+// TestARollupRowsSlowestCallBelongsToItsOwnGroup.
+func TestTypesDetailPaneDescribesAnRPCOnlyType(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = selectRow(t, m, "aws_subnet")
+	want := strings.Join([]string{
+		"Type      aws_subnet",
+		"UI res.   0",
+		"UI total  0ms",
+		"RPC calls 1",
+		"RPC total 40ms",
+		"RPC max   40ms",
+		"",
+		"Slowest ApplyResourceChange",
+	}, "\n")
+	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
+		t.Errorf("aws_subnet detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// The slowest call a rollup row names must come from THAT row's group. The
+// group lookup behind it is a second lookup, separate from the aggregate
+// the row's cells come from, so the two can drift apart without a single
+// cell changing.
+//
+// Its duration is by construction the row's own max -- model.RollupBy's
+// MaxMs and groupRPCSpans' slowest run over the same spans under the same
+// key -- so the row's max cell is a free expectation for it, maintained by
+// nobody and available in every fixture and every row. A rollup reporting
+// some other group's slowest, or the whole log's, breaks the equality on
+// any row whose max differs from that group's. Sweeping every row of both
+// rollup views over every fixture is what makes that a general assertion
+// rather than one that happens to hold for the row a test selected.
+func TestARollupRowsSlowestCallBelongsToItsOwnGroup(t *testing.T) {
+	for _, fixture := range []string{"two-tier.log", "two-providers.log", "provider-rpc.log", "mixed-hcp.log", "structured-ui.log"} {
+		for _, c := range []struct {
+			key rune
+			// maxCell is which of the view's cells holds the group's
+			// longest call: providerColumns' max, typeColumns' RPC max.
+			maxCell int
+			// callsCell is the group's RPC-tier call count, which is 0 for
+			// a type only the UI tier saw -- the one case with no slowest
+			// call to name.
+			callsCell int
+		}{
+			{key: '1', maxCell: 3, callsCell: 2},
+			{key: '2', maxCell: 5, callsCell: 3},
+		} {
+			m := update(t, New(testLog(t, fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
+			for i, r := range m.rows() {
+				if r.rollup == nil {
+					t.Fatalf("%s view %c row %d is not a rollup", fixture, c.key, i)
+				}
+				if r.cells[c.callsCell] == "0" {
+					if r.rollup.slowest != nil {
+						t.Errorf("%s view %c row %q has no RPC-tier calls but names %q as its slowest", fixture, c.key, r.cells[0], r.rollup.slowest.RPC)
+					}
+					continue
+				}
+				if r.rollup.slowest == nil {
+					t.Errorf("%s view %c row %q has %s RPC-tier calls but names no slowest", fixture, c.key, r.cells[0], r.cells[c.callsCell])
+					continue
+				}
+				if got := formatMs(uint64(r.rollup.slowest.DurationMs)); got != r.cells[c.maxCell] {
+					t.Errorf("%s view %c row %q: slowest call is %s, but the row's max is %s -- the slowest call belongs to another group", fixture, c.key, r.cells[0], got, r.cells[c.maxCell])
+				}
+			}
+		}
 	}
 }
 
@@ -852,48 +992,86 @@ func TestTypesDetailPaneShowsBothTiers(t *testing.T) {
 func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = selectRow(t, m, "local_file")
-	cells := m.rows()[m.Selected()].cells
-	if cells[3] != "0" {
-		t.Fatalf("fixture assumption changed: local_file has %s RPC calls, want a UI-tier-only row", cells[3])
-	}
 	want := strings.Join([]string{
-		"Type      " + cells[0],
-		"UI res.   " + cells[1],
-		"UI total  " + cells[2],
-		"RPC calls " + cells[3],
-		"RPC total " + cells[4],
-		"RPC max   " + cells[5],
+		"Type      local_file",
+		"UI res.   1",
+		"UI total  1.0s",
+		"RPC calls 0",
+		"RPC total 0ms",
+		"RPC max   0ms",
 		"",
-		"Slowest",
-		"no RPC-tier calls",
+		"Slowest no RPC-tier calls",
 	}, "\n")
-	if got := detailBody(t, m, 50, 20); got != want {
+	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("UI-only types detail pane =\n%s\n\nwant\n%s", got, want)
 	}
 }
 
-// renderDetail truncates with lines[:h], which takes the BOTTOM of the pane
-// first. The group's aggregate is therefore rendered before the slowest
-// call: on a terminal short enough to lose one of them, the summary of the
-// row the cursor is on is what survives and the single call behind it is
-// what goes.
+// A short pane keeps or drops the slowest-call section WHOLE, and says when
+// it dropped it.
 //
-// The height is exactly the title plus the aggregate, so the assertion
-// measures the cut itself rather than a pane that happened to fit.
-func TestAShortDetailPaneKeepsTheAggregateAndDropsTheSlowestCall(t *testing.T) {
+// Cut line by line, the pane had a band of heights where it looked finished
+// and was not: the blank separator, then the heading with nothing beneath
+// it, then the heading and a labelled value with the value gone. The last
+// of those is the dangerous one, because it does not look broken -- it
+// reads as a complete answer to "which call was slowest" -- and the band
+// sits at heights where the centre table still fits, so the frame around it
+// looks healthy.
+//
+// The heights swept are every one either side of the boundary, from a pane
+// with room for nothing but its title upwards, so the assertion measures
+// the cut rather than a pane that happened to fit. The pane's own lines are
+// counted from what it renders at full height, so this does not carry its
+// own copy of the layout.
+func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	// A rollup row, since only a rollup pane has a slowest-call section
 	// beneath an aggregate for a short pane to choose between.
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	if full := detailBody(t, m, 50, 20); !strings.Contains(full, slowestHeading) {
-		t.Fatalf("the slowest section is absent even at full height, so this cannot measure what a short pane drops:\n%s", full)
+	full := strings.Split(m.renderDetail(50, 40), "\n")
+	const slowestSectionLines = 2 // the blank separator and the Slowest line
+	if n := len(full); n < 1+slowestSectionLines+1 {
+		t.Fatalf("fixture assumption changed: the whole pane is %d lines, too few to have a section to drop:\n%s", n, strings.Join(full, "\n"))
 	}
-	const aggregateLines = 6 // provider, calls, total, max, resource types, RPC methods
-	short := detailBody(t, m, 50, 1+aggregateLines)
-	if !strings.Contains(short, "Total 6ms") || !strings.Contains(short, "Calls 2") {
-		t.Errorf("a short detail pane dropped the group aggregate, which is the part that describes the selected row:\n%s", short)
+	aggregate := full[:len(full)-slowestSectionLines] // title and the group's own figures
+	slowest := full[len(full)-1]
+	if !strings.HasPrefix(slowest, slowestHeading) {
+		t.Fatalf("fixture assumption changed: the pane's last line is %q, not the slowest call", slowest)
 	}
-	if strings.Contains(short, slowestHeading) {
-		t.Errorf("a short detail pane kept the slowest call at the aggregate's expense:\n%s", short)
+
+	for h := 1; h <= len(full)+2; h++ {
+		lines := strings.Split(m.renderDetail(50, h), "\n")
+		if n := len(lines); n > h {
+			t.Errorf("height %d: the pane is %d lines:\n%s", h, n, strings.Join(lines, "\n"))
+		}
+		switch {
+		case h >= len(full):
+			if got := strings.Join(lines, "\n"); got != strings.Join(full, "\n") {
+				t.Errorf("height %d has room for the whole pane but rendered:\n%s", h, got)
+			}
+		case h > len(aggregate):
+			// Room for the aggregate but not for the slowest section: it
+			// must go whole, with a line left over to say that it did.
+			if got, want := lines, append(append([]string{}, aggregate...), detailCutMark); !slices.Equal(got, want) {
+				t.Errorf("height %d rendered:\n%s\n\nwant the aggregate and a cut mark\n%s", h, strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		default:
+			// Not even room for the aggregate. The title survives, since it
+			// names the pane, and every height but 1 -- which has no line to
+			// spare -- marks the cut on its last line.
+			if lines[0] != full[0] {
+				t.Errorf("height %d gave up the pane's title: %q", h, lines[0])
+			}
+			if h > 1 && lines[h-1] != detailCutMark {
+				t.Errorf("height %d does not mark the cut on its last line:\n%s", h, strings.Join(lines, "\n"))
+			}
+		}
+		// Whatever the height, no line of a labelled figure may survive
+		// without its figure, and no heading without what it heads.
+		for _, ln := range lines {
+			if ln == slowestHeading || strings.HasSuffix(ln, " ") {
+				t.Errorf("height %d left the dangling line %q:\n%s", h, ln, strings.Join(lines, "\n"))
+			}
+		}
 	}
 }
 
@@ -919,7 +1097,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 	if got := m.detailPaneNatural; got < lipgloss.Width(wantLine) {
 		t.Errorf("detailPaneNatural = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
 	}
-	body := detailBody(t, m, detailPaneWidth(m.detailPaneNatural, 160), 20)
+	body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural, 160), 20)
 	if !strings.Contains(body, wantLine) {
 		t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
 	}
@@ -931,16 +1109,66 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 // placeholder.
 func TestTheDetailPanePlaceholderMeansThereIsNoSelection(t *testing.T) {
 	base := New(testLog(t, "two-tier.log"), "x.log")
-	for _, key := range []rune{'1', '2', '4'} {
-		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
-		if got := detailBody(t, m, 50, 20); strings.Contains(got, noSelectionNote) {
-			t.Errorf("view %c has rows but its detail pane is dead:\n%s", key, got)
+	for _, c := range []struct {
+		key   rune
+		title string
+	}{
+		{'1', rollupDetailTitle},
+		{'2', rollupDetailTitle},
+		{'4', spanDetailTitle},
+	} {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
+		if got := detailBody(t, m, c.title, 50, 20); strings.Contains(got, noSelectionNote) {
+			t.Errorf("view %c has rows but its detail pane is dead:\n%s", c.key, got)
 		}
 	}
 	m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
-	if got := detailBody(t, m, 50, 20); got != noSelectionNote {
+	if got := detailBody(t, m, noSelectionTitle, 50, 20); got != noSelectionNote {
 		t.Errorf("raw log detail pane = %q, want the placeholder %q -- there is no row there to describe", got, noSelectionNote)
 	}
+}
+
+// The pane's TITLE is a claim about what is beneath it, so it has to come
+// from the kind of row the cursor is on. Fixed at SPAN DETAIL, the pane
+// headed a group's aggregate -- "Total 6ms" over two calls added together
+// -- as though it were one span's duration: a plausible number under the
+// wrong noun, which is the failure this tool can least afford.
+//
+// The titles are asserted in the RENDERED frame, not through renderDetail,
+// because the title is also where the detail pane carries keyboard focus:
+// a title composed correctly and then lost to the pane's own width or focus
+// styling would still leave the frame mislabelled.
+func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
+	base := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	for _, c := range []struct {
+		key   rune
+		title string
+	}{
+		{'1', rollupDetailTitle}, // every providers row is a group
+		{'2', rollupDetailTitle}, // every types row is a group
+		{'4', spanDetailTitle},   // every calls row is one span
+		{'6', noSelectionTitle},  // the raw log has no row to describe
+	} {
+		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
+		title := strings.TrimRight(strings.SplitN(detailPaneOf(m.View()), "\n", 2)[0], " ")
+		if title != c.title {
+			t.Errorf("view %c: detail pane is headed %q, want %q", c.key, title, c.title)
+		}
+	}
+}
+
+// detailPaneOf is the detail pane's own column of a three-pane frame, the
+// same way centrePaneOf is the centre's. The three panes render overlapping
+// values at their own widths, so an assertion about one of them has to be
+// made against that one.
+func detailPaneOf(view string) string {
+	var detail []string
+	for _, line := range strings.Split(view, "\n") {
+		if fields := strings.Split(line, paneSep); len(fields) == 3 {
+			detail = append(detail, fields[2])
+		}
+	}
+	return strings.Join(detail, "\n")
 }
 
 // The centre pane must name the view it is showing, in the CENTRE pane
@@ -1034,11 +1262,11 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	if len(rows) == 0 {
 		t.Fatal("fixture assumption changed: the opening view has no rows")
 	}
-	if rows[m.Selected()].spanIdx < 0 {
+	if !rows[m.Selected()].isCall() {
 		t.Fatalf("the opening screen's selected row is a rollup, not a call: %+v", rows[m.Selected()])
 	}
 	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], 50), "\n")
-	if got := detailBody(t, m, 50, 20); got != want {
+	if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want {
 		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
 	}
 }
