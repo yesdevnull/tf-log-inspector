@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math/bits"
 	"sort"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -94,10 +95,10 @@ type spanEvent struct {
 // before starts at the same instant: a span ending exactly as another
 // begins is a handover, not overlap. PeakConcurrency's peak sweep and
 // Stalls' idle sweep both depend on this exact ordering, so it is built
-// once here rather than duplicated -- the zero-duration and StartClamped
-// edge cases documented below are subtle enough that two independently
-// maintained copies of this ordering is exactly where they would drift out
-// of step with each other.
+// once here rather than duplicated -- the zero-duration edge case
+// documented below is subtle enough that two independently maintained
+// copies of this ordering is exactly where they would drift out of step
+// with each other.
 func spanEvents(spans []span.Span) []spanEvent {
 	events := make([]spanEvent, 0, len(spans)*2)
 	for i, s := range spans {
@@ -130,11 +131,19 @@ func spanEvents(spans []span.Span) []spanEvent {
 // function's peak. That is not a discrepancy to reconcile; the two answer
 // different questions.
 //
-// A zero-duration span is a synthetic edge case; the degenerate case that
-// actually turns up in real logs is StartClamped: a span whose reported
-// duration exceeds its offset from the log's first entry has its start
-// clamped to zero, which collapses its timeline extent to zero even though
-// its DurationMs is not, so it too overlaps nothing here.
+// A zero-duration span is not a synthetic edge case. The UI-hook tier
+// produces them routinely: a completion hook that carries no
+// elapsed_seconds at all -- what Terraform's "complete after 0s" lines
+// are -- is stored with DurationMs 0 by span.UIHookBuilder, and both
+// builders derive StartMs by subtracting DurationMs from EndMs, so such a
+// span is always zero-extent.
+//
+// StartClamped is a separate degenerate case and not this one: a span whose
+// reported duration exceeds its offset from the log's first entry has its
+// start clamped to zero, leaving the extent [0, EndMs). That is empty only
+// when the span closed on the log's very first timestamped entry -- a
+// clamped span's DurationMs is strictly greater than that offset, so its
+// DurationMs is never zero either.
 //
 // It rejects a mixed-fidelity slice for the same reason PackLanes does: see
 // sameFidelity.
@@ -146,33 +155,104 @@ func PeakConcurrency(spans []span.Span) (int, error) {
 		return 0, err
 	}
 
+	return peakFromEvents(spanEvents(spans)), nil
+}
+
+// peakFromEvents is PeakConcurrency's sweep over events already built and
+// sorted by spanEvents. Stalls needs the same number over the same events --
+// it is the capacity Stalls measures idle lanes against -- so the sweep
+// lives here rather than being written out twice.
+func peakFromEvents(events []spanEvent) int {
 	var cur, peak int
-	for _, e := range spanEvents(spans) {
+	for _, e := range events {
 		cur += e.delta
 		if cur > peak {
 			peak = cur
 		}
 	}
-	return peak, nil
+	return peak
 }
 
 // Stall is a window during which fewer lanes were busy than the timeline
-// has, named by the span that was still running when the others were not.
+// has capacity for, named by a span that kept running while the others did
+// not.
 type Stall struct {
 	StartMs, EndMs uint32
 	Idle           int // lanes with nothing to do in this window
-	Blocking       int // index into the spans slice: the longest span running throughout
+	// Blocking indexes the spans slice Stalls was given: the longest span
+	// running at any point in this window, ties towards the lower index.
+	//
+	// It is -1 when NOTHING was running -- every lane idle at once, which
+	// is a wait with no span to blame rather than an impossible value.
+	// Consumers must handle it: indexing spans with -1 panics, and looking
+	// -1 up in a lane finds none. See Stalls for why such windows are
+	// reported rather than skipped.
+	Blocking int
+}
+
+// outranksAsBlocking reports whether span a is the better name for a stall
+// than span b: the longer span wins, and a tie resolves towards the lower
+// span index so that repeated runs over the same log name the same span.
+// -1 -- no span at all -- loses to anything and beats nothing.
+//
+// It is the single definition of that order, used both to rank spans for
+// the sweep's per-window choice and to pick between the choices of the
+// windows a merge joins together.
+func outranksAsBlocking(spans []span.Span, a, b int) bool {
+	switch {
+	case a < 0:
+		return false
+	case b < 0:
+		return true
+	case spans[a].DurationMs != spans[b].DurationMs:
+		return spans[a].DurationMs > spans[b].DurationMs
+	}
+	return a < b
 }
 
 // Stalls sweeps the same start/end events PeakConcurrency does, but keeps
 // the running set rather than just its size, so each window can be named by
 // the span still running while the others are not.
 //
-// lanes is the caller's lane count -- normally len(PackLanes(spans)) -- and
-// minMs is the caller's own noise threshold; Stalls invents neither. It
-// merges adjacent windows before applying minMs, because a stall split by a
-// handover between two other spans is still one stall: thresholding first
-// would drop both halves of a genuine wait that only looks short in pieces.
+// The capacity idle lanes are counted against is the spans' own peak
+// concurrency, not the caller's lane count. PackLanes gives a zero-extent
+// span a lane of its own so the timeline has a row to draw it in (see
+// PeakConcurrency), and that lane can hold work in no window at all:
+// counting it as capacity reports the entire run as idle off the back of
+// one instantaneous span, which the UI-hook tier emits by the dozen. For
+// spans with a non-empty extent the two numbers agree anyway -- greedy
+// packing in start order needs exactly as many lanes as the deepest
+// overlap -- so nothing is lost by measuring against the spans.
+//
+// lanes is kept as a ceiling on that capacity, so Stalls never reports more
+// idle lanes than the caller has rows to show them in. A caller passing
+// len(PackLanes(spans)) can only ever pass a number at or above the peak,
+// so the cap does not bite there; it is what stops a caller drawing a
+// narrower timeline from being told about lanes it does not have.
+//
+// minMs is the caller's own noise threshold; Stalls invents neither it nor
+// the lane count. Windows are merged before minMs is applied, because a
+// stall split by a handover is still one stall: thresholding first drops
+// both halves of a genuine wait that only looks short in pieces.
+//
+// Merging is on the idle count alone. The blocking lane is by definition
+// the one that keeps starting new work, so a long wait is routinely split
+// by handovers WITHIN it -- one 16.7s wait behind four consecutive calls
+// from the same provider is four windows naming four different spans.
+// Merging on the blocking span as well reports that as four stalls, of
+// which the shortest then falls under minMs and vanishes, understating the
+// wait it was supposed to measure. The merged window is named by the
+// longest span that blocked any part of it (see outranksAsBlocking), which
+// is the same answer as scanning the merged window whole would give: the
+// longest span running anywhere in it also wins the window it runs in.
+//
+// A window where NOTHING is running is reported too, with Blocking -1.
+// Being unable to name a blocker is not the same as there being no wait:
+// Terraform core working with no provider call in flight is the commonest
+// shape of a slow plan, and it is drawn as blank space across every lane.
+// An annotation silent about it contradicts the picture it sits under.
+// Such a window can never merge into a blocked one, since idle is the full
+// capacity when nothing runs and strictly less whenever something does.
 func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 	if len(spans) == 0 {
 		return nil, nil
@@ -182,26 +262,63 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 	}
 
 	events := spanEvents(spans)
+	capacity := min(lanes, peakFromEvents(events))
+
+	// order lists spans best-blocker first and rank is its inverse, so the
+	// blocking span of a window is the lowest rank still running: running
+	// carries that set as one bit per rank, and the answer is its lowest
+	// set bit. The obvious alternative -- rescanning every span for the
+	// longest one still open, once per window -- is quadratic in the span
+	// count, and a capture opens a window per distinct event instant while
+	// the timeline asks for the whole answer again on every frame.
+	order := make([]int, len(spans))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool { return outranksAsBlocking(spans, order[a], order[b]) })
+	rank := make([]int, len(spans))
+	for r, idx := range order {
+		rank[idx] = r
+	}
+	running := make([]uint64, (len(spans)+63)/64)
 
 	var raw []Stall
-	// open is indexed by span, not a map, so a tie in DurationMs breaks
-	// towards the lowest span index deterministically rather than however
-	// Go's map iteration happens to land. It counts each span's net
-	// start/end deltas rather than recording a bool, so a zero-duration
-	// span -- whose start and end land in the same sweep batch -- nets to
-	// 0 and reads as not running regardless of which of its two events the
-	// tie-break in spanEvents happens to order first. A bool keyed by
-	// last-write-wins got this wrong: it left such a span marked running
-	// for the rest of the sweep, which matters once a genuinely live span
-	// also has DurationMs 0 (StartClamped spans do, per PeakConcurrency's
-	// doc comment) and the two tie for Blocking.
+	// The window before the first event is elapsed capture time with
+	// nothing running: a span's StartMs is an offset from the log's own
+	// zero point, not from its first span, so this is measured time, not
+	// invented. It is the same wait as any other all-idle window and is
+	// reported as one. There is no matching window after the last event:
+	// Stalls is handed no end-of-log timestamp, so the last event it saw is
+	// the last thing it knows happened, and the sweep never invents a
+	// segment past that.
+	if first := events[0].at; first > 0 && capacity > 0 {
+		raw = append(raw, Stall{StartMs: 0, EndMs: first, Idle: capacity, Blocking: -1})
+	}
+
+	// open records each span's liveness as the net of its start and end
+	// deltas rather than as a bool, so a
+	// zero-duration span -- whose start and end land in the same sweep
+	// batch -- nets to 0 and reads as not running regardless of which of
+	// its two events the tie-break in spanEvents happens to order first. A
+	// bool keyed by last-write-wins got this wrong: it left such a span
+	// marked running for the rest of the sweep, so an instant with no
+	// extent could win Blocking from a span that was genuinely still going.
 	open := make([]int, len(spans))
 	var runningCount int
 	for i := 0; i < len(events); {
 		at := events[i].at
 		for i < len(events) && events[i].at == at {
-			open[events[i].idx] += events[i].delta
-			runningCount += events[i].delta
+			e := events[i]
+			open[e.idx] += e.delta
+			runningCount += e.delta
+			// Driven from open's net count, and so inheriting its
+			// zero-duration behaviour: the bit is only ever read once the
+			// whole batch at this instant has been applied.
+			if open[e.idx] > 0 {
+				running[rank[e.idx]/64] |= 1 << (rank[e.idx] % 64)
+			} else {
+				running[rank[e.idx]/64] &^= 1 << (rank[e.idx] % 64)
+			}
 			i++
 		}
 		if i == len(events) {
@@ -210,27 +327,21 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 			break
 		}
 		next := events[i].at
-		idle := lanes - runningCount
-		if idle <= 0 || runningCount == 0 {
-			// idle <= 0: every lane is busy. runningCount == 0: nothing is
-			// running at all, so this is the gap between two phases of
-			// work, not a stall -- reporting it would blame a span that had
-			// already finished for a wait it played no part in.
+		idle := capacity - runningCount
+		if idle <= 0 {
+			// Every lane that can hold work is holding some.
 			continue
 		}
-		blocking := -1
-		for idx, o := range open {
-			if o > 0 && (blocking == -1 || spans[idx].DurationMs > spans[blocking].DurationMs) {
-				blocking = idx
-			}
-		}
-		raw = append(raw, Stall{StartMs: at, EndMs: next, Idle: idle, Blocking: blocking})
+		raw = append(raw, Stall{StartMs: at, EndMs: next, Idle: idle, Blocking: lowestRankRunning(order, running)})
 	}
 
 	var merged []Stall
 	for _, s := range raw {
-		if n := len(merged); n > 0 && merged[n-1].EndMs == s.StartMs && merged[n-1].Idle == s.Idle && merged[n-1].Blocking == s.Blocking {
+		if n := len(merged); n > 0 && merged[n-1].EndMs == s.StartMs && merged[n-1].Idle == s.Idle {
 			merged[n-1].EndMs = s.EndMs
+			if outranksAsBlocking(spans, s.Blocking, merged[n-1].Blocking) {
+				merged[n-1].Blocking = s.Blocking
+			}
 			continue
 		}
 		merged = append(merged, s)
@@ -243,4 +354,17 @@ func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
 		}
 	}
 	return stalls, nil
+}
+
+// lowestRankRunning returns the span index of the best-ranked span in the
+// running set -- the lowest set bit, since order ranks the best blocker
+// first -- or -1 when nothing is running at all, which Stall.Blocking
+// documents as its own answer rather than a missing one.
+func lowestRankRunning(order []int, running []uint64) int {
+	for w, word := range running {
+		if word != 0 {
+			return order[w*64+bits.TrailingZeros64(word)]
+		}
+	}
+	return -1
 }

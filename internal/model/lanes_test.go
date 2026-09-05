@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math/rand/v2"
 	"reflect"
 	"testing"
 
@@ -215,11 +216,18 @@ func TestStallsReportsNoStallWhenEverySpanRunsThroughout(t *testing.T) {
 	}
 }
 
-// A gap where every span has already finished is the space between two
-// phases of work, not a stall: nothing is idle, because nothing is running
-// to be idle. A sweep that reported this gap would blame a span that had
-// already completed for a wait it played no part in.
-func TestStallsIgnoresGapsWhereNothingIsRunning(t *testing.T) {
+// A window where every lane is idle at once is the commonest shape of a
+// wait: Terraform core working with no provider call in flight at all.
+// There is no span to blame for it, which is the whole reason it is easy to
+// skip -- but "cannot name a blocker" is not "is not a wait", and a
+// timeline that draws that blank space while its annotation reports no
+// stalls contradicts its own picture. Such a window is reported with
+// Blocking -1.
+//
+// It never merges into a blocked window on either side: idle is the full
+// capacity when nothing runs and strictly less than that when something
+// does, so the two kinds cannot share an idle count.
+func TestStallsReportsWindowsWhereNothingWasRunning(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
@@ -229,28 +237,36 @@ func TestStallsIgnoresGapsWhereNothingIsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 200, EndMs: 260, Idle: 1, Blocking: 2}}
+	want := []Stall{
+		{StartMs: 100, EndMs: 200, Idle: 2, Blocking: -1},
+		{StartMs: 200, EndMs: 260, Idle: 1, Blocking: 2},
+	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Stalls = %+v, want %+v (the 100ms-200ms gap has nothing running, so it must not appear)", got, want)
+		t.Errorf("Stalls = %+v, want %+v (the 100ms-200ms window has nothing running, which is a wait with no span to name)", got, want)
 	}
 }
 
-// Two sweep segments that share the same idle count and the same blocking
-// span are one stall, even though a third span's handover splits the sweep
-// into two segments at the midpoint. Thresholding before merging would drop
-// both 30ms halves of this 60ms stall; thresholding after merging keeps it.
+// Two sweep segments that share an idle count are one stall, even though a
+// handover between two other spans splits the sweep into two segments at
+// the midpoint. Thresholding before merging would drop both sub-threshold
+// halves of this 50ms stall; thresholding after merging keeps it.
+//
+// The fourth span exists to lift the timeline's capacity to three: without
+// it nothing here ever runs three-up, so the two segments have no idle lane
+// to report and the merge has nothing to act on.
 func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 1000, DurationMs: 1000}, // always running; the blocking span throughout
-		{StartMs: 0, EndMs: 30, DurationMs: 20},
-		{StartMs: 30, EndMs: 60, DurationMs: 20},
+		{StartMs: 0, EndMs: 30, DurationMs: 30},
+		{StartMs: 30, EndMs: 60, DurationMs: 30},
+		{StartMs: 0, EndMs: 10, DurationMs: 10},
 	}
 	got, err := Stalls(spans, 3, 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
 	want := []Stall{
-		{StartMs: 0, EndMs: 60, Idle: 1, Blocking: 0},
+		{StartMs: 10, EndMs: 60, Idle: 1, Blocking: 0},
 		{StartMs: 60, EndMs: 1000, Idle: 2, Blocking: 0},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -259,22 +275,33 @@ func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 }
 
 // A zero-duration span's interval [StartMs, EndMs) is empty, so it must
-// never win Blocking once it has both started and ended -- even when the
-// genuinely running span sharing the window also happens to report
-// DurationMs 0, as a StartClamped span can (see PeakConcurrency's doc
-// comment). A liveness bookkeeping scheme that leaves the elapsed span
-// marked "running" would let it win the tie, pointing the annotation at a
+// never win Blocking once it has both started and ended: the sweep has to
+// tell "started and finished in the same instant" apart from "still
+// running", and a scheme keyed by last write wins leaves the elapsed span
+// marked running for the rest of the sweep, pointing the annotation at a
 // span whose interval had already elapsed instead of the one still going.
+//
+// Span 1's shape -- a 100ms extent with DurationMs 0 -- is synthetic:
+// both builders derive StartMs by subtracting DurationMs from EndMs, so a
+// real span's extent never exceeds its stored duration, and a real
+// DurationMs-0 span is therefore always zero-extent. It is written that way
+// deliberately, because the tie at DurationMs 0 is the only arrangement in
+// which a wrongly-live elapsed span could beat the span that is genuinely
+// running, and a test for that bookkeeping has to be able to express it.
+//
+// Span 2 lifts the timeline's capacity to two lanes, so that there is an
+// idle lane to report a blocking span for at all.
 func TestStallsIgnoresElapsedZeroDurationSpansWhenChoosingBlocking(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 30, EndMs: 30, DurationMs: 0}, // elapsed by t=30; contributes nothing
 		{StartMs: 0, EndMs: 100, DurationMs: 0}, // genuinely running throughout
+		{StartMs: 0, EndMs: 20, DurationMs: 20}, // the second lane's work
 	}
 	got, err := Stalls(spans, 2, 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 0, EndMs: 100, Idle: 1, Blocking: 1}}
+	want := []Stall{{StartMs: 20, EndMs: 100, Idle: 1, Blocking: 1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v (the elapsed zero-duration span must not win Blocking)", got, want)
 	}
@@ -296,5 +323,163 @@ func TestStallsBreaksDurationTiesTowardsTheLowerIndex(t *testing.T) {
 	want := []Stall{{StartMs: 100, EndMs: 200, Idle: 1, Blocking: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v", got, want)
+	}
+}
+
+// PackLanes hands a zero-extent span its own lane, because the timeline
+// needs a row to draw it in (see PeakConcurrency's doc comment), so on a log
+// where every real span overlaps, the lane count exceeds the number of lanes
+// any span can occupy. That surplus is a drawing artefact, not idle
+// capacity: counted as idle it reports the whole run as one stall on the
+// strength of a single instantaneous span. The UI-hook tier produces those
+// routinely -- a completion hook carrying no elapsed_seconds, which is what
+// Terraform's "complete after 0s" lines are, is stored with DurationMs 0.
+func TestStallsDoesNotCountTheLaneAZeroDurationSpanOpens(t *testing.T) {
+	busy := []span.Span{
+		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
+		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
+		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
+	}
+	if got, err := Stalls(busy, 3, 1000); err != nil {
+		t.Fatalf("Stalls: %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("Stalls over three spans that all run throughout = %+v, want none", got)
+	}
+
+	withZero := []span.Span{busy[0], busy[1], busy[2], {StartMs: 5000, EndMs: 5000, DurationMs: 0}}
+	lanes, err := PackLanes(withZero)
+	if err != nil {
+		t.Fatalf("PackLanes: %v", err)
+	}
+	if len(lanes) != 4 {
+		t.Fatalf("PackLanes packed %d lanes, want 4 -- this test's premise is that the zero-duration span opens a fourth", len(lanes))
+	}
+	got, err := Stalls(withZero, len(lanes), 1000)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Stalls = %+v, want none: the lane a zero-duration span opens can hold work in no window, so it is not idle capacity", got)
+	}
+}
+
+// The spans testdata/timeline-many-stalls.log builds: one short google call,
+// then four aws calls handing over to each other back to back. google's lane
+// is idle continuously from 3.3s to 20.0s, blocked by aws throughout -- but
+// by four DIFFERENT aws spans, because the blocking lane is by definition
+// the one that keeps starting new work. Merging on the blocking span as well
+// as the idle count splits that one wait into four, of which the last falls
+// under the threshold and is dropped, understating the wait by two seconds
+// and spending four annotation lines saying it.
+//
+// The window before the first span is its own stall, with no span to name:
+// see TestStallsReportsTheIdleWindowBeforeTheFirstSpan.
+func TestStallsMergesOneWaitAcrossHandoversInsideTheBlockingLane(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 3100, EndMs: 3300, DurationMs: 200},    // google
+		{StartMs: 3000, EndMs: 9000, DurationMs: 6000},   // aws, and the longest of them
+		{StartMs: 9000, EndMs: 14000, DurationMs: 5000},  // aws
+		{StartMs: 14000, EndMs: 18000, DurationMs: 4000}, // aws
+		{StartMs: 18000, EndMs: 20000, DurationMs: 2000}, // aws
+	}
+	lanes, err := PackLanes(spans)
+	if err != nil {
+		t.Fatalf("PackLanes: %v", err)
+	}
+	if len(lanes) != 2 {
+		t.Fatalf("PackLanes packed %d lanes, want 2 -- every aws span reuses lane 0", len(lanes))
+	}
+	got, err := Stalls(spans, len(lanes), 1000)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{
+		{StartMs: 0, EndMs: 3000, Idle: 2, Blocking: -1},
+		{StartMs: 3300, EndMs: 20000, Idle: 1, Blocking: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (one 16.7s wait, named by the longest span that blocked any part of it)", got, want)
+	}
+}
+
+// The timeline's zero point is the log's own -- a span's StartMs is an
+// offset from the log's first timestamped entry, not from its first span --
+// so time before the first span is elapsed capture time with nothing
+// running: the same wait as any other all-idle window, drawn as the same
+// blank space at the left of every lane.
+//
+// Nothing is reported after the last span ends. Stalls is handed no
+// end-of-log timestamp, so the last event it sees is the last thing it
+// knows happened; a trailing window would be invented rather than measured.
+func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
+		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
+	}
+	got, err := Stalls(spans, 2, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 0, EndMs: 8000, Idle: 2, Blocking: -1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (8s of the capture elapsed before any span started, and none after the last ended)", got, want)
+	}
+
+	atZero := []span.Span{
+		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
+		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
+	}
+	if got, err := Stalls(atZero, 2, 0); err != nil {
+		t.Fatalf("Stalls: %v", err)
+	} else if len(got) != 0 {
+		t.Errorf("Stalls = %+v, want none: work starts at the log's zero point, so there is no window before it", got)
+	}
+}
+
+// Stalls maintains its running set incrementally rather than rescanning
+// every span per window, so the property the old scan made obvious is
+// pinned here instead, over spans dense enough to keep the bookkeeping
+// busy: the span named as Blocking runs somewhere in the window and no span
+// running in that window outranks it, -1 appears only where nothing runs at
+// all, and no two returned windows could still have been merged.
+func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	spans := make([]span.Span, 200)
+	for i := range spans {
+		start := uint32(r.IntN(5000))
+		dur := uint32(r.IntN(400))
+		spans[i] = span.Span{StartMs: start, EndMs: start + dur, DurationMs: dur}
+	}
+	got, err := Stalls(spans, len(spans), 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("Stalls found no windows over 200 overlapping spans: this test would assert nothing")
+	}
+
+	runsIn := func(s span.Span, w Stall) bool {
+		return max(s.StartMs, w.StartMs) < min(s.EndMs, w.EndMs)
+	}
+	for _, w := range got {
+		for i, s := range spans {
+			switch {
+			case w.Blocking < 0 && runsIn(s, w):
+				t.Fatalf("stall %+v names no blocking span, but span %d ran in that window", w, i)
+			case w.Blocking < 0 || !runsIn(s, w):
+				continue
+			case s.DurationMs > spans[w.Blocking].DurationMs,
+				s.DurationMs == spans[w.Blocking].DurationMs && i < w.Blocking:
+				t.Fatalf("stall %+v names span %d (%dms), but span %d (%dms) also ran in that window and outranks it", w, w.Blocking, spans[w.Blocking].DurationMs, i, s.DurationMs)
+			}
+		}
+		if w.Blocking >= 0 && !runsIn(spans[w.Blocking], w) {
+			t.Fatalf("stall %+v names span %d, which does not run anywhere in that window", w, w.Blocking)
+		}
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i-1].EndMs == got[i].StartMs && got[i-1].Idle == got[i].Idle {
+			t.Fatalf("stalls %+v and %+v are adjacent and share an idle count: they are one window reported as two", got[i-1], got[i])
+		}
 	}
 }
