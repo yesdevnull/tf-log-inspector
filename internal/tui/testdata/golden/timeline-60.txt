@@ -15,4 +15,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  4 calls  6 raw log
-⇥ pane  ␣ facet  ⏎ open  ↔ span  f facets  / search  Esc cle
+⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q qu

@@ -154,8 +154,8 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	// line: "q quit" is the hint this file's own comments call
 	// non-negotiable, and the view-key line has always been the one given
 	// up first when there is not room for both.
-	if lines[1] != m.actionKeys() {
-		t.Errorf("second line at height 2 is %q, want the action keys %q", lines[1], m.actionKeys())
+	if lines[1] != m.actionKeys(m.paneWidth()) {
+		t.Errorf("second line at height 2 is %q, want the action keys %q", lines[1], m.actionKeys(m.paneWidth()))
 	}
 }
 
@@ -232,7 +232,7 @@ func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
 		// actionKeys) -- a pre-existing limit this task's split does not
 		// change, since actionKeys is untouched. "q quit" is only
 		// guaranteed once the action line itself fits.
-		if w >= lipgloss.Width(m.actionKeys()) && !strings.Contains(lines[1], "q quit") {
+		if w >= lipgloss.Width(m.actionKeys(w)) && !strings.Contains(lines[1], "q quit") {
 			t.Errorf("footer(%d) action line lost q quit: %q", w, lines[1])
 		}
 	}
@@ -1487,7 +1487,7 @@ func TestTheFooterNeverLosesQuitAtWidthsTheActionLineFits(t *testing.T) {
 		// rebuilds the row cache, and the footer's own open hint is a
 		// function of the selected row.
 		m.setView(b.view)
-		for w := lipgloss.Width(m.actionKeys()); w <= 200; w++ {
+		for w := lipgloss.Width(m.actionKeys(200)); w <= 200; w++ {
 			lines := strings.Split(m.footer(w), "\n")
 			action := lines[len(lines)-1]
 			if !strings.Contains(action, "q quit") {
@@ -1624,10 +1624,53 @@ func TestTheFooterOffersTheSpanKeysOnlyWhereTheyStep(t *testing.T) {
 func TestTheActionLineStillFitsTheNarrowestThreePaneWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 70, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
-	if !strings.Contains(m.actionKeys(), spanCursorHint) {
-		t.Fatalf("the timeline's action keys do not carry the span hint, so this asserts nothing: %q", m.actionKeys())
+	if !strings.Contains(m.actionKeys(detailInlineWidth), spanCursorHint) {
+		t.Fatalf("the timeline's action keys do not carry the span hint, so this asserts nothing: %q", m.actionKeys(detailInlineWidth))
 	}
-	if n := lipgloss.Width(m.actionKeys()); n > detailInlineWidth {
-		t.Errorf("the timeline's action line is %d columns, more than the %d a %d-column terminal gives it: %q", n, detailInlineWidth, detailInlineWidth, m.actionKeys())
+	if n := lipgloss.Width(m.actionKeys(detailInlineWidth)); n > detailInlineWidth {
+		t.Errorf("the timeline's action line is %d columns, more than the %d a %d-column terminal gives it: %q", n, detailInlineWidth, detailInlineWidth, m.actionKeys(detailInlineWidth))
+	}
+}
+
+// TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth is the same rule
+// the open hint follows, applied to a width rather than to a row: below
+// detailInlineWidth the detail pane collapses, and the within-lane cursor's
+// only visible effect is in that pane (see renderTimeline), so ←/→ there
+// move a selection nothing on screen reflects. Advertising them at that
+// width advertises a key that does nothing observable -- and it costs "q
+// quit", which the footer was split in two to protect, its place on the
+// line.
+func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	const narrowW = 60
+	small := update(t, m, tea.WindowSizeMsg{Width: narrowW, Height: 40})
+	narrow := footerOf(small.View())
+	if strings.Contains(narrow, spanCursorHint) {
+		t.Errorf("at %d columns the footer offers %q, but the detail pane it steps is not drawn: %q", narrowW, spanCursorHint, narrow)
+	}
+	// The action line has been over budget at this width since before the
+	// span hint existed (see keyHints), so what is asserted is that the
+	// hint costs the quit end of it NOTHING: the timeline's line here is
+	// the same line every other view with something to open draws.
+	calls := update(t, small, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	action := func(footer string) string {
+		lines := strings.Split(footer, "\n")
+		return lines[len(lines)-1]
+	}
+	if got, want := action(narrow), action(footerOf(calls.View())); got != want {
+		t.Errorf("at %d columns the timeline's action line is %q, want the same line the calls view draws, %q", narrowW, got, want)
+	}
+	if !strings.Contains(narrow, "q qu") {
+		t.Errorf("at %d columns the action line no longer reaches the quit hint at all: %q", narrowW, narrow)
+	}
+
+	big := update(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	wide := footerOf(big.View())
+	for _, want := range []string{spanCursorHint, "q quit"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("at 100 columns the footer does not offer %q: %q", want, wide)
+		}
 	}
 }

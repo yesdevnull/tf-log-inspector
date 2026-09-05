@@ -353,7 +353,7 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // height. Each line is still clipped independently, because a 60-column
 // terminal cannot show 62 columns of action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
-	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(), w)
+	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(w), w)
 }
 
 // openHint names the key that jumps from the selected row to the log entry
@@ -374,10 +374,10 @@ const spanCursorHint = "↔ span"
 
 // actionKeys is the hint group for the keys that DO something to what is on
 // screen, as opposed to the ones that change which view is on screen. It is
-// 52 display columns bare, 62 with the open hint, and 70 in the timeline,
-// which carries both that and the span hint; every binding added to it
-// pushes "q quit" closer to the edge a narrow terminal cuts from, which is
-// what keeps it this terse.
+// 52 display columns bare, 62 with the open hint, and 70 in the timeline at
+// a width that draws the detail pane, which carries both that and the span
+// hint; every binding added to it pushes "q quit" closer to the edge a
+// narrow terminal cuts from, which is what keeps it this terse.
 //
 // The open hint is shown only where Enter has something to open: a call
 // row's own span in the table views, or the timeline's selected span, which
@@ -397,20 +397,35 @@ const spanCursorHint = "↔ span"
 // selectedLaneStepsThroughSpans) -- and nowhere else, since no other view
 // has a within-lane cursor for them to move.
 //
-// Both ask a predicate built on the same state their key handler reads --
-// selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
+// The span hint is the one hint here that also asks the WIDTH, and that is
+// the same rule again rather than a width budget. Below detailInlineWidth
+// the detail pane collapses (see renderPanes), and the within-lane cursor's
+// only visible effect is in that pane: renderTimeline states the limit --
+// the bar draws no marker for it, because a packed lane can put several
+// spans in one column -- so at those widths ←/→ move a selection nothing on
+// screen reflects. A hint there names a key that does nothing observable,
+// which is exactly what this group refuses. It costs nothing to drop: the
+// keys still drive Enter's jump target at every width, and a reader who
+// cannot see what they select has no use for being told they exist. That it
+// also gives "q quit" its place back on a 60-column terminal -- the hint
+// this file's own comments call non-negotiable, and the reason the footer
+// was split in two at all -- is the consequence, not the reason.
+//
+// Each hint asks a predicate built on the same state its key handler reads
+// -- selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
 // through timelineLanes -- so the footer cannot come to advertise a key the
-// handler has stopped acting on. Neither asks which pane has focus: Enter
-// is inert from the detail pane the way space is inert outside the facet
-// pane, and "␣ facet" is shown regardless for the same reason -- a hint
-// that flickered as Tab moved would describe the keyboard rather than the
-// view.
-func (m *Model) actionKeys() string {
+// handler has stopped acting on. None asks which pane has focus: Enter is
+// inert from the detail pane the way space is inert outside the facet pane,
+// and "␣ facet" is shown regardless for the same reason -- a hint that
+// flickered as Tab moved would describe the keyboard rather than the view.
+// The width is different in kind from focus: it decides what is DRAWN, and
+// a pane that is not drawn is not somewhere the reader can look.
+func (m *Model) actionKeys(w int) string {
 	keys := []string{"⇥ pane", "␣ facet"}
 	if m.selectedRowOpens() {
 		keys = append(keys, openHint)
 	}
-	if m.selectedLaneStepsThroughSpans() {
+	if w >= detailInlineWidth && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
