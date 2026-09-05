@@ -145,6 +145,16 @@ func TestGoldenLayouts(t *testing.T) {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		compareGolden(t, fmt.Sprintf("layout-%d.txt", w), m.View())
 	}
+	// All three above are taken in the opening view, whose every row is one
+	// span. A ROLLUP view composes a different frame from the same log: a
+	// different column set in the centre, a detail pane of two sections
+	// rather than one, and a different set of view-key hints in the footer.
+	// None of that was locked anywhere. 100 columns is the width this tool
+	// is actually run at, and the one where the side panes and the centre
+	// compete hardest.
+	m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	compareGolden(t, "layout-100-providers.txt", m.View())
 }
 
 // Pressing 'f' below the facet-pane's inline width threshold must open it as
@@ -800,6 +810,50 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 	// and the comparison is against the values themselves.
 	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("providers detail pane =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// The rollup detail pane's own clip DIRECTION, at a width where it actually
+// clips. Every other assertion about the pane is made at 50 columns, where
+// nothing does -- and the pane never renders at 50: it renders at
+// minDetailPaneWidth on a 70-column terminal, one of the three widths the
+// spec names, and at a quarter of a 100-column one.
+//
+// Front-clipping is the whole reason two "…/hashicorp/…" addresses stay
+// apart there, and the same for two resource types sharing a provider's
+// prefix. Cut from the wrong end, every provider line reads "Prov
+// registry.terr…" and every aws type "Type      aws_…": a pane that cannot
+// tell its own rows apart, rendering plausible text for whichever row the
+// cursor is on.
+//
+// The width comes from the pane's own policy at that terminal width rather
+// than from a number written here, so this follows the layout instead of
+// pinning a guess at it. Every row of each view is asserted, since the point
+// is that the rows differ.
+func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
+	for _, c := range []struct {
+		fixture string
+		key     rune
+		want    []string
+	}{
+		{"two-providers.log", '1', []string{"Prov  …icorp/google", "Prov  …ashicorp/aws"}},
+		{"two-tier.log", '2', []string{"Type      …instance", "Type      …cal_file", "Type      …s_subnet"}},
+	} {
+		m := update(t, New(testLog(t, c.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
+		w := detailPaneWidth(m.detailPaneNatural, detailInlineWidth)
+		if w >= m.detailPaneNatural {
+			t.Fatalf("%s: the pane renders at %d columns against a natural width of %d, so nothing clips and this measures nothing", c.fixture, w, m.detailPaneNatural)
+		}
+		if got := len(m.rows()); got != len(c.want) {
+			t.Fatalf("fixture assumption changed: %s view %c has %d rows, want %d", c.fixture, c.key, got, len(c.want))
+		}
+		for i, want := range c.want {
+			m.selected = i
+			first := strings.SplitN(detailBody(t, m, rollupDetailTitle, w, 20), "\n", 2)[0]
+			if first != want {
+				t.Errorf("%s view %c row %d: pane's first line at %d columns = %q, want %q -- an identifier keeps its tail", c.fixture, c.key, i, w, first, want)
+			}
+		}
 	}
 }
 

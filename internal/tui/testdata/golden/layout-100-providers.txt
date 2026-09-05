@@ -1,0 +1,40 @@
+tfli -- plan.log -- 2 RPC spans, 0 UI spans
+
+PROVIDERS                 │ BY PROVIDER                                  │ GROUP DETAIL             
+[7;2m[ ] ….io/hashicorp/aws  1[0m │ provider                   total  calls  max │ Prov  …o/hashicorp/google
+[ ] …/hashicorp/google  1 │ [7m…form.io/hashicorp/google    8ms      1  8ms[0m │ Calls 1                  
+RPCS                      │ …rraform.io/hashicorp/aws    5ms      1  5ms │ Total 8ms                
+[ ] ApplyResourceChan…  2 │                                              │ Max   8ms                
+RESOURCE TYPES            │                                              │ Types 1                  
+[ ] aws_subnet  1         │                                              │ RPCs  1                  
+[ ] …_compute_instance  1 │                                              │                          
+LEVELS                    │                                              │ Slowest ApplyResourceCha…
+[ ] TRACE  2              │                                              │                          
+[ ] UNKNOWN  1            │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+                          │                                              │                          
+
+Durations here are measured under logging, which is not
+free: one workspace planned in 24.1s unlogged and 522.2s
+with debug plus provider TRACE. Rankings hold, since every
+span paid the same cost, but absolute times do not transfer
+to an unlogged run.
+
+2 types  4 calls  6 raw log  ⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
