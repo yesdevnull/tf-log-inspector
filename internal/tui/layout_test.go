@@ -281,9 +281,9 @@ func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 //
 // A call row IS a single span, so its pane describes that span and nothing
 // else: no group aggregate and no "Slowest" section, both of which would be
-// the same call reported twice. This is the view the rollup panes were
-// modelled on, so it is also the control -- it must render exactly what it
-// rendered before there were rollup panes at all.
+// the same call reported twice. It is the control for the rollup panes,
+// which show both: the RPC, provider and duration lines here, and nothing
+// under them.
 func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	m := callsModel(t, "provider-rpc.log", "x.log")
 	want := m.log.RPCSpans[m.rows()[0].spanIdx]
@@ -1193,10 +1193,11 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 	}
 }
 
-// The placeholder now means what it says: there is no selection to
-// describe. Every view with rows describes the row the cursor is on, and
+// The placeholder means exactly what it says: there is no selection to
+// describe. Every view with rows describes the row the cursor is on, so
 // only the raw log -- which has no rows of its own -- reaches the
-// placeholder.
+// placeholder, and a rollup view reaching it would be a pane that failed to
+// describe a row that is right there on screen.
 func TestTheDetailPanePlaceholderMeansThereIsNoSelection(t *testing.T) {
 	base := New(testLog(t, "two-tier.log"), "x.log")
 	for _, c := range []struct {
@@ -1406,8 +1407,9 @@ func TestTheFooterNeverLosesQuitToTheViewKeys(t *testing.T) {
 
 // The interface opens on the calls view, so the opening screen's detail
 // pane describes a CALL -- the top row's own span -- rather than sitting on
-// the placeholder or on a group aggregate. This is the first screen a user
-// sees, and it is the one the pane was previously blank on.
+// the placeholder or on a group aggregate. It is the first screen a user
+// sees, and the only one they see without pressing a key, so a pane that
+// says nothing there is a pane most users never see working.
 func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	rows := m.rows()

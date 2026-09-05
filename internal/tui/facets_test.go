@@ -94,7 +94,7 @@ func TestSpaceOnlyTogglesFromTheFacetPane(t *testing.T) {
 	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	before := len(base.rows())
 	if before < 2 {
-		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a stray toggle would be visible", before)
+		t.Fatalf("fixture assumption changed: %d call rows, want at least 2 so a stray toggle would be visible", before)
 	}
 	for _, want := range []Pane{PaneList, PaneDetail} {
 		m := base

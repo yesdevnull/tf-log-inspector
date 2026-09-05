@@ -377,7 +377,7 @@ func TestTabSkipsPanesTheWidthHasCollapsed(t *testing.T) {
 	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), size)
 	before := len(base.rows())
 	if before < 2 {
-		t.Fatalf("fixture assumption changed: %d provider rows, want at least 2 so a filter can be seen to narrow them", before)
+		t.Fatalf("fixture assumption changed: %d call rows, want at least 2 so a filter can be seen to narrow them", before)
 	}
 
 	m := base
@@ -393,7 +393,7 @@ func TestTabSkipsPanesTheWidthHasCollapsed(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	if got := len(m.rows()); got != before {
-		t.Errorf("space after two Tabs left %d provider rows, want the unfiltered %d -- a filter was applied through a pane the user cannot see", got, before)
+		t.Errorf("space after two Tabs left %d call rows, want the unfiltered %d -- a filter was applied through a pane the user cannot see", got, before)
 	}
 	if len(m.selectedFacets) != 0 {
 		t.Errorf("selectedFacets = %v after keys pressed at 80 columns, want nothing selected", m.selectedFacets)

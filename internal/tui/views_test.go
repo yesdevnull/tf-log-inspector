@@ -593,10 +593,11 @@ func TestTheTableSaysWhenAFilterHasEmptiedIt(t *testing.T) {
 	}
 }
 
-// The same emptiness with NO filter to blame must not accuse one: the
-// providers view of a log carrying UI-hook spans only really does have
-// nothing to rank, and telling the user to press Esc there sends them after
-// a filter that was never set.
+// The same emptiness with NO filter to blame must not accuse one: the calls
+// view of a log carrying UI-hook spans only really does have nothing to
+// rank -- every call row is an RPC-tier span and there are none -- and
+// telling the user to press Esc there sends them after a filter that was
+// never set.
 func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
 	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	if len(m.log.RPCSpans) != 0 || len(m.log.UISpans) == 0 {
@@ -604,7 +605,7 @@ func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
 	}
 	centre := centrePaneOf(m.View())
 	if !strings.Contains(centre, "this view has no rows for this log") {
-		t.Errorf("the providers view of a UI-only log says nothing about being empty:\n%s", centre)
+		t.Errorf("the calls view of a UI-only log says nothing about being empty:\n%s", centre)
 	}
 	if strings.Contains(centre, "nothing matches the filter") {
 		t.Errorf("an unfiltered empty view blames a filter that was never set:\n%s", centre)
