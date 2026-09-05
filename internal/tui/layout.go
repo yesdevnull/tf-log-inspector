@@ -562,9 +562,11 @@ func (m *Model) focusablePanes(w int) []Pane {
 }
 
 // renderCentre renders the centre pane: its title, then its content for the
-// active view. ViewRawLog is not one of renderList's rollup/call tables --
-// it renders directly from m.log.Entries via renderRawLog -- so it is
-// dispatched separately here rather than inside renderList itself.
+// active view. ViewRawLog and ViewTimeline are not one of renderList's
+// rollup/call tables -- the raw log renders directly from m.log.Entries via
+// renderRawLog, and the timeline renders from m.timelineSpans() and
+// model.PackLanes via renderTimeline -- so both are dispatched separately
+// here rather than inside renderList itself.
 //
 // The title is what names the view. Without it the centre pane was the only
 // one of the three carrying no label at all, so the pane holding a providers
@@ -584,13 +586,23 @@ func (m *Model) renderCentre(w, h int) string {
 		return ""
 	}
 	title := clipWidth(viewTitle(m.view), w)
+	// The timeline's title names the TIER it is drawing (see timelineTitle),
+	// which views' own static "TIMELINE" cannot: that table has no notion of
+	// the current log, and the tier is a property of it.
+	if m.view == ViewTimeline {
+		title = clipWidth(m.timelineTitle(), w)
+	}
 	if h == 1 {
 		return title
 	}
-	if m.view == ViewRawLog {
+	switch m.view {
+	case ViewRawLog:
 		return title + "\n" + m.renderRawLog(w, h-1)
+	case ViewTimeline:
+		return title + "\n" + m.renderTimeline(w, h-1)
+	default:
+		return title + "\n" + m.renderList(w, h-1)
 	}
-	return title + "\n" + m.renderList(w, h-1)
 }
 
 // pane is one column of a composed pane row: its rendered content and the

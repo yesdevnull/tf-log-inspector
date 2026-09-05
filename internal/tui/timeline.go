@@ -1,12 +1,20 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+// timelineState is the timeline view's own state, kept as its own struct as
+// rawLogState is, so the view's concerns stay grouped with the file that
+// owns them. It carries nothing yet: task 6 adds the lane and within-lane
+// span cursor (see task 6's brief), which this task deliberately does not
+// build.
+type timelineState struct{}
 
 // timelineTier is which of the log's two span sets the timeline draws.
 // model.PackLanes refuses a slice mixing fidelities (see the doc comment on
@@ -30,11 +38,121 @@ const (
 // mean without saying so. The project owner's chosen fallback -- RPC where
 // the log has one, otherwise UI -- is therefore a property of the LOG, not
 // of the current selection.
+//
+// tierNone is reported only when the log carries neither tier at all: a
+// filter narrowing a tier that DOES exist down to nothing is reported as
+// tierRPC or tierUI with zero spans, which renderTimeline reads as "the
+// filter hid them" rather than "this log was never captured with timing".
+// Those are different states for a reader to act on -- one clears with Esc,
+// the other needs a different capture -- and collapsing them into the same
+// tierUI-with-nothing-in-it result (which this function returned before this
+// case was split out) would have made tierNone unreachable and the two
+// states indistinguishable on screen.
 func (m *Model) timelineSpans() (timelineTier, []span.Span) {
+	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
+		return tierNone, nil
+	}
 	if len(m.log.RPCSpans) == 0 {
 		return tierUI, m.uiFilter().SpansMatching(m.log.UISpans)
 	}
 	return tierRPC, m.filter().SpansMatching(m.log.RPCSpans)
+}
+
+// timelineTitle names the pane after the tier timelineSpans has chosen for
+// the log. The UI tier is stated explicitly as whole-second resolution --
+// Terraform's UI hooks round a resource's start and end to the nearest
+// second before the log ever sees them -- so a reader does not carry RPC's
+// millisecond precision over to bars that do not have it.
+func (m *Model) timelineTitle() string {
+	switch tier, _ := m.timelineSpans(); tier {
+	case tierRPC:
+		return "TIMELINE (rpc)"
+	case tierUI:
+		return "TIMELINE (ui, whole seconds)"
+	default:
+		return "TIMELINE"
+	}
+}
+
+// noTimedSpansNote is what the timeline shows for a log carrying neither
+// span tier: what is missing, and what to capture to get it. It names the
+// same two environment variables writeRPCCaptureHint's gates require,
+// because a reader who only sees a bare "no spans" here has no next step
+// beyond guessing.
+const noTimedSpansNote = "no timed spans in this log; RPC timings need TF_LOG_SDK_PROTO=TRACE and TF_LOG_PROVIDER=TRACE"
+
+// timelineWallClockMs is the total window the timeline's axis and lane bars
+// scale against: the latest EndMs among spans, matching
+// internal/profile.writeConcurrency's own wallClock measurement of the same
+// idea. It is computed over whatever spans the caller hands it -- the
+// active filter's own subset, not the tier's whole span set -- so a
+// narrowed filter re-scales the axis to what it actually shows rather than
+// leaving idle space sized for spans no longer on screen.
+func timelineWallClockMs(spans []span.Span) uint32 {
+	var wallClock uint32
+	for _, s := range spans {
+		if s.EndMs > wallClock {
+			wallClock = s.EndMs
+		}
+	}
+	return wallClock
+}
+
+// renderTimeline renders the timeline view's centre-pane content: one lane
+// bar per lane PackLanes packs the active tier's spans into, followed by the
+// time axis.
+//
+// A log with neither span tier gets capture guidance in place of any bars
+// (noTimedSpansNote); a tier that exists but whose filter hides every span
+// gets the same "nothing matches" note the table views give (noMatchNote) --
+// deliberately the SAME note, so a reader who has seen it in another view
+// recognises it here rather than learning a second phrasing for one
+// situation. Those are the two states renderList's own empty handling
+// separates for the same reason; see timelineSpans for why they can never
+// collapse into each other.
+//
+// The axis is always the LAST line, and is never dropped for want of
+// height: this task builds no cursor yet (see Model.timeline, timelineState
+// and task 6), so there is no notion yet of which lane to keep on screen
+// when they do not all fit, and dropping the axis instead would lose the
+// one thing every lane bar is drawn against.
+func (m *Model) renderTimeline(w, h int) string {
+	if h <= 0 {
+		return ""
+	}
+	tier, spans := m.timelineSpans()
+	if tier == tierNone {
+		return clipWidth(noTimedSpansNote, w)
+	}
+	if len(spans) == 0 {
+		return clipWidth(noMatchNote, w)
+	}
+
+	lanes, err := model.PackLanes(spans)
+	if err != nil {
+		// timelineSpans hands PackLanes spans of a single tier by
+		// construction, so ErrMixedTimelines reaching here means that
+		// guarantee broke somewhere upstream -- a programming error to fail
+		// loudly on, the same treatment unhandledView gives its own
+		// can't-happen case, rather than a blank pane that looks like this
+		// view was never built.
+		panic(fmt.Sprintf("tui: renderTimeline: %v", err))
+	}
+	wallClock := timelineWallClockMs(spans)
+
+	laneRows := len(lanes)
+	if laneRows > h-1 {
+		laneRows = h - 1
+	}
+	if laneRows < 0 {
+		laneRows = 0
+	}
+	lines := make([]string, 0, laneRows+1)
+	for _, lane := range lanes[:laneRows] {
+		lines = append(lines, clipWidth(laneBar(spans, lane, wallClock, w), w))
+	}
+	lines = append(lines, clipWidth(timeAxis(wallClock, w), w))
+	return strings.Join(lines, "\n")
 }
 
 // laneBar renders one lane's spans as a bar row barW columns wide covering

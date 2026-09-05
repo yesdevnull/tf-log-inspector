@@ -36,5 +36,5 @@ with debug plus provider TRACE. Rankings hold, since every
 span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
-1 providers  2 types  6 raw log
+1 providers  2 types  5 timeline  6 raw log
 ⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit

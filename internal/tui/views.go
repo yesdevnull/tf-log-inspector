@@ -214,6 +214,13 @@ func (m *Model) rows() []row {
 		r = typeRows(f.SpansMatching(m.log.RPCSpans), m.uiFilter().SpansMatching(m.log.UISpans))
 	case ViewCalls:
 		r = callRows(m.log.RPCSpans, f)
+	case ViewTimeline:
+		// The timeline renders from m.timelineSpans() and model.PackLanes,
+		// not from rows(): a lane is neither a rollup of many spans nor one
+		// span, so forcing it into row would break the isCall invariant
+		// renderDetail dispatches on. nil here is the same deliberate
+		// omission ViewRawLog's case is.
+		r = nil
 	case ViewRawLog:
 		// The raw log renders straight from m.log.Entries and has no rows
 		// of its own, so nil is its answer rather than an omission.
@@ -236,8 +243,8 @@ func (m *Model) rows() []row {
 // renderList returning "" compose a centre pane titled with the new view and
 // holding nothing, beside a detail pane saying nothing is selected and a
 // footer advertising the key that got there. Nothing on screen, and nothing
-// in the test suite, says the view was never built -- and views 3 (resource
-// addresses) and 5 (timeline) are specified and waiting to be added.
+// in the test suite, says the view was never built -- and view 3 (resource
+// addresses) is specified and waiting to be added.
 func unhandledView(v View) string {
 	return fmt.Sprintf("tui: view %d has no rows or columns; add it to rows() and renderList()", v)
 }
@@ -502,9 +509,10 @@ func (m *Model) renderList(w, h int) string {
 	case ViewCalls:
 		cols = callColumns
 	default:
-		// ViewRawLog never reaches here -- renderCentre routes it to
-		// renderRawLog -- so anything landing in this case is a view with
-		// no table of its own. See unhandledView.
+		// ViewRawLog and ViewTimeline never reach here -- renderCentre
+		// routes them to renderRawLog and renderTimeline respectively -- so
+		// anything landing in this case is a view with no table of its own.
+		// See unhandledView.
 		panic(unhandledView(m.view))
 	}
 	return renderTable(preamble, cols, m.rows(), empty, m.selected, m.pane == PaneList, w, h)

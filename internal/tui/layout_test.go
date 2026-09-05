@@ -1328,8 +1328,16 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 	for _, b := range views {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
 		title := strings.TrimRight(strings.SplitN(centrePaneOf(m.View()), "\n", 2)[0], " ")
-		if title != b.title {
-			t.Errorf("key %q: centre pane's first line = %q, want the view's name %q", b.key, title, b.title)
+		want := b.title
+		if b.view == ViewTimeline {
+			// The timeline's rendered title names the TIER it draws (see
+			// timelineTitle) rather than views' static placeholder, so this
+			// one view's title is measured against its own function instead
+			// of the table entry every other view matches exactly.
+			want = m.timelineTitle()
+		}
+		if title != want {
+			t.Errorf("key %q: centre pane's first line = %q, want %q", b.key, title, want)
 		}
 	}
 }
@@ -1354,9 +1362,9 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 
 // The footer has to say which number keys switch views, at 100 and 160
 // columns -- 100 is what this tool is actually run at. It must name only
-// the keys that WORK: 3 (resource addresses) and 5
-// (timeline) are specified but unimplemented, and a hint for a key that
-// does nothing is worse than no hint. The key for the view already showing
+// the keys that WORK: 3 (resource addresses) is specified but
+// unimplemented, and a hint for a key that does nothing is worse than no
+// hint. The key for the view already showing
 // is left out for the same reason -- Update ignores it -- and the centre
 // pane's title names that view instead.
 //
@@ -1388,7 +1396,7 @@ func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 					t.Errorf("width %d, %s view: footer %q does not offer %q", w, current.name, got, hint)
 				}
 			}
-			for _, unbound := range []string{"3 ", "5 "} {
+			for _, unbound := range []string{"3 "} {
 				if strings.Contains(got, unbound) {
 					t.Errorf("width %d, %s view: footer %q offers key %q, which is specified but unimplemented", w, current.name, got, unbound)
 				}

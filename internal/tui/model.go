@@ -12,15 +12,16 @@ import (
 )
 
 // View identifies which of the top-level views the interface is showing.
-// Views 3 (resource addresses) and 5 (timeline) belong to later phases and
-// have no key bound to them yet: ViewCalls and ViewRawLog take the key
-// numbers either side of the gaps they leave.
+// View 3 (resource addresses) belongs to a later phase and has no key bound
+// to it yet: ViewCalls and ViewTimeline take the key numbers either side of
+// the gap it leaves.
 type View uint8
 
 const (
 	ViewProviders View = iota // key 1
 	ViewTypes                 // key 2
 	ViewCalls                 // key 4
+	ViewTimeline              // key 5
 	ViewRawLog                // key 6
 
 	// viewCount is not a view: it is how many values View has, kept at the
@@ -47,10 +48,9 @@ type viewBinding struct {
 // source of truth for what a number key does, what the centre pane calls
 // itself, and what the footer offers.
 //
-// Keys "3" (resource addresses) and "5" (timeline) are deliberately absent:
-// they are specified but unimplemented, so nothing binds them and nothing
-// advertises them. Pressing one falls through to a no-op rather than an
-// index lookup into unbound state.
+// Key "3" (resource addresses) is deliberately absent: it is specified but
+// unimplemented, so nothing binds it and nothing advertises it. Pressing it
+// falls through to a no-op rather than an index lookup into unbound state.
 //
 // The titles deliberately do not repeat the facet pane's section headers.
 // The facet pane's PROVIDERS is a list of values to FILTER by, ranked by
@@ -62,6 +62,13 @@ var views = []viewBinding{
 	{key: "1", view: ViewProviders, title: "BY PROVIDER", name: "providers"},
 	{key: "2", view: ViewTypes, title: "BY RESOURCE TYPE", name: "types"},
 	{key: "4", view: ViewCalls, title: "CALLS", name: "calls"},
+	// TIMELINE here is a placeholder title: the timeline renders from its
+	// own state, not from rows(), so renderCentre overrides it at render
+	// time to name the tier the log actually has (see timelineTitle). This
+	// entry exists so viewTitle(ViewTimeline) is never the empty string
+	// TestEveryViewHasABinding treats as "no title" -- an unreachable branch
+	// kept reachable by that sweep, not by anything that reads this title.
+	{key: "5", view: ViewTimeline, title: "TIMELINE", name: "timeline"},
 	{key: "6", view: ViewRawLog, title: "RAW LOG", name: "raw log"},
 }
 
@@ -166,6 +173,13 @@ type Model struct {
 	// raw is the raw log view's own state: which entry sits at its top, and
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
+
+	// timeline is the timeline view's own state. It carries no cursor yet --
+	// that is task 6's addition, see timeline.go and Task 6's brief -- so it
+	// is declared here only so this task's rendering has a field on Model to
+	// grow into rather than task 6 having to add the field AND the pane in
+	// one change.
+	timeline timelineState
 
 	// blockedJump records that the last Enter refused to jump because the
 	// active filter hides the target entry (see jumpToSpan). It is a

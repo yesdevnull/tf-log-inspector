@@ -99,7 +99,7 @@ func TestUnknownKeyIsInert(t *testing.T) {
 // every press from one fixed view would report "the key works" for whichever
 // key happened to name that view even if nothing bound it at all.
 func TestNumberKeysSwitchViews(t *testing.T) {
-	for key, want := range map[rune]View{'1': ViewProviders, '2': ViewTypes, '4': ViewCalls, '6': ViewRawLog} {
+	for key, want := range map[rune]View{'1': ViewProviders, '2': ViewTypes, '4': ViewCalls, '5': ViewTimeline, '6': ViewRawLog} {
 		m := New(testLog(t, "mixed-hcp.log"), "x.log")
 		m.view = ViewRawLog
 		if want == ViewRawLog {
@@ -163,7 +163,7 @@ func TestEveryViewHasABinding(t *testing.T) {
 // with the new view and holding nothing, a detail pane saying nothing is
 // selected, and a footer advertising the key that got there -- a dead pane
 // that looks like a rendering fault and passes every test in this package.
-// Views 3 and 5 are specified and unbuilt, so this is one edit away.
+// View 3 is specified and unbuilt, so this is one edit away.
 //
 // A View outside the enum stands in for that view here: Update can never
 // produce one (viewKeys holds only bound keys), so it is the same
@@ -189,14 +189,12 @@ func TestAnUnhandledViewFailsLoudly(t *testing.T) {
 	}
 }
 
-// Views 3 and 5 belong to later phases. Pressing them must do nothing.
+// View 3 belongs to a later phase. Pressing it must do nothing.
 func TestUnimplementedViewKeysAreInert(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	for _, key := range []rune{'3', '5'} {
-		got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
-		if got.ActiveView() != ViewTypes {
-			t.Errorf("key %q changed the view to %v, want it left on ViewTypes", key, got.ActiveView())
-		}
+	got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	if got.ActiveView() != ViewTypes {
+		t.Errorf("key %q changed the view to %v, want it left on ViewTypes", '3', got.ActiveView())
 	}
 }
 

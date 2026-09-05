@@ -189,3 +189,106 @@ func TestLaneBarPacksExactlyTheColumnsEachSpanCovers(t *testing.T) {
 		}
 	}
 }
+
+// TestTimelineTierIsNoneForALogWithNeitherTier is the reachability test for
+// tierNone: without it, timelineSpans falls through to tierUI with zero
+// spans, and the empty pane could never tell "no timed spans in this log"
+// apart from "the filter hid them".
+func TestTimelineTierIsNoneForALogWithNeitherTier(t *testing.T) {
+	m := New(&model.Log{}, "x.log")
+	tier, spans := m.timelineSpans()
+	if tier != tierNone {
+		t.Fatalf("tier = %v, want tierNone", tier)
+	}
+	if spans != nil {
+		t.Errorf("spans = %v, want nil", spans)
+	}
+}
+
+// TestTimelineTitleNamesTheTier checks the pane title states which tier is
+// drawn, and flags the UI tier's whole-second resolution so a reader does
+// not mistake it for RPC precision.
+func TestTimelineTitleNamesTheTier(t *testing.T) {
+	rpc := New(testLog(t, "timeline.log"), "x.log")
+	if got := rpc.timelineTitle(); got != "TIMELINE (rpc)" {
+		t.Errorf("timelineTitle = %q, want %q", got, "TIMELINE (rpc)")
+	}
+	ui := New(testLog(t, "structured-ui.log"), "x.log")
+	if got := ui.timelineTitle(); got != "TIMELINE (ui, whole seconds)" {
+		t.Errorf("timelineTitle = %q, want %q", got, "TIMELINE (ui, whole seconds)")
+	}
+}
+
+// noTimedSpansForTest is the empty-state guidance renderTimeline shows a log
+// with neither tier -- kept here as a literal, rather than importing the
+// package constant, so the test also catches the wording drifting away from
+// what the brief specifies.
+const noTimedSpansForTest = "no timed spans in this log; RPC timings need TF_LOG_SDK_PROTO=TRACE and TF_LOG_PROVIDER=TRACE"
+
+func TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans(t *testing.T) {
+	m := New(&model.Log{}, "x.log")
+	// Wide enough that the note is not itself clipped -- the point of this
+	// test is the WORDING, not the width clip every pane's content shares.
+	if got := m.renderTimeline(100, 10); got != noTimedSpansForTest {
+		t.Errorf("renderTimeline over a log with no spans = %q, want %q", got, noTimedSpansForTest)
+	}
+}
+
+// TestRenderTimelineReportsTheFilterWhenItHidesEverySpan checks that an
+// active filter matching nothing reads differently from a log that never had
+// timed spans -- the two are different states and must not look the same on
+// screen (see TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans).
+func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
+	m := New(testLog(t, "timeline.log"), "x.log")
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+	m.invalidateRows()
+	if got := m.renderTimeline(80, 10); got != noMatchNote {
+		t.Errorf("renderTimeline over a filter matching nothing = %q, want %q", got, noMatchNote)
+	}
+}
+
+// TestRenderTimelineDrawsOneRowPerLanePlusTheAxis pins the composition this
+// task owns: laneBar and timeAxis are tested in isolation above, so this
+// checks only that renderTimeline stacks one bar per lane, in PackLanes'
+// order, with the axis as the final line.
+func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
+	m := New(testLog(t, "timeline.log"), "x.log")
+	got := m.renderTimeline(40, 10)
+	lines := strings.Split(got, "\n")
+
+	_, spans := m.timelineSpans()
+	lanes, err := model.PackLanes(spans)
+	if err != nil {
+		t.Fatalf("PackLanes: %v", err)
+	}
+	if len(lines) != len(lanes)+1 {
+		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane plus the axis)", len(lines), len(lanes)+1)
+	}
+	wallClock := timelineWallClockMs(spans)
+	for i, lane := range lanes {
+		if want := laneBar(spans, lane, wallClock, 40); lines[i] != want {
+			t.Errorf("lane %d = %q, want %q", i, lines[i], want)
+		}
+	}
+	if want := timeAxis(wallClock, 40); lines[len(lines)-1] != want {
+		t.Errorf("last line = %q, want the time axis %q", lines[len(lines)-1], want)
+	}
+}
+
+// TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit checks the one piece of
+// height budgeting this task does: with no cursor yet to decide which lane
+// matters most (task 6 adds that), a pane too short for every lane still
+// keeps the axis rather than losing it to whichever lane happened to come
+// last.
+func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
+	m := New(testLog(t, "timeline.log"), "x.log")
+	got := m.renderTimeline(40, 1)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("renderTimeline(h=1) produced %d lines, want 1", len(lines))
+	}
+	_, spans := m.timelineSpans()
+	if want := timeAxis(timelineWallClockMs(spans), 40); lines[0] != want {
+		t.Errorf("renderTimeline(h=1) = %q, want the axis alone: %q", lines[0], want)
+	}
+}
