@@ -861,7 +861,21 @@ func clipWidth(s string, w int) string {
 // second, seconds with one decimal place at or above it. Written fresh
 // rather than imported from internal/profile, which internal/tui may not
 // depend on.
+//
+// Exactly zero is the one value the scale does not decide, so it is spelled
+// "0s" rather than "0ms": zero has no magnitude to place on a scale, and
+// both spellings name the same quantity. The tie is broken here, once, for
+// every caller rather than at one of them, because the alternative is two
+// spellings of one number on adjacent lines of the same pane -- the
+// timeline's leading-gap annotation reading "0ms" directly beneath an axis
+// whose own left end reads "0s" (see timeAxis, which takes its left label
+// from this function so the two cannot drift apart again). A reader
+// matching that window to the axis above it should not have to work out
+// that they are the same instant.
 func formatMs(ms uint64) string {
+	if ms == 0 {
+		return "0s"
+	}
 	if ms < 1000 {
 		return fmt.Sprintf("%dms", ms)
 	}

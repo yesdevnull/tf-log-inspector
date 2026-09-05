@@ -61,8 +61,8 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
 		{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0ms", "0ms"},       // UI tier only
-		{"aws_subnet", "0", "0ms", "1", "40ms", "40ms"},      // RPC tier only
+		{"local_file", "1", "1.0s", "0", "0s", "0s"},         // UI tier only
+		{"aws_subnet", "0", "0s", "1", "40ms", "40ms"},       // RPC tier only
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
 		if !slices.Equal(got, want) {
@@ -145,7 +145,7 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
 		{"github_repository", "1", "4.0s", "1", "3.8s", "3.8s"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0ms", "0ms"},          // UI tier only
+		{"local_file", "1", "1.0s", "0", "0s", "0s"},            // UI tier only
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
 		if !slices.Equal(got, want) {

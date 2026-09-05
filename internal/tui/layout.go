@@ -804,6 +804,15 @@ func fitDetailSections(title string, sections []detailSection, w, h int) []strin
 // direct unit coverage of the formatting regardless of which caller reaches
 // it.
 //
+// Start appears only for a span whose start was forced to zero because its
+// reported duration exceeded its offset from the log's first entry
+// (span.Span.StartClamped). It sits directly under Dur because Dur is what
+// it qualifies: the timeline draws such a span from column 0 with a length
+// of EndMs, so the pane would otherwise read "Dur 45.0s" beside a
+// three-second bar with nothing accounting for the difference. It is prose
+// rather than an identifier and is told apart by its head, so it end-clips
+// (see columnKind).
+//
 // RPC, Prov and Addr are all identifier values, and all three go through
 // clipIdentifierField, each clipped from the end its kind allows (see
 // columnKind): the same value clipped here, in the facet pane and in the
@@ -822,11 +831,21 @@ func spanDetailLines(s span.Span, w int) []string {
 		{label: "Prov", value: s.Provider, kind: tailIdentifierColumn},
 		{label: "Dur", value: formatMs(uint64(s.DurationMs)), kind: numericColumn},
 	}
+	if s.StartClamped {
+		fields = append(fields, detailField{label: "Start", value: clampedStartValue, kind: headIdentifierColumn})
+	}
 	if s.Fidelity == span.FidelityUIReported {
 		fields = append(fields, detailField{label: "Addr", value: s.Address, kind: tailIdentifierColumn})
 	}
 	return detailFieldLines(fields, w)
 }
+
+// clampedStartValue is what the detail pane puts under Start for a span
+// whose start was clamped. It states the clamp and the value it was clamped
+// to, in --profile's own words ("has its start clamped to zero"), so a
+// reader who has seen the note --profile prints for the same spans
+// recognises this as the same finding rather than a second one.
+const clampedStartValue = "clamped to zero"
 
 // noSelectionNote is what the detail pane says when there is no selected row
 // to describe -- a view with no rows at all, or a selection outside the rows

@@ -1031,6 +1031,12 @@ func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
 			"RPC   ApplyResourceChange",
 			"Prov  registry.terraform.io/hashicorp/aws",
 			"Dur   5ms",
+			// two-providers.log opens on this very call, so its 5ms
+			// duration exceeds its own 0ms offset from the log's first
+			// entry and ReportedBuilder clamps the start (see
+			// span.Span.StartClamped). The pane says so: the timeline
+			// draws such a span somewhere it did not run.
+			"Start clamped to zero",
 		}, "\n"),
 	}
 	for i := range want {
@@ -1091,7 +1097,7 @@ func TestTypesDetailPaneDescribesAnRPCOnlyType(t *testing.T) {
 	want := strings.Join([]string{
 		"Type      aws_subnet",
 		"UI res.   0",
-		"UI total  0ms",
+		"UI total  0s",
 		"RPC calls 1",
 		"RPC total 40ms",
 		"RPC max   40ms",
@@ -1167,8 +1173,8 @@ func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
 		"UI res.   1",
 		"UI total  1.0s",
 		"RPC calls 0",
-		"RPC total 0ms",
-		"RPC max   0ms",
+		"RPC total 0s",
+		"RPC max   0s",
 		"",
 		"Slowest no RPC-tier calls",
 	}, "\n")
@@ -1511,5 +1517,22 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], 50), "\n")
 	if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want {
 		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
+	}
+}
+
+// A clamped start is the one thing about a span that the timeline draws
+// WRONG -- anchored at column 0, with a length shorter than its own
+// duration -- so the pane describing the selected span has to say so.
+// Without it the pane reads "Dur 45.0s" beside a three-second bar with
+// nothing accounting for the difference.
+func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
+	s := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 0, EndMs: 2000, DurationMs: 45000, StartClamped: true, Fidelity: span.FidelityReported}
+	out := strings.Join(spanDetailLines(s, 60), "\n")
+	if !strings.Contains(out, "clamped") {
+		t.Errorf("clamped span detail says nothing about its clamped start:\n%s", out)
+	}
+	unclamped := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 1000, EndMs: 2000, DurationMs: 1000, Fidelity: span.FidelityReported}
+	if out := strings.Join(spanDetailLines(unclamped, 60), "\n"); strings.Contains(out, "clamped") {
+		t.Errorf("an unclamped span's detail claims a clamped start:\n%s", out)
 	}
 }

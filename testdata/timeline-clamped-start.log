@@ -1,0 +1,16 @@
+# SYNTHESISED to exercise a span whose start was clamped to zero. Unlike
+# every other timeline fixture here, the first line is NOT an anchor placed
+# far enough back to keep every start unclamped -- it sits only 2s before
+# the first response, which reports a 45s duration. ReportedBuilder cannot
+# subtract 45s from a 2s offset, so it clamps that span's start to zero and
+# records StartClamped (see the doc comment on span.Span). The span's bar is
+# therefore drawn from column 0 and only 2s long, beside a detail pane
+# reading 45.0s: the positional distortion the timeline's clamped-start note
+# exists to declare. A second, ordinary aws call closes at 12s so the log
+# also carries an unclamped span to contrast with, and the 5s window between
+# the two carries no call at all. The line shape is
+# testdata/two-providers.log's "Received downstream response" verbatim.
+# Values are invented; no line here is from a real run.
+2026-09-05T05:00:00.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Configuring provider client @module=sdk.proto
+2026-09-05T05:00:02.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-1111-4a1b-8c2d-000000000001 tf_resource_type=aws_instance tf_rpc=GetProviderSchema tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=45000 @module=sdk.proto
+2026-09-05T05:00:12.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-2222-4a1b-8c2d-000000000002 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto

@@ -336,11 +336,16 @@ func TestLaneBarLeavesTheGapBetweenTwoSpansBlank(t *testing.T) {
 func TestLaneBarGivesAShortSpanOneColumn(t *testing.T) {
 	// 1ms in a 10s window is 0.002 of one column at this width. It still
 	// gets a column: the log recorded a real call, and rounding it away
-	// makes the lane look emptier than it was.
+	// makes the lane look emptier than it was. It gets the LIGHTEST
+	// column, because 1ms of a 500ms column is what it is -- a mark saying
+	// a call happened here, not a claim that the column was busy.
 	spans := []span.Span{{StartMs: 5000, EndMs: 5001, DurationMs: 1}}
 	got := laneBar(spans, model.Lane{Spans: []int{0}}, 10000, 20)
-	if strings.Count(got, "█") != 1 {
-		t.Errorf("laneBar = %q, want exactly one bar column", got)
+	if strings.Count(got, " ") != 19 {
+		t.Errorf("laneBar = %q, want exactly one non-blank column", got)
+	}
+	if strings.Count(got, string(laneShades[0])) != 1 {
+		t.Errorf("laneBar = %q, want its one column at the lightest shade %q", got, string(laneShades[0]))
 	}
 }
 
@@ -388,10 +393,12 @@ func TestTimeAxisNamesBothEnds(t *testing.T) {
 func TestLaneBarLightsAPartiallyOccupiedFinalColumn(t *testing.T) {
 	// 50ms/column at this width. [40,60) starts inside column 0 and ends
 	// inside column 1 -- ms 50-60 belong to column 1, so that column must
-	// be lit too, not just the one the span started in.
+	// be lit too, not just the one the span started in. Both are lit at the
+	// lightest shade: the span accounts for 10 of each column's 50ms, and
+	// neither column was anywhere near busy.
 	spans := []span.Span{{StartMs: 40, EndMs: 60, DurationMs: 20}}
 	got := laneBar(spans, model.Lane{Spans: []int{0}}, 1000, 20)
-	want := strings.Repeat("█", 2) + strings.Repeat(" ", 18)
+	want := strings.Repeat("░", 2) + strings.Repeat(" ", 18)
 	if got != want {
 		t.Errorf("laneBar = %q, want %q", got, want)
 	}
@@ -399,14 +406,25 @@ func TestLaneBarLightsAPartiallyOccupiedFinalColumn(t *testing.T) {
 
 // TestLaneBarPacksExactlyTheColumnsEachSpanCovers checks CONTENT, not just
 // width, over the same three-span fixture TestLaneBarIsAlwaysExactlyBarWColumns
-// uses. That test allocates its comparison string as barW bools and writes
+// uses. That test allocates its comparison string as barW columns and writes
 // every one of them, so it cannot fail on a geometry error -- it is a fixed
-// point of the string-building loop, not of the column mapping. The lit
-// columns here are instead worked out by hand from the column-boundary rule
-// (a start floors into the column it falls in; an end ceils, since a span
-// still running through any part of a column occupies it) rather than by
-// calling laneCol or laneEndCol, so a regression in that mapping that still
-// produces a barW-long string is still caught.
+// point of the string-building loop, not of the column mapping. The rows
+// here are instead written out by hand from the column-boundary rule (a
+// start floors into the column it falls in; an end ceils, since a span still
+// running through any part of a column occupies it) together with the
+// shading bands (█ only for a column a span fills entirely, ▓ from two
+// thirds, ▒ from one third, ░ below that or merely touched), rather than
+// by calling laneCol, laneEndCol or laneShadeFor, so a regression in any of
+// them that still produces a barW-long string is still caught.
+//
+// The three spans are 1ms at 0, 200ms at [400,600) and 1ms at 999, over a
+// 1000ms window. At barW=1 the single column stands for the whole window
+// and holds 202 of its 1000ms, so the bar is the lightest shade rather than
+// solid: the row is honest about a lane that was idle four fifths of the
+// time, which the previous lit-or-unlit rendering was not. At barW=79 the
+// columns are 12 or 13ms wide, and the 200ms span's first and last hold 5
+// and 6 of those milliseconds -- both in the middle band, either side of
+// fifteen columns it fills outright.
 func TestLaneBarPacksExactlyTheColumnsEachSpanCovers(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 1, DurationMs: 1},
@@ -415,31 +433,20 @@ func TestLaneBarPacksExactlyTheColumnsEachSpanCovers(t *testing.T) {
 	}
 	cases := []struct {
 		barW int
-		lit  []int // columns each of the three spans covers, hand-derived
+		want string
 	}{
-		{1, []int{0}},
-		{7, []int{0, 2, 3, 4, 6}},
-		{20, []int{0, 8, 9, 10, 11, 19}},
-		{79, []int{0, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 78}},
+		{1, "░"},
+		{7, "░ ░█░ ░"},
+		{20, "░       ████       ░"},
+		{79, "░" + strings.Repeat(" ", 30) + "▒" + strings.Repeat("█", 15) + "▒" + strings.Repeat(" ", 30) + "░"},
 	}
 	for _, c := range cases {
-		on := make([]bool, c.barW)
-		for _, col := range c.lit {
-			on[col] = true
+		if w := lipgloss.Width(c.want); w != c.barW {
+			t.Fatalf("the hand-written row for barW=%d is %d columns wide", c.barW, w)
 		}
-		var b strings.Builder
-		for _, filled := range on {
-			if filled {
-				b.WriteRune('█')
-			} else {
-				b.WriteByte(' ')
-			}
-		}
-		want := b.String()
-
 		got := laneBar(spans, model.Lane{Spans: []int{0, 2, 1}}, 1000, c.barW)
-		if got != want {
-			t.Errorf("laneBar(barW=%d) = %q, want %q", c.barW, got, want)
+		if got != c.want {
+			t.Errorf("laneBar(barW=%d) = %q, want %q", c.barW, got, c.want)
 		}
 	}
 }
@@ -529,10 +536,10 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 	lines := strings.Split(got, "\n")
 
 	lanes := m.timelineLanes()
-	annotationLines := strings.Split(m.stallAnnotation(40), "\n")
+	annotationLines := m.timelineNotes(40)
 	wantLines := len(lanes) + 1 + len(annotationLines)
 	if len(lines) != wantLines {
-		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane, the axis, and the stall annotation)", len(lines), wantLines)
+		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane, the axis, and the notes beneath it)", len(lines), wantLines)
 	}
 
 	_, spans := m.timelineSpans()
@@ -611,8 +618,9 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
-	row := padRight(labels[0], labelW) + " " + laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
-	if want := cursorBar(row, 40, true); lines[0] != want {
+	label := cursorBar(padRight(labels[0], labelW)+" ", labelW+1, true)
+	want := label + laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
+	if lines[0] != want {
 		t.Errorf("first line = %q, want lane 0's bar %q: the annotation must not consume the last lane row", lines[0], want)
 	}
 }
@@ -658,11 +666,11 @@ func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
 	// finish; that span is what the annotation must name.
 	m := timelineModel(t)
 	got := m.stallAnnotation(80)
-	if !strings.Contains(got, "idle") {
-		t.Fatalf("stallAnnotation says nothing about idle lanes: %q", got)
+	if !strings.Contains(got, "concurrency dropped to") {
+		t.Fatalf("stallAnnotation says nothing about capacity going unused: %q", got)
 	}
 	if !strings.Contains(got, "waiting on") {
-		t.Errorf("stallAnnotation does not name what the idle lanes waited on: %q", got)
+		t.Errorf("stallAnnotation does not name what the unused capacity waited on: %q", got)
 	}
 }
 
@@ -770,8 +778,8 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 
 	got := m.stallAnnotation(80)
 	want := []string{
-		"1 lane idle 3.3s–20.0s waiting on aws/1",
-		"2 lanes idle 0ms–3.0s — before any provider call",
+		"concurrency dropped to 1 of 2, 3.3s–20.0s — waiting on aws/1",
+		"nothing running at all, 0s–3.0s — before any provider call",
 	}
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v (one continuous wait, longest first)", lines, want)
@@ -825,9 +833,9 @@ func everyKindOfWaitModel(t *testing.T) Model {
 func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
 	m := everyKindOfWaitModel(t)
 	want := []string{
-		"2 lanes idle 9.0s–20.0s — nothing running",
-		"1 lane idle 20.0s–30.0s waiting on aws/1",
-		"2 lanes idle 0ms–3.0s — before any provider call",
+		"nothing running at all, 9.0s–20.0s — between provider calls",
+		"concurrency dropped to 1 of 2, 20.0s–30.0s — waiting on aws/1",
+		"nothing running at all, 0s–3.0s — before any provider call",
 	}
 	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
@@ -865,9 +873,9 @@ func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
 	lines := strings.Split(got, "\n")
 
 	want := []string{
-		"1 lane idle 2.0s–12.0s waiting on aws/1",
-		"1 lane idle 14.0s–22.0s waiting on aws/1",
-		"1 lane idle 24.0s–30.0s waiting on aws/1",
+		"concurrency dropped to 1 of 2, 2.0s–12.0s — waiting on aws/1",
+		"concurrency dropped to 1 of 2, 14.0s–22.0s — waiting on aws/1",
+		"concurrency dropped to 1 of 2, 24.0s–30.0s — waiting on aws/1",
 		detailCutMark,
 	}
 	if !slices.Equal(lines, want) {
@@ -933,7 +941,9 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	for row, laneIdx := range wantVisible {
 		want := rowContent(laneIdx)
 		if laneIdx == m.timeline.lane {
-			want = cursorBar(want, 40, true)
+			// Only the label column carries the cursor; see
+			// TestTheCursorDoesNotRedrawTheSelectedLanesBar.
+			want = cursorBar(padRight(labels[laneIdx], labelW)+" ", labelW+1, true) + laneBar(spans, lanes[laneIdx], wallClock, barW)
 		}
 		if lines[row] != want {
 			t.Errorf("row %d = %q, want lane %d's row %q", row, lines[row], laneIdx, want)
@@ -950,5 +960,205 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	}
 	if want := m.stallAnnotation(40); lines[3] != want {
 		t.Errorf("last line = %q, want the stall annotation %q", lines[3], want)
+	}
+}
+
+// laneBarOf strips the styling and the label column off one rendered lane
+// row, leaving the bar: the block-and-space pattern that is what this view
+// actually says. Labels are ASCII and are padded to a fixed column count, so
+// dropping labelW+1 runes drops exactly labelW+1 display columns.
+func laneBarOf(t *testing.T, row string, labelW int) string {
+	t.Helper()
+	plain, _ := logfmt.StripANSI(row, nil)
+	r := []rune(plain)
+	if len(r) < labelW+1 {
+		t.Fatalf("lane row %q is shorter than its own label column", plain)
+	}
+	return string(r[labelW+1:])
+}
+
+// TestTheCursorDoesNotRedrawTheSelectedLanesBar is the property the
+// full-row reverse-video cursor violated. Reverse video swaps foreground
+// and background, and a bar is drawn as filled cells against empty ones --
+// so wrapping the whole row in it painted the busy columns as empty and the
+// idle columns as solid. The one row that inverted the view's central claim
+// was the row the cursor was on, and every ↑/↓ inverted a different one.
+//
+// The bar a lane renders must therefore be byte-identical whether or not
+// the cursor is on it. The two assertions below it pin the mechanism rather
+// than the symptom: no styling may reach the bar area at all, and the
+// selected row must still be styled somewhere, so this cannot be satisfied
+// by dropping the cursor.
+func TestTheCursorDoesNotRedrawTheSelectedLanesBar(t *testing.T) {
+	m := timelineModel(t)
+	const w, h = 60, 10
+	lanes := m.timelineLanes()
+	if len(lanes) < 2 {
+		t.Fatalf("timeline.log packs into %d lanes, want at least 2 so one lane can be drawn both selected and not", len(lanes))
+	}
+	_, spans := m.timelineSpans()
+	labelW := laneLabelWidth(laneLabels(spans, lanes))
+
+	onFirst := strings.Split(m.renderTimeline(w, h), "\n")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.timeline.lane != 1 {
+		t.Fatalf("lane = %d after one ↓, want 1", m.timeline.lane)
+	}
+	onSecond := strings.Split(m.renderTimeline(w, h), "\n")
+
+	for i := range lanes {
+		got, want := laneBarOf(t, onSecond[i], labelW), laneBarOf(t, onFirst[i], labelW)
+		if got != want {
+			t.Errorf("lane %d's bar is %q with the cursor on lane 1 and %q with it on lane 0", i, got, want)
+		}
+	}
+
+	if bar := laneBarOf(t, onFirst[0], labelW); !strings.HasSuffix(onFirst[0], bar) {
+		t.Errorf("the selected lane's row %q carries styling inside its bar area", onFirst[0])
+	}
+	if !strings.Contains(onFirst[0], "\x1b[") {
+		t.Errorf("the selected lane's row %q carries no cursor styling at all", onFirst[0])
+	}
+	if strings.Contains(onFirst[1], "\x1b[") {
+		t.Errorf("an unselected lane's row %q carries cursor styling", onFirst[1])
+	}
+}
+
+// TestEveryLaneShadeIsOneDisplayColumn measures each glyph laneBar can draw
+// the way every width in this package is measured. A shade that resolved to
+// two columns would silently widen every bar carrying it and push the pane
+// separator beside it out of line on that row alone.
+func TestEveryLaneShadeIsOneDisplayColumn(t *testing.T) {
+	for _, shade := range laneShades {
+		if w := lipgloss.Width(string(shade)); w != 1 {
+			t.Errorf("lane shade %q is %d display columns, want 1", shade, w)
+		}
+	}
+}
+
+// TestLaneBarShadesAColumnByHowMuchOfItIsBusy pins the shading thresholds
+// against a single span sized to land in each band. 20 columns over a 1000ms
+// window is 50ms per column, so a span's length in a column IS its
+// occupancy as a percentage of 50.
+func TestLaneBarShadesAColumnByHowMuchOfItIsBusy(t *testing.T) {
+	cases := []struct {
+		name       string
+		start, end uint32
+		want       rune
+	}{
+		{"the whole column", 0, 50, '█'},
+		{"three quarters of it", 0, 38, '▓'},
+		{"half of it", 0, 25, '▒'},
+		{"a tenth of it", 0, 5, '░'},
+		{"a single millisecond", 0, 1, '░'},
+	}
+	for _, c := range cases {
+		spans := []span.Span{{StartMs: c.start, EndMs: c.end, DurationMs: c.end - c.start}}
+		got := laneBar(spans, model.Lane{Spans: []int{0}}, 1000, 20)
+		if []rune(got)[0] != c.want {
+			t.Errorf("a span covering %s renders column 0 as %q, want %q", c.name, string([]rune(got)[0]), string(c.want))
+		}
+	}
+}
+
+// TestADenseLaneIsNotDrawnSolid is the fixture form of the same defect the
+// cursor had, in the other direction: every span lights at least one whole
+// column, so a lane holding more calls than the bar has columns lit all of
+// them and rendered as fully busy while its true occupancy was about 1.3%.
+// Idle time drawn as work is the exact inversion of what this view is for.
+func TestADenseLaneIsNotDrawnSolid(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-dense-lane.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	lanes := m.timelineLanes()
+	if len(lanes) != 1 {
+		t.Fatalf("timeline-dense-lane.log packs into %d lanes, want 1 (see the fixture's own doc comment)", len(lanes))
+	}
+	_, spans := m.timelineSpans()
+	const barW = 46
+	if len(lanes[0].Spans) <= barW {
+		t.Fatalf("the lane holds %d spans, want more than the %d columns drawn for it", len(lanes[0].Spans), barW)
+	}
+
+	got := laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
+	if strings.ContainsRune(got, '█') {
+		t.Errorf("a lane 1.3%% occupied draws a fully-busy column: %q", got)
+	}
+	if strings.ContainsRune(got, ' ') {
+		t.Fatalf("this fixture is meant to touch every column, so a blank one means it no longer exercises the defect: %q", got)
+	}
+	if !strings.ContainsRune(got, '░') {
+		t.Errorf("a barely-occupied lane is not drawn at its lightest shade: %q", got)
+	}
+}
+
+// TestTheTimelineDeclaresAClampedStart covers the one view that draws
+// extents POSITIONALLY saying nothing about a span whose start it does not
+// know. --profile already prints a note whenever a span is clamped; the
+// timeline drew such a span anchored at column 0 with a length shorter than
+// its own duration and left the reader to notice.
+func TestTheTimelineDeclaresAClampedStart(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-clamped-start.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	_, spans := m.timelineSpans()
+	if !slices.ContainsFunc(spans, func(s span.Span) bool { return s.StartClamped }) {
+		t.Fatalf("timeline-clamped-start.log carries no clamped span, so it no longer exercises this")
+	}
+	got := m.renderTimeline(60, 20)
+	if !strings.Contains(got, "clamped") {
+		t.Errorf("the timeline says nothing about its clamped span:\n%s", got)
+	}
+
+	// A pane too short for the whole block cuts it from the tail, and what
+	// must survive that cut is the caveat, not the stall line: a stall
+	// dropped is a finding not shown, and detailCutMark says so, while the
+	// caveat dropped leaves the bars above reading as facts they are not.
+	short := strings.Split(m.renderTimeline(60, 5), "\n")
+	if len(short) != 5 {
+		t.Fatalf("renderTimeline(h=5) produced %d lines, want 5", len(short))
+	}
+	if !strings.Contains(short[2], "clamped") {
+		t.Errorf("a cut pane dropped the clamped-start note ahead of the stall line:\n%s", strings.Join(short, "\n"))
+	}
+	if got := short[len(short)-1]; got != detailCutMark {
+		t.Errorf("last line = %q, want %q: the block was cut with nothing marking it", got, detailCutMark)
+	}
+
+	// A log with nothing clamped must not carry the note: a caveat shown
+	// unconditionally is one a reader learns to ignore.
+	clean := timelineModel(t)
+	if out := clean.renderTimeline(60, 20); strings.Contains(out, "clamped") {
+		t.Errorf("timeline.log has no clamped span but the view claims one:\n%s", out)
+	}
+}
+
+// TestTheStallAnnotationDoesNotClaimToCountRows is why the wording changed.
+// The count a stall carries is peak CONCURRENCY, not the rows drawn, and
+// per-provider packing makes the two diverge by construction: a provider
+// that has finished still occupies a row but is no longer capacity. Calling
+// it "N lanes idle" beside a five-row timeline is a statement about the
+// screen that the number is not entitled to make.
+func TestTheStallAnnotationDoesNotClaimToCountRows(t *testing.T) {
+	for _, m := range []Model{timelineModel(t), everyKindOfWaitModel(t), topStallsModel(t)} {
+		got := m.stallAnnotation(80)
+		if strings.Contains(got, "lane idle") || strings.Contains(got, "lanes idle") {
+			t.Errorf("stallAnnotation counts lanes, which is not what the number measures: %q", got)
+		}
+	}
+}
+
+// TestTheAnnotationSpellsZeroTheWayTheAxisDoes closes a two-spellings-of-one-
+// number gap: the leading-gap line read "0ms–1.0s" directly beneath an axis
+// whose own left end read "0s". A reader matching the annotation's window to
+// the axis above it is matching two spellings of the same instant.
+func TestTheAnnotationSpellsZeroTheWayTheAxisDoes(t *testing.T) {
+	m := everyKindOfWaitModel(t)
+	got := m.stallAnnotation(80)
+	if strings.Contains(got, "0ms") {
+		t.Errorf("stallAnnotation spells zero as 0ms, where the axis above it spells it 0s: %q", got)
+	}
+	if axis := timeAxis(9000, 40); !strings.HasPrefix(axis, "0s") {
+		t.Errorf("timeAxis no longer opens on 0s: %q", axis)
 	}
 }

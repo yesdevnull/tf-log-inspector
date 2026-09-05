@@ -1,11 +1,11 @@
 tfli -- plan.log -- 3 RPC spans, 0 UI spans
 
 TIMELINE (rpc)
-[7maws/1         ████████████     █████████████████████████████[0m
-google/1         ████████████                               
+[7maws/1    [0m     ░███████████     ░████████████████████████████
+google/1         ▒██████████▓                               
          0s                                             9.0s
-1 lane idle 4.0s–9.0s waiting on aws/1
-2 lanes idle 0ms–1.0s — before any provider call
+concurrency dropped to 1 of 2, 4.0s–9.0s — waiting on aws/1
+nothing running at all, 0s–1.0s — before any provider call
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s
