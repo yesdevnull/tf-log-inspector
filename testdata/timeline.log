@@ -1,0 +1,15 @@
+# SYNTHESISED to exercise the swimlane timeline's lane packing and stall
+# detection. Two RPC spans -- one aws, one google -- genuinely overlap in
+# time, which packs them into two lanes; a third aws span then runs alone
+# for 5s after both earlier spans have finished, giving the stall
+# annotation a real solo window to find. The line shape is
+# testdata/two-providers.log's "Received downstream response" verbatim. The
+# first line is not itself a response: it exists only to anchor the
+# scanner's base clock a few seconds before the first real span, so that
+# span's start is not clamped to zero by ReportedBuilder (see the doc
+# comment on span.Span). Values are invented; no line here is from a real
+# run.
+2026-09-05T02:00:00.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Configuring provider client @module=sdk.proto
+2026-09-05T02:00:03.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=aaaaaaaa-1111-4a1b-8c2d-000000000001 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=2000 @module=sdk.proto
+2026-09-05T02:00:03.500Z [TRACE] provider.terraform-provider-google_v5.30.0_x5: Received downstream response: tf_req_id=bbbbbbbb-2222-4a1b-8c2d-000000000002 tf_resource_type=google_compute_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/google tf_req_duration_ms=2000 @module=sdk.proto
+2026-09-05T02:00:09.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=cccccccc-3333-4a1b-8c2d-000000000003 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
