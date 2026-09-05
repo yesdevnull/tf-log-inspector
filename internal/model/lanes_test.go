@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -154,5 +156,104 @@ func TestPeakConcurrencyIgnoresZeroDurationSpans(t *testing.T) {
 	}
 	if len(lanes) != 3 {
 		t.Errorf("PackLanes packed %d lanes, want 3 -- the zero-duration span still needs a row to draw, even though it overlaps nothing", len(lanes))
+	}
+}
+
+func TestStallsFindsTheWindowWhereOnlyOneSpanRan(t *testing.T) {
+	// Three spans. Two finish early; one runs long past them, so from
+	// 100ms to 500ms two of the three lanes are idle.
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 500, DurationMs: 500, RPC: "Configure"},
+		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
+		{StartMs: 0, EndMs: 80, DurationMs: 80, RPC: "ReadResource"},
+	}
+	got, err := Stalls(spans, 3, 50)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 100, EndMs: 500, Idle: 2, Blocking: 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v", got, want)
+	}
+}
+
+func TestStallsIgnoresWindowsBelowTheThreshold(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 100, DurationMs: 100},
+		{StartMs: 0, EndMs: 90, DurationMs: 90},
+	}
+	got, err := Stalls(spans, 2, 50)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Stalls = %+v, want none: the 10ms window is below the 50ms threshold", got)
+	}
+}
+
+func TestStallsRefusesMixedTimelines(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityReported},
+		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityUIReported},
+	}
+	if _, err := Stalls(spans, 2, 0); !errors.Is(err, ErrMixedTimelines) {
+		t.Errorf("Stalls over mixed fidelities = %v, want ErrMixedTimelines", err)
+	}
+}
+
+func TestStallsReportsNoStallWhenEverySpanRunsThroughout(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 500, DurationMs: 500},
+		{StartMs: 0, EndMs: 500, DurationMs: 500},
+	}
+	got, err := Stalls(spans, 2, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Stalls = %+v, want none: both lanes are busy for the whole window", got)
+	}
+}
+
+// A gap where every span has already finished is the space between two
+// phases of work, not a stall: nothing is idle, because nothing is running
+// to be idle. A sweep that reported this gap would blame a span that had
+// already completed for a wait it played no part in.
+func TestStallsIgnoresGapsWhereNothingIsRunning(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 100, DurationMs: 100},
+		{StartMs: 0, EndMs: 100, DurationMs: 100},
+		{StartMs: 200, EndMs: 260, DurationMs: 60},
+	}
+	got, err := Stalls(spans, 2, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 200, EndMs: 260, Idle: 1, Blocking: 2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (the 100ms-200ms gap has nothing running, so it must not appear)", got, want)
+	}
+}
+
+// Two sweep segments that share the same idle count and the same blocking
+// span are one stall, even though a third span's handover splits the sweep
+// into two segments at the midpoint. Thresholding before merging would drop
+// both 30ms halves of this 60ms stall; thresholding after merging keeps it.
+func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 1000, DurationMs: 1000}, // always running; the blocking span throughout
+		{StartMs: 0, EndMs: 30, DurationMs: 20},
+		{StartMs: 30, EndMs: 60, DurationMs: 20},
+	}
+	got, err := Stalls(spans, 3, 50)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{
+		{StartMs: 0, EndMs: 60, Idle: 1, Blocking: 0},
+		{StartMs: 60, EndMs: 1000, Idle: 2, Blocking: 0},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v", got, want)
 	}
 }

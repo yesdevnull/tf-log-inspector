@@ -139,3 +139,105 @@ func PeakConcurrency(spans []span.Span) (int, error) {
 	}
 	return peak, nil
 }
+
+// Stall is a window during which fewer lanes were busy than the timeline
+// has, named by the span that was still running when the others were not.
+type Stall struct {
+	StartMs, EndMs uint32
+	Idle           int // lanes with nothing to do in this window
+	Blocking       int // index into the spans slice: the longest span running throughout
+}
+
+// Stalls sweeps the same start/end events PeakConcurrency does, but keeps
+// the running set rather than just its size, so each window can be named by
+// the span still running while the others are not.
+//
+// lanes is the caller's lane count -- normally len(PackLanes(spans)) -- and
+// minMs is the caller's own noise threshold; Stalls invents neither. It
+// merges adjacent windows before applying minMs, because a stall split by a
+// handover between two other spans is still one stall: thresholding first
+// would drop both halves of a genuine wait that only looks short in pieces.
+func Stalls(spans []span.Span, lanes int, minMs uint32) ([]Stall, error) {
+	if len(spans) == 0 {
+		return nil, nil
+	}
+	if err := sameFidelity(spans); err != nil {
+		return nil, err
+	}
+
+	type event struct {
+		at    uint32
+		delta int
+		idx   int
+	}
+	events := make([]event, 0, len(spans)*2)
+	for i, s := range spans {
+		events = append(events, event{s.StartMs, 1, i}, event{s.EndMs, -1, i})
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].at != events[j].at {
+			return events[i].at < events[j].at
+		}
+		// Ends before starts at the same instant, as PeakConcurrency does:
+		// a span ending exactly as another begins is a handover, not overlap.
+		return events[i].delta < events[j].delta
+	})
+
+	var raw []Stall
+	// running is indexed by span, not a map, so a tie in DurationMs breaks
+	// towards the lowest span index deterministically rather than however
+	// Go's map iteration happens to land.
+	running := make([]bool, len(spans))
+	var runningCount int
+	for i := 0; i < len(events); {
+		at := events[i].at
+		for i < len(events) && events[i].at == at {
+			if events[i].delta > 0 {
+				running[events[i].idx] = true
+				runningCount++
+			} else {
+				running[events[i].idx] = false
+				runningCount--
+			}
+			i++
+		}
+		if i == len(events) {
+			// No further event, so no window follows: the sweep never
+			// invents a segment past the last thing it observed.
+			break
+		}
+		next := events[i].at
+		idle := lanes - runningCount
+		if idle <= 0 || runningCount == 0 {
+			// idle <= 0: every lane is busy. runningCount == 0: nothing is
+			// running at all, so this is the gap between two phases of
+			// work, not a stall -- reporting it would blame a span that had
+			// already finished for a wait it played no part in.
+			continue
+		}
+		blocking := -1
+		for idx, live := range running {
+			if live && (blocking == -1 || spans[idx].DurationMs > spans[blocking].DurationMs) {
+				blocking = idx
+			}
+		}
+		raw = append(raw, Stall{StartMs: at, EndMs: next, Idle: idle, Blocking: blocking})
+	}
+
+	var merged []Stall
+	for _, s := range raw {
+		if n := len(merged); n > 0 && merged[n-1].EndMs == s.StartMs && merged[n-1].Idle == s.Idle && merged[n-1].Blocking == s.Blocking {
+			merged[n-1].EndMs = s.EndMs
+			continue
+		}
+		merged = append(merged, s)
+	}
+
+	var stalls []Stall
+	for _, s := range merged {
+		if s.EndMs-s.StartMs >= minMs {
+			stalls = append(stalls, s)
+		}
+	}
+	return stalls, nil
+}
