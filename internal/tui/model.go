@@ -102,12 +102,15 @@ const (
 	PaneFacets Pane = iota
 	PaneList
 	PaneDetail
-)
 
-// paneCount is how many values Pane has. Tab cycles over the panes the
-// current width actually draws (focusablePanes), which is a subset of
-// these, so this sizes that list rather than serving as a modulus.
-const paneCount = PaneDetail + 1
+	// paneCount is not a pane: it is how many values Pane has, kept at the
+	// END of the enum so that adding a pane above it grows the count without
+	// anyone remembering to -- the same reasoning viewCount's own doc comment
+	// gives for View. Tab cycles over the panes the current width actually
+	// draws (focusablePanes), which is a subset of these, so this sizes that
+	// list rather than serving as a modulus.
+	paneCount
+)
 
 // Model is the bubbletea model for tfli's full-screen interface. It wraps a
 // loaded log; nothing here mutates the log.

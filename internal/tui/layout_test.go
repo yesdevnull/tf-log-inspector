@@ -183,6 +183,25 @@ func TestGoldenLayouts(t *testing.T) {
 	compareGolden(t, "layout-100-providers.txt", m.View())
 }
 
+// Golden files lock the timeline view's own layout at the three widths the
+// spec names, the same as TestGoldenLayouts does for the opening view.
+//
+// timeline.log, not timeline-many-lanes.log, is the fixture: it packs into
+// two lanes of two DIFFERENT providers (aws/1, google/1), so a golden of it
+// shows the per-provider label scheme at all, and it carries a real stall
+// window, so a golden of it shows the annotation too. timeline-many-lanes.log
+// packs five lanes of the SAME provider (aws/1..aws/5) with nothing idle
+// between them, so a golden of it would show neither -- it exists for
+// TestTimelineLaneRowsScrollToKeepTheCursorOnScreen, which is what actually
+// needs five lanes to force scrolling, not for a static layout snapshot.
+func TestGoldenTimelineLayouts(t *testing.T) {
+	base := update(t, New(testLog(t, "timeline.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	for _, w := range []int{70, 100, 160} {
+		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+		compareGolden(t, fmt.Sprintf("timeline-%d.txt", w), m.View())
+	}
+}
+
 // The footer's view-key hints must never vanish. Composed onto one line with
 // the action keys they used to be dropped whole below 95 columns because the
 // line was clipped from its end and "q quit" had to survive; two lines lets
