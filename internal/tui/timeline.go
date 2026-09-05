@@ -77,20 +77,20 @@ func (m *Model) timelineTitle() string {
 	}
 }
 
-// noTimedSpansNote is what the timeline shows for a log carrying neither
-// span tier: what is missing, and what to capture to get it. It names the
-// same two environment variables writeRPCCaptureHint's gates require,
-// because a reader who only sees a bare "no spans" here has no next step
-// beyond guessing.
-const noTimedSpansNote = "no timed spans in this log; RPC timings need TF_LOG_SDK_PROTO=TRACE and TF_LOG_PROVIDER=TRACE"
-
 // timelineWallClockMs is the total window the timeline's axis and lane bars
 // scale against: the latest EndMs among spans, matching
 // internal/profile.writeConcurrency's own wallClock measurement of the same
 // idea. It is computed over whatever spans the caller hands it -- the
 // active filter's own subset, not the tier's whole span set -- so a
-// narrowed filter re-scales the axis to what it actually shows rather than
-// leaving idle space sized for spans no longer on screen.
+// narrowed filter re-scales the axis's RIGHT end to the last span it still
+// shows rather than leaving idle space sized for spans no longer on screen.
+//
+// The left end stays pinned at 0 either way: a span's StartMs is an offset
+// from the log's own zero point, and re-basing the axis on the earliest
+// SURVIVING span would redraw those offsets as something they are not. The
+// visible cost is that a filter keeping only spans starting late in the plan
+// packs their bars against the right of a mostly blank pane -- which is an
+// honest picture of when that work ran, not a scaling fault.
 func timelineWallClockMs(spans []span.Span) uint32 {
 	var wallClock uint32
 	for _, s := range spans {
@@ -114,6 +114,16 @@ func timelineWallClockMs(spans []span.Span) uint32 {
 // the tier's filtered spans on every call. Every caller must reach this
 // through a pointer, or it fills a cache on a copy that is immediately
 // discarded, the same hazard rowsCache's own doc comment describes.
+//
+// INVARIANT, because the cache is only half of a pair: a model.Lane holds
+// INDICES into the slice timelineSpans() returns, and that slice is NOT
+// cached -- it is rebuilt on every call. The two agree only because both are
+// pure functions of the same filter state and invalidateRows clears this
+// cache whenever that state changes. A cached lane read against a span slice
+// built from different filter state indexes the wrong spans, and nothing
+// would report it: the detail pane would describe one span while Enter
+// jumped to another. Anything that changes what timelineSpans() returns must
+// therefore go through invalidateRows.
 func (m *Model) timelineLanes() []model.Lane {
 	if m.timelineLanesCached {
 		return m.timelineLanesCache
@@ -303,14 +313,17 @@ func laneLabelWidth(labels []string) int {
 // (see timelineLanes), then the time axis, then the stall annotation (see
 // stallAnnotation) naming the windows model.Stalls found beneath it.
 //
-// A log with neither span tier gets capture guidance in place of any bars
-// (noTimedSpansNote); a tier that exists but whose filter hides every span
-// gets the same "nothing matches" note the table views give (noMatchNote) --
-// deliberately the SAME note, so a reader who has seen it in another view
+// A log with neither span tier gets the same capture guidance the table
+// views give it (captureGuidance, rendered the way renderList renders it);
+// a tier that exists but whose filter hides every span gets the same
+// "nothing matches" note those views give (noMatchNote). Both are
+// deliberately the SAME text, so a reader who has seen one in another view
 // recognises it here rather than learning a second phrasing for one
-// situation. Those are the two states renderList's own empty handling
-// separates for the same reason; see timelineSpans for why they can never
-// collapse into each other.
+// situation -- and captureGuidance is pre-wrapped to 40 columns, so its
+// environment variable names survive the narrowest centre pane a supported
+// width produces, which a single long line does not. Those are the two
+// states renderList's own empty handling separates for the same reason; see
+// timelineSpans for why they can never collapse into each other.
 //
 // Each lane's row is its label (laneLabels), padded to the widest label
 // drawn, then its bar over whatever width is left of w -- laneBar is tested
@@ -324,6 +337,14 @@ func laneLabelWidth(labels []string) int {
 // spans it cannot tell apart -- and is instead named in the detail pane
 // beside it.
 //
+// That makes the within-lane cursor a DETAIL-PANE affordance, with a known
+// limit: below detailInlineWidth the detail pane is gone (see renderPanes),
+// and left/right then move a selection nothing on screen reflects. A marker
+// added only at the widths where the detail pane exists would make one key's
+// visible behaviour depend on the terminal's width, which is a worse answer
+// than a stated limitation; the key still drives Enter's jump target at
+// every width, so it is not inert.
+//
 // The lane rows are windowed around the lane cursor by the same
 // scrollWindow the centre table uses for its own row cursor, so a log with
 // more lanes than the pane is tall keeps the selected one on screen instead
@@ -331,7 +352,7 @@ func laneLabelWidth(labels []string) int {
 // area by the same label width the lane rows reserve so it still names
 // both ends of what the bars above it are measuring against, is never
 // dropped for want of height -- it is the one thing every lane bar is
-// drawn relative to. It is no longer the LAST line once there is a stall
+// drawn relative to. It is not the LAST line once there is a stall
 // to report, though: the annotation reserves its own room below the axis
 // (see the comment on that reservation, below) and is appended after it,
 // so on any pane tall enough to show both, the axis sits second-to-last
@@ -342,7 +363,7 @@ func (m *Model) renderTimeline(w, h int) string {
 	}
 	tier, spans := m.timelineSpans()
 	if tier == tierNone {
-		return clipWidth(noTimedSpansNote, w)
+		return clipLines(clipEachWidth(captureGuidance, w), h)
 	}
 	if len(spans) == 0 {
 		return clipWidth(noMatchNote, w)
@@ -359,12 +380,19 @@ func (m *Model) renderTimeline(w, h int) string {
 	// get whatever is left of h: it is bounded to a handful of short lines
 	// (see maxStallsShown), so on a pane with room to spare it costs
 	// nothing the lanes would otherwise have used, and only competes with
-	// them on a pane too short to show both -- the same "the axis is never
-	// dropped for want of height" priority this function already applied,
-	// carried one step further down to the annotation the lanes and axis
-	// exist to explain.
+	// them on a pane too short to show both.
+	//
+	// On such a pane the annotation gives way, not the bars. It exists to
+	// explain the lanes, so it can never be worth the last lane row: a
+	// timeline drawing the axis and three stall lines and not one bar has
+	// dropped the only thing this view is for -- idle time rendered as
+	// visible blank space. One lane row is therefore held back from the
+	// annotation's room whenever there is a lane to draw, the same
+	// content-outranks-chrome ordering the axis's own never-dropped rule
+	// states above, and the frame states again when it shortens the logging
+	// caveat rather than the footer.
 	annotationLines := strings.Split(m.stallAnnotation(w), "\n")
-	if room := h - 1; len(annotationLines) > room {
+	if room := max(h-1-min(1, len(lanes)), 0); len(annotationLines) > room {
 		annotationLines = annotationLines[:room]
 	}
 
@@ -515,7 +543,7 @@ func timeAxis(spanMs uint32, barW int) string {
 // tier and filter have nothing worth reporting -- whether because no window
 // cleared the threshold, or because a filter has emptied the timeline
 // entirely. Rendering nothing here would be indistinguishable from a blank
-// pane that failed to draw at all, the same reasoning noTimedSpansNote and
+// pane that failed to draw at all, the same reasoning captureGuidance and
 // noMatchNote already state for the lanes above it.
 const stallAnnotationNoStalls = "no stalls"
 
@@ -612,7 +640,15 @@ func (m *Model) stallAnnotation(w int) string {
 		stalls = stalls[:maxStallsShown]
 	}
 
+	// The lane is named with the label the LANE ROW renders, clipped by the
+	// same rule and to the same width renderTimeline's label column uses
+	// (laneLabelWidth, capped at maxLaneLabelWidth). "waiting on aws/1"
+	// points at exactly one bar only if the bar carries that same text:
+	// naming a lane "googleworkspace/1" beside a row reading
+	// "…workspace/1" would send the reader looking for a bar that is not
+	// on screen.
 	labels := laneLabels(spans, lanes)
+	labelW := laneLabelWidth(labels)
 	lines := make([]string, len(stalls))
 	for i, s := range stalls {
 		l := stallLane(lanes, s.Blocking)
@@ -630,7 +666,15 @@ func (m *Model) stallAnnotation(w int) string {
 		if s.Idle == 1 {
 			unit = "lane"
 		}
-		lines[i] = clipWidth(fmt.Sprintf("%d %s idle %s–%s waiting on %s", s.Idle, unit, formatMs(uint64(s.StartMs)), formatMs(uint64(s.EndMs)), labels[l]), w)
+		// clipValueEnd rather than clipWidth: this line's payload is its
+		// TAIL -- which lane the idle ones waited on -- and clipWidth cuts
+		// with no marker, so a pane too narrow for the whole sentence would
+		// otherwise render "2 lanes idle 3.3s–9.0s waiting" as though that
+		// were all there was to say. The head is what survives the cut,
+		// since the offsets locate the window on the axis directly above;
+		// the ellipsis is what tells the reader a lane name was named and
+		// they have not seen it.
+		lines[i] = clipValueEnd(fmt.Sprintf("%d %s idle %s–%s waiting on %s", s.Idle, unit, formatMs(uint64(s.StartMs)), formatMs(uint64(s.EndMs)), clipValueForKind(labels[l], labelW, tailIdentifierColumn)), w)
 	}
 	return strings.Join(lines, "\n")
 }

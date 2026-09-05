@@ -243,6 +243,30 @@ func TestTimelineFallsBackToTheUITierWhenThereAreNoRPCSpans(t *testing.T) {
 	}
 }
 
+// TestTimelineDrawsTheRPCTierForALogCarryingBoth pins the tier choice on
+// the one case the other tier tests cannot reach: a log carrying BOTH
+// tiers. timeline.log is RPC-only and structured-ui.log UI-only, so an
+// implementation that preferred the UI tier wherever UI spans exist would
+// satisfy every one of them. A wrong tier choice is silent -- it draws the
+// other tier's bars and numbers rather than failing -- so the ambiguous log
+// needs its own pin.
+func TestTimelineDrawsTheRPCTierForALogCarryingBoth(t *testing.T) {
+	l := testLog(t, "two-tier.log")
+	if len(l.RPCSpans) == 0 || len(l.UISpans) == 0 {
+		t.Fatalf("fixture assumption changed: two-tier.log has %d RPC and %d UI spans, want both non-empty", len(l.RPCSpans), len(l.UISpans))
+	}
+	m := New(l, "x.log")
+	tier, spans := m.timelineSpans()
+	if tier != tierRPC {
+		t.Fatalf("tier = %v, want tierRPC: a log carrying both tiers draws RPC", tier)
+	}
+	for _, s := range spans {
+		if s.Fidelity != span.FidelityReported {
+			t.Fatalf("span %+v is not RPC fidelity; the UI tier leaked into the RPC tier's spans", s)
+		}
+	}
+}
+
 func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
 	// Narrow the provider dimension to a value no span carries. The facet
@@ -423,18 +447,29 @@ func TestTimelineTitleNamesTheTier(t *testing.T) {
 	}
 }
 
-// noTimedSpansForTest is the empty-state guidance renderTimeline shows a log
-// with neither tier -- kept here as a literal, rather than importing the
-// package constant, so the test also catches the wording drifting away from
-// what the brief specifies.
-const noTimedSpansForTest = "no timed spans in this log; RPC timings need TF_LOG_SDK_PROTO=TRACE and TF_LOG_PROVIDER=TRACE"
-
+// TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans checks a log
+// with neither span tier gets the SAME guidance the table views give it, and
+// that the guidance survives the pane it is drawn in.
+//
+// 44 columns is the centre pane at a 100-column terminal, not a generous
+// width chosen to keep the text intact: captureGuidance is pre-wrapped to 40
+// specifically so it fits there, and a single long line -- which clipWidth
+// cuts with no ellipsis -- loses the environment variable names that are the
+// whole point of the guidance while still reading as a finished sentence.
 func TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans(t *testing.T) {
 	m := New(&model.Log{}, "x.log")
-	// Wide enough that the note is not itself clipped -- the point of this
-	// test is the WORDING, not the width clip every pane's content shares.
-	if got := m.renderTimeline(100, 10); got != noTimedSpansForTest {
-		t.Errorf("renderTimeline over a log with no spans = %q, want %q", got, noTimedSpansForTest)
+	const w, h = 44, 20
+	// renderList is what the table views answer this log with; the timeline
+	// must not teach a second phrasing of the same advice.
+	want := m.renderList(w, h)
+	got := m.renderTimeline(w, h)
+	if got != want {
+		t.Fatalf("renderTimeline over a log with no spans =\n%s\nwant renderList's own guidance:\n%s", got, want)
+	}
+	for _, name := range []string{"TF_LOG_PROVIDER=TRACE", "TF_LOG_SDK_PROTO=TRACE"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("guidance at %d columns lost %s, the actionable half of it:\n%s", w, name, got)
+		}
 	}
 }
 
@@ -522,6 +557,41 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	}
 }
 
+// TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane checks
+// the other half of that priority: the stall annotation gives way before the
+// last lane row does. The bars are what this view exists to draw and the
+// annotation explains them, so a pane with room for only one of the two
+// keeps the bar -- the same ordering the axis's own never-dropped rule
+// states, and the frame states again when it shortens the logging caveat
+// rather than the footer.
+//
+// timeline-many-stalls.log reports maxStallsShown stalls, which is exactly
+// what a four-line pane has room for once the axis has taken its line: the
+// case where an unreserved lane row is lost entirely.
+func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-many-stalls.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if got := len(strings.Split(m.stallAnnotation(40), "\n")); got != maxStallsShown {
+		t.Fatalf("fixture assumption changed: stallAnnotation is %d lines, want maxStallsShown (%d)", got, maxStallsShown)
+	}
+
+	got := m.renderTimeline(40, 4)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4:\n%s", len(lines), got)
+	}
+
+	lanes := m.timelineLanes()
+	_, spans := m.timelineSpans()
+	labels := laneLabels(spans, lanes)
+	labelW := laneLabelWidth(labels)
+	barW := 40 - labelW - 1
+	row := padRight(labels[0], labelW) + " " + laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
+	if want := cursorBar(row, 40, true); lines[0] != want {
+		t.Errorf("first line = %q, want lane 0's bar %q: the annotation must not consume the last lane row", lines[0], want)
+	}
+}
+
 // TestStallAnnotationNamesTheBlockingSpan checks the annotation's basic
 // shape against timeline.log's own solo window.
 func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
@@ -556,6 +626,66 @@ func TestNoStallsSaysSoRatherThanRenderingNothing(t *testing.T) {
 	m.invalidateRows()
 	if got := m.stallAnnotation(80); strings.TrimSpace(got) == "" {
 		t.Error("stallAnnotation is blank where there are no stalls to report")
+	}
+}
+
+// longLabelStallModel is a model over synthetic spans whose provider name is
+// longer than maxLaneLabelWidth, packed so one lane sits idle while the
+// other runs: the case where the annotation names a lane the lane row can
+// only draw clipped.
+func longLabelStallModel(t *testing.T) Model {
+	t.Helper()
+	const provider = "registry.terraform.io/hashicorp/googleworkspace"
+	return update(t, New(&model.Log{RPCSpans: []span.Span{
+		{Provider: provider, StartMs: 0, EndMs: 1000, DurationMs: 1000, RPC: "PlanResourceChange", Fidelity: span.FidelityReported},
+		{Provider: provider, StartMs: 0, EndMs: 1000, DurationMs: 1000, RPC: "PlanResourceChange", Fidelity: span.FidelityReported},
+		{Provider: provider, StartMs: 5000, EndMs: 15000, DurationMs: 10000, RPC: "ApplyResourceChange", Fidelity: span.FidelityReported},
+	}}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+// TestStallAnnotationNamesTheLaneAsTheLaneRowDrawsIt checks the annotation
+// clips a lane label exactly as the lane row does. "waiting on X" is the
+// annotation's whole justification for naming lanes rather than spans -- it
+// points at exactly one bar -- and it points at nothing if the bar's own
+// label column, capped at maxLaneLabelWidth, renders a different string.
+func TestStallAnnotationNamesTheLaneAsTheLaneRowDrawsIt(t *testing.T) {
+	m := longLabelStallModel(t)
+	lanes := m.timelineLanes()
+	if len(lanes) != 2 {
+		t.Fatalf("synthetic spans packed into %d lanes, want 2 so one can sit idle", len(lanes))
+	}
+
+	got := m.stallAnnotation(80)
+	if !strings.Contains(got, "waiting on …workspace/1") {
+		t.Errorf("stallAnnotation = %q, want it to name the lane as the lane row draws it: …workspace/1", got)
+	}
+	if strings.Contains(got, "waiting on googleworkspace/1") {
+		t.Errorf("stallAnnotation = %q names a label no lane row shows", got)
+	}
+
+	// The lane row is the other half of the claim: what it draws in its
+	// label column must be the string the annotation just used.
+	row, _ := logfmt.StripANSI(strings.Split(m.renderTimeline(80, 10), "\n")[0], nil)
+	if !strings.HasPrefix(row, "…workspace/1") {
+		t.Errorf("lane row = %q, want it to start with the label the annotation names", row)
+	}
+}
+
+// TestStallAnnotationMarksATruncatedLine checks a pane too narrow for the
+// whole sentence does not render the surviving head as though it were the
+// whole of it: the tail names the lane, which is the payload, so the cut
+// carries an ellipsis rather than clipWidth's silent chop.
+func TestStallAnnotationMarksATruncatedLine(t *testing.T) {
+	m := longLabelStallModel(t)
+	const w = 30
+	got := m.stallAnnotation(w)
+	for _, line := range strings.Split(got, "\n") {
+		if lipgloss.Width(line) > w {
+			t.Fatalf("stallAnnotation line %q is %d columns, want at most %d", line, lipgloss.Width(line), w)
+		}
+		if !strings.HasSuffix(line, "…") {
+			t.Errorf("stallAnnotation line %q is cut at %d columns but carries no marker saying so", line, w)
+		}
 	}
 }
 

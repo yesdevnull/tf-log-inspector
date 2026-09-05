@@ -269,13 +269,21 @@ func (m Model) Selected() int {
 	return m.selected
 }
 
-// RowCount reports what the selection is clamped against for the active
-// view. For the rollup and call views that is the row count itself. For
+// RowCount reports what m.selected is clamped against for the active view.
+// For the rollup and call views that is the row count itself. For
 // ViewRawLog, which has no rows of its own, it is the log's TOTAL entry
 // count -- not the number of entries the pane draws, which is only those
-// passing entryVisible. Nothing reads the selection in that view (the pane
+// passing entryVisible. Nothing reads m.selected in that view (the pane
 // renders from m.raw.top, and scrollRawLog does its own clamping against
 // the same total), so the two never have to agree.
+//
+// ViewTimeline reports 0, because rows() is nil for it (see rows' own
+// switch, which says why a lane is not a row):
+// the timeline has a cursor, but it is m.timeline's lane and within-lane
+// span, clamped by clampTimelineSelection against the packed lanes rather
+// than by anything here. m.selected is unused in that view, so 0 is an
+// honest answer about m.selected rather than a claim the view has nothing
+// selected.
 func (m *Model) RowCount() int {
 	if m.view == ViewRawLog {
 		return len(m.log.Entries)

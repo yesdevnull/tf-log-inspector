@@ -194,9 +194,16 @@ func TestGoldenLayouts(t *testing.T) {
 // between them, so a golden of it would show neither -- it exists for
 // TestTimelineLaneRowsScrollToKeepTheCursorOnScreen, which is what actually
 // needs five lanes to force scrolling, not for a static layout snapshot.
+// The widths bracket both of the timeline's own degradations: 160 and 100
+// draw every pane, 70 is detailInlineWidth's inclusive lower bound -- the
+// narrowest width that still has a detail pane -- and 60 is below it, where
+// the detail pane is gone and the lanes take the width it frees. That last
+// one matters more here than for the table views: the within-lane span
+// cursor's only visible effect is in the detail pane (see renderTimeline),
+// so the full-width layout is the one arrangement no other assertion covers.
 func TestGoldenTimelineLayouts(t *testing.T) {
 	base := update(t, New(testLog(t, "timeline.log"), "plan.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
-	for _, w := range []int{70, 100, 160} {
+	for _, w := range []int{60, 70, 100, 160} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		compareGolden(t, fmt.Sprintf("timeline-%d.txt", w), m.View())
 	}

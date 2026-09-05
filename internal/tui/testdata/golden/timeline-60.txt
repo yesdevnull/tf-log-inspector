@@ -1,0 +1,16 @@
+tfli -- plan.log -- 3 RPC spans, 0 UI spans
+
+TIMELINE (rpc)
+[7maws/1         ████████████     █████████████████████████████[0m
+google/1         ████████████                               
+         0s                                             9.0s
+1 lane idle 4.0s–9.0s waiting on aws/1
+
+Durations here are measured under logging, which is not
+free: one workspace planned in 24.1s unlogged and 522.2s
+with debug plus provider TRACE. Rankings hold, since every
+span paid the same cost, but absolute times do not transfer
+to an unlogged run.
+
+1 providers  2 types  4 calls  6 raw log
+⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q qu
