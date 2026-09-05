@@ -265,6 +265,31 @@ func TestSelectionIsClampedAndResetsOnViewChange(t *testing.T) {
 	}
 }
 
+// A view switch must serve the NEW view's rows. The cache is rebuilt before
+// the switch returns -- it has to be, to clamp the selection against the
+// list it rebuilds -- so a switch that assigned the view after rebuilding
+// would leave the table and the detail pane reading a cache built for the
+// view being left. Every figure on screen would then be a real figure from
+// the wrong projection, under the new view's title.
+//
+// provider-rpc.log is the fixture because its counts differ by view: two
+// calls roll up to one provider row, so a stale cache is visible as a row
+// count as well as a row KIND.
+func TestSwitchingViewsRebuildsTheRowsForTheViewBeingEntered(t *testing.T) {
+	m := callsModel(t, "provider-rpc.log", "x.log")
+	if got := len(m.rows()); got != 2 {
+		t.Fatalf("fixture assumption changed: %d call rows, want 2", got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	rows := m.rows()
+	if len(rows) != 1 {
+		t.Fatalf("after switching to the providers view, rows() returned %d rows, want the 1 provider row -- the cache was built for the view being left", len(rows))
+	}
+	if rows[0].rollup == nil {
+		t.Errorf("the providers view served a call row: %+v", rows[0])
+	}
+}
+
 // Re-pressing the key for the view already active must not zero the user's
 // scroll position: the reason selection resets on a view change -- row 40 of
 // one view is meaningless in another -- does not apply when the view has not

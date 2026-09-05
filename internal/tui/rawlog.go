@@ -73,10 +73,8 @@ func (m *Model) jumpToSpan(idx int) {
 		m.blockedJump = true
 		return
 	}
-	m.view = ViewRawLog
+	m.setView(ViewRawLog)
 	m.raw.top = entry
-	m.selected = 0
-	m.invalidateRows()
 }
 
 // pageRawLog moves the raw log's top entry by delta screenfuls.

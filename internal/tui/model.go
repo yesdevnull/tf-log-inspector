@@ -350,9 +350,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Keys "3" and "5" are not in viewKeys, so pressing them lands
 			// here and does nothing -- they are unbound, not broken.
 			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
-				m.view = v
-				m.selected = 0
-				m.invalidateRows()
+				m.setView(v)
 			}
 		}
 	case tea.WindowSizeMsg:
@@ -422,16 +420,36 @@ func (m *Model) toggleFacetFocus() {
 	m.pane = PaneFacets
 }
 
+// setView switches the interface to v: it assigns the view, puts the
+// selection back on the first row, and rebuilds the row cache -- in that
+// order.
+//
+// The order is the reason this exists rather than three statements at each
+// call site. invalidateRows rebuilds the cache before it returns, in order
+// to clamp the selection against the list it rebuilds, so it builds for
+// whichever view m.view names at the moment of the call: assign the view
+// afterwards and the cache holds rows for the view being LEFT, which rows()
+// then serves to the table and the detail pane. Held together here, the
+// order cannot be stated wrongly by a caller.
+//
+// The selection resets because row 40 of one view is meaningless in
+// another; the clamp inside invalidateRows is for a list that SHRANK under
+// a filter, which is a different question.
+func (m *Model) setView(v View) {
+	m.view = v
+	m.selected = 0
+	m.invalidateRows()
+}
+
 // invalidateRows drops any cached rows so they are rebuilt from the current
 // view and filter rather than served stale, and re-clamps the selection
 // against the list it rebuilds.
 //
-// CALLERS MUST SET m.view FIRST. Clamping needs a row count, so this
-// rebuilds the cache before it returns -- for whichever view m.view names at
-// the moment of the call. Assigning the view afterwards therefore leaves a
-// cache built for the view being left behind, and rows() will serve it. Both
-// callers that switch views (Update's number keys, jumpToSpan) assign
-// m.view before they call this, for that reason.
+// Clamping needs a row count, so this rebuilds the cache before it returns,
+// for whichever view m.view names at the moment of the call. Everything
+// that changes the VIEW goes through setView, which owns that ordering; the
+// callers that reach this directly (a facet toggle, Esc) change the filter
+// and leave the view where it is.
 //
 // The clamp belongs here because everything that can shorten the list comes
 // through here: narrowing a filter can leave the selection past the end of
