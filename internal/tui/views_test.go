@@ -251,21 +251,6 @@ func TestTheDetailPaneDegradesOnARowThatNamesNoSpan(t *testing.T) {
 	}
 }
 
-// Enter and the detail pane must ask the same question of the same field.
-// Enter jumps a row to the log entry that closed its span, which only a
-// call row has; asked of the rollup field instead, the two could disagree
-// about which rows carry one.
-func TestEnterDoesNotJumpFromARollupRow(t *testing.T) {
-	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	if r := m.rows()[m.Selected()]; r.isCall() {
-		t.Fatalf("fixture assumption changed: the selected providers row is a call, not a rollup: %+v", r)
-	}
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.ActiveView() != ViewProviders {
-		t.Errorf("Enter on a rollup row switched to %v; a group resolves to no single entry to jump to", m.ActiveView())
-	}
-}
-
 // RowCount is what clamps the selection, so it must be the active view's own
 // row count and not a count borrowed from another slice.
 //

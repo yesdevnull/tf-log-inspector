@@ -169,8 +169,10 @@ func TestRawLogPagingIsClamped(t *testing.T) {
 	}
 }
 
-// Enter on a rollup row (spanIdx -1, as every ViewProviders row is) has no
-// span to jump to, so it must be inert rather than jumping to entry 0.
+// Enter on a rollup row (every ViewProviders row is one) has no span to jump
+// to, so it must be inert rather than jumping to entry 0. Enter asks
+// row.isCall, the same predicate the detail pane asks before reading a
+// span's fields, so the two cannot disagree about which rows carry one.
 func TestEnterOnARollupRowIsInert(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
