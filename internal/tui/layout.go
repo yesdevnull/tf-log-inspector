@@ -255,7 +255,7 @@ func header(m *Model) string {
 	}
 	f := m.filter()
 	return fmt.Sprintf("tfli -- %s -- %d of %d RPC spans, %d of %d UI spans",
-		m.name, countMatching(f, m.log.RPCSpans), rpc, countMatching(f, m.log.UISpans), ui)
+		m.name, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
 }
 
 // countMatching counts the spans passing f. It exists rather than a call to

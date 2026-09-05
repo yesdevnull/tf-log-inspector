@@ -69,6 +69,89 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 	}
 }
 
+// The two tiers do not share a vocabulary for provider or RPC: a UI-hook
+// span carries Terraform's implied provider ("aws") and a hook action
+// ("create"), an RPC-tier span the full registry address and a
+// plugin-protocol method. The facet pane is built from the RPC tier, so the
+// only provider checkbox on offer is one no UI-hook span can match --
+// applying it to the UI tier zeroed every UI figure on screen.
+//
+// A zero that means "you cannot see this" where the reader reads "there was
+// none" is the wrong-number class this tool exists to avoid, and it came
+// with its own signals suppressed: the resolution caveat vanishes with the
+// UI rows, and the header's UI count agreed with the zeroes.
+//
+// Resource type is the field that means the same thing on both sides, so it
+// is the one dimension that still applies. two-tier.log's aws_instance has
+// figures in both tiers, which is what makes the difference visible.
+func TestAProviderFacetDoesNotZeroTheUITier(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if !m.filterActive() {
+		t.Fatal("ticking the provider facet did not activate a filter")
+	}
+
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+	// Cells in typeColumns' order: resource type, UI res., UI total,
+	// RPC calls, RPC total, RPC max.
+	for _, want := range [][]string{
+		{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}, // both tiers
+		{"local_file", "1", "1.0s", "0", "0ms", "0ms"},       // UI tier only
+	} {
+		got, _ := paneRowStartingWith(t, centre, want[0])
+		if !slices.Equal(got, want) {
+			t.Errorf("with a provider ticked, types row for %s = %v, want %v -- the UI tier speaks a different provider vocabulary and must not be filtered by it:\n%s", want[0], got, want, centre)
+		}
+	}
+	if !strings.Contains(centre, "whole seconds") {
+		t.Errorf("the UI-hook resolution caveat went with the UI figures, so nothing on screen qualifies them:\n%s", centre)
+	}
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "3 of 3 UI spans") {
+		t.Errorf("header = %q, want it to count the UI spans the types view actually shows", header)
+	}
+}
+
+// An RPC facet is the same defect in the other dimension: "create" is what
+// a UI-hook span calls its action and "ApplyResourceChange" is what the RPC
+// tier calls its method, so neither checkbox can ever match the other tier.
+func TestAnRPCFacetDoesNotZeroTheUITier(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = moveFacetCursorTo(t, m, dimRPC, "ApplyResourceChange")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+	got, _ := paneRowStartingWith(t, centre, "aws_instance")
+	want := []string{"aws_instance", "2", "5.0s", "1", "250ms", "250ms"}
+	if !slices.Equal(got, want) {
+		t.Errorf("with an RPC ticked, types row for aws_instance = %v, want %v -- the RPC filter belongs to the RPC tier alone:\n%s", got, want, centre)
+	}
+}
+
+// Resource type IS shared between the tiers -- it is why
+// model.JoinByResourceType keys on it and on nothing else -- so ticking one
+// must narrow BOTH tiers. Without this, "filter the UI tier by less" is
+// satisfied by not filtering it at all.
+func TestATypeFacetNarrowsBothTiers(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = moveFacetCursorTo(t, m, dimType, "aws_instance")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	rows := m.rows()
+	if len(rows) != 1 || rows[0].cells[0] != "aws_instance" {
+		t.Fatalf("ticking resource type aws_instance left %d rows, want just that type: %v", len(rows), rows)
+	}
+	// local_file's UI-hook resource is the one the type filter has to
+	// remove: it belongs to no RPC-tier span, so only the UI slice can
+	// carry it.
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 3 UI spans") {
+		t.Errorf("header = %q, want the type filter to have narrowed the UI tier as well", header)
+	}
+}
+
 // paneRowStartingWith finds the one row of a rendered pane whose first cell
 // is want, and reports its cells and which line of the pane it was on.
 //

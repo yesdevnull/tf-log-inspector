@@ -63,6 +63,10 @@ func levelFacet(entries []logfmt.Entry) model.Facet {
 // the whole log. A dimension with one or more values selected contributes
 // exactly that allow-list: a span passes only if its value for that
 // dimension was selected.
+//
+// This is the filter as it applies to the RPC tier and to log entries. The
+// UI-hook tier is filtered by uiFilter instead, and every count or rollup
+// drawn from m.log.UISpans goes through that one.
 func (m Model) filter() model.Filter {
 	return model.Filter{
 		Providers: m.selectedFacets[dimProvider],
@@ -70,6 +74,27 @@ func (m Model) filter() model.Filter {
 		Types:     m.selectedFacets[dimType],
 		Levels:    m.selectedLevels(),
 	}
+}
+
+// uiFilter is the filter as it applies to the UI-hook tier: the resource
+// type dimension, and only that one.
+//
+// The two tiers do not share a vocabulary. A UI-hook span's provider is
+// Terraform's implied provider ("aws") and its RPC is a hook action
+// ("create"); an RPC-tier span's are the full registry address
+// ("registry.terraform.io/hashicorp/aws") and a plugin-protocol method
+// ("ApplyResourceChange"). The facet pane is built from the RPC tier, so
+// the only provider or RPC value it can offer is one no UI-hook span
+// carries -- and applying it to the UI tier matches nothing, zeroing every
+// UI figure on screen.
+//
+// A zero that means "you cannot see this" where the reader reads "there was
+// none" is the wrong-number class this tool exists to avoid, so those two
+// dimensions are not applied to this tier at all. Resource type is kept
+// because it is the field that means the same thing on both sides -- the
+// reason model.JoinByResourceType keys on it and on nothing else.
+func (m Model) uiFilter() model.Filter {
+	return model.Filter{Types: m.filter().Types}
 }
 
 // selectedLevels turns the level dimension's selected value names back into

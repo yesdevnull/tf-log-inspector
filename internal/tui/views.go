@@ -211,7 +211,7 @@ func (m *Model) rows() []row {
 	case ViewProviders:
 		r = providerRows(f.SpansMatching(m.log.RPCSpans))
 	case ViewTypes:
-		r = typeRows(f.SpansMatching(m.log.RPCSpans), f.SpansMatching(m.log.UISpans))
+		r = typeRows(f.SpansMatching(m.log.RPCSpans), m.uiFilter().SpansMatching(m.log.UISpans))
 	case ViewCalls:
 		r = callRows(m.log.RPCSpans, f)
 	}
@@ -436,7 +436,7 @@ func (m *Model) renderList(w, h int) string {
 		cols = providerColumns
 	case ViewTypes:
 		cols = typeColumns
-		preamble = typesPreamble(m.filter().SpansMatching(m.log.UISpans))
+		preamble = typesPreamble(m.uiFilter().SpansMatching(m.log.UISpans))
 	case ViewCalls:
 		cols = callColumns
 	default:
