@@ -1,0 +1,35 @@
+# SYNTHESISED to exercise the stall annotation's own truncation and
+# ordering: four solo stall windows of DISTINCT duration (5.7s, 5s, 4s,
+# 2s), back to back with no gap between them, all comfortably clearing
+# stallAnnotation's 1s/5% threshold. The annotation shows only the top
+# three by duration, so this fixture pins that the correct three survive
+# (5.7s, 5s, 4s) and the shortest (2s) is the one dropped -- a distinction
+# testdata/timeline.log cannot exercise, since it clears the threshold
+# with only one stall. All boundary times are round multiples of 100ms so
+# formatMs's one-decimal rendering has nothing to round.
+#
+# The one aws span opened before the google span ends up as PackLanes'
+# lane 0, and every later aws span reuses that same lane -- PackLanes
+# checks lanes in order and lane 0 is always free again by the time the
+# next aws span starts -- so lane 0 stays aws-only and every stall here
+# names "aws/1", not "mixed/1" (a mixed lane is what an earlier, less
+# careful version of this fixture produced when the SHORT google span was
+# opened first instead of the long-running aws sequence: PackLanes then
+# reused google's lane for the LATER aws spans, since it freed up first,
+# which would have made this fixture assert something other than what it
+# was built to test). The google span's own lane is never reused, since
+# lane 0 is always tried first and always available by the time anything
+# else needs a lane.
+#
+# The line shape is testdata/two-providers.log's "Received downstream
+# response" verbatim. The first line is not itself a response: it anchors
+# the scanner's base clock a few seconds before the first real span, so
+# that span's start is not clamped to zero by ReportedBuilder (see the
+# doc comment on span.Span). Values are invented; no line here is from a
+# real run.
+2026-09-05T04:00:00.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Configuring provider client @module=sdk.proto
+2026-09-05T04:00:03.300Z [TRACE] provider.terraform-provider-google_v5.30.0_x5: Received downstream response: tf_req_id=dddddddd-1111-4a1b-8c2d-000000000001 tf_resource_type=google_compute_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/google tf_req_duration_ms=200 @module=sdk.proto
+2026-09-05T04:00:09.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=dddddddd-2222-4a1b-8c2d-000000000002 tf_resource_type=aws_instance tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=6000 @module=sdk.proto
+2026-09-05T04:00:14.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=dddddddd-3333-4a1b-8c2d-000000000003 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5000 @module=sdk.proto
+2026-09-05T04:00:18.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=dddddddd-4444-4a1b-8c2d-000000000004 tf_resource_type=aws_iam_role tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=4000 @module=sdk.proto
+2026-09-05T04:00:20.000Z [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=dddddddd-5555-4a1b-8c2d-000000000005 tf_resource_type=aws_s3_bucket tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=2000 @module=sdk.proto

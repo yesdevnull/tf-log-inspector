@@ -454,9 +454,10 @@ func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
 // TestRenderTimelineDrawsOneRowPerLanePlusTheAxis pins the composition this
 // package owns: laneBar, timeAxis and laneLabels are tested in isolation
 // elsewhere, so this checks only that renderTimeline stacks one labelled bar
-// per lane, in PackLanes' order (via timelineLanes), with the axis -- indented
-// to sit under the bar area, past the label column every lane row reserves --
-// as the final line.
+// per lane, in PackLanes' order (via timelineLanes), then the axis --
+// indented to sit under the bar area, past the label column every lane row
+// reserves -- then the stall annotation (see stallAnnotation) as the final
+// line(s).
 //
 // Cursor styling is stripped before comparing: lane 0 carries the cursor by
 // default, and the point of this test is the composition, not cursorBar's own
@@ -467,8 +468,10 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 	lines := strings.Split(got, "\n")
 
 	lanes := m.timelineLanes()
-	if len(lines) != len(lanes)+1 {
-		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane plus the axis)", len(lines), len(lanes)+1)
+	annotationLines := strings.Split(m.stallAnnotation(40), "\n")
+	wantLines := len(lanes) + 1 + len(annotationLines)
+	if len(lines) != wantLines {
+		t.Fatalf("renderTimeline produced %d lines, want %d (one per lane, the axis, and the stall annotation)", len(lines), wantLines)
 	}
 
 	_, spans := m.timelineSpans()
@@ -486,8 +489,13 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 			t.Errorf("lane %d = %q, want %q", i, got, want)
 		}
 	}
-	if want := strings.Repeat(" ", labelW+1) + timeAxis(wallClock, barW); lines[len(lines)-1] != want {
-		t.Errorf("last line = %q, want the indented time axis %q", lines[len(lines)-1], want)
+	if want := strings.Repeat(" ", labelW+1) + timeAxis(wallClock, barW); lines[len(lanes)] != want {
+		t.Errorf("axis line = %q, want %q", lines[len(lanes)], want)
+	}
+	for i, want := range annotationLines {
+		if got := lines[len(lanes)+1+i]; got != want {
+			t.Errorf("annotation line %d = %q, want %q", i, got, want)
+		}
 	}
 }
 
@@ -514,12 +522,81 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	}
 }
 
+// TestStallAnnotationNamesTheBlockingSpan checks the annotation's basic
+// shape against timeline.log's own solo window.
+func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
+	// timeline.log has one long span running alone after the others
+	// finish; that span is what the annotation must name.
+	m := timelineModel(t)
+	got := m.stallAnnotation(80)
+	if !strings.Contains(got, "idle") {
+		t.Fatalf("stallAnnotation says nothing about idle lanes: %q", got)
+	}
+	if !strings.Contains(got, "waiting on") {
+		t.Errorf("stallAnnotation does not name what the idle lanes waited on: %q", got)
+	}
+}
+
+func TestStallAnnotationRendersOffsetsNotWallClock(t *testing.T) {
+	// Span times are milliseconds from a per-builder zero point, not a
+	// clock. Rendering them as "04:11:20" would be inventing a time of
+	// day out of an offset.
+	m := timelineModel(t)
+	got := m.stallAnnotation(80)
+	if strings.Contains(got, ":") {
+		t.Errorf("stallAnnotation looks like a wall-clock time, which this log has no basis for: %q", got)
+	}
+}
+
+func TestNoStallsSaysSoRatherThanRenderingNothing(t *testing.T) {
+	// Silence and "no stalls" look identical on screen, and one of them
+	// is a bug.
+	m := timelineModel(t)
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+	m.invalidateRows()
+	if got := m.stallAnnotation(80); strings.TrimSpace(got) == "" {
+		t.Error("stallAnnotation is blank where there are no stalls to report")
+	}
+}
+
+// TestStallAnnotationShowsAtMostTheTopFewByDuration checks the two things
+// maxStallsShown exists for: the stalls kept are the LONGEST by duration,
+// not the first chronologically, and no more than maxStallsShown are shown
+// even when every stall in the log clears the threshold.
+// timeline-many-stalls.log's four solo windows (5.7s, 5s, 4s, 2s, longest
+// first) all clear it, and its own doc comment explains why
+// testdata/timeline.log cannot exercise this: that fixture has only one
+// surviving stall, so it never touches the sort or the truncation at all.
+func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline-many-stalls.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	got := m.stallAnnotation(80)
+	lines := strings.Split(got, "\n")
+	if len(lines) != maxStallsShown {
+		t.Fatalf("stallAnnotation produced %d lines, want %d (maxStallsShown): %q", len(lines), maxStallsShown, got)
+	}
+
+	want := []string{
+		"1 lane idle 3.3s–9.0s waiting on aws/1",
+		"1 lane idle 9.0s–14.0s waiting on aws/1",
+		"1 lane idle 14.0s–18.0s waiting on aws/1",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("stallAnnotation = %v, want %v (the fixture's three longest solo windows, longest first)", lines, want)
+	}
+	if strings.Contains(got, "18.0s–20.0s") {
+		t.Errorf("stallAnnotation names the fixture's shortest (2s) stall, which maxStallsShown should have dropped: %q", got)
+	}
+}
+
 // TestTimelineLaneRowsScrollToKeepTheCursorOnScreen checks the scrolling
 // renderTimeline gained when the lane cursor was added: the previous code
 // always drew lanes[:laneRows] -- the first screenful, full stop -- so
 // moving the cursor past it left the highlighted row off the visible pane
 // entirely. timeline-many-lanes.log packs into five lanes (verified below
-// against PackLanes rather than assumed); a pane with room for three of them
+// against PackLanes rather than assumed); a pane with room for two of them,
+// once the axis and the stall annotation have each taken their own line,
 // must scroll to keep the LAST one, where the cursor is moved to, on screen.
 func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	m := update(t, New(testLog(t, "timeline-many-lanes.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -537,15 +614,18 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 		t.Fatalf("lane = %d after moving to the last lane, want %d", m.timeline.lane, len(lanes)-1)
 	}
 
-	// h=4 gives renderTimeline three lane rows plus the axis -- fewer than
-	// the fixture's five lanes. With the cursor on lane 4 (0-based) and a
-	// three-row window, scrollWindow's own pin-to-edge rule puts the window
-	// at lanes [2, 3, 4]: lanes 0 and 1 must have scrolled off, and the
-	// cursor's own lane 4 must be the LAST row drawn, ahead of the axis.
+	// h=4 gives renderTimeline one line for the axis and one for the stall
+	// annotation -- the fixture's five spans fully overlap, so no lane is
+	// ever idle and stallAnnotation reports "no stalls" in a single line
+	// -- leaving two lane rows, fewer than the fixture's five lanes. With
+	// the cursor on lane 4 (0-based) and a two-row window, scrollWindow's
+	// own pin-to-edge rule puts the window at lanes [3, 4]: lanes 0-2 must
+	// have scrolled off, and the cursor's own lane 4 must be the LAST lane
+	// row drawn, ahead of the axis and the annotation.
 	got := m.renderTimeline(40, 4)
 	lines := strings.Split(got, "\n")
 	if len(lines) != 4 {
-		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4 (3 lane rows plus the axis)", len(lines))
+		t.Fatalf("renderTimeline(h=4) produced %d lines, want 4 (2 lane rows, the axis, and the stall annotation)", len(lines))
 	}
 
 	_, spans := m.timelineSpans()
@@ -557,7 +637,7 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 		return padRight(labels[i], labelW) + " " + laneBar(spans, lanes[i], wallClock, barW)
 	}
 
-	wantVisible := []int{2, 3, 4}
+	wantVisible := []int{3, 4}
 	var scratch []byte
 	for row, laneIdx := range wantVisible {
 		want := rowContent(laneIdx)
@@ -568,13 +648,16 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 			t.Errorf("row %d = %q, want lane %d's row %q", row, lines[row], laneIdx, want)
 		}
 	}
-	for _, hidden := range []int{0, 1} {
+	for _, hidden := range []int{0, 1, 2} {
 		want, _ := logfmt.StripANSI(rowContent(hidden), scratch)
-		for _, line := range lines[:3] {
+		for _, line := range lines[:2] {
 			if stripped, s := logfmt.StripANSI(line, scratch); stripped == want {
 				scratch = s
 				t.Errorf("lane %d is still visible at %q; it should have scrolled off to keep the cursor's lane on screen", hidden, line)
 			}
 		}
+	}
+	if want := m.stallAnnotation(40); lines[3] != want {
+		t.Errorf("last line = %q, want the stall annotation %q", lines[3], want)
 	}
 }

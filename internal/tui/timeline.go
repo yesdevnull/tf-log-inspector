@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -348,8 +350,22 @@ func (m *Model) renderTimeline(w, h int) string {
 	labelW := laneLabelWidth(labels)
 	barW := max(w-labelW-1, 0)
 
-	top, visible := scrollWindow(m.timeline.lane, len(lanes), h-1)
-	lines := make([]string, 0, visible+1)
+	// The annotation is reserved room below the axis before the lane rows
+	// get whatever is left of h: it is bounded to a handful of short lines
+	// (see maxStallsShown), so on a pane with room to spare it costs
+	// nothing the lanes would otherwise have used, and only competes with
+	// them on a pane too short to show both -- the same "the axis is never
+	// dropped for want of height" priority this function already applied,
+	// carried one step further down to the annotation the lanes and axis
+	// exist to explain.
+	annotationLines := strings.Split(m.stallAnnotation(w), "\n")
+	if room := h - 1; len(annotationLines) > room {
+		annotationLines = annotationLines[:room]
+	}
+
+	dataH := h - 1 - len(annotationLines)
+	top, visible := scrollWindow(m.timeline.lane, len(lanes), dataH)
+	lines := make([]string, 0, visible+1+len(annotationLines))
 	for i := top; i < top+visible; i++ {
 		line := padRight(clipValueForKind(labels[i], labelW, tailIdentifierColumn), labelW) + " " + laneBar(spans, lanes[i], wallClock, barW)
 		line = clipWidth(line, w)
@@ -359,6 +375,7 @@ func (m *Model) renderTimeline(w, h int) string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, clipWidth(strings.Repeat(" ", labelW+1)+timeAxis(wallClock, barW), w))
+	lines = append(lines, annotationLines...)
 	return strings.Join(lines, "\n")
 }
 
@@ -487,4 +504,128 @@ func timeAxis(spanMs uint32, barW int) string {
 		axis += strings.Repeat(" ", barW-w)
 	}
 	return axis
+}
+
+// stallAnnotationNoStalls is what stallAnnotation renders when the current
+// tier and filter have nothing worth reporting -- whether because no window
+// cleared the threshold, or because a filter has emptied the timeline
+// entirely. Rendering nothing here would be indistinguishable from a blank
+// pane that failed to draw at all, the same reasoning noTimedSpansNote and
+// noMatchNote already state for the lanes above it.
+const stallAnnotationNoStalls = "no stalls"
+
+// maxStallsShown bounds how many stall windows the annotation names. The
+// pane has finite height, and a log with many short idle windows would
+// otherwise crowd the axis and lane rows off screen with entries nobody
+// asked to see; the handful longest by duration are what answers the
+// question this view exists for -- was the plan slow because of work or
+// because of waiting.
+const maxStallsShown = 3
+
+// stallThresholdMs is the minimum stall duration worth naming: 5% of the
+// window, or 1s, whichever is larger. A short window has plenty of genuine
+// sub-second handovers between spans that are not worth calling a stall; a
+// long one can have a stall that is a small fraction of it and still be the
+// reason the plan felt slow, so the floor alone would drown a real signal
+// in noise on a short log and a bare percentage would flag noise on a long
+// one.
+//
+// Measured against testdata/timeline.log, a 9s window: 5% is 450ms, so the
+// 1s floor governs. That drops the fixture's two ~500ms handover stalls
+// (see model.Stalls' own merge-then-threshold doc comment) and keeps its
+// one genuine 5s solo window -- exactly the distinction this annotation
+// exists to draw.
+func stallThresholdMs(wallClock uint32) uint32 {
+	return max(wallClock/20, 1000)
+}
+
+// stallLane reports which lane contains the span at idx, so a stall can be
+// named by the same lane label the bars above it already carry. -1 if idx
+// names no span in any lane, which cannot happen for a Blocking index
+// model.Stalls produced from the very spans lanes was packed from, but is
+// reported rather than assumed so a broken invariant fails visibly instead
+// of indexing lanes with a value that silently means something else.
+func stallLane(lanes []model.Lane, idx int) int {
+	for i, lane := range lanes {
+		if slices.Contains(lane.Spans, idx) {
+			return i
+		}
+	}
+	return -1
+}
+
+// stallAnnotation renders the windows model.Stalls found beneath the lanes
+// and axis, naming each by the lane label the reader already sees the bars
+// under -- "waiting on aws/1" points at exactly one bar, the way naming the
+// blocking span's RPC and resource type would not once a lane has packed
+// more than one call sharing that name. At most maxStallsShown, longest
+// first: the pane's height is finite, and a screenful of short stalls is
+// noise beside the one that mattered.
+//
+// Offsets are rendered with formatMs, the same duration formatter every
+// other number in this package uses, rather than a wall-clock time: span
+// times are milliseconds from a per-builder zero point (see the doc
+// comment on span.Span), and rendering a time of day out of that offset
+// would be inventing a fact the log does not carry.
+//
+// A tier with no spans -- including one a filter has emptied entirely --
+// reports stallAnnotationNoStalls rather than an empty string: see its own
+// doc comment for why silence is not an acceptable answer here.
+func (m *Model) stallAnnotation(w int) string {
+	_, spans := m.timelineSpans()
+	if len(spans) == 0 {
+		return clipWidth(stallAnnotationNoStalls, w)
+	}
+
+	lanes := m.timelineLanes()
+	wallClock := timelineWallClockMs(spans)
+	stalls, err := model.Stalls(spans, len(lanes), stallThresholdMs(wallClock))
+	if err != nil {
+		// timelineSpans hands a single tier's spans by construction, the
+		// same guarantee timelineLanes leans on for PackLanes -- see its
+		// own panic comment for why this is a programming error to fail
+		// loudly on rather than an annotation that quietly says nothing.
+		panic(fmt.Sprintf("tui: stallAnnotation: %v", err))
+	}
+	if len(stalls) == 0 {
+		return clipWidth(stallAnnotationNoStalls, w)
+	}
+
+	sort.SliceStable(stalls, func(i, j int) bool {
+		di, dj := stalls[i].EndMs-stalls[i].StartMs, stalls[j].EndMs-stalls[j].StartMs
+		if di != dj {
+			return di > dj
+		}
+		// Duration ties break by start time so the chosen top few, and
+		// their order, do not depend on model.Stalls' own internal
+		// ordering -- sort.SliceStable alone only guarantees ties keep
+		// their INPUT order, which is an implementation detail of the
+		// sweep, not a property this function should expose.
+		return stalls[i].StartMs < stalls[j].StartMs
+	})
+	if len(stalls) > maxStallsShown {
+		stalls = stalls[:maxStallsShown]
+	}
+
+	labels := laneLabels(spans, lanes)
+	lines := make([]string, len(stalls))
+	for i, s := range stalls {
+		l := stallLane(lanes, s.Blocking)
+		if l < 0 {
+			// model.Stalls produced Blocking as an index into the very
+			// spans slice lanes was packed from, so every stall's blocking
+			// span must sit in exactly one lane -- the same invariant the
+			// panic above relies on for model.Stalls itself. Failing
+			// loudly here matches that convention, rather than naming a
+			// stall's lane "?", which would read as a deliberate answer
+			// instead of the broken guarantee it would actually be.
+			panic(fmt.Sprintf("tui: stallAnnotation: span %d (stall %d's Blocking) is not in any lane", s.Blocking, i))
+		}
+		unit := "lanes"
+		if s.Idle == 1 {
+			unit = "lane"
+		}
+		lines[i] = clipWidth(fmt.Sprintf("%d %s idle %s–%s waiting on %s", s.Idle, unit, formatMs(uint64(s.StartMs)), formatMs(uint64(s.EndMs)), labels[l]), w)
+	}
+	return strings.Join(lines, "\n")
 }
