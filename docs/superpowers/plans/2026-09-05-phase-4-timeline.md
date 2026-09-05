@@ -351,9 +351,91 @@ func timeAxis(spanMs uint32, barW int) string
 - A zero-duration span still gets one column: it is a real call that the log recorded, and rounding it to nothing makes the lane look emptier than it was.
 - `spanMs` of 0 (every span zero-duration, or one span) must not divide by zero.
 
-- [ ] **Step 1: Write the failing tests** — at minimum: a span covering the whole window fills every column; two spans in one lane leave the gap between them blank; a 1ms span in a 10s window still renders one column; `lipgloss.Width` of every produced row equals `barW`.
+- [ ] **Step 1: Write the failing tests**
 
-- [ ] **Step 2–6: fail, implement, pass, commit.**
+```go
+func TestLaneBarFillsEveryColumnForASpanCoveringTheWindow(t *testing.T) {
+	spans := []span.Span{{StartMs: 0, EndMs: 1000, DurationMs: 1000}}
+	got := laneBar(spans, model.Lane{Spans: []int{0}}, 1000, 20)
+	if want := strings.Repeat("\u2588", 20); got != want {
+		t.Errorf("laneBar = %q, want %q", got, want)
+	}
+}
+
+func TestLaneBarLeavesTheGapBetweenTwoSpansBlank(t *testing.T) {
+	// Two spans in one lane, each a quarter of the window, with half the
+	// window idle between them. The blank columns ARE the point of this
+	// view: idle time has to be visible as space.
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 250, DurationMs: 250},
+		{StartMs: 750, EndMs: 1000, DurationMs: 250},
+	}
+	got := laneBar(spans, model.Lane{Spans: []int{0, 1}}, 1000, 20)
+	want := strings.Repeat("\u2588", 5) + strings.Repeat(" ", 10) + strings.Repeat("\u2588", 5)
+	if got != want {
+		t.Errorf("laneBar = %q, want %q", got, want)
+	}
+}
+
+func TestLaneBarGivesAShortSpanOneColumn(t *testing.T) {
+	// 1ms in a 10s window is 0.002 of one column at this width. It still
+	// gets a column: the log recorded a real call, and rounding it away
+	// makes the lane look emptier than it was.
+	spans := []span.Span{{StartMs: 5000, EndMs: 5001, DurationMs: 1}}
+	got := laneBar(spans, model.Lane{Spans: []int{0}}, 10000, 20)
+	if strings.Count(got, "\u2588") != 1 {
+		t.Errorf("laneBar = %q, want exactly one bar column", got)
+	}
+}
+
+func TestLaneBarIsAlwaysExactlyBarWColumns(t *testing.T) {
+	// Every lane row is a pane column, so a row wider or narrower than
+	// barW pushes the panes beside it out of alignment on that line only
+	// -- the failure mode that is hardest to see in a screenshot and
+	// easiest to catch here.
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 1, DurationMs: 1},
+		{StartMs: 999, EndMs: 1000, DurationMs: 1},
+		{StartMs: 400, EndMs: 600, DurationMs: 200},
+	}
+	for _, barW := range []int{1, 7, 20, 79} {
+		got := laneBar(spans, model.Lane{Spans: []int{0, 2, 1}}, 1000, barW)
+		if w := lipgloss.Width(got); w != barW {
+			t.Errorf("laneBar(barW=%d) is %d display columns: %q", barW, w, got)
+		}
+	}
+}
+
+func TestLaneBarSurvivesAZeroWindow(t *testing.T) {
+	// Every span zero-duration, so spanMs is 0. Dividing by it would panic
+	// and take the whole interface down on a log that is merely unusual.
+	spans := []span.Span{{StartMs: 0, EndMs: 0}}
+	got := laneBar(spans, model.Lane{Spans: []int{0}}, 0, 20)
+	if w := lipgloss.Width(got); w != 20 {
+		t.Errorf("laneBar over a zero window is %d columns: %q", w, got)
+	}
+}
+
+func TestTimeAxisNamesBothEnds(t *testing.T) {
+	got := timeAxis(522200, 40)
+	if w := lipgloss.Width(got); w != 40 {
+		t.Fatalf("timeAxis is %d display columns, want 40: %q", w, got)
+	}
+	if !strings.HasPrefix(got, "0s") {
+		t.Errorf("timeAxis does not start at 0s: %q", got)
+	}
+	if !strings.HasSuffix(got, "522.2s") {
+		t.Errorf("timeAxis does not end at the window total: %q", got)
+	}
+}
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `go test ./internal/tui/ -run 'TestLaneBar|TestTimeAxis' -v`
+Expected: FAIL — `undefined: laneBar`.
+
+- [ ] **Step 3: Implement. Step 4: Run them and watch them pass. Step 5: Run the full suite. Step 6: Commit.**
 
 ---
 
@@ -410,9 +492,89 @@ func (m *Model) selectedTimelineSpan() (idx int, ok bool)
 - The footer's open hint (`actionKeys` → `selectedRowOpens`) must answer for the timeline too: in this view Enter opens the selected span, so the hint is shown. Route both the hint and the handler through one predicate so they cannot drift, the way `row.isCall` does for the table views.
 - Both cursors clamp: changing lanes clamps the within-lane index to the new lane's length, and a filter change that shortens a lane must not leave the cursor past its end. Invalidate the timeline's selection wherever `invalidateRows` is called.
 
-- [ ] **Step 1: Write the failing tests** — moving down past the last lane stays on the last lane; `→` past the last span in a lane stays put; changing lanes clamps the span index; a facet toggle that empties the timeline leaves `selectedTimelineSpan` returning `ok == false` rather than an out-of-range index; Enter from the timeline switches to `ViewRawLog` positioned at the selected span's entry.
+- [ ] **Step 1: Write the failing tests**
 
-- [ ] **Step 2–6: fail, implement, pass, commit.**
+```go
+// timelineModel is a model showing the timeline over timeline.log, sized so
+// every pane is drawn. Each test starts from its own, because Model is
+// driven through a pointer and shares its filter maps when copied.
+func timelineModel(t *testing.T) *Model {
+	t.Helper()
+	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+func TestTimelineCursorStopsAtTheLastLane(t *testing.T) {
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	lanes := m.timelineLanes()
+	if m.timeline.lane != len(lanes)-1 {
+		t.Errorf("lane = %d after walking off the end, want %d", m.timeline.lane, len(lanes)-1)
+	}
+}
+
+func TestTimelineCursorStopsAtTheLastSpanInALane(t *testing.T) {
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	}
+	lanes := m.timelineLanes()
+	if last := len(lanes[m.timeline.lane].Spans) - 1; m.timeline.span != last {
+		t.Errorf("span = %d after walking off the end, want %d", m.timeline.span, last)
+	}
+}
+
+func TestChangingLanesClampsTheSpanCursor(t *testing.T) {
+	// Step deep into a long lane, then move to a shorter one. Leaving the
+	// index where it was would point past the end of the new lane, and
+	// every reader of it would have to bounds-check for itself.
+	m := timelineModel(t)
+	for i := 0; i < 50; i++ {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	lanes := m.timelineLanes()
+	if m.timeline.span >= len(lanes[m.timeline.lane].Spans) {
+		t.Errorf("span = %d in a lane of %d spans", m.timeline.span, len(lanes[m.timeline.lane].Spans))
+	}
+	if _, ok := m.selectedTimelineSpan(); !ok {
+		t.Error("selectedTimelineSpan reports nothing selected in a non-empty lane")
+	}
+}
+
+func TestAFilterThatEmptiesTheTimelineSelectsNothing(t *testing.T) {
+	m := timelineModel(t)
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+	m.invalidateRows()
+	if idx, ok := m.selectedTimelineSpan(); ok {
+		t.Errorf("selectedTimelineSpan = (%d, true) over an empty timeline, want ok == false", idx)
+	}
+}
+
+func TestEnterFromTheTimelineOpensTheSelectedSpanInTheRawLog(t *testing.T) {
+	m := timelineModel(t)
+	idx, ok := m.selectedTimelineSpan()
+	if !ok {
+		t.Fatal("nothing selected on a timeline with spans")
+	}
+	_, spans := m.timelineSpans()
+	want := int(spans[idx].Entry)
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("view = %v after Enter, want ViewRawLog", m.view)
+	}
+	if m.TopEntry() != want {
+		t.Errorf("top entry = %d, want %d (the entry that closed the selected span)", m.TopEntry(), want)
+	}
+}
+```
+
+`timelineLanes()` is the accessor this task adds for the lanes currently drawn; name it whatever fits the file, but the cursor tests need to ask something what the lanes are rather than recomputing them, or they will pass while disagreeing with the renderer.
+
+- [ ] **Step 2: Run them and watch them fail. Step 3: Implement. Step 4: Run them. Step 5: Full suite. Step 6: Commit.**
 
 ---
 
@@ -429,7 +591,46 @@ Below the lanes, the windows `model.Stalls` found, in the spec's shape: `3 lanes
 - At most the top few stalls by duration; the pane has finite height and a hundred 60ms stalls is noise.
 - Where there are none, say so in one line rather than leaving blank space: silence and "no stalls" look identical otherwise.
 
-- [ ] **Steps 1–6: test, fail, implement, pass, read, commit.**
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
+	// timeline.log has one long span running alone after the others
+	// finish; that span is what the annotation must name.
+	m := timelineModel(t)
+	got := m.stallAnnotation(80)
+	if !strings.Contains(got, "idle") {
+		t.Fatalf("stallAnnotation says nothing about idle lanes: %q", got)
+	}
+	if !strings.Contains(got, "waiting on") {
+		t.Errorf("stallAnnotation does not name what the idle lanes waited on: %q", got)
+	}
+}
+
+func TestStallAnnotationRendersOffsetsNotWallClock(t *testing.T) {
+	// Span times are milliseconds from a per-builder zero point, not a
+	// clock. Rendering them as "04:11:20" would be inventing a time of
+	// day out of an offset.
+	m := timelineModel(t)
+	got := m.stallAnnotation(80)
+	if strings.Contains(got, ":") {
+		t.Errorf("stallAnnotation looks like a wall-clock time, which this log has no basis for: %q", got)
+	}
+}
+
+func TestNoStallsSaysSoRatherThanRenderingNothing(t *testing.T) {
+	// Silence and "no stalls" look identical on screen, and one of them
+	// is a bug.
+	m := timelineModel(t)
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+	m.invalidateRows()
+	if got := m.stallAnnotation(80); strings.TrimSpace(got) == "" {
+		t.Error("stallAnnotation is blank where there are no stalls to report")
+	}
+}
+```
+
+- [ ] **Step 2: Run them and watch them fail. Step 3: Implement. Step 4: Run them. Step 5: Full suite, and read the rendered annotation against `testdata/timeline.log` by eye — an annotation that is well-formed and wrong passes every assertion above. Step 6: Commit.**
 
 ---
 
