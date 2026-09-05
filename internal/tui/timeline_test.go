@@ -130,3 +130,62 @@ func TestTimeAxisNamesBothEnds(t *testing.T) {
 		t.Errorf("timeAxis does not end at the window total: %q", got)
 	}
 }
+
+func TestLaneBarLightsAPartiallyOccupiedFinalColumn(t *testing.T) {
+	// 50ms/column at this width. [40,60) starts inside column 0 and ends
+	// inside column 1 -- ms 50-60 belong to column 1, so that column must
+	// be lit too, not just the one the span started in.
+	spans := []span.Span{{StartMs: 40, EndMs: 60, DurationMs: 20}}
+	got := laneBar(spans, model.Lane{Spans: []int{0}}, 1000, 20)
+	want := strings.Repeat("█", 2) + strings.Repeat(" ", 18)
+	if got != want {
+		t.Errorf("laneBar = %q, want %q", got, want)
+	}
+}
+
+// TestLaneBarPacksExactlyTheColumnsEachSpanCovers checks CONTENT, not just
+// width, over the same three-span fixture TestLaneBarIsAlwaysExactlyBarWColumns
+// uses. That test allocates its comparison string as barW bools and writes
+// every one of them, so it cannot fail on a geometry error -- it is a fixed
+// point of the string-building loop, not of the column mapping. The lit
+// columns here are instead worked out by hand from the column-boundary rule
+// (a start floors into the column it falls in; an end ceils, since a span
+// still running through any part of a column occupies it) rather than by
+// calling laneCol or laneEndCol, so a regression in that mapping that still
+// produces a barW-long string is still caught.
+func TestLaneBarPacksExactlyTheColumnsEachSpanCovers(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 1, DurationMs: 1},
+		{StartMs: 999, EndMs: 1000, DurationMs: 1},
+		{StartMs: 400, EndMs: 600, DurationMs: 200},
+	}
+	cases := []struct {
+		barW int
+		lit  []int // columns each of the three spans covers, hand-derived
+	}{
+		{1, []int{0}},
+		{7, []int{0, 2, 3, 4, 6}},
+		{20, []int{0, 8, 9, 10, 11, 19}},
+		{79, []int{0, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 78}},
+	}
+	for _, c := range cases {
+		on := make([]bool, c.barW)
+		for _, col := range c.lit {
+			on[col] = true
+		}
+		var b strings.Builder
+		for _, filled := range on {
+			if filled {
+				b.WriteRune('█')
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		want := b.String()
+
+		got := laneBar(spans, model.Lane{Spans: []int{0, 2, 1}}, 1000, c.barW)
+		if got != want {
+			t.Errorf("laneBar(barW=%d) = %q, want %q", c.barW, got, want)
+		}
+	}
+}

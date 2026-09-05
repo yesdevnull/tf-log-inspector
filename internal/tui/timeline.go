@@ -60,10 +60,19 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 		// start is clamped into range before end is derived from it, so a
 		// span whose start lands beyond the window (which laneCol cannot
 		// itself rule out -- see its own comment) still gets its one
-		// column inside the row rather than the minimum-one-column bump
-		// pushing end past barW with nothing left to draw.
+		// column drawn below rather than being silently dropped: the
+		// minimum-one-column bump adds to whatever start ends up being,
+		// so an unclamped out-of-range start would open a range beyond
+		// barW that the barW cap below then closes back down to empty.
 		start := min(laneCol(s.StartMs, spanMs, barW), barW-1)
-		end := laneCol(s.EndMs, spanMs, barW)
+		// end ceils rather than floors: a span's last millisecond can fall
+		// anywhere inside its final column, not just on that column's
+		// boundary, and a column the span is still running through must
+		// count as occupied. Flooring the end the way start floors would
+		// silently render that column idle -- exactly the failure mode
+		// this view exists to avoid, only inverted: busy time drawn as
+		// waiting rather than waiting drawn as busy.
+		end := laneEndCol(s.EndMs, spanMs, barW)
 		if end <= start {
 			end = start + 1
 		}
@@ -87,25 +96,45 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 }
 
 // laneCol maps a millisecond instant to the column it falls in, scaling
-// linearly across barW columns over a window of spanMs. spanMs of 0 means
-// every span in the lane is zero-duration, so there is no time axis to
-// scale against -- every instant maps to column 0 rather than dividing by
-// zero, and laneBar's minimum-one-column rule then lights that column
-// instead of leaving the row blank.
+// linearly across barW columns over a window of spanMs and flooring: an
+// instant belongs to whichever column its own millisecond falls inside.
+// laneBar uses it only for a span's START, which is exactly what floor
+// answers -- the column the span begins occupying. spanMs of 0 means every
+// span in the lane is zero-duration, so there is no time axis to scale
+// against -- every instant maps to column 0 rather than dividing by zero,
+// and laneBar's minimum-one-column rule then lights that column instead of
+// leaving the row blank.
 //
-// The result is capped at barW rather than barW-1: callers use it for both
-// a span's start (which they clamp themselves, since a start belongs to a
-// specific column) and its end (an exclusive bound, for which barW is the
-// correct value when the span runs to the edge of the window). PackLanes
-// builds every span from the same slice this window is measured over, so ms
-// should never exceed spanMs in practice, but the cap keeps a stray
-// out-of-range value from producing a column index laneBar cannot index
-// with.
+// The result is capped at barW as a defensive bound against a ms beyond
+// spanMs, which PackLanes building every span from the same slice this
+// window is measured over should rule out but this function cannot verify
+// on its own.
 func laneCol(ms, spanMs uint32, barW int) int {
 	if spanMs == 0 {
 		return 0
 	}
 	col := int(uint64(ms) * uint64(barW) / uint64(spanMs))
+	return min(col, barW)
+}
+
+// laneEndCol maps a millisecond instant to the EXCLUSIVE end column of the
+// span it closes, ceiling rather than flooring: a span still running
+// through any part of a column -- even its last millisecond -- must count
+// that column as occupied, so the boundary is rounded away from the span's
+// start rather than towards it. Flooring here the way laneCol floors a
+// start would silently drop the column a span's end merely touches, which
+// draws work that happened as idle time it did not spend.
+//
+// The ceiling-division idiom (numerator + denominator - 1) / denominator
+// avoids floating point, matching the rest of this package's integer
+// column arithmetic. spanMs of 0 shares laneCol's zero-window handling: no
+// time axis to scale against, so every instant maps to column 0 and the
+// caller's minimum-one-column bump takes it from there.
+func laneEndCol(ms, spanMs uint32, barW int) int {
+	if spanMs == 0 {
+		return 0
+	}
+	col := int((uint64(ms)*uint64(barW) + uint64(spanMs) - 1) / uint64(spanMs))
 	return min(col, barW)
 }
 
