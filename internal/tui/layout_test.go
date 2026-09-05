@@ -1236,19 +1236,39 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 // does nothing is worse than no hint. The key for the view already showing
 // is left out for the same reason -- Update ignores it -- and the centre
 // pane's title names that view instead.
+//
+// Both halves of that rule are swept from EVERY view, with the wanted and
+// unwanted hints derived from the views table rather than written out. Run
+// from one view only, the test cannot tell "leaves out the current view's
+// key" from "always leaves out that one view's key": a footer omitting a
+// working key while in another view, and advertising a dead one, satisfies
+// a fixed expectation just as well.
 func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{100, 160} {
-		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
-		got := footerOf(m.View())
-		for _, want := range []string{"1 providers", "2 types", "6 raw log"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("width %d: footer %q does not offer %q", w, got, want)
+		for _, current := range views {
+			m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(current.key)})
+			if m.ActiveView() != current.view {
+				t.Fatalf("key %q did not select the %s view", current.key, current.name)
 			}
-		}
-		for _, unwanted := range []string{"3 ", "5 ", "4 calls"} {
-			if strings.Contains(got, unwanted) {
-				t.Errorf("width %d: footer %q offers %q, which does nothing when pressed", w, got, unwanted)
+			got := footerOf(m.View())
+			for _, b := range views {
+				hint := b.key + " " + b.name
+				if b.view == current.view {
+					if strings.Contains(got, hint) {
+						t.Errorf("width %d, %s view: footer %q offers %q, the key for the view already showing, which does nothing when pressed", w, current.name, got, hint)
+					}
+					continue
+				}
+				if !strings.Contains(got, hint) {
+					t.Errorf("width %d, %s view: footer %q does not offer %q", w, current.name, got, hint)
+				}
+			}
+			for _, unbound := range []string{"3 ", "5 "} {
+				if strings.Contains(got, unbound) {
+					t.Errorf("width %d, %s view: footer %q offers key %q, which is specified but unimplemented", w, current.name, got, unbound)
+				}
 			}
 		}
 	}
