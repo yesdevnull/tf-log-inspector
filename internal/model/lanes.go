@@ -160,8 +160,9 @@ func PeakConcurrency(spans []span.Span) (int, error) {
 
 // peakFromEvents is PeakConcurrency's sweep over events already built and
 // sorted by spanEvents. Stalls needs the same number over the same events --
-// it is the capacity Stalls measures idle lanes against -- so the sweep
-// lives here rather than being written out twice.
+// it is the capacity Stalls measures each window's running count against,
+// and carries on every Stall it returns -- so the sweep lives here rather
+// than being written out twice.
 func peakFromEvents(events []spanEvent) int {
 	var cur, peak int
 	for _, e := range events {
@@ -173,17 +174,39 @@ func peakFromEvents(events []spanEvent) int {
 	return peak
 }
 
-// Stall is a window during which fewer lanes were busy than the timeline
-// has capacity for, named by a span that kept running while the others did
-// not.
+// Stall is a window during which fewer spans were running at once than the
+// log's peak concurrency, named by a span that kept running while the
+// others did not.
 type Stall struct {
 	StartMs, EndMs uint32
-	Idle           int // lanes with nothing to do in this window
+	// MinRunning and MaxRunning are the fewest and the most spans running
+	// at any instant in the window: equal for a window that holds one depth
+	// from end to end, and a range for one merged out of segments of
+	// differing depth (see Stalls' merge rule).
+	//
+	// Both, because the floor alone overstates how bad the earlier part of
+	// a merged window was -- a wait that ran two-up for twenty seconds and
+	// one-up for twenty more is not forty seconds of running one-up. And a
+	// range rather than a direction, because merging on contiguity admits a
+	// window whose depth falls and rises again, so a consumer wording the
+	// pair as a ramp would be claiming something the numbers do not say.
+	MinRunning, MaxRunning int
+	// Capacity is what those two are measured against: the peak concurrency
+	// of the very spans this stall was swept from (see Stalls for why that,
+	// and not a lane count the caller chose).
+	//
+	// It is carried here rather than left for the consumer to recompute,
+	// because both halves of "M of N" are only a pair while they come from
+	// one sweep of one slice. A consumer that measures N over some other
+	// slice prints a running count that is too high, or negative, with
+	// nothing in the output looking wrong.
+	Capacity int
 	// Blocking indexes the spans slice Stalls was given: the longest span
 	// running at any point in this window, ties towards the lower index.
 	//
-	// It is -1 when NOTHING was running -- every lane idle at once, which
-	// is a wait with no span to blame rather than an impossible value.
+	// It is -1 when NOTHING was running -- MinRunning and MaxRunning are
+	// then both zero -- which is a wait with no span to blame rather than
+	// an impossible value.
 	// Consumers must handle it: indexing spans with -1 panics, and looking
 	// -1 up in a lane finds none. See Stalls for why such windows are
 	// reported rather than skipped.
@@ -228,8 +251,9 @@ func outranksAsBlocking(spans []span.Span, a, b int) bool {
 // the running set rather than just its size, so each window can be named by
 // the span still running while the others are not.
 //
-// The capacity idle lanes are counted against is the spans' own peak
-// concurrency. Stalls takes no lane count from the caller, because there is
+// The capacity a window's running count is measured against, and which
+// every returned Stall carries, is the spans' own peak concurrency. Stalls
+// takes no lane count from the caller, because there is
 // no lane count a correct caller could pass that would change the answer: a
 // lane holds one span at a time, so however a caller chooses to pack these
 // spans into rows it needs at least as many rows as the deepest overlap,
@@ -241,8 +265,8 @@ func outranksAsBlocking(spans []span.Span, a, b int) bool {
 // as idle off the back of one instantaneous span, which the UI-hook tier
 // emits by the dozen.
 //
-// The consequence a caller must word its output for: capacity is what a
-// stall's Idle is measured against, so Idle can be smaller than the number
+// The consequence a caller must word its output for: Capacity is peak
+// concurrency and not a count of rows, so it can be smaller than the number
 // of rows the caller draws -- a caller packing each provider's spans
 // separately opens a row for a provider whose calls never overlap anything,
 // and that row is real but is not capacity the log ever used at once.
@@ -252,24 +276,37 @@ func outranksAsBlocking(spans []span.Span, a, b int) bool {
 // stall split by a handover is still one stall: thresholding first drops
 // both halves of a genuine wait that only looks short in pieces.
 //
-// Merging is on the idle count alone. The blocking lane is by definition
-// the one that keeps starting new work, so a long wait is routinely split
-// by handovers WITHIN it -- one 16.7s wait behind four consecutive calls
-// from the same provider is four windows naming four different spans.
-// Merging on the blocking span as well reports that as four stalls, of
-// which the shortest then falls under minMs and vanishes, understating the
-// wait it was supposed to measure. The merged window is named by the
-// longest span that blocked any part of it (see outranksAsBlocking), which
-// is the same answer as scanning the merged window whole would give: the
-// longest span running anywhere in it also wins the window it runs in.
+// Merging is on contiguity: windows that abut are one wait, whatever the
+// depth or the blocking span does inside it. Two ordinary shapes force
+// that. The blocking span is by definition the one that keeps starting new
+// work, so a long wait is routinely split by handovers WITHIN it -- one
+// 16.7s wait behind four consecutive calls from the same provider is four
+// windows naming four different spans. And a run draining off one provider
+// at a time steps the depth down with nothing starting in between: three
+// spans ending 20s apart are 40s of continuous waiting, which a rule keyed
+// on the running count reports as two separate waits of 20s.
+// Either split understates the wait it was supposed to measure, since each
+// fragment is thresholded against minMs on its own and the shortest
+// vanish, and it spends a caller's whole annotation on one ramp-down.
+//
+// A merged window reports the range of depths it covered, MinRunning to
+// MaxRunning, and is named by the longest span that blocked any part of it
+// (see outranksAsBlocking), which is the same answer as scanning the merged
+// window whole would give: the longest span running anywhere in it also
+// wins the window it runs in.
 //
 // A window where NOTHING is running is reported too, with Blocking -1.
 // Being unable to name a blocker is not the same as there being no wait:
 // Terraform core working with no provider call in flight is the commonest
 // shape of a slow plan, and it is drawn as blank space across every lane.
 // An annotation silent about it contradicts the picture it sits under.
-// Such a window can never merge into a blocked one, since idle is the full
-// capacity when nothing runs and strictly less whenever something does.
+//
+// The sign of Blocking is the one boundary a merge never crosses, however
+// closely the two windows abut. "Nothing running" and "waiting on the span
+// still going" are different findings with different causes, and a window
+// merged across that line would name a span as blocking a stretch that
+// began after it had already finished -- which is the reader-facing failure
+// merging exists to remove, recreated one level up.
 func Stalls(spans []span.Span, minMs uint32) ([]Stall, error) {
 	if len(spans) == 0 {
 		return nil, nil
@@ -309,7 +346,7 @@ func Stalls(spans []span.Span, minMs uint32) ([]Stall, error) {
 	// the last thing it knows happened, and the sweep never invents a
 	// segment past that.
 	if first := events[0].at; first > 0 && capacity > 0 {
-		raw = append(raw, Stall{StartMs: 0, EndMs: first, Idle: capacity, Blocking: -1})
+		raw = append(raw, Stall{StartMs: 0, EndMs: first, MinRunning: 0, MaxRunning: 0, Capacity: capacity, Blocking: -1})
 	}
 
 	// open records each span's liveness as the net of its start and end
@@ -344,18 +381,33 @@ func Stalls(spans []span.Span, minMs uint32) ([]Stall, error) {
 			break
 		}
 		next := events[i].at
-		idle := capacity - runningCount
-		if idle <= 0 {
-			// Every lane that can hold work is holding some.
+		if runningCount >= capacity {
+			// As many spans are in flight as ever were at once, so there is
+			// nothing here that was waiting.
 			continue
 		}
-		raw = append(raw, Stall{StartMs: at, EndMs: next, Idle: idle, Blocking: lowestRankRunning(order, running)})
+		// One segment holds one depth throughout, so it opens with its
+		// range closed; only a merge widens it.
+		raw = append(raw, Stall{
+			StartMs: at, EndMs: next,
+			MinRunning: runningCount, MaxRunning: runningCount,
+			Capacity: capacity,
+			Blocking: lowestRankRunning(order, running),
+		})
 	}
 
+	// Contiguous windows of the same KIND are one wait, and the sign of
+	// Blocking is the kind: within a kind both the depth and the blocking
+	// span are free to change, across it nothing may merge at all (see the
+	// doc comment above). The range widens to cover every segment taken in,
+	// and the name is re-derived over them rather than kept from whichever
+	// segment opened the window.
 	var merged []Stall
 	for _, s := range raw {
-		if n := len(merged); n > 0 && merged[n-1].EndMs == s.StartMs && merged[n-1].Idle == s.Idle {
+		if n := len(merged); n > 0 && merged[n-1].EndMs == s.StartMs && (merged[n-1].Blocking < 0) == (s.Blocking < 0) {
 			merged[n-1].EndMs = s.EndMs
+			merged[n-1].MinRunning = min(merged[n-1].MinRunning, s.MinRunning)
+			merged[n-1].MaxRunning = max(merged[n-1].MaxRunning, s.MaxRunning)
 			if outranksAsBlocking(spans, s.Blocking, merged[n-1].Blocking) {
 				merged[n-1].Blocking = s.Blocking
 			}
@@ -393,9 +445,16 @@ func lowestRankRunning(order []int, running []uint64) int {
 // eight-minute plan was eight minutes of work or ninety seconds of work and
 // six minutes of waiting -- for a log whose idle time is spread thinly
 // rather than gathered into windows long enough to clear a stall threshold.
-// Rate-limited polling is the ordinary shape that produces one: sixty short
-// calls three seconds apart never drop the concurrency and never open a
-// long enough gap, so every stall rule is silent while the run is 98% idle.
+// Rate-limited polling is the ordinary shape that produces one, and it is
+// the threshold alone that silences the stall list over it, not any absence
+// of stalls: sixty forty-millisecond calls three seconds apart
+// (testdata/timeline-dense-lane.log) drop the concurrency to zero in every
+// one of the fifty-nine gaps between them, and Stalls opens an all-idle
+// window for each. Every one of those windows is 2.96s long, against the
+// 9s a caller scaling its threshold to that 180s window asks for, so all
+// fifty-nine are dropped -- correctly, since a three-second gap is not what
+// a reader means by a stall -- while only 1.3% of the run had a call in
+// flight at all.
 //
 // It is a UNION, not a sum of durations. Two spans running [0,10) and
 // [5,15) cover fifteen milliseconds between them, not the twenty their

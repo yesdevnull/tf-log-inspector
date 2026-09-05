@@ -161,18 +161,21 @@ func TestPeakConcurrencyIgnoresZeroDurationSpans(t *testing.T) {
 }
 
 func TestStallsFindsTheWindowWhereOnlyOneSpanRan(t *testing.T) {
-	// Three spans. Two finish early; one runs long past them, so from
-	// 100ms to 500ms two of the three lanes are idle.
+	// Three spans. Two finish together at 100ms; one runs long past them,
+	// so from 100ms to 500ms a single span is running against a peak of
+	// three. They finish together deliberately: this window holds one depth
+	// from end to end, and a wait whose depth changes partway is
+	// TestStallsMergesAWaitWhoseDepthChanges.
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 500, DurationMs: 500, RPC: "Configure"},
 		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
-		{StartMs: 0, EndMs: 80, DurationMs: 80, RPC: "ReadResource"},
+		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
 	}
 	got, err := Stalls(spans, 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 100, EndMs: 500, Idle: 2, Blocking: 0}}
+	want := []Stall{{StartMs: 100, EndMs: 500, MinRunning: 1, MaxRunning: 1, Capacity: 3, Blocking: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v", got, want)
 	}
@@ -224,9 +227,8 @@ func TestStallsReportsNoStallWhenEverySpanRunsThroughout(t *testing.T) {
 // stalls contradicts its own picture. Such a window is reported with
 // Blocking -1.
 //
-// It never merges into a blocked window on either side: idle is the full
-// capacity when nothing runs and strictly less than that when something
-// does, so the two kinds cannot share an idle count.
+// It never merges into a blocked window on either side, however closely
+// they abut: see TestStallsNeverMergesAcrossTheBlockedAndAllIdleBoundary.
 func TestStallsReportsWindowsWhereNothingWasRunning(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
@@ -238,22 +240,91 @@ func TestStallsReportsWindowsWhereNothingWasRunning(t *testing.T) {
 		t.Fatalf("Stalls: %v", err)
 	}
 	want := []Stall{
-		{StartMs: 100, EndMs: 200, Idle: 2, Blocking: -1},
-		{StartMs: 200, EndMs: 260, Idle: 1, Blocking: 2},
+		{StartMs: 100, EndMs: 200, MinRunning: 0, MaxRunning: 0, Capacity: 2, Blocking: -1},
+		{StartMs: 200, EndMs: 260, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v (the 100ms-200ms window has nothing running, which is a wait with no span to name)", got, want)
 	}
 }
 
-// Two sweep segments that share an idle count are one stall, even though a
-// handover between two other spans splits the sweep into two segments at
-// the midpoint. Thresholding before merging would drop both sub-threshold
-// halves of this 50ms stall; thresholding after merging keeps it.
+// Windows merge on contiguity, so the one rule holding two findings apart is
+// the sign of Blocking: a window with a span still running is "waiting on
+// aws/1" and one with nothing running at all is "nothing running", and they
+// have different causes even when they abut. Merging them would report a
+// span as blocking a stretch it had already finished before -- the same
+// reader-facing failure the merge rule exists to remove, one level up.
 //
-// The fourth span exists to lift the timeline's capacity to three: without
-// it nothing here ever runs three-up, so the two segments have no idle lane
-// to report and the merge has nothing to act on.
+// The three windows here put the boundary in both directions: span 1
+// finishes at 50ms leaving span 0 running alone, span 0 finishes at 100ms
+// leaving nothing running, and span 2 opens at 150ms running alone again.
+// Every pair is contiguous, and no pair may merge.
+func TestStallsNeverMergesAcrossTheBlockedAndAllIdleBoundary(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 100, DurationMs: 100},
+		{StartMs: 0, EndMs: 50, DurationMs: 50},
+		{StartMs: 150, EndMs: 200, DurationMs: 50},
+	}
+	got, err := Stalls(spans, 0)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{
+		{StartMs: 50, EndMs: 100, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 0},
+		{StartMs: 100, EndMs: 150, MinRunning: 0, MaxRunning: 0, Capacity: 2, Blocking: -1},
+		{StartMs: 150, EndMs: 200, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 2},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (a blocked wait and an all-idle window are different findings and never merge, in either order)", got, want)
+	}
+}
+
+// The ordinary tail of a plan: three providers draining off one at a time.
+// google's lane is idle continuously from 20.0s to the end, and merging on
+// the running count alone ends that wait and starts another the moment
+// azurerm finishes too -- reporting one 40s wait as two of 20s, and
+// spending two of the three lines a caller has room for on one ramp-down.
+//
+// The merged window reports the range it covered rather than its floor.
+// Reporting only the floor would say "1 of 3" for a stretch that ran two-up
+// for half its length, which overstates how bad the earlier half was; and
+// no direction is claimed, because merging on contiguity admits a window
+// that fell and rose again.
+func TestStallsMergesAWaitWhoseDepthChanges(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 60000, DurationMs: 60000}, // aws, running throughout
+		{StartMs: 0, EndMs: 20000, DurationMs: 20000}, // google
+		{StartMs: 0, EndMs: 40000, DurationMs: 40000}, // azurerm
+	}
+	peak, err := PeakConcurrency(spans)
+	if err != nil {
+		t.Fatalf("PeakConcurrency: %v", err)
+	}
+	got, err := Stalls(spans, 1000)
+	if err != nil {
+		t.Fatalf("Stalls: %v", err)
+	}
+	want := []Stall{{StartMs: 20000, EndMs: 60000, MinRunning: 1, MaxRunning: 2, Capacity: 3, Blocking: 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Stalls = %+v, want %+v (one 40s wait at a depth that changes, not two waits of 20s)", got, want)
+	}
+	// Capacity is carried on the stall so a caller renders both halves of
+	// "M of N" from one measurement of one slice, rather than sweeping the
+	// spans a second time for the denominator.
+	if got[0].Capacity != peak {
+		t.Errorf("stall Capacity = %d, want PeakConcurrency's %d", got[0].Capacity, peak)
+	}
+}
+
+// One wait split by a handover is one stall: the 10ms-30ms and 30ms-60ms
+// segments are 20ms and 30ms apart, so thresholding before merging would
+// drop both halves of a wait that starts at 10ms and never lets up.
+// Thresholding after merging keeps it, which is what the reported window
+// starting at 10ms rather than at 60ms shows.
+//
+// The fourth span exists to lift the spans' peak concurrency to three:
+// without it nothing here ever runs three-up, so the first two segments are
+// running at capacity and the merge has nothing to act on.
 func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 	spans := []span.Span{
 		{StartMs: 0, EndMs: 1000, DurationMs: 1000}, // always running; the blocking span throughout
@@ -265,10 +336,7 @@ func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{
-		{StartMs: 10, EndMs: 60, Idle: 1, Blocking: 0},
-		{StartMs: 60, EndMs: 1000, Idle: 2, Blocking: 0},
-	}
+	want := []Stall{{StartMs: 10, EndMs: 1000, MinRunning: 1, MaxRunning: 2, Capacity: 3, Blocking: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v", got, want)
 	}
@@ -301,7 +369,7 @@ func TestStallsIgnoresElapsedZeroDurationSpansWhenChoosingBlocking(t *testing.T)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 20, EndMs: 100, Idle: 1, Blocking: 1}}
+	want := []Stall{{StartMs: 20, EndMs: 100, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v (the elapsed zero-duration span must not win Blocking)", got, want)
 	}
@@ -320,7 +388,7 @@ func TestStallsBreaksDurationTiesTowardsTheLowerIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 100, EndMs: 200, Idle: 1, Blocking: 0}}
+	want := []Stall{{StartMs: 100, EndMs: 200, MinRunning: 2, MaxRunning: 2, Capacity: 3, Blocking: 0}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v", got, want)
 	}
@@ -394,8 +462,8 @@ func TestStallsMergesOneWaitAcrossHandoversInsideTheBlockingLane(t *testing.T) {
 		t.Fatalf("Stalls: %v", err)
 	}
 	want := []Stall{
-		{StartMs: 0, EndMs: 3000, Idle: 2, Blocking: -1},
-		{StartMs: 3300, EndMs: 20000, Idle: 1, Blocking: 1},
+		{StartMs: 0, EndMs: 3000, MinRunning: 0, MaxRunning: 0, Capacity: 2, Blocking: -1},
+		{StartMs: 3300, EndMs: 20000, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 1},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v (one 16.7s wait, named by the longest span that blocked any part of it)", got, want)
@@ -420,7 +488,7 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
-	want := []Stall{{StartMs: 0, EndMs: 8000, Idle: 2, Blocking: -1}}
+	want := []Stall{{StartMs: 0, EndMs: 8000, MinRunning: 0, MaxRunning: 0, Capacity: 2, Blocking: -1}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Stalls = %+v, want %+v (8s of the capture elapsed before any span started, and none after the last ended)", got, want)
 	}
@@ -441,7 +509,8 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 // pinned here instead, over spans dense enough to keep the bookkeeping
 // busy: the span named as Blocking runs somewhere in the window and no span
 // running in that window outranks it, -1 appears only where nothing runs at
-// all, and no two returned windows could still have been merged.
+// all, every window's depth sits inside the capacity it is reported against,
+// and no two returned windows could still have been merged.
 func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	spans := make([]span.Span, 200)
@@ -477,9 +546,23 @@ func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 			t.Fatalf("stall %+v names span %d, which does not run anywhere in that window", w, w.Blocking)
 		}
 	}
+	peak, err := PeakConcurrency(spans)
+	if err != nil {
+		t.Fatalf("PeakConcurrency: %v", err)
+	}
+	for _, w := range got {
+		switch {
+		case w.Capacity != peak:
+			t.Fatalf("stall %+v is measured against capacity %d, but the spans' peak concurrency is %d", w, w.Capacity, peak)
+		case w.MinRunning > w.MaxRunning || w.MaxRunning >= w.Capacity:
+			t.Fatalf("stall %+v has an impossible depth: a window is reported only while fewer than %d spans run", w, w.Capacity)
+		case (w.MinRunning == 0) != (w.Blocking < 0):
+			t.Fatalf("stall %+v names a blocking span for a window that ran empty, or names none for a window that did not", w)
+		}
+	}
 	for i := 1; i < len(got); i++ {
-		if got[i-1].EndMs == got[i].StartMs && got[i-1].Idle == got[i].Idle {
-			t.Fatalf("stalls %+v and %+v are adjacent and share an idle count: they are one window reported as two", got[i-1], got[i])
+		if got[i-1].EndMs == got[i].StartMs && (got[i-1].Blocking < 0) == (got[i].Blocking < 0) {
+			t.Fatalf("stalls %+v and %+v are contiguous and are the same kind of finding: they are one window reported as two", got[i-1], got[i])
 		}
 	}
 }
