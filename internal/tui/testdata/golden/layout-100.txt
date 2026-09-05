@@ -29,7 +29,6 @@ LEVELS                    │                                              │
                           │                                              │                          
                           │                                              │                          
                           │                                              │                          
-                          │                                              │                          
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s
@@ -37,4 +36,5 @@ with debug plus provider TRACE. Rankings hold, since every
 span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
-1 providers  2 types  6 raw log  ⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+1 providers  2 types  6 raw log
+⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit

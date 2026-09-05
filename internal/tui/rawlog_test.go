@@ -225,12 +225,21 @@ func TestSlashSearchHonoursActiveFilter(t *testing.T) {
 	}
 }
 
-// footerOf returns the composed view's last line, which is the footer: the
-// key hints, or the search prompt while a search is open or has just
-// failed.
+// footerOf returns the composed view's footer: the key hints' two lines, or
+// the search prompt's one line while a search is open or has just failed.
+//
+// View always places a blank line above the footer, so that blank line
+// tells the two shapes apart: it survives as the line before last only when
+// the footer beneath it is the one-line message, since a two-line footer's
+// own first line -- never blank, views is never empty -- stands there
+// instead.
 func footerOf(view string) string {
 	lines := strings.Split(view, "\n")
-	return lines[len(lines)-1]
+	last := lines[len(lines)-1]
+	if n := len(lines); n >= 2 && lines[n-2] != "" {
+		return lines[n-2] + "\n" + last
+	}
+	return last
 }
 
 // rawLogView returns a model showing the raw log at a known terminal size.

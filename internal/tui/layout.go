@@ -205,6 +205,17 @@ const (
 // a height that dropped it, '/' captured every keystroke with nothing on
 // screen to say so -- the query invisible, 'q' no longer quitting -- which
 // is the trap the Ctrl+C handling in handleSearchKey exists to escape.
+//
+// m.footer(w) returns one line for the search and blocked-jump messages and
+// two for the ordinary key hints, so the room reserved for it and the number
+// of lines appended both follow len(footerLines) rather than assuming
+// either count. Each line is clipped on its own rather than the joined
+// block being clipped as one string: clipWidth measures display columns
+// across a "\n" as it would across any other character, so clipping the
+// two-line block whole would spend the SECOND line's width budget
+// continuing from wherever the first line left off, cutting "q quit" away
+// again on exactly the terminals this task widened the footer to keep it
+// on.
 func (m *Model) View() string {
 	w, h := m.paneWidth(), m.height
 	if h <= 0 {
@@ -229,10 +240,14 @@ func (m *Model) View() string {
 	}
 	lines = append(lines, "")
 
-	if len(lines) > h-1 {
-		lines = lines[:h-1]
+	footerLines := strings.Split(m.footer(w), "\n")
+	if room := h - len(footerLines); len(lines) > room {
+		lines = lines[:room]
 	}
-	return strings.Join(append(lines, clipWidth(m.footer(w), w)), "\n")
+	for _, line := range footerLines {
+		lines = append(lines, clipWidth(line, w))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // header names the file and its span counts.
@@ -308,35 +323,18 @@ func (m *Model) footer(w int) string {
 // the key that lifts it is named.
 const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears it"
 
-// keyHints is the footer's hint line for view v in a terminal w columns
-// wide: which number keys switch views, then which keys act.
+// keyHints is the footer's two hint lines: which number keys switch views,
+// then which keys act on what is on screen.
 //
-// The two groups together are 91 to 95 display columns, depending on which
-// view's key is left out, and the action keys alone are 62. Neither fits
-// every supported width, and the line is clipped from its END, so a line
-// composed longer than w loses its tail -- which is "q quit", the one key a
-// user must never lose sight of. So the view keys are an ALL-OR-NOTHING
-// addition: they are shown only when the whole composed line fits w, and
-// dropped entirely when it does not, rather than added and then cut. Below
-// the width they fit at, the line is exactly the action keys it has always
-// been, and the view the user is in is still named by the centre pane's own
-// title (see renderCentre), which every width shows.
-//
-// That puts the view keys on screen from 95 columns up and the view's name
-// on screen at every width, which is the split the two facts deserve: the
-// name answers "what am I looking at" and has to survive anywhere, while
-// the keys answer "what else is there" and only have to be findable.
-//
-// 62 columns is not a floor anyone is protected by: renderPanes has a layout
-// for widths below detailInlineWidth and the spec defines one, so the
-// interface really does render at 60 columns, where "q quit" is already cut
-// to "q qu". Nothing should budget against 62 as though it were guaranteed.
+// They are two lines rather than one because a single composed line ran to
+// 107 display columns once the timeline joined it, and the line is clipped
+// from its END -- so the tail it lost was "q quit", the one key a user must
+// never lose sight of. Splitting them lets both groups keep their full names
+// at every width this interface renders at, and costs one line of pane
+// height. Each line is still clipped independently, because a 60-column
+// terminal cannot show 62 columns of action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
-	action := m.actionKeys()
-	if line := viewKeyHints(m.view) + "  " + action; lipgloss.Width(line) <= w {
-		return line
-	}
-	return action
+	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(), w)
 }
 
 // openHint names the key that jumps from the selected row to the log entry
@@ -392,8 +390,8 @@ func viewKeyHints(v View) string {
 
 // frameFixedLines is what a frame spends on everything but the pane row and
 // the caveat block: the header, the blank line beneath it, the blank line
-// above the footer, and the footer itself.
-const frameFixedLines = 4
+// above the footer, and the footer's two hint lines.
+const frameFixedLines = 5
 
 // paneHeight is how many lines the pane row itself gets in a frame h lines
 // tall carrying caveatLines lines of caveat. The caveat block costs one line

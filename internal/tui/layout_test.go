@@ -157,6 +157,35 @@ func TestGoldenLayouts(t *testing.T) {
 	compareGolden(t, "layout-100-providers.txt", m.View())
 }
 
+// The footer's view-key hints must never vanish. Composed onto one line with
+// the action keys they used to be dropped whole below 95 columns because the
+// line was clipped from its end and "q quit" had to survive; two lines lets
+// both groups keep their full names at every width this interface renders
+// at.
+func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	for _, w := range []int{60, 70, 100, 160} {
+		got := m.footer(w)
+		lines := strings.Split(got, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("footer(%d) = %d lines, want 2:\n%s", w, len(lines), got)
+		}
+		// The view-key line names every view except the one showing, at
+		// every width -- the whole point of the two-line split.
+		if !strings.Contains(lines[0], "2 types") {
+			t.Errorf("footer(%d) view line lost its hints: %q", w, lines[0])
+		}
+		// The action line is clipped on its own, so it can still lose its
+		// own tail on a terminal narrower than its own 62 columns (see
+		// actionKeys) -- a pre-existing limit this task's split does not
+		// change, since actionKeys is untouched. "q quit" is only
+		// guaranteed once the action line itself fits.
+		if w >= lipgloss.Width(m.actionKeys()) && !strings.Contains(lines[1], "q quit") {
+			t.Errorf("footer(%d) action line lost q quit: %q", w, lines[1])
+		}
+	}
+}
+
 // Pressing 'f' below the facet-pane's inline width threshold must open it as
 // an overlay AND give it the keyboard. The overlay exists precisely so
 // facets are usable on a narrow terminal, and an overlay without focus is a
@@ -666,10 +695,10 @@ func TestTheCaveatShortensBeforeItCostsTheFooter(t *testing.T) {
 		wantFull, wantAny bool
 	}{
 		{40, true, true},
-		{11, true, true},
-		{10, false, true},
-		{7, false, true},
-		{6, false, false},
+		{12, true, true},
+		{11, false, true},
+		{8, false, true},
+		{7, false, false},
 	} {
 		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: c.h})
 		view := m.View()
@@ -1297,9 +1326,9 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 	}
 }
 
-// The footer has to say which number keys switch views, at the widths that
-// can hold the hints -- 100 columns is what this tool is actually run at.
-// It must name only the keys that WORK: 3 (resource addresses) and 5
+// The footer has to say which number keys switch views, at 100 and 160
+// columns -- 100 is what this tool is actually run at. It must name only
+// the keys that WORK: 3 (resource addresses) and 5
 // (timeline) are specified but unimplemented, and a hint for a key that
 // does nothing is worse than no hint. The key for the view already showing
 // is left out for the same reason -- Update ignores it -- and the centre
@@ -1381,12 +1410,12 @@ func TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens(t *testing.T) {
 	}
 }
 
-// The footer is clipped from its END, and "q quit" is the one key a user
-// must not lose sight of. So the view-key hints are all-or-nothing: shown
-// only when the whole composed line fits, never appended and then cut. This
-// sweeps every width from the one the action keys alone need, in every
-// view -- the hints vary by view, so the widest composed line does too.
-func TestTheFooterNeverLosesQuitToTheViewKeys(t *testing.T) {
+// The action line is clipped on its own, independently of the view-key line
+// above it, so nothing the view-key line says can still crowd "q quit" off
+// the end of the action line the way one composed line used to. This sweeps
+// every width from the one the action keys alone need, in every view -- the
+// open hint varies by view, so the width the action line needs does too.
+func TestTheFooterNeverLosesQuitAtWidthsTheActionLineFits(t *testing.T) {
 	m := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, b := range views {
 		// setView rather than an assignment: it resets the selection and
@@ -1394,12 +1423,13 @@ func TestTheFooterNeverLosesQuitToTheViewKeys(t *testing.T) {
 		// function of the selected row.
 		m.setView(b.view)
 		for w := lipgloss.Width(m.actionKeys()); w <= 200; w++ {
-			got := clipWidth(m.footer(w), w)
-			if !strings.Contains(got, "q quit") {
-				t.Fatalf("%s at %d columns: footer %q has lost the quit hint", b.title, w, got)
+			lines := strings.Split(m.footer(w), "\n")
+			action := lines[len(lines)-1]
+			if !strings.Contains(action, "q quit") {
+				t.Fatalf("%s at %d columns: action line %q has lost the quit hint", b.title, w, action)
 			}
-			if n := lipgloss.Width(got); n > w {
-				t.Fatalf("%s at %d columns: footer is %d columns: %q", b.title, w, n, got)
+			if n := lipgloss.Width(action); n > w {
+				t.Fatalf("%s at %d columns: action line is %d columns: %q", b.title, w, n, action)
 			}
 		}
 	}
