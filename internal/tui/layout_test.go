@@ -150,6 +150,13 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "tfli -- x.log") {
 		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
 	}
+	// The surviving footer line must be the ACTION line, not the view-key
+	// line: "q quit" is the hint this file's own comments call
+	// non-negotiable, and the view-key line has always been the one given
+	// up first when there is not room for both.
+	if lines[1] != m.actionKeys() {
+		t.Errorf("second line at height 2 is %q, want the action keys %q", lines[1], m.actionKeys())
+	}
 }
 
 // Golden files lock the layout at the three widths the spec names. They use
