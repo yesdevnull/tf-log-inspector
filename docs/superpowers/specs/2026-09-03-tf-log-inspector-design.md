@@ -206,6 +206,15 @@ span is matched to the core-side address context active at that moment, keyed
 on RPC name, resource type and time. It is **inference, not observation**, and
 is treated as such throughout — see Address attribution below.
 
+**Amended 2026-09-06: core is one source of an address, not the only one, and
+not the one phase 5 uses.** Terraform's `terraform.ui` structured-output stream
+names a full address for every resource it touches, and there it is *observed*
+rather than inferred. Core's addresses are available only under full
+`TF_LOG=TRACE`, which suppresses that stream; the capture this project
+standardised on measures `core vertex lines 0`. Phase 5 correlates against the
+UI stream instead, and the core mechanism is specified but deferred. See Address
+attribution.
+
 ## The observer effect: logging changes what is measured
 
 **Measured 2026-09-04, and it is large.** Four captures of the same HCP
@@ -343,6 +352,16 @@ observed captures above, so neither mode's memory cost is a concern at
 today's measured sizes; this is worth re-checking if a much larger capture
 ever turns up.
 
+**Amended 2026-09-06:** "only ever needs one entry at a time" no longer holds.
+`runDiagnose` already retains `builder.Spans()`, and phase 5's confidence and
+coverage figures require the full context table plus a whole-log correlation
+pass — a span can overlap a context that opens later in the file, so nothing can
+be labelled on the fly. `--diagnose` still streams the file rather than reading
+it whole, so `Log.Data` is still never materialised, but it now holds the RPC
+spans, the UI-hook context table and one `Attribution` per RPC span. Against the
+measured captures that is thousands of contexts beside 2,174 spans, so the
+conclusion is unchanged; the stated reason is what needed correcting.
+
 ## Data model
 
 The indexed unit is a **logical entry**, not a physical line. A single log
@@ -373,38 +392,64 @@ type Span struct {
     StartMs, EndMs     uint32
     RPC, Provider      uint16 // interned
     ResourceType       uint32 // interned; observed, from tf_resource_type
-    Address            uint32 // interned; OBSERVED, from the UI-hook stream only
+    ResourceAddr       uint32 // interned; inferred by correlation, 0 if unknown
     Fidelity           uint8  // which SpanBuilder produced this
+    AddrConfidence     uint8  // Exact | Likely | Ambiguous | Unknown
 }
 ```
 
-**Corrected 2026-09-06: inferred addresses do not live on `Span`.** This sketch
-originally carried `ResourceAddr` and `AddrConfidence` here. `Span.Address` now
-exists and means an address the log *stated* — it is how a `FidelityUIReported`
-span carries its own. Writing an inferred address into that same field would
-collapse the observed/inferred distinction the whole design rests on, in the
-one struct whose job is to record what the log said.
+**This sketch is superseded, 2026-09-06.** It is the 2026-09-03 design sketch and
+is kept for the argument it makes, not as a description of the code. The shipped
+`span.Span` (`internal/span/span.go`) differs in three ways that matter here: it
+carries a single `Entry uint32` rather than `StartEntry`/`EndEntry`; its `RPC`,
+`Provider`, `ResourceType` and `Address` are `string`, deduplicated through a
+`map[string]string` retain cache rather than interned to ids; and its `Address`
+field means an **observed** address, populated only for `FidelityUIReported`
+spans from `hook.resource.addr`.
 
-Attribution is therefore a parallel table in its own package, indexed by span:
+**Inferred addresses do not live on `Span`.** Writing one into `Span.Address`
+would collapse the observed/inferred distinction the whole design rests on, in
+the one struct whose job is to record what the log said. Attribution is a
+parallel table in its own package:
 
 ```go
-// Attribution labels one span. Held in a slice parallel to the span slice,
-// never merged into Span: Span records what the log stated, this records what
-// was inferred from it.
+// Attribution labels one RPC span. Held in a slice parallel to
+// model.Log.RPCSpans specifically -- not to a concatenation of RPCSpans and
+// UISpans, which model deliberately keeps apart. UISpans need no attribution:
+// their Address is observed.
 type Attribution struct {
-    Address    uint32 // interned; 0 when no address was attributed
-    Candidates uint32 // how many addresses were equally plausible
-    Confidence uint8  // Exact | Likely | Ambiguous | Unattributed | NoContext
-    Mechanism  uint8  // which correlator produced this
+    Address    string // "" when no address was attributed
+    Candidates uint32 // overlapping candidates considered, in every state
+    Confidence uint8  // Contained | Likely | Overlapping | Ambiguous | Unattributed
 }
 ```
 
-It is pointer-free for the same reason `Span` is, so the GC argument below
-holds over both slices.
+`Candidates` is defined as **the number of overlapping candidates considered**,
+which has a well-defined value in every state — 1 for `Contained` and
+`Overlapping`, N for `Likely` and `Ambiguous`, 0 for `Unattributed`. An earlier
+draft defined it as "how many were equally plausible", which has no value at all
+for the two states where exactly one candidate wins.
+
+There is no `Mechanism` field: phase 5 builds one mechanism (see Address
+attribution), so it would be a per-log constant stored on every span. There is no
+`NoContext` confidence value either, for the same reason — it is a property of the
+log, and under it the table is not allocated.
+
+`Attribution.Address` is a `string`, matching how the shipped `Span` retains its
+strings. There is no id-yielding interner to hold addresses: `logfmt.Interner` is
+`uint16` and holds component names only.
 
 Neither struct contains a pointer or a string. Go's garbage collector therefore
 never traces the line and span slices — they are two large pointer-free
-allocations it walks past. Strings live in a small intern table; distinct
+allocations it walks past.
+
+**Corrected 2026-09-06: this holds for `Entry`, not for the shipped `Span`.**
+`span.Span` carries four `string` fields, so the span slice is traced. The
+mitigation is the deduplication the next paragraph describes — distinct
+providers, RPC names, types and addresses number in the thousands at most, so
+the strings are few even when the spans are many — but the slice is not the
+pointer-free allocation this paragraph claims. `Attribution` holds one string
+per span on the same basis. Strings live in a small intern table; distinct
 providers, RPC names and resource types number in the thousands at most.
 
 **Component facets.** Terraform core writes messages that *begin* with a
@@ -477,101 +522,238 @@ runs after span extraction, in its own package, over its own inputs.
 **Revised 2026-09-06.** The original design named one mechanism — core's graph
 walk — and made the whole phase conditional on it. That mechanism cannot run on
 the capture this project standardised on, which measured `core vertex lines 0`
-and `core GRPC lines 0` (open question 5). A second mechanism exists that the
+and `core GRPC lines 0` (open question 8). A second mechanism exists that the
 original design could not have seen, because it was written before any capture
-produced spans from both builders at once. **Both ship, and the sniffer picks
-per log**, exactly as the extraction tiers already do.
+produced spans from both builders at once. **Phase 5 builds the second one.
+The first is specified below but deferred**, for the reasons under Mechanism A.
 
-#### Mechanism A: core graph walk
-
-Available under full `TF_LOG=TRACE`. Core's graph walk is tracked as a state
-machine over its own log lines: `vertex "<address>"` lines open and close
-address context, and `[TRACE] GRPCProvider: <RPCName>` marks core issuing a
-call. A provider span is attributed to an address when the RPC name and
-resource type match a core-side context that was open across the span's time
-window.
-
-Core's walk is concurrent and the log carries no goroutine identifier, so
-several vertices of one type are open at once. That is the ambiguity open
-question 2 has always named and never measured.
-
-#### Mechanism B: UI-hook address context
+#### Mechanism B: UI-hook address context — the one phase 5 builds
 
 Available on the standardised capture (debug toggle + `TF_LOG_PROVIDER` and
 `TF_LOG_SDK_PROTO` at TRACE), which carries the `terraform.ui` stream *and*
-provider RPCs. Terraform's UI hook names a full address — module path,
-resource name and index key — for every resource it touches.
+provider RPCs. Terraform's UI hook names a full address for every resource it
+touches, and `hook.resource` decomposes it: `module`, `resource`,
+`resource_type`, `resource_name`, `resource_key`. That object shape is
+confirmed against a real run (`testdata/structured-ui.log`'s header).
 
-This mechanism does **not** reuse `UIHookBuilder`'s spans. That builder admits
-only completion-bearing hook types (`apply_complete`, `apply_errored`,
-`ephemeral_op_*`, `provision_*`) because it needs `elapsed_seconds`; a plan log
-may therefore yield very few of them while carrying thousands of RPCs. Address
-context is instead taken from `_start`/`_complete` **pairs of every hook type**,
-which is a wider source and the one a refresh-heavy plan needs.
+Address context is taken from hook `_start` and terminator lines, **not** from
+`UIHookBuilder`'s spans.
 
-A consequence worth stating: those context windows are bounded by the lines'
-own RFC3339Nano timestamps, not by `elapsed_seconds`. They are millisecond
-precise, so the whole-second rounding that limits UI-hook *durations* does not
-enter the correlation.
+**Corrected 2026-09-06, and the correction matters because the original reason
+was false.** An earlier draft justified this by saying `UIHookBuilder` admits
+"no refresh types at all" and so would miss a plan's refresh work. That is
+wrong: **a refresh emits `apply_start`/`apply_complete` with `action:"read"`** —
+confirmed against a real run and recorded in `testdata/structured-ui.log`'s
+header. There is no `refresh_*` type; refresh coverage arrives under the
+`apply_*` name and is already inside `isCompletionType`. The same draft said the
+builder filters on `elapsed_seconds`; it filters on `isCompletionType` alone
+(`internal/span/uihook.go`) and emits a span with `DurationMs` 0 when elapsed is
+absent.
 
-**How much of a real plan mechanism B can cover is unmeasured.** Which hook
-types appear, and how often, is a structural fact about Dan's captures that
-nothing has yet counted. `--diagnose` gains a hook-type histogram, and that
-number sizes the mechanism before anything is built on it.
+The three reasons that do hold:
+
+- A `_start` line gives an **opening bound** where no completion exists. A
+  resource still running at end-of-log, or one whose completion was truncated
+  away, has context under a start-line rule and none under a completion rule.
+- `_errored` terminates a context that `_complete` never closes. Under a
+  literal `_start`/`_complete` rule an errored operation opens a context that
+  stays open for the rest of the log.
+- The pair's own **RFC3339Nano timestamps** bound the window, so context is
+  millisecond precise. `elapsed_seconds` is quantised to whole seconds (open
+  question 7) and would blur every boundary by up to a second in each direction.
+
+**Context lifecycle.** Stated literally, because a glob would repeat the
+mistake above:
+
+| Event | Types |
+|---|---|
+| Opens a context | `apply_start`, `ephemeral_op_start`, `provision_start` |
+| Closes it | `apply_complete`, `apply_errored`, `ephemeral_op_complete`, `ephemeral_op_errored`, `provision_complete`, `provision_errored` |
+| Neither | `apply_progress` and every non-hook type |
+
+`apply_progress` carries a partial `elapsed_seconds` and must never close a
+context, the same guard `isCompletionType` already applies for durations.
+
+- **Unclosed at end-of-log:** the context stays open and its window ends at the
+  last timestamp in the log, matching how an unclosed *span* is handled under
+  Edge cases. It is counted, and the count is reported.
+- **Two windows on one address:** a resource refreshed and then applied produces
+  two. They stay **two separate contexts**, never merged. Merging would create a
+  window spanning the gap between them and would attribute calls made in that
+  gap to a resource that was not being worked on.
+- **Zero-extent context** (`_start` and its terminator in the same millisecond):
+  see the interval convention below. It is never a candidate for anything, and
+  is counted so the loss is visible rather than silent.
+
+#### Mechanism A: core graph walk — specified, deferred
+
+Available only under full `TF_LOG=TRACE`. Core's graph walk is tracked as a
+state machine over its own log lines: `vertex "<address>"` lines delimit address
+context, and `[TRACE] GRPCProvider: <RPCName>` marks core issuing a call.
+
+**Deferred out of phase 5 on 2026-09-06**, and the four gaps are recorded here
+so the deferral is a decision rather than an omission:
+
+1. **The opening marker is unknown.** The only `vertex` line this project has
+   ever seen is a *close* — `vertex "aws_codebuild_project.codebuild_name":
+   visit complete`. Which message form opens a context has not been established.
+   `internal/span/sniff.go` counts the `vertex "` prefix generically and so
+   offers no answer.
+2. **Address-to-type derivation is a parser nobody has written.** Contexts carry
+   an address; candidates are keyed on resource type. Deriving `aws_internet_gateway`
+   from `module.vpc["datacenter1"].aws_internet_gateway.this[0]` means handling
+   module prefixes, `data.` prefixes and index keys. Mechanism B is handed
+   `resource_type` directly, which is why the asymmetry is easy to miss.
+3. **The confidence model below does not describe it.** Candidates there are
+   defined on resource type and time. Mechanism A additionally matches on RPC
+   name, which the model has no place for.
+4. **No fixture exists and none can honestly be synthesised yet.** Nothing under
+   `testdata/` contains a `vertex "` or `GRPCProvider:` line. Synthesising one
+   requires knowing the marker forms of gap 1 — so the fixture would encode a
+   guess, and every test written against it would agree with that guess. That is
+   how phase 4's `laneCol` floor survived a full test suite.
+
+Building A therefore starts by verifying the marker forms against
+`hashicorp/terraform`'s source, the way `uihook.go`'s schema was verified. Until
+then it is a design, not a plan. It serves only the 730 s full-TRACE capture,
+which this document already declines to standardise on.
 
 #### The two clocks
 
 Mechanism B correlates spans built by `ReportedBuilder`, which anchors to
-`logfmt.Scan`'s baseline, against context built from the structured stream,
-which `UIHookBuilder` bases independently — two zero points, both derived from
-absolute timestamps that are currently computed and then discarded. Attribution
-re-bases both onto one clock by exposing those baselines.
+`logfmt.Scan`'s baseline, against context collected from the structured stream,
+which is based independently on the first parseable `@timestamp`. Two zero
+points. Correlation re-bases them onto one clock.
 
-The two streams are emitted by one Terraform process and so should share a
-clock, but *should* is not *does*. `--diagnose` reports the offset between the
-two baselines, which makes the assumption checkable rather than load-bearing
-and undisclosed.
+`logfmt.Stats.FirstTS` already exposes `Scan`'s baseline, and `--diagnose`
+already renders it as `log wall-clock`. `UIHookBuilder.base` is unexported;
+the context collector establishes its own baseline by the same rule, and
+exposes it.
+
+**On whether the two streams share a clock.** They are emitted by one Terraform
+process, so re-basing is exact by construction. `--diagnose` reports the offset
+between the baselines, but **as the re-basing constant, not as a check** — an
+earlier draft claimed it verified clock agreement, which it cannot. The two
+baselines mark *different events*: the first hclog line brackets the whole
+Terraform process, while the first `terraform.ui` line begins the plan phase
+inside it (open question 8). Their difference is real elapsed time plus any
+skew, and the two terms are not separable, so the number is large and positive
+on every healthy log and reads identically whether the clocks agree or not.
+Reporting it as a constant is useful; calling it a check would be a false
+assurance.
+
+**Re-basing never rewrites a span.** Correlation runs on locally re-based
+copies. `Span.StartMs` and `Span.EndMs` are left exactly as their builders set
+them, because `model.PackLanes` and `PeakConcurrency` refuse a mixed-fidelity
+slice on the premise that those fields are not comparable across builders — a
+premise keyed on `Fidelity`, which in-place re-basing would silently falsify.
+The existing rule "attribution never changes a duration" is extended: it does
+not change a start time either.
 
 #### Confidence
 
-Candidates for a span are address contexts of the same resource type whose
-windows overlap the span's window on the unified clock.
+**Interval convention: `[start, end)`, half-open**, matching `model.PackLanes`
+and `PeakConcurrency`. Consistency here is not cosmetic — this project has
+already had to pin it once, and the three cases below are where it bites.
+
+Candidates for an RPC span are address contexts that satisfy all of:
+
+- **Resource type matches.** `ReportedBuilder` folds `tf_data_source_type` into
+  `ResourceType`, and the UI hook reports `resource_type:"local_file"` for
+  `data.local_file.thing` — so type alone cannot separate a data source from a
+  managed resource of the same type. `hook.resource.resource` carries the `data.`
+  prefix that does. **The `data.` prefix separates candidate pools**: a
+  `ReadDataSource` RPC draws only from data-source contexts, everything else only
+  from managed-resource contexts.
+- **Operation matches.** Both sides carry one and neither vocabulary is the
+  other's: the RPC span holds `tf_rpc` (`ReadResource`, `PlanResourceChange`,
+  `ApplyResourceChange`, `ReadDataSource`), while `UIHookBuilder` maps
+  `hook.action` (`read`, `create`, `update`, `delete`) into `Span.RPC`. The map
+  between them is stated once, in the correlator, and an RPC name absent from it
+  matches any action rather than none — an unmapped name must not silently
+  attribute nothing.
+- **Windows overlap** under the half-open convention.
 
 | Confidence | Condition |
 |------------|-----------|
-| **Exact** | Exactly one candidate overlaps |
-| **Likely** | Several overlap, but exactly one **contains** the span entirely |
-| **Ambiguous** | Several overlap, none uniquely containing |
+| **Contained** | Exactly one candidate, and it contains the span entirely |
+| **Likely** | Several candidates, exactly one containing the span entirely |
+| **Overlapping** | Exactly one candidate, overlapping but not containing |
+| **Ambiguous** | Several candidates, none uniquely containing |
 | **Unattributed** | Context source present in this log, no candidate matched |
 | **No context** | This log carries no address context at all |
 
-"Materially better" is defined **structurally, not as a threshold**. Containment
-is a qualitative difference between candidates and needs no tuned constant; a
-ratio ("20% more overlap") would be an invented number sitting under every
-address the tool prints.
+**"Materially better" is structural, not a threshold.** Containment is a
+qualitative difference between candidates and needs no tuned constant; a ratio
+("20% more overlap") would be an invented number sitting under every address the
+tool prints.
 
-The last two rows are one row in the original design, and separating them
-matters: "this log cannot answer the question" and "this log can answer it but
-not for this call" are different facts about the log, and a reader who cannot
-tell them apart will go looking for the wrong fix. The timeline's stall
-annotation already sets this precedent — dead window, blocked wait and leading
-gap are three distinct sentences for the same blank space.
+**Why the top label is not called `Exact`.** An earlier draft awarded `Exact` for
+"exactly one candidate overlaps", which rewards the *scarcity* of context rather
+than the strength of the evidence: a span sharing one millisecond with a lone
+window outranked a span sitting wholly inside one of two. It also borrowed this
+document's word for observation — "Exact. The normal case for any modern
+provider" in the extraction-tier table, "observed, always exact" in the views
+table. Inference does not get to reuse observation's vocabulary. `Contained` and
+`Overlapping` now separate the two cases that `Exact` conflated, and neither word
+claims more than the geometry supports.
+
+**Zero-extent intervals.** Under `[start, end)` a zero-extent interval contains
+no instant and therefore overlaps nothing. A span with `tf_req_duration_ms=0` is
+`Unattributed`; a context whose start and terminator share a millisecond is never
+a candidate. Both are counted and reported rather than silently dropped — the
+same treatment `PeakConcurrency` needed for the same reason.
+
+**Clamped starts are excluded from containment.** `ReportedBuilder` clamps a
+span's start to zero when its duration exceeds the offset from the first
+timestamped entry, and `span.Span`'s own comment notes this hits "the early
+`GetProviderSchema` and `Configure` calls that are most often the slow ones". A
+clamped span's window is `[0, EndMs)` — a fabricated start — and would overlap
+nearly every context in the log while appearing to *contain* several. Letting
+that drive a `Contained` or `Likely` verdict would build an inference on a number
+the log never stated, on precisely the longest calls in the capture. A
+`StartClamped` span is therefore correlated on its end instant alone: candidates
+are contexts whose window contains `EndMs`, and its confidence is capped at
+`Overlapping`. `--diagnose` already counts `ClampedSpans`, so the affected
+population is visible.
+
+**"Context source present"** means at least one context was successfully opened
+*and* closed — a completed pair. `span.Capabilities` gains a counter for it;
+`UIHookCompletions` does not serve, because it counts completion lines, which is
+`UIHookBuilder`'s precondition and not this one. Below one completed pair the
+verdict for every span is `No context`, and the attribution table is not
+allocated at all.
 
 #### Ambiguity is never resolved by guessing
 
-**An `Ambiguous` span never asserts an address.** Where the original design
-showed the best candidate with a `?`, the interface instead states the count —
-`1 of 4 azuread_service_principal` — and lists the candidates as candidates. A
-wrong name marked `?` is still a wrong name, and it is the kind of thing that
-gets quoted without its marker.
+**An `Ambiguous` span never asserts an address.** Where the original design showed
+the best candidate with a `?`, the interface states how many candidates there were
+and lists them as candidates. A wrong name marked `?` is still a wrong name, and
+it is the kind of thing that gets quoted without its marker.
 
-The same rule governs view `3`: ambiguous time is its own `(ambiguous)` row
-beside `(unattributed)`, never divided across the candidates. Splitting a
-duration between resources the tool could not tell apart would invent numbers
-of exactly the kind the `~` prefix exists to prevent.
+The detail pane is the constrained surface here — `maxDetailPaneWidth` 40,
+`minDetailPaneWidth` 19, and it collapses entirely below `detailInlineWidth` 70 —
+while a real address (`module.vpc["datacenter1"].aws_internet_gateway.this[0]`)
+runs past 50 characters. So:
 
-**Attribution never changes a duration.** It only labels a span. If the whole
-step fails — because no context source was captured — every span is
+- The headline reads `4 candidates`, a count and nothing else. An earlier draft
+  wrote `1 of 4 azuread_service_principal`, which reads as "the first of four" and
+  names a resource *type* where the reader expects an address.
+- **At most three candidates are listed**, longest-overlap first, each clipped by
+  `tailIdentifierColumn` so the resource name survives and the module path is what
+  is cut. A fourth and beyond are summarised as `+N more`.
+- **Below 70 columns the detail pane is not drawn at all**, so the count and
+  candidates are not shown; the row's own confidence marker is all that survives.
+  This is existing degradation behaviour, stated here because the golden tests at
+  70, 100 and 160 columns lock it.
+
+The same rule governs view `3`: ambiguous time is its own `(ambiguous)` row beside
+`(unattributed)`, never divided across the candidates. Splitting a duration between
+resources the tool could not tell apart would invent numbers of exactly the kind
+the `~` prefix exists to prevent.
+
+**Attribution never changes a duration or a start time.** It only labels a span. If
+the whole step fails — because no context source was captured — every span is
 `No context` and the tool degrades to type-level ranking with no loss of timing
 accuracy. This is why address ranking is a view, not a foundation.
 
@@ -605,16 +787,35 @@ It parses a log and prints **structural facts only**:
   `<ts> [TRACE] provider.<name>: <msg> key1=<v> key2=<v>`.
 - Which of the documented `tf_*` fields were observed, and how often.
 - Whether core-side lines (`vertex "…"`, `GRPCProvider: …`) are present, which
-  determines whether attribution mechanism A is possible at all.
+  determines whether attribution mechanism A would be possible at all.
 - A **histogram of `terraform.ui` hook `type` values** — type names and counts,
-  no addresses — which determines how much of a plan mechanism B can cover.
-- Which attribution mechanism the sniffer selected, and why, mirroring how it
-  already reports the extraction tier.
+  no addresses. A cheap structural fact, and the count of completed context
+  pairs within it is what decides whether attribution runs at all. It is **not**
+  what sizes the mechanism: see the coverage statistic below.
+- **The address-attribution coverage statistic**: of N RPC spans totalling T ms,
+  what share fall inside at least one same-type context window, and what the
+  candidate-count distribution is across them. This is the number that sizes
+  mechanism B, and it **requires the correlator** — no cheaper proxy yields it,
+  which is why the measurement sits inside phase 5 rather than gating it from
+  outside.
 - **The distribution of address-attribution confidence** — what proportion of
-  spans resolve to Exact / Likely / Ambiguous / Unattributed / No context.
-- The **offset between the two clock baselines**, `logfmt.Scan`'s and
-  `UIHookBuilder`'s, so the assumption that both streams share a clock is
-  checked rather than trusted.
+  spans, and of span *time*, resolve to Contained / Likely / Overlapping /
+  Ambiguous / Unattributed.
+- The **offset between the two clock baselines**, reported as the re-basing
+  constant it is. It is not a check on clock agreement and must not be described
+  as one — see The two clocks.
+
+**Where the new counters live.** `logfmt.StructuredSink`'s doc comment states the
+disclosure guarantee as a property of construction: the report's `Collector`
+deliberately does not implement that interface, so no structured-line content can
+reach a template. The hook-type histogram is `Collector`-shaped and an implementer
+would naturally add it there, which would dissolve that guarantee. It goes on
+`span.Sniffer` instead, which already implements `StructuredSink`. **No
+attribution output prints an address**, masked or otherwise — the histogram is
+type names, the coverage and confidence figures are counts and totals, and the
+candidate distribution is counts of candidates rather than the candidates
+themselves. The report's recurring-only withholding rule (`recurringTopN`) applies
+to the hook-type histogram as it does to every other name-and-count list.
 - Observed line count, mean line length, and parse throughput, to replace the
   capacity-planning guesses with measurements.
 - The proportion of content that is **not** hclog — plan output and harness
@@ -665,22 +866,42 @@ so there is one filter state and many projections of it.
 |-----|-------------|
 | `1` | **Providers** — rollup by `tf_provider_addr`, total time descending |
 | `2` | **Resource types** — rollup by `tf_resource_type` / `tf_data_source_type`; observed, always exact |
-| `3` | **Resource addresses** — rollup by inferred address, ranked by attributed RPC time; rows carry a confidence marker, and time that could not be attributed to one address is shown as explicit `(ambiguous)` and `(unattributed)` rows rather than silently dropped or divided up |
+| `3` | **Resource addresses** — one row per address, marked `obs` or `inf` for where the address came from; time that could not be attributed to one address is shown as explicit `(ambiguous)` and `(unattributed)` rows rather than silently dropped or divided up |
 | `4` | **Calls** — individual spans, ranked by duration |
 | `5` | **Timeline** — swimlanes (below) |
 | `6` | **Raw log** — every line, facet-filtered |
 
 View `3` is empty-but-honest when a log carries no address context at all: it
-shows a single row explaining that attribution needs either core at TRACE or
-the `terraform.ui` stream in the same file, rather than appearing broken. That
-row says something different from an `(unattributed)` row, which means the log
-could answer the question and did not answer it for those spans.
+shows a single row naming the capture that would answer the question — the
+standardised one, debug toggle plus `TF_LOG_PROVIDER` and `TF_LOG_SDK_PROTO` at
+TRACE — rather than appearing broken. It does **not** recommend core at TRACE:
+that suppresses `terraform.ui` entirely (open question 8), so following it would
+buy an address view at the cost of the resource view. Core at TRACE is mentioned
+only as the alternative, with that cost stated.
 
-**Ranked by attributed RPC time on every capture**, so the view means one thing
-regardless of which mechanism produced its addresses. Where the UI stream also
-supplies an observed per-resource duration, that is a second column and is
-labelled as the observed figure — the same side-by-side shape the type-level
-join already uses.
+That row says something different from an `(unattributed)` row, which means the
+log could answer the question and did not answer it for those spans.
+
+**Two measures, and the row says which it has.** A row carries an observed
+per-resource duration where the `terraform.ui` stream supplies one, and
+attributed RPC time where correlation supplies it. On the standardised capture a
+row can carry both. They are never summed, and the row is marked `obs` or `inf`
+in a column of its own — not by a confidence letter, because no confidence value
+means "observed" and a reader cannot be asked to infer provenance from a grade.
+
+**The sort key is named in the view's header**, because which measure exists
+depends on the capture: a structured-output-only log has observed addresses and
+*zero* RPC spans, so ranking it by attributed RPC time would rank every row at
+zero. The header reads `sorted by attributed RPC time` or `sorted by observed
+duration` accordingly, and the reader is never left to guess which number
+ordered the list.
+
+**The observed column carries open question 7's caveat.** `elapsed_seconds` is
+quantised to whole seconds with independent rounding at both ends, which that
+question concludes "does not support ranking individual resources against each
+other" — the finding that put a three-line warning above `--diagnose`'s
+`SLOWEST RESOURCES` table. The column is labelled as whole-second quantised, and
+**view 3's ranking is never keyed on it** when attributed RPC time is available.
 
 ### Timeline (view 5)
 
@@ -798,8 +1019,22 @@ rules as tested behaviour. No PTY, no timing, no flakes, no library required.
 | Tier sniffer | Selects the highest tier a given log supports |
 | `diagnose` | Correct counts; value stripping leaks no values |
 | `model` | Grouping, sorting, facet filtering, lane packing |
+| Context collector | `_start`/terminator pairing, `_errored` and unclosed terminators, two windows on one address, `apply_progress` closing nothing |
+| Attribution correlator | Confidence assignment on a two-stream fixture, incl. zero-extent spans and contexts, `StartClamped` spans capped at `Overlapping`, and the `data.` prefix separating candidate pools |
+| Attribution availability | Runs above one completed context pair, `No context` below it and no table allocated |
 | `tui` | Key handling, pane focus, layout degradation |
 | End-to-end | Real binary against a generated fixture log, no mocks |
+
+**Fixtures for attribution.** `testdata/two-tier.log` already carries both
+streams and is the base for the correlator's tests; the confidence cases above
+need synthesised additions with the usual `# SYNTHESISED` header, since each
+turns on a boundary no real capture can be relied on to contain. Mechanism A has
+**no fixture and cannot honestly get one yet** — synthesising a `vertex "…"` log
+requires knowing the opening marker form, which is unverified, so the fixture
+would encode a guess and every test written against it would agree with that
+guess. This is the failure mode that let phase 4's `laneCol` floor survive a
+full suite. Verify the marker forms against `hashicorp/terraform` before
+building A.
 
 Test output must be pristine. Truncated-log and non-monotonic-timestamp cases
 are expected error paths; those tests capture and assert the specific
@@ -831,23 +1066,45 @@ anything is built on top of it.
    ranked call list, and the raw log view including span-to-log jumping. This
    is the smallest thing that fully serves the primary use case.
 4. **Timeline (view 5)** with swimlanes and stall annotation.
-5. **Address attribution and view 3.** ~~*Conditional on phase 1's confidence
-   numbers*; cut it if ambiguity is high.~~ **Revised 2026-09-06: it ships, with
-   both mechanisms, and the measurement moves inside the phase.** The condition
-   was never resolvable from outside, because the confidence distribution that
-   was supposed to gate the phase cannot be computed without building the
-   correlator that the gate was guarding. So the phase begins with the
-   measurement — a hook-type histogram and a confidence distribution in
-   `--diagnose` — and the numbers it produces are published rather than
-   hypothesised.
+5. **Address attribution: naming a call's resource, and view 3.**
+   ~~*Conditional on phase 1's confidence numbers*; cut it if ambiguity is
+   high.~~ **Revised 2026-09-06.** The old condition was never resolvable from
+   outside: the confidence distribution meant to gate the phase cannot be
+   computed without building the correlator the gate was guarding. The
+   measurement therefore moves inside the phase, ahead of the view.
 
-   The second condition dissolved rather than being accepted. Core addressing
-   does require core at TRACE, which suppresses `terraform.ui` (open question
-   8), and that alone would have made the address view and the resource view
-   mutually exclusive. Mechanism B takes its addresses from the `terraform.ui`
-   stream instead, so the standardised capture supports attribution *and* the
-   resource view together. The mechanisms are complementary, not rival: between
-   them they cover both captures Dan takes.
+   **Scope — one mechanism, two deliverables, one of them gated.**
+
+   - **Mechanism B only** (correlation against `terraform.ui` address context).
+     Mechanism A, core's graph walk, is specified but deferred; its four gaps
+     are recorded under Address attribution. It serves only the 730 s full-TRACE
+     capture this document already declines to standardise on, and its fixture
+     cannot honestly be synthesised until its marker forms are verified upstream.
+   - **The Calls detail pane names a call's resource** — resource name, plus
+     module and index key where they exist. This is the acceptance criterion the
+     phase exists for, not a nice-to-have: the phase is not complete if
+     attribution runs and the pane does not show it. It is **unconditional**. It
+     degrades honestly at every confidence value, because an `Ambiguous` span
+     reports a candidate count rather than a name, so a poor distribution costs
+     usefulness and not truthfulness.
+   - **View 3 is gated** on the coverage statistic, because a whole view whose
+     rows are mostly `(ambiguous)` and `(unattributed)` is not worth its
+     complexity. **The threshold: view 3 ships as a view when at least half of
+     attributable RPC span *time* resolves to `Contained` or `Likely`.** Below
+     that it ships as a `--diagnose` figure only.
+
+     Time, not span count, because time is what every view in this tool ranks by;
+     a distribution that resolves most short calls and none of the long ones has
+     not earned a view. The half is a **judgement, not a measurement** — no
+     evidence sets it, and it is recorded as a number so the decision is made
+     before the result is known rather than after. Revise it against the real
+     distribution if the reasoning turns out wrong, in this document, with a date.
+
+   The old second condition dissolved rather than being accepted. Core addressing
+   does require core at TRACE, which suppresses `terraform.ui` (open question 8),
+   and that alone would have made the address view and the resource view mutually
+   exclusive. Mechanism B takes its addresses from the `terraform.ui` stream, so
+   the standardised capture supports attribution *and* the resource view together.
 6. **`terraform plan -json` parser** as a second input format.
 
 Phases 3 and 4 deliver the primary use case without depending on the one piece
@@ -1002,14 +1259,19 @@ which is only possible because HCP delivers protocol lines un-nested.
    **Restated 2026-09-06.** This was written as a gate on phase 5, which was
    circular: the distribution cannot be computed without the correlator the
    gate was meant to authorise. It is now a *measurement inside* phase 5,
-   taken before the view is built and published with the phase. Two things
-   changed the stakes. Ambiguity no longer produces a wrong answer — an
-   `Ambiguous` span states its candidate count instead of naming a resource —
-   so a high rate degrades the view's usefulness rather than its honesty. And
-   mechanism B correlates against `terraform.ui` context windows, whose
-   concurrency profile is a different question from core's graph walk; the
-   distribution is reported per mechanism, because one number over both would
-   average two unlike things.
+   taken before the view is built. It still gates something — view 3 ships as a
+   view only if at least half of attributable RPC span time resolves to
+   `Contained` or `Likely` — but not the phase, and not the detail-pane naming.
+
+   Two things changed the stakes. Ambiguity no longer produces a wrong answer —
+   an `Ambiguous` span states its candidate count instead of naming a resource —
+   so a high rate degrades usefulness rather than honesty. And the question
+   above is about *core's* concurrency; phase 5 correlates against
+   `terraform.ui` context windows instead, which is a different concurrency
+   profile and a different number. The figure phase 5 publishes answers the
+   mechanism it builds, not this question as originally posed. Mechanism A's
+   ambiguity rate remains genuinely unmeasured, and would have to be measured
+   before A is built.
 3. **Whether tier 2 pairing is available. ANSWERED, 2026-09-04: yes.**
    Absent from the public samples because the line is emitted via
    `logging.ProtocolTrace` and those samples were captured below TRACE. A
@@ -1030,6 +1292,13 @@ which is only possible because HCP delivers protocol lines un-nested.
    View 3 is reachable in the environment that matters; whether it is
    *reliable* is open question 2, still unmeasured because tier 3 is not
    built.
+
+   **Qualified 2026-09-06.** "Reachable" here means reachable *by mechanism A*,
+   in a full-TRACE capture. It is not reachable that way in the capture this
+   document standardises on, which measures `core vertex lines 0`. Phase 5
+   reaches view 3 by mechanism B — `terraform.ui` address context — which is a
+   different source with a different reliability question. See Address
+   attribution.
 
 8. **What a TRACE capture costs in structured output. CONFIRMED,
    2026-09-04: the whole of it.** Checked directly against the raw logs:
@@ -1105,9 +1374,16 @@ which is only possible because HCP delivers protocol lines un-nested.
    **This is the capture to standardise on.** It is the only one that answers
    both "which resources were slow" and "which calls were slow" from a single
    run, and at 30 MB it sits between the 17 MB debug and 37 MB full-TRACE
-   captures. Only address attribution is out of reach, and open question 2
+   captures. ~~Only address attribution is out of reach, and open question 2
    never established that view 3 was worth its complexity in the first
-   place.
+   place.~~
+
+   **Corrected 2026-09-06: address attribution is not out of reach on this
+   capture.** What is out of reach is *core-derived* attribution, which needs
+   the vertex and GRPC lines this capture measures at zero. The `terraform.ui`
+   stream it does carry names a full address for every resource it touches, so
+   the capture supports attribution as well as both timing answers. The
+   standardisation recommendation is strengthened by this, not weakened.
 
    **The two tiers join on resource type, which weakens the case for view
    3.** Both builders populate `Span.ResourceType` — the reported builder
@@ -1117,9 +1393,15 @@ which is only possible because HCP delivers protocol lines un-nested.
    address attribution at all: *these reads took 247 s in total, and here are
    the RPC calls of that type and what each cost*. Address attribution is
    only needed to distinguish two instances **of the same type**, which is a
-   narrower question than the design originally assumed and one this capture
+   narrower question than the design originally assumed. ~~and one this capture
    cannot answer anyway. Phase 2 should build the type-level join first and
-   let it demonstrate whether the address-level view is still wanted.
+   let it demonstrate whether the address-level view is still wanted.~~
+
+   **Superseded 2026-09-06.** The type-level join shipped in phase 2 and the
+   address-level view was still wanted — Dan asked for it against a real capture
+   while using the shipped Calls view, which names no resource. And this capture
+   *can* answer it, through the UI stream. Phase 5 builds it, with view 3 gated
+   on the coverage statistic rather than on this demonstration.
 
    ~~**Per-resource timings and address attribution are mutually exclusive.**
    Provider RPC timing can be added to either, but no capture yields all
