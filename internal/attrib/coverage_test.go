@@ -7,6 +7,21 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
+// confidenceCount is tied to Contained's ordinal, which only guards against
+// an insertion BEFORE Contained -- appending a value after it leaves
+// int(Contained)+1 unchanged and Summarise's guard silently drops every span
+// at the new value, with no build-time or run-time signal. This is the test
+// that closes that gap: it fails if a future value is ever added below
+// Contained in the enum, since Contained must stay last for confidenceCount
+// to mean what its own comment says.
+func TestContainedIsTheHighestConfidence(t *testing.T) {
+	for _, c := range []Confidence{Unattributed, Ambiguous, Overlapping, Likely} {
+		if c >= Contained {
+			t.Errorf("%v >= Contained; confidenceCount assumes Contained is last", c)
+		}
+	}
+}
+
 func TestSummariseCountsAndTimesByConfidence(t *testing.T) {
 	spans := []span.Span{
 		{DurationMs: 100}, {DurationMs: 200}, {DurationMs: 300},

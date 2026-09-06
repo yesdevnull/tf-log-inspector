@@ -4,10 +4,14 @@ import "github.com/yesdevnull/tf-log-inspector/internal/span"
 
 // confidenceCount is how many Confidence values there are. It is used with
 // the guard in Summarise to prevent out-of-range panic when indexing
-// ByConfidence and MsByConfidence. Tied to the Confidence enum in
-// correlate.go as a compile-time fact rather than a hand-copied number: this
-// breaks at build time if Contained ever stops being the highest-valued
-// Confidence.
+// ByConfidence and MsByConfidence. Tied to Contained's own ordinal in
+// correlate.go rather than a hand-copied number, so inserting a value
+// BEFORE Contained is automatically safe: confidenceCount grows with it.
+// It does NOT detect a value appended AFTER Contained -- int(Contained)+1
+// stays whatever it already was, the arrays stay one element short, and
+// Summarise's guard then silently drops every span at the new value. Nothing
+// enforces this at build time or run time, which is why Contained must stay
+// the last value in the enum (see TestContainedIsTheHighestConfidence).
 const confidenceCount = int(Contained) + 1
 
 // Coverage is the published distribution of attribution outcomes. It is what

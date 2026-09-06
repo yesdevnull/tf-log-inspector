@@ -86,9 +86,9 @@ func Load(path string) (*Log, error) {
 	// The gate is whether ANY context was collected, not whether one has
 	// CLOSED: a context is appended the moment a _start hook is seen, so a
 	// capture killed mid-run -- every resource started, none finished -- has
-	// real context windows despite zero completed pairs. Gating on
-	// CompletedPairs() here reported no context at all for a log that
-	// plainly carried some (see Log.HasAddressContext).
+	// real context windows despite zero completed pairs. CompletedPairs()
+	// alone would miss exactly that case, reporting no context at all for a
+	// log that plainly carries some (see Log.HasAddressContext).
 	var (
 		ctxs    []attrib.Context
 		attribs []attrib.Attribution

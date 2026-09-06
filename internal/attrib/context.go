@@ -73,12 +73,12 @@ type Context struct {
 // walk (PreRefresh/PostRefresh in hashicorp/terraform's
 // internal/command/views/hook_json.go), a different hook pair from
 // apply_start/apply_complete's action:"read" data-source read (PreApply with
-// plans.Read). Both are real; conflating them was a false claim this spec
-// carried until 2026-09-07 (see the spec's Address attribution section).
-// There is no refresh_errored: refresh closes only via refresh_complete, or
-// stays unclosed -- confirmed against hashicorp/terraform tag v1.14.9's
-// internal/command/views/json/message_types.go, which defines no such
-// constant.
+// plans.Read). Both are real, and neither stands in for the other: a call
+// correlated against the wrong pair's window would attribute time to work
+// that never happened. There is no refresh_errored: refresh closes only via
+// refresh_complete, or stays unclosed -- confirmed against hashicorp/
+// terraform tag v1.14.9's internal/command/views/json/message_types.go,
+// which defines no such constant.
 func opensContext(t string) bool {
 	switch t {
 	case "apply_start", "refresh_start", "ephemeral_op_start", "provision_start":
@@ -267,6 +267,16 @@ func (c *ContextCollector) Contexts() []Context {
 // terraform.ui only the plan phase within it), so their difference is real
 // elapsed time plus any skew and the two are not separable.
 func (c *ContextCollector) FirstTS() time.Time { return c.firstTS }
+
+// LastTS is the last parseable @timestamp on any structured line, tracked the
+// same unconditional way as firstTS -- on every line this collector sees,
+// whether or not it carries a hook Terraform's own resource lifecycle uses.
+// That makes it a true upper bound on the stream's wall clock even when the
+// log's last event is one span.UIHookBuilder builds no span for (provision_*
+// and refresh_* completions carry no elapsed_seconds -- see
+// span.isCompletionType), which the max of built spans' own EndMs would
+// otherwise understate.
+func (c *ContextCollector) LastTS() time.Time { return c.lastTS }
 
 // TypeCounts is the histogram of structured-output "type" values. Type names
 // and counts only: it is rendered by --diagnose, which is masked for sharing.

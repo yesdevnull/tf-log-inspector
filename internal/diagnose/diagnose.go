@@ -210,11 +210,20 @@ type Report struct {
 	// UI-hook figures. These describe span.UIHookBuilder's spans, which sit
 	// on their own timeline (see the doc comment on span.Span.StartMs) and
 	// so are never summed with the RPC-tier figures above.
-	UISpanCount           int
-	UISlowestMs           uint32
-	UITotalSpanMs         uint64
-	UIClampedSpans        int
-	UIWallClockMs         uint64              // derived from the UI-hook spans' own EndMs offsets; 0 if there are none
+	UISpanCount    int
+	UISlowestMs    uint32
+	UITotalSpanMs  uint64
+	UIClampedSpans int
+	// UIWallClockMs is the later of two figures: the UI-hook spans' own
+	// EndMs offsets, and attrib.ContextCollector's FirstTS/LastTS span over
+	// EVERY structured line this log carries. The second term is what
+	// covers a log whose last event is a provision_*/refresh_* completion --
+	// span.isCompletionType builds no span for either, so the first term
+	// alone would understate the log by whatever came after the last
+	// span-building completion. 0 if there is neither a UI-hook span nor a
+	// parseable structured-line timestamp.
+	UIWallClockMs uint64
+
 	SlowestResources      []ResourceRow       // ranked by duration descending, top 10
 	ByResourceType        []ResourceTypeTotal // ranked by total duration descending, top 10
 	UIResourceTypeCount   int                 // distinct resource types seen, before the top-10 cap on ByResourceType
@@ -372,6 +381,18 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		}
 	}
 
+	// cc parses every structured line's timestamp unconditionally (see
+	// attrib.ContextCollector.LastTS), so its span covers a trailing
+	// provision_*/refresh_* completion that built no UI-hook span of its
+	// own. Taken as a floor under the span-derived figure below, not a
+	// replacement for it: a log with UI-hook spans but no address-context
+	// hooks at all (structured output below the hook-carrying types) still
+	// wants the span-derived figure, and cc.FirstTS/LastTS cover only lines
+	// this same scan fed to it.
+	if !cc.FirstTS().IsZero() {
+		r.UIWallClockMs = uint64(cc.LastTS().Sub(cc.FirstTS()).Milliseconds())
+	}
+
 	r.UISpanCount = len(uiSpans)
 	rows := make([]ResourceRow, 0, len(uiSpans))
 	typeTotals := map[string]*ResourceTypeTotal{}
@@ -467,9 +488,9 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	// The gate is whether any context was collected at all, not whether one
 	// has CLOSED: a context is appended the moment a _start hook is seen, so
 	// a capture killed mid-run -- every resource started, none finished --
-	// has real context windows despite zero completed pairs. Gating on
-	// CompletedPairs() here told a reader with exactly this kind of log to
-	// enable a stream their log already carries.
+	// has real context windows despite zero completed pairs. CompletedPairs()
+	// alone would miss exactly that case, telling a reader with this kind of
+	// log to enable a stream their log already carries.
 	if len(ctxs) > 0 {
 		r.HasContext = true
 		r.Contexts = len(ctxs)
@@ -638,9 +659,10 @@ func (r Report) Render(w io.Writer) error {
 	case r.UISpanCount > 0:
 		// Structured-output lines carry no scanner-visible timestamp (see
 		// span.Span's StartMs/EndMs doc comment), so Stats.FirstTS/LastTS
-		// stay zero for a pure UI-hook log. The UI-hook spans' own EndMs
-		// offsets are the only clock available, so the figure is derived
-		// from them and labelled as such rather than left silently absent.
+		// stay zero for a pure UI-hook log. UIWallClockMs is derived instead
+		// (see its own doc comment), from the UI-hook spans' EndMs offsets
+		// and attrib.ContextCollector's own timestamp span -- labelled as
+		// derived rather than left silently absent.
 		fmt.Fprintf(b, "  log wall-clock       %.1fs (derived from UI-hook resource timings)\n", float64(r.UIWallClockMs)/1000)
 	default:
 		fmt.Fprintf(b, "  log wall-clock       unavailable\n")

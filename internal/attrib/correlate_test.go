@@ -152,6 +152,31 @@ func TestZeroDurationSpanInsideOneContextIsAttributed(t *testing.T) {
 	}
 }
 
+// pointOverlaps's start boundary must be inclusive, the point-membership
+// analogue of TestContainmentIncludesASpanStartingExactlyAtTheContextStart.
+// Every other degenerate-span case above places its instant well inside the
+// context, never at c.Start itself, so this is the one test that would catch
+// pointOverlaps's start clause being mutated to exclusive (t.After(c.Start)).
+func TestZeroDurationSpanAtExactlyContextStartIsContained(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 100, 1000)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 100)}, base, ctxs)
+	if got[0].Confidence != Contained {
+		t.Errorf("Confidence = %v, want Contained for a zero-duration span exactly at the context's start", got[0].Confidence)
+	}
+}
+
+// The half-open sibling: a zero-duration span at exactly the context's END is
+// Unattributed -- the context's own end instant lies outside its window, the
+// same rule TestContainmentIncludesASpanEndingExactlyAtTheContextEnd pins for
+// an interval span.
+func TestZeroDurationSpanAtExactlyContextEndIsUnattributed(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 0, 100)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 100)}, base, ctxs)
+	if got[0].Confidence != Unattributed {
+		t.Errorf("Confidence = %v, want Unattributed for a zero-duration span exactly at the context's end", got[0].Confidence)
+	}
+}
+
 // The sibling case: a zero-duration span whose instant falls inside TWO
 // candidate contexts is Ambiguous, the same as an interval span overlapping
 // several without uniquely containing the span.
@@ -279,6 +304,23 @@ func TestRefreshContextWithNoActionMatchesAnyRPC(t *testing.T) {
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
 	if got[0].Confidence != Contained {
 		t.Errorf("Confidence = %v, want Contained -- an empty context action must not exclude a candidate", got[0].Confidence)
+	}
+	if got[0].Address != "aws_instance.a" {
+		t.Errorf("Address = %q, want aws_instance.a", got[0].Address)
+	}
+}
+
+// TestRefreshContextWithNoActionMatchesAnyRPC above exercises only
+// ReadResource, whose allowed set is {"read"} -- mutating actionMatches'
+// empty-action branch to `return rpc == "ReadResource"` (precisely the false
+// "refresh means read" mapping the spec was corrected against) leaves that
+// test green. This pins the same rule for an RPC mapped to a DIFFERENT
+// allowed set, so a mapping that special-cased ReadResource cannot pass here.
+func TestRefreshContextWithNoActionMatchesAnRPCMappedToOtherActions(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "", 0, 1000)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ApplyResourceChange", 100, 200)}, base, ctxs)
+	if got[0].Confidence != Contained {
+		t.Errorf("Confidence = %v, want Contained -- an empty context action must not exclude ApplyResourceChange either", got[0].Confidence)
 	}
 	if got[0].Address != "aws_instance.a" {
 		t.Errorf("Address = %q, want aws_instance.a", got[0].Address)
@@ -419,6 +461,51 @@ func TestNamedPanicsOnAmbiguousOrUnattributed(t *testing.T) {
 			}()
 			named(c, 1, conf)
 		})
+	}
+}
+
+// Every Correlate test above builds contexts with the synthetic ctx()
+// helper, and collect(t, "testdata/context.log") -- used throughout
+// context_test.go -- is never fed into Correlate. So "a refresh context
+// opens" (TestRefreshHookOpensAndClosesAContext) and "an empty action
+// matches" (TestRefreshContextWithNoActionMatchesAnyRPC) are each proven, but
+// never joined, even though refresh windows are the largest source of RPC
+// volume in a real plan. base and the span's offsets are derived from the
+// fixture's own timestamps rather than hard-coded, so this cannot silently
+// pass on a coincidence between an assumed base and the fixture's real one.
+func TestCorrelateAttributesARealParsedRefreshWindow(t *testing.T) {
+	cc, ctxs := collect(t, "testdata/context.log")
+	realBase := cc.FirstTS()
+
+	var refresh Context
+	for _, c := range ctxs {
+		if c.Address == "aws_instance.tracked" {
+			refresh = c
+			break
+		}
+	}
+	if refresh.Address == "" {
+		t.Fatal("fixture produced no aws_instance.tracked context")
+	}
+
+	startMs := refresh.Start.Sub(realBase).Milliseconds()
+	endMs := refresh.End.Sub(realBase).Milliseconds()
+	if endMs-startMs < 2 {
+		t.Fatalf("refresh window [%d, %d) is too narrow to place a span strictly inside it", startMs, endMs)
+	}
+
+	s := span.Span{
+		StartMs: uint32(startMs + 1), EndMs: uint32(endMs - 1),
+		DurationMs: uint32(endMs - startMs - 2),
+		RPC:        "ReadResource", ResourceType: "aws_instance",
+		Fidelity: span.FidelityReported,
+	}
+	got := Correlate([]span.Span{s}, realBase, ctxs)
+	if got[0].Confidence != Contained {
+		t.Fatalf("Confidence = %v, want Contained", got[0].Confidence)
+	}
+	if got[0].Address != "aws_instance.tracked" {
+		t.Errorf("Address = %q, want aws_instance.tracked", got[0].Address)
 	}
 }
 

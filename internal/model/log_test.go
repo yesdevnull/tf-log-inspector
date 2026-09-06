@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -165,6 +166,30 @@ func TestLoadBuildsNoAttributionTableWithoutContext(t *testing.T) {
 	}
 	if l.Attribs != nil {
 		t.Errorf("Attribs = %v, want nil", l.Attribs)
+	}
+}
+
+// AttributionForEntry is exercised elsewhere only indirectly, via
+// internal/tui/timeline_test.go, left over from before it moved to this
+// package. This pins its own contract directly: a lookup by the closing
+// entry's ordinal, not by position, and a zero Attribution for an ordinal no
+// RPC span closed.
+func TestAttributionForEntryLooksUpByClosingEntryNotPosition(t *testing.T) {
+	l := &Log{
+		RPCSpans: []span.Span{{Entry: 5}, {Entry: 9}},
+		Attribs: []attrib.Attribution{
+			{Confidence: attrib.Contained, Address: "aws_instance.a"},
+			{Confidence: attrib.Ambiguous, Candidates: 2},
+		},
+	}
+	if got := l.AttributionForEntry(9); got.Confidence != attrib.Ambiguous || got.Candidates != 2 {
+		t.Errorf("AttributionForEntry(9) = %+v, want the second span's Ambiguous attribution", got)
+	}
+	if got := l.AttributionForEntry(5); got.Address != "aws_instance.a" {
+		t.Errorf("AttributionForEntry(5) = %+v, want the first span's attribution", got)
+	}
+	if got := l.AttributionForEntry(123); got != (attrib.Attribution{}) {
+		t.Errorf("AttributionForEntry(123) = %+v, want the zero Attribution for an entry no span closed", got)
 	}
 }
 

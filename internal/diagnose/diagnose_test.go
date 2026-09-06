@@ -760,6 +760,35 @@ func TestReportDerivesWallClockFromUIHookSpansWhenNoHclogTimestamps(t *testing.T
 	}
 }
 
+// Fix wave: provision_*/refresh_* completions build no UI-hook span (see
+// span.isCompletionType), so a wall clock derived only from UI-hook spans'
+// own EndMs understates the log whenever one of those two is the LAST event
+// in a pure structured-output capture. attrib.ContextCollector parses every
+// structured line's timestamp unconditionally, so its FirstTS/LastTS span
+// covers the trailing completion even though no span was built for it.
+//
+// completionHookLine ("2026-09-04T09:15:02.601000+10:00") is this log's only
+// span-building line; the trailing refresh_complete below sits at
+// "2026-09-04T09:20:00.000000+10:00", 297399ms later -- a gap the old
+// span-only figure would drop entirely.
+func TestReportWallClockCoversATrailingRefreshCompleteWithNoSpan(t *testing.T) {
+	const trailingRefreshComplete = `{"@level":"info","@message":"aws_instance.tracked: Refresh complete","@module":"terraform.ui","@timestamp":"2026-09-04T09:20:00.000000+10:00","hook":{"resource":{"addr":"aws_instance.tracked","module":"","resource":"aws_instance.tracked","implied_provider":"aws","resource_type":"aws_instance","resource_name":"tracked","resource_key":null}},"type":"refresh_complete"}`
+	r := build(t, completionHookLine+"\n"+trailingRefreshComplete+"\n")
+	if r.UISpanCount == 0 {
+		t.Fatal("fixture built no UI-hook spans; this test proves nothing")
+	}
+	if r.UIWallClockMs != 297399 {
+		t.Errorf("UIWallClockMs = %d, want 297399 (must cover the trailing refresh_complete, which built no span of its own)", r.UIWallClockMs)
+	}
+	out := render(t, r)
+	if strings.Contains(out, "log wall-clock       unavailable") {
+		t.Errorf("report says wall-clock unavailable despite UI-hook spans:\n%s", out)
+	}
+	if !strings.Contains(out, "297.4s") {
+		t.Errorf("report does not render the wall clock covering the trailing refresh_complete:\n%s", out)
+	}
+}
+
 func TestReportWallClockUnavailableWhenNeitherSourceExists(t *testing.T) {
 	out := render(t, build(t, ""))
 	if !strings.Contains(out, "log wall-clock") {
@@ -1223,6 +1252,25 @@ func TestCandidateCountsFollowTheWholeConfidenceListNotJustAmbiguous(t *testing.
 // iteration: two distinct candidate counts seen by the SAME number of spans
 // must still print in the same order every time (candidate count ascending),
 // not whichever order ranging over the map happened to visit them.
+// candidateBreakdown must exclude the 0-candidate bucket: Unattributed's own
+// row in the confidence list already covers spans with no candidate at all,
+// and this breakdown is documented (and titled, in Render) as "spans with a
+// candidate" -- an extra "0 candidates" row would contradict that heading.
+// Removing the `if k == 0 { continue }` guard changes real rendered output
+// but leaves every other candidateBreakdown/rendering test green, so this
+// asserts the exclusion directly rather than relying on an incidental miss.
+func TestCandidateBreakdownExcludesZeroCandidates(t *testing.T) {
+	got := candidateBreakdown(map[uint32]int{0: 5, 1: 2})
+	for _, cc := range got {
+		if cc.Candidates == 0 {
+			t.Fatalf("candidateBreakdown = %+v, want no 0-candidate row", got)
+		}
+	}
+	if len(got) != 1 {
+		t.Errorf("candidateBreakdown = %+v, want exactly the 1-candidate row", got)
+	}
+}
+
 func TestCandidateBreakdownOrderIsDeterministic(t *testing.T) {
 	m := map[uint32]int{3: 2, 1: 2, 2: 2}
 	want := []CandidateCount{{Candidates: 1, Spans: 2}, {Candidates: 2, Spans: 2}, {Candidates: 3, Spans: 2}}
