@@ -460,10 +460,15 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	if strings.Contains(got, slowestHeading) {
 		t.Errorf("calls view detail pane carries a rollup's %q section for a row that is one span:\n%s", slowestHeading, got)
 	}
-	// Indexed the same way selectedDetail itself does, rather than passing
-	// the zero Attribution: provider-rpc.log carries no address context, so
-	// the two happen to agree here, but only because of that fixture
-	// property rather than because the pane never reads a real attribution.
+	// Computed independently of selectedDetail's own lookup
+	// (model.Log.AttributionForEntry) rather than by calling it -- a test
+	// that derives its expectation through the same helper it exercises
+	// would prove nothing. The positional index is safe ground truth here
+	// because spanIdx already indexes the same unfiltered m.log.RPCSpans
+	// slice Attribs is parallel to. provider-rpc.log carries no address
+	// context, so the two ways of asking happen to agree here, but only
+	// because of that fixture property rather than because the pane never
+	// reads a real attribution.
 	var a attrib.Attribution
 	if spanIdx < len(m.log.Attribs) {
 		a = m.log.Attribs[spanIdx]
@@ -1758,10 +1763,14 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 		t.Fatalf("the opening screen's selected row is a rollup, not a call: %+v", rows[m.Selected()])
 	}
 	spanIdx := rows[m.Selected()].spanIdx
-	// Indexed the same way selectedDetail itself does (see the same note on
-	// TestDetailPaneShowsTheSelectedSpan): provider-rpc.log carries no
-	// address context, so this and the zero Attribution agree, but that is
-	// a fixture property, not a premise this test states without it.
+	// Computed independently of selectedDetail's own lookup, the same way
+	// and for the same reason as TestDetailPaneShowsTheSelectedSpan: a test
+	// that derived its expectation through the helper it is exercising
+	// would prove nothing, and the positional index is safe ground truth
+	// here regardless, since spanIdx already indexes the same unfiltered
+	// m.log.RPCSpans slice Attribs is parallel to. provider-rpc.log carries
+	// no address context, so this and the zero Attribution agree, but that
+	// is a fixture property, not a premise this test states without it.
 	var a attrib.Attribution
 	if spanIdx < len(m.log.Attribs) {
 		a = m.log.Attribs[spanIdx]
@@ -1871,6 +1880,12 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 // l: one line per field of each span a row or the timeline cursor can
 // select, and every line of each rollup row's own sections. It is what
 // detailNaturalWidth is measured to fit.
+//
+// It indexes Attribs positionally rather than calling
+// model.Log.AttributionForEntry, deliberately: this helper is ground truth
+// for detailNaturalWidth's own measurement, computed independently of it,
+// and the positional index is safe here because it walks l.RPCSpans
+// unfiltered -- the same slice Attribs is parallel to.
 func reachableDetailLines(l *model.Log) []string {
 	var lines []string
 	hasContext := l.HasAddressContext()

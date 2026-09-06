@@ -290,6 +290,10 @@ func (c *ContextCollector) ZeroExtentContexts() uint64 {
 }
 
 // CompletedPairs reports how many contexts were both opened and closed. It
-// is attribution's precondition: below one completed pair there is no
-// address context in this log at all.
+// is NOT attribution's presence gate -- that is len(Contexts()) > 0 (see
+// model.Log.HasAddressContext and diagnose.Build), since a context is
+// appended the moment a _start hook is seen and a capture killed mid-run
+// can carry real, still-open context with zero completed pairs. This is
+// reported as a finer-grained figure alongside the unclosed-context count,
+// not as a precondition for anything.
 func (c *ContextCollector) CompletedPairs() int { return c.closedPairs }
