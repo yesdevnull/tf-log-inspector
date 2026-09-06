@@ -97,6 +97,32 @@ func TestLoadAttributesRPCSpansToAddresses(t *testing.T) {
 	}
 }
 
+// A log can carry address context with no RPC spans at all -- structured-ui.log
+// is exactly this shape: completed apply_start/apply_complete (and
+// apply_start/apply_errored) pairs, and no provider-RPC lines whatsoever.
+// attrib.Correlate always allocates make([]Attribution, len(spans)), so with
+// zero spans Attribs is a non-nil, zero-length slice rather than nil. Address
+// context must still be reported true: HasAddressContext is a property of
+// whether the log carries context at all, not of len(Attribs).
+func TestLoadReportsAddressContextWithNoRPCSpans(t *testing.T) {
+	l, err := Load(fixture(t, "structured-ui.log"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(l.RPCSpans) != 0 {
+		t.Fatalf("fixture has %d RPC spans, want 0 -- test premise requires none", len(l.RPCSpans))
+	}
+	if len(l.Contexts) == 0 {
+		t.Fatal("fixture produced no contexts -- test premise requires at least one completed pair")
+	}
+	if !l.HasAddressContext() {
+		t.Error("HasAddressContext = false, want true: this log carries completed address context")
+	}
+	if len(l.Attribs) != 0 {
+		t.Errorf("len(Attribs) = %d, want 0 -- there are no RPC spans to attribute", len(l.Attribs))
+	}
+}
+
 func TestLoadBuildsNoAttributionTableWithoutContext(t *testing.T) {
 	// A log with no terraform.ui stream has no address context at all, which
 	// is a property of the LOG. The table is not allocated rather than being

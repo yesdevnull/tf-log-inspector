@@ -117,4 +117,13 @@ func (l *Log) Bytes(e logfmt.Entry) []byte {
 // all. It is the difference between "this log cannot answer which resource a
 // call belongs to" and "this log can, and did not for this call" -- two facts
 // the interface must not present in the same words.
-func (l *Log) HasAddressContext() bool { return len(l.Attribs) > 0 }
+//
+// This tests Contexts, not Attribs. attrib.Correlate always allocates
+// make([]Attribution, len(spans)), so a log with completed context but zero
+// RPC spans (e.g. a plan with no provider calls at all) gets a non-nil,
+// zero-length Attribs -- len(Attribs) > 0 would wrongly report no context for
+// a log that plainly has some. Contexts is only ever populated under the same
+// CompletedPairs() > 0 gate in Load, and a completed pair guarantees at least
+// one entry in ContextCollector.Contexts(), so this reflects the log-level
+// property regardless of how many RPC spans exist to attribute.
+func (l *Log) HasAddressContext() bool { return len(l.Contexts) > 0 }
