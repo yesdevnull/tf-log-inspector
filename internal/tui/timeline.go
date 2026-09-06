@@ -71,13 +71,33 @@ func (m *Model) timelineSpans() (timelineTier, []span.Span) {
 // separate only so the cache above it is one branch rather than three
 // returns each having to remember to fill it.
 func (m *Model) filteredTimelineSpans() (timelineTier, []span.Span) {
-	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
+	switch tier := timelineTierFor(m.log); tier {
+	case tierRPC:
+		return tier, m.filter().SpansMatching(m.log.RPCSpans)
+	case tierUI:
+		return tier, m.uiFilter().SpansMatching(m.log.UISpans)
+	default:
 		return tierNone, nil
 	}
-	if len(m.log.RPCSpans) == 0 {
-		return tierUI, m.uiFilter().SpansMatching(m.log.UISpans)
+}
+
+// timelineTierFor is the tier decision itself, as a property of the LOG
+// alone: RPC where the log has one, otherwise UI, and tierNone only for a
+// log carrying neither. It is separate from filteredTimelineSpans because
+// the question is asked outside the timeline too -- detailNaturalWidth
+// sizes the detail pane over the spans a selection can actually reach, and
+// a UI-hook span is reachable only in a log this answers tierUI for. Two
+// copies of the rule would let the pane be measured for a tier the view
+// never draws, sizing it for a line no keypress can produce out of columns
+// the centre pane would otherwise have.
+func timelineTierFor(l *model.Log) timelineTier {
+	switch {
+	case len(l.RPCSpans) > 0:
+		return tierRPC
+	case len(l.UISpans) > 0:
+		return tierUI
 	}
-	return tierRPC, m.filter().SpansMatching(m.log.RPCSpans)
+	return tierNone
 }
 
 // timelineTitle names the pane after the tier timelineSpans has chosen for
@@ -448,6 +468,52 @@ func laneLabelWidth(labels []string) int {
 	return min(w, maxLaneLabelWidth)
 }
 
+// timelineLaneLabels is every lane's label and the width the label column
+// is drawn at, for the current tier and filter, measured ONCE per frame and
+// cached beside the spans and lanes it is derived from (see
+// timelineLabelsCache).
+//
+// The pair is returned together, and cached together, because the two
+// callers must agree on both. renderTimeline draws each lane row's label
+// clipped to that width, and stallAnnotation names a stall's lane with the
+// same label clipped the same way -- "waiting on aws/1" points at exactly
+// one bar only if the bar carries that same text, so a label measured to a
+// different width in the two places sends the reader looking for a row that
+// is not on screen. Two hand-kept copies of that rule are what the one
+// measurement replaces.
+//
+// Every caller must reach it through a POINTER, or it fills a cache on a
+// copy that is immediately discarded -- the hazard rowsCache's own doc
+// comment describes, pinned here by
+// TestRenderFillsTheTimelineLabelCacheOnTheModelItRendered.
+func (m *Model) timelineLaneLabels() ([]string, int) {
+	if !m.timelineLabelsCached {
+		_, spans := m.timelineSpans()
+		m.timelineLabelsCache = laneLabels(spans, m.timelineLanes())
+		m.timelineLabelWidthCache = laneLabelWidth(m.timelineLabelsCache)
+		m.timelineLabelsCached = true
+	}
+	return m.timelineLabelsCache, m.timelineLabelWidthCache
+}
+
+// timelineWallClock is the window the axis, the bars and the busy summary
+// are all scaled to (see timelineWallClockMs), for the current tier and
+// filter, measured once per frame and cached with them.
+//
+// One measurement rather than three per frame is the point: the axis's
+// right-hand label, every bar's column arithmetic, the busy percentage's
+// denominator and the stall threshold are all the same window, and a frame
+// in which they were not would draw bars against one scale and label them
+// with another. The same pointer-receiver rule applies as above.
+func (m *Model) timelineWallClock() uint32 {
+	if !m.timelineWallClockCached {
+		_, spans := m.timelineSpans()
+		m.timelineWallClockCache = timelineWallClockMs(spans)
+		m.timelineWallClockCached = true
+	}
+	return m.timelineWallClockCache
+}
+
 // renderTimeline renders the timeline view's centre-pane content: one
 // labelled lane bar per lane the active tier's spans pack into (see
 // timelineLanes), then the time axis, then the stall annotation (see
@@ -500,7 +566,10 @@ func laneLabelWidth(labels []string) int {
 // The lane rows are windowed around the lane cursor by the same
 // scrollWindow the centre table uses for its own row cursor, so a log with
 // more lanes than the pane is tall keeps the selected one on screen instead
-// of always showing the first screenful.
+// of always showing the first screenful. A window that left lanes off
+// screen says how many in the axis row's label gutter (see laneCutMark):
+// a lane that scrolled away leaves no gap behind it, so without the count a
+// five-lane log drawing one lane looks exactly like a one-lane log.
 //
 // The axis is indented under the bar area by the same label width the lane
 // rows reserve, so it still names both ends of what the bars above it are
@@ -528,10 +597,8 @@ func (m *Model) renderTimeline(w, h int) string {
 	}
 
 	lanes := m.timelineLanes()
-	wallClock := timelineWallClockMs(spans)
-
-	labels := laneLabels(spans, lanes)
-	labelW := laneLabelWidth(labels)
+	wallClock := m.timelineWallClock()
+	labels, labelW := m.timelineLaneLabels()
 	barW := max(w-labelW-1, 0)
 
 	// h is spent in priority order: one lane row, then one line of notes,
@@ -598,10 +665,36 @@ func (m *Model) renderTimeline(w, h int) string {
 		lines = append(lines, clipWidth(label+laneBar(spans, lanes[i], wallClock, barW), w))
 	}
 	if axisH > 0 {
-		lines = append(lines, clipWidth(strings.Repeat(" ", labelW+1)+timeAxis(wallClock, barW), w))
+		gutter := padRight(clipValueEnd(laneCutMark(len(lanes)-visible), labelW), labelW) + " "
+		lines = append(lines, clipWidth(gutter+timeAxis(wallClock, barW), w))
 	}
 	lines = append(lines, notes...)
 	return strings.Join(lines, "\n")
+}
+
+// laneCutMark is what the axis row's label gutter says when the pane had
+// more lanes than it had room to draw: "+3" for three lanes not on screen.
+// Nothing was cut means nothing is said, so a one-lane log and a five-lane
+// log showing one lane no longer render the same frame -- the silence this
+// view's own cut marks (detailCutMark on the notes, on the stall list, and
+// on the detail pane beside it) all exist to refuse.
+//
+// It is a count rather than a bare ellipsis because the number is the whole
+// finding: a reader who cannot see four lanes needs to know there are four,
+// not merely that there are some. The gutter is blank space the axis row
+// already spends, so the mark costs no lane row -- which matters more here
+// than anywhere else in the pane, since a lane row is the one thing this
+// view exists to draw. It sits under the labels, in the same column and
+// clipped the same way, because it names lanes.
+//
+// A pane too short even for the axis cannot say it: at that height the
+// timeline has one lane row and, at best, the notes' own cut mark, which is
+// the same limit fitDetailSections states for a one-line detail pane.
+func laneCutMark(hidden int) string {
+	if hidden <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("+%d", hidden)
 }
 
 // clampedStartNote is what the timeline says when any span it draws had its
@@ -668,7 +761,7 @@ func (m *Model) timelineNotes(w int) []string {
 	if m.timelineNarrowed() {
 		lines = append(lines, wrapToWidth(timelineFilterNote, w)...)
 	}
-	lines = append(lines, clipValueEnd(busyNote(spans), w))
+	lines = append(lines, clipValueEnd(busyNote(spans, m.timelineWallClock()), w))
 	return append(lines, strings.Split(m.stallAnnotation(w), "\n")...)
 }
 
@@ -753,17 +846,19 @@ func (m *Model) timelineNarrowed() bool {
 // view's word for occupancy: laneShadeFor shades each column by how much of
 // it was busy, and this is the same measure taken over the whole window.
 //
-// The denominator is timelineWallClockMs over the same filtered spans the
-// axis is scaled to, so the percentage is a fraction of the window a reader
-// can see, not of some other span of time. A zero window -- every span
-// zero-extent, which the UI tier can produce -- reports 0%, there being no
-// window for anything to be a fraction of.
+// The denominator is the window handed in, which is the one the axis is
+// scaled to (Model.timelineWallClock, measured over these same filtered
+// spans), so the percentage is a fraction of the window a reader can see
+// rather than of some other span of time. It is a parameter for the reason
+// laneBar and timeAxis take theirs: the frame measures the window once and
+// every part of it drawn against that scale is given the same number. A
+// zero window -- every span zero-extent, which the UI tier can produce --
+// reports 0%, there being no window for anything to be a fraction of.
 //
 // The percentage truncates rather than rounding, so it never reports 100%
 // for a window with idle time in it, and never rounds a run that was 0.4%
 // busy up to 1%.
-func busyNote(spans []span.Span) string {
-	window := timelineWallClockMs(spans)
+func busyNote(spans []span.Span, window uint32) string {
 	busy, err := model.BusyMs(spans)
 	if err != nil {
 		// One fidelity by construction, the same guarantee timelineLanes
@@ -994,26 +1089,47 @@ func laneEndCol(ms, spanMs uint32, barW int) int {
 // written out as "0s", so that the axis and the annotation beneath it
 // cannot spell the same instant two ways -- see formatMs on why zero is
 // spelled in seconds.
+//
+// The right label is drawn only where it fits WHOLE, with a column of space
+// separating it from the left one, and is otherwise replaced by
+// detailCutMark. Neither half of that is presentation. A bar exactly as
+// wide as the two labels together left no gap, so they ran into each other
+// as a single token ("0s521.4s"); a bar narrower still had the pair cut by
+// clipWidth, which marks nothing, leaving a fragment that reads as a whole
+// number and a wrong one -- "0s521" for a 521.4s window, "0s800" for one of
+// 800ms, both off by orders of magnitude from either end of the axis they
+// claim to label. Losing the total is the cost; stating it wrongly is not
+// an alternative, and the notes beneath still carry the window (see
+// busyNote). The mark is the same ellipsis the notes block, the stall list
+// and the detail pane already cut with.
+//
+// "0s" is what survives at the last: it anchors the axis under the lane
+// bars' own left edge. A bar with no room even for the mark beside it keeps
+// the left label alone, which is where the closing clipWidth takes over.
+//
+// The result is exactly barW columns wide, whichever of those it drew.
 func timeAxis(spanMs uint32, barW int) string {
 	if barW <= 0 {
 		return ""
 	}
 	left := formatMs(0)
 	right := formatMs(uint64(spanMs))
+	if !axisLabelsFit(left, right, barW) {
+		right = detailCutMark
+		if !axisLabelsFit(left, right, barW) {
+			right = ""
+		}
+	}
 
 	gap := max(barW-lipgloss.Width(left)-lipgloss.Width(right), 0)
-	axis := left + strings.Repeat(" ", gap) + right
+	return clipWidth(left+strings.Repeat(" ", gap)+right, barW)
+}
 
-	// A pane too narrow to hold both labels truncates from the right: "0s"
-	// anchors the axis under the lane bars' own left edge, and the row
-	// beneath it is already unreadable at that width regardless of which
-	// label survives, so keeping the left one is no more than a tie-break.
-	if w := lipgloss.Width(axis); w > barW {
-		axis = clipWidth(axis, barW)
-	} else if w < barW {
-		axis += strings.Repeat(" ", barW-w)
-	}
-	return axis
+// axisLabelsFit reports whether the axis can carry both labels at barW
+// columns: their own widths plus the one column of space that keeps them
+// two labels rather than one token.
+func axisLabelsFit(left, right string, barW int) bool {
+	return lipgloss.Width(left)+1+lipgloss.Width(right) <= barW
 }
 
 // stallAnnotationNoStalls is what stallAnnotation renders when the current
@@ -1064,6 +1180,13 @@ const maxStallsShown = 3
 // (see model.Stalls' own merge-then-threshold doc comment) and keeps its
 // 5s solo window and the 1s of core start-up before either provider was
 // called -- exactly the distinction this annotation exists to draw.
+//
+// Every fixture in this repository has a window of 20s or less, which is
+// the crossover: below it the floor governs everywhere, so no fixture can
+// pin what the percentage is. Both terms are held to their values directly
+// instead, by TestStallThresholdTakesTheLargerOfItsTwoTerms, and the
+// percentage is shown deciding which waits survive on a window long enough
+// for it to govern by TestALongWindowsPercentageDecidesWhichWaitsAreNamed.
 func stallThresholdMs(wallClock uint32) uint32 {
 	return max(wallClock/20, 1000)
 }
@@ -1226,8 +1349,7 @@ func (m *Model) stallAnnotation(w int) string {
 	}
 
 	lanes := m.timelineLanes()
-	wallClock := timelineWallClockMs(spans)
-	stalls, err := model.Stalls(spans, stallThresholdMs(wallClock))
+	stalls, err := model.Stalls(spans, stallThresholdMs(m.timelineWallClock()))
 	if err != nil {
 		// timelineSpans hands spans of a single fidelity by construction,
 		// the same guarantee timelineLanes leans on for PackLanes -- see
@@ -1257,15 +1379,15 @@ func (m *Model) stallAnnotation(w int) string {
 		stalls = stalls[:maxStallsShown]
 	}
 
-	// The lane is named with the label the LANE ROW renders, clipped by the
-	// same rule and to the same width renderTimeline's label column uses
-	// (laneLabelWidth, capped at maxLaneLabelWidth). "waiting on aws/1"
-	// points at exactly one bar only if the bar carries that same text:
-	// naming a lane "googleworkspace/1" beside a row reading
-	// "…workspace/1" would send the reader looking for a bar that is not
-	// on screen.
-	labels := laneLabels(spans, lanes)
-	labelW := laneLabelWidth(labels)
+	// The lane is named with the label the LANE ROW renders, from the same
+	// measurement it renders from (timelineLaneLabels) and clipped by the
+	// same rule to the same width. "waiting on aws/1" points at exactly one
+	// bar only if the bar carries that same text: naming a lane
+	// "googleworkspace/1" beside a row reading "…workspace/1" would send
+	// the reader looking for a bar that is not on screen. One measurement
+	// read by both is what makes that structural rather than a rule two
+	// call sites have to keep in step by hand.
+	labels, labelW := m.timelineLaneLabels()
 	lines := make([]string, 0, len(stalls)+1)
 	for i, s := range stalls {
 		// The window is the SECOND field of every line, whichever of the

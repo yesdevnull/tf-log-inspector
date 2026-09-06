@@ -204,6 +204,39 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	}
 }
 
+// The span hint asks whether the detail pane is DRAWN, and between
+// detailInlineWidth and facetInlineWidth that is not a question about width
+// alone: the facet overlay replaces the whole pane row there, so the frame
+// carries neither the timeline nor the detail pane the hint's keys step
+// through. Focus is on the facet pane while it is open, so ←/→ are inert as
+// well -- Update binds them to the list pane.
+//
+// 80 columns is the default terminal and sits inside that band.
+// timeline.log packs a lane holding more than one span, which is the other
+// half of what the hint is shown on.
+func TestTheSpanHintIsHiddenWhileTheFacetOverlayReplacesTheDetailPane(t *testing.T) {
+	m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 80, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if !m.selectedLaneStepsThroughSpans() {
+		t.Fatal("the selected lane holds one span, so the hint would be hidden for a reason this test is not about")
+	}
+	if !strings.Contains(m.View(), spanCursorHint) {
+		t.Fatal("the hint is already absent with the overlay shut, so opening it cannot be what removes it")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if !m.showFacetOverlay {
+		t.Fatal("f did not open the facet overlay at 80 columns")
+	}
+	out := m.View()
+	if strings.Contains(out, spanDetailTitle) {
+		t.Fatalf("the overlay frame still draws the detail pane, so the hint has somewhere to point:\n%s", out)
+	}
+	if strings.Contains(out, spanCursorHint) {
+		t.Errorf("the footer offers %q over a frame with no timeline and no detail pane:\n%s", spanCursorHint, out)
+	}
+}
+
 // Golden files lock the layout at the three widths the spec names. They use
 // two-providers.log, not mixed-hcp.log: a golden commits whatever the view
 // renders into the repository, and two-providers.log is wholly synthesised
@@ -1612,6 +1645,72 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 	if got := detailNaturalWidth(l); got < lipgloss.Width(widest) {
 		t.Errorf("detailNaturalWidth = %d, want at least %d for %q", got, lipgloss.Width(widest), widest)
 	}
+}
+
+// A log carrying BOTH tiers reaches the detail pane through its RPC spans
+// alone. timelineSpans draws the UI tier only where the log has no RPC span
+// at all, and row.spanIdx only ever indexes RPCSpans, so every UI-hook
+// span's Addr line is a line no keypress in such a log can put on screen --
+// and every column it claims comes out of the centre pane, which in the
+// timeline is the bar area this view exists for.
+//
+// The case is built here rather than taken from a fixture because no
+// fixture shows it. testdata/two-tier.log carries both tiers, but its
+// widest RPC line -- a registry provider address at 41 columns -- already
+// outruns its longest Addr line at 23, so the pane measures the same width
+// either way and the defect is invisible in it.
+func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
+	ui := span.Span{
+		RPC: "create", Provider: "aws", ResourceType: "aws_subnet",
+		Address:    "module.networking.module.private_subnets.aws_subnet.this[0]",
+		StartMs:    0,
+		EndMs:      1000,
+		DurationMs: 1000,
+		Fidelity:   span.FidelityUIReported,
+	}
+	l := &model.Log{
+		RPCSpans: []span.Span{{RPC: "PlanResourceChange", Provider: "aws", ResourceType: "aws_subnet", StartMs: 0, EndMs: 10, DurationMs: 10, Fidelity: span.FidelityReported}},
+		UISpans:  []span.Span{ui},
+	}
+
+	var addr string
+	for _, line := range spanDetailLines(ui, hugeWidth) {
+		if strings.HasPrefix(line, "Addr") {
+			addr = line
+		}
+	}
+	if addr == "" {
+		t.Fatal("the UI-hook span has no Addr line, so this asserts nothing")
+	}
+
+	got := detailNaturalWidth(l)
+	for _, line := range reachableDetailLines(l) {
+		if w := lipgloss.Width(line); w >= lipgloss.Width(addr) {
+			t.Fatalf("the pane can draw %q at %d columns, as wide as the Addr line %q -- this case no longer isolates the unreachable tier", line, w, addr)
+		} else if w > got {
+			t.Errorf("detailNaturalWidth = %d, too narrow for %q at %d columns", got, line, w)
+		}
+	}
+	if got >= lipgloss.Width(addr) {
+		t.Errorf("detailNaturalWidth = %d, wide enough for %q (%d columns) -- a line this log can never put in the pane", got, addr, lipgloss.Width(addr))
+	}
+}
+
+// reachableDetailLines is every line the detail pane can actually draw for
+// l: one line per field of each span a row or the timeline cursor can
+// select, and every line of each rollup row's own sections. It is what
+// detailNaturalWidth is measured to fit.
+func reachableDetailLines(l *model.Log) []string {
+	var lines []string
+	for _, s := range l.RPCSpans {
+		lines = append(lines, spanDetailLines(s, hugeWidth)...)
+	}
+	for _, r := range append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...) {
+		for _, section := range rollupDetailSections(r.rollup, hugeWidth) {
+			lines = append(lines, section...)
+		}
+	}
+	return lines
 }
 
 // The measurement has to reach the SCREEN, not just the function: a pane

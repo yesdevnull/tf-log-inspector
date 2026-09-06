@@ -182,12 +182,33 @@ type Model struct {
 	// Anything that can change what timelineSpans() returns -- the filter,
 	// since the tier itself is a property of the log rather than of the
 	// selection (see timelineSpans) -- must invalidate these via
-	// invalidateRows.
+	// invalidateRows, along with everything derived from them below.
 	timelineTierCache   timelineTier
 	timelineSpansCache  []span.Span
 	timelineSpansCached bool
 	timelineLanesCache  []model.Lane
 	timelineLanesCached bool
+
+	// timelineLabelsCache and timelineLabelWidthCache memoise the lane
+	// labels and the width the label column is drawn at, and
+	// timelineWallClockCache the window the axis and every bar are scaled
+	// to. They belong to the same group for the same reason and are dropped
+	// on the same path: all three are derived from the spans and lanes
+	// above, so a stale one describes a packing that is gone.
+	//
+	// They are cached for a reason beyond cost. renderTimeline and
+	// stallAnnotation each derived the labels and their width for
+	// themselves, and the annotation's copy HAD to match the renderer's
+	// clip rule and width or "waiting on aws/1" would name a bar drawn as
+	// something else -- an invariant held by two hand-kept copies. One
+	// measurement per frame, read by both, is what removes it. The cost is
+	// real as well: laneLabels walks every lane into a fresh map, twice per
+	// frame, on a log that can pack lanes into the hundreds.
+	timelineLabelsCache     []string
+	timelineLabelWidthCache int
+	timelineLabelsCached    bool
+	timelineWallClockCache  uint32
+	timelineWallClockCached bool
 
 	// facetPaneNatural and detailPaneNatural are how wide each side pane
 	// would have to be to show its widest line in full. Both are functions
@@ -550,6 +571,11 @@ func (m *Model) invalidateRows() {
 	m.timelineSpansCached = false
 	m.timelineLanesCache = nil
 	m.timelineLanesCached = false
+	m.timelineLabelsCache = nil
+	m.timelineLabelWidthCache = 0
+	m.timelineLabelsCached = false
+	m.timelineWallClockCache = 0
+	m.timelineWallClockCached = false
 	m.raw.notFound = false
 	m.clampSelection()
 	if m.view == ViewTimeline {

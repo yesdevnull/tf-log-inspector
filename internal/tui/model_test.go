@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // update applies one message and returns the concrete model. Update's
@@ -351,6 +352,41 @@ func TestRenderFillsTheTimelineSpansCacheOnTheModelItRendered(t *testing.T) {
 	live.log = &model.Log{} // a rebuild would now find no spans at all
 	if _, got := live.timelineSpans(); len(got) != len(want) {
 		t.Errorf("timelineSpans returned %d spans after a render, want the cached %d -- the render cached into a copy", len(got), len(want))
+	}
+}
+
+// The lane labels, the width they are drawn in and the wall clock the axis
+// is scaled to are cached beside the spans and lanes they come from, and
+// need the same pointer-receiver guarantee for a reason beyond cost:
+// renderTimeline and stallAnnotation must name a lane the same way and clip
+// it to the same width, or the annotation points at a bar that is not on
+// screen. A render filling the cache on a copy leaves each measuring its
+// own again, which is the hand-kept invariant the cache exists to remove.
+//
+// Observed by swapping the span and lane caches out AFTER the render for a
+// set that would derive a different label and a different window: a cache
+// the render filled on the live model still answers with what it measured
+// then, while one filled on a discarded copy is rebuilt from the swap.
+func TestRenderFillsTheTimelineLabelCacheOnTheModelItRendered(t *testing.T) {
+	live := liveModel(t, "timeline.log", tea.WindowSizeMsg{Width: 160, Height: 40}, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	wantLabels, wantWidth := live.timelineLaneLabels()
+	wantClock := live.timelineWallClock()
+	if len(wantLabels) == 0 || wantClock == 0 {
+		t.Fatal("fixture has no lanes or no window, so a stale measurement could not be told from a fresh one")
+	}
+
+	live.timelineLabelsCache, live.timelineLabelWidthCache, live.timelineLabelsCached = nil, 0, false
+	live.timelineWallClockCache, live.timelineWallClockCached = 0, false
+	_ = live.View()
+
+	// A rebuild would now derive "zzzzzzzz/1" over a 1ms window.
+	live.timelineSpansCache = []span.Span{{Provider: "zzzzzzzz", StartMs: 0, EndMs: 1, DurationMs: 1, Fidelity: span.FidelityReported}}
+	live.timelineLanesCache = []model.Lane{{Spans: []int{0}}}
+	if gotLabels, gotWidth := live.timelineLaneLabels(); !slices.Equal(gotLabels, wantLabels) || gotWidth != wantWidth {
+		t.Errorf("timelineLaneLabels = %v at %d columns after a render, want the cached %v at %d -- the render cached into a copy", gotLabels, gotWidth, wantLabels, wantWidth)
+	}
+	if got := live.timelineWallClock(); got != wantClock {
+		t.Errorf("timelineWallClock = %d after a render, want the cached %d -- the render cached into a copy", got, wantClock)
 	}
 }
 

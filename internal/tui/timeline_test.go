@@ -828,9 +828,93 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
-	want := strings.Repeat(" ", labelW+1) + timeAxis(timelineWallClockMs(spans), barW)
+	// One of the two lanes is drawn, so the axis gutter carries the mark for
+	// the other; see TestTheAxisMarksLaneRowsScrolledOffScreen.
+	want := padRight("+1", labelW) + " " + timeAxis(timelineWallClockMs(spans), barW)
 	if lines[1] != want {
 		t.Errorf("renderTimeline(h=3) = %q, want the axis on its second line: %q", lines, want)
+	}
+}
+
+// The axis used to cut its right label with clipWidth, which marks nothing,
+// and it cut the two labels as one concatenated string. Both failures read
+// as a complete number rather than a missing one: a 521.4s window on a bar
+// eight columns wide rendered "0s521.4s", with the labels run together into
+// one token, and five columns rendered "0s521" -- a number that is neither
+// end of the axis and is off by three orders of magnitude. A sub-second
+// window was worse still: 800ms rendered "0s800", which reads as seconds.
+//
+// The right label is therefore drawn only where it fits WHOLE with a column
+// of space telling it from the left one, and where it does not the same
+// ellipsis every other cut on this view carries stands in its place. What
+// the reader loses is the window's size, which the notes below still carry;
+// what they no longer get is a wrong one.
+//
+// These widths are reachable: barW is w-labelW-1, so a terminal of roughly
+// 21 columns or fewer produces them.
+func TestTheAxisDropsARightLabelItCannotShowWhole(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		barW   int
+		spanMs uint32
+		want   string
+	}{
+		{"labels that would run together as one token", 8, 521400, "0s     " + detailCutMark},
+		{"a label that would be cut to a shorter number", 5, 521400, "0s  " + detailCutMark},
+		{"a sub-second window that would read as seconds", 5, 800, "0s  " + detailCutMark},
+		{"no room for even the mark", 3, 521400, "0s "},
+		{"one column of separation is all it needs", 9, 521400, "0s 521.4s"},
+		{"room to spare", 12, 521400, "0s    521.4s"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := timeAxis(c.spanMs, c.barW)
+			if got != c.want {
+				t.Errorf("timeAxis(%d, %d) = %q, want %q", c.spanMs, c.barW, got, c.want)
+			}
+			if n := lipgloss.Width(got); n != c.barW {
+				t.Errorf("timeAxis(%d, %d) = %q, %d columns wide, want exactly %d", c.spanMs, c.barW, got, n, c.barW)
+			}
+		})
+	}
+}
+
+// A pane too short for every lane must SAY that lanes are missing. Without
+// it, "five lanes, one drawn" and "one lane" render as the same frame:
+// there is no scrollbar, and a lane that scrolled off leaves no gap behind
+// it. Every other truncation on this view marks itself -- the stall list
+// its top-N cut, the notes block its height cut, the detail pane beside it
+// its own -- and a silence that reads as completeness is what all three
+// exist to refuse.
+//
+// The mark rides in the axis row's label gutter, which is blank space the
+// pane already spends, so it costs no lane row. timeline-many-lanes.log
+// packs five lanes: h=5 has room for two of them, the axis and the two
+// notes, and h=8 has room for all five.
+func TestTheAxisMarksLaneRowsScrolledOffScreen(t *testing.T) {
+	m := New(testLog(t, "timeline-many-lanes.log"), "x.log")
+	lanes := m.timelineLanes()
+	if len(lanes) != 5 {
+		t.Fatalf("timeline-many-lanes.log packs into %d lanes, want 5 (see the fixture's own doc comment)", len(lanes))
+	}
+	_, spans := m.timelineSpans()
+	labelW := laneLabelWidth(laneLabels(spans, lanes))
+	const w = 60
+	axis := timeAxis(timelineWallClockMs(spans), w-labelW-1)
+
+	short := strings.Split(m.renderTimeline(w, 5), "\n")
+	if len(short) != 5 {
+		t.Fatalf("renderTimeline(h=5) produced %d lines, want 5 (two lane rows, the axis and two notes)", len(short))
+	}
+	if got, want := short[2], padRight("+3", labelW)+" "+axis; got != want {
+		t.Errorf("axis row with two of five lanes drawn = %q, want %q -- the three that scrolled off go unmarked", got, want)
+	}
+
+	tall := strings.Split(m.renderTimeline(w, 8), "\n")
+	if len(tall) != 8 {
+		t.Fatalf("renderTimeline(h=8) produced %d lines, want 8 (five lane rows, the axis and two notes)", len(tall))
+	}
+	if got, want := tall[5], strings.Repeat(" ", labelW+1)+axis; got != want {
+		t.Errorf("axis row with every lane drawn = %q, want %q -- nothing was cut, so nothing may be marked", got, want)
 	}
 }
 
@@ -1265,6 +1349,71 @@ func TestALeadingWindowContainingACompletedCallIsNotTheLeadingGap(t *testing.T) 
 	want := []string{"nothing running, 0s–3.0s" + betweenCallsClause}
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
+	}
+}
+
+// stallThresholdMs has two terms and each one governs somewhere, so each
+// needs a case where it is the one deciding. Neither had one: every fixture
+// in this repository has a window of 20s or less, where 5% never reaches
+// the 1s floor, so the percentage was free to be any percentage at all.
+//
+// The floor is the constant this view's wording rests on -- it is what
+// drops testdata/timeline.log's three 500ms handover slivers while keeping
+// its 5s solo window -- and the percentage is what stops a long capture
+// reporting every sub-second gap in it. 20s is the crossover, where the two
+// terms agree, and is included so the floor and the percentage are pinned
+// on both sides of it rather than only in their own halves.
+func TestStallThresholdTakesTheLargerOfItsTwoTerms(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		wallClock uint32
+		want      uint32
+	}{
+		{"an empty window still has a floor", 0, 1000},
+		{"the floor governs a short window", 9000, 1000},
+		{"the terms agree at the crossover", 20000, 1000},
+		{"the percentage governs just past it", 21000, 1050},
+		{"the percentage governs a long window", 180000, 9000},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stallThresholdMs(c.wallClock); got != c.want {
+				t.Errorf("stallThresholdMs(%d) = %d, want %d", c.wallClock, got, c.want)
+			}
+		})
+	}
+}
+
+// The threshold's percentage has to decide something a reader can see, not
+// just return a number, so this is the same question asked of the
+// annotation: on a window long enough for the percentage to govern, a wait
+// shorter than it must be dropped and one longer than it kept.
+//
+// The window is 200s, where 5% is 10s. aws runs the whole of it while
+// google calls twice, leaving a 13s wait and a 183s one -- one either side
+// of a 10% threshold and both above a 5% one, so what survives says which
+// percentage is in force. It is synthetic for the reason topStallsModel is:
+// no fixture has a window anywhere near long enough.
+func TestALongWindowsPercentageDecidesWhichWaitsAreNamed(t *testing.T) {
+	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
+	spans := []span.Span{{Provider: aws, RPC: "ApplyResourceChange", StartMs: 0, EndMs: 200000, DurationMs: 200000, Fidelity: span.FidelityReported}}
+	for _, g := range [][2]uint32{{0, 2000}, {15000, 17000}} {
+		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: g[0], EndMs: g[1], DurationMs: g[1] - g[0], Fidelity: span.FidelityReported})
+	}
+	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	if _, got := m.timelineSpans(); timelineWallClockMs(got) != 200000 {
+		t.Fatalf("the window is %dms, want 200000", timelineWallClockMs(got))
+	}
+	if got := stallThresholdMs(200000); got != 10000 {
+		t.Fatalf("the threshold on a 200s window is %dms; this case is built for 5%% of it", got)
+	}
+
+	want := []string{
+		"waiting on aws/1, 17.0s–200.0s — concurrency 1 of 2",
+		"waiting on aws/1, 2.0s–15.0s — concurrency 1 of 2",
+	}
+	if got := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(got, want) {
+		t.Errorf("stallAnnotation = %v, want %v -- the 13s wait clears 5%% of the window and not 10%%", got, want)
 	}
 }
 

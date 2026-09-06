@@ -81,14 +81,23 @@ func facetNaturalWidth(facets []model.Facet) int {
 // under the types view's ten-column label ("RPC calls") outruns a provider
 // address under the span detail's six ("Prov").
 //
-// BOTH span tiers are measured. A UI-hook span's detail carries an Addr
-// line (see spanDetailLines) that no RPC span has, and it is the widest
-// line this pane draws for such a log -- a resource address runs to a whole
-// module path where a provider address is one registry slug. The timeline's
-// cursor selects UI-tier spans directly (selectedTimelineSpanValue), so a
-// log carrying UI-hook spans only would otherwise be measured off its
-// rollups alone and front-clip every address it drew, collapsing distinct
-// module paths to identical text with terminal width to spare.
+// The span tier it measures is the tier a selection can actually reach,
+// which timelineTierFor decides -- the same rule timelineSpans draws by, so
+// the two cannot disagree about which spans this pane will ever be asked to
+// describe. A UI-hook span's detail carries an Addr line (see
+// spanDetailLines) that no RPC span has, and it is the widest line this
+// pane draws for a log whose only tier is that one: the timeline's cursor
+// selects such spans directly (selectedTimelineSpanValue), so measured off
+// its rollups alone that pane would front-clip every address it drew,
+// collapsing distinct module paths to identical text with terminal width to
+// spare.
+//
+// A log carrying BOTH tiers is measured over its RPC spans alone, because
+// that is all it can show: timelineSpans draws the UI tier only where there
+// is no RPC span to draw instead, and row.spanIdx only ever indexes
+// RPCSpans. Measuring the UI tier there would size the pane for a line no
+// keypress can produce, and the columns it claimed would come out of the
+// centre pane -- in the timeline, the bar area the view exists for.
 //
 // It formats every span in the log and rolls the log up twice, so like
 // facetNaturalWidth it is measured once in New over data that cannot change
@@ -101,11 +110,13 @@ func facetNaturalWidth(facets []model.Facet) int {
 // other overrun.
 func detailNaturalWidth(l *model.Log) int {
 	width := minDetailPaneWidth
-	for _, spans := range [][]span.Span{l.RPCSpans, l.UISpans} {
-		for _, s := range spans {
-			for _, line := range spanDetailLines(s, hugeWidth) {
-				width = max(width, lipgloss.Width(line))
-			}
+	spans := l.RPCSpans
+	if timelineTierFor(l) == tierUI {
+		spans = l.UISpans
+	}
+	for _, s := range spans {
+		for _, line := range spanDetailLines(s, hugeWidth) {
+			width = max(width, lipgloss.Width(line))
 		}
 	}
 	rollups := append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...)
@@ -401,19 +412,26 @@ const spanCursorHint = "↔ span"
 // selectedLaneStepsThroughSpans) -- and nowhere else, since no other view
 // has a within-lane cursor for them to move.
 //
-// The span hint is the one hint here that also asks the WIDTH, and that is
-// the same rule again rather than a width budget. Below detailInlineWidth
-// the detail pane collapses (see renderPanes), and the within-lane cursor's
-// only visible effect is in that pane: renderTimeline states the limit --
-// the bar draws no marker for it, because a packed lane can put several
-// spans in one column -- so at those widths ←/→ move a selection nothing on
-// screen reflects. A hint there names a key that does nothing observable,
-// which is exactly what this group refuses. It costs nothing to drop: the
-// keys still drive Enter's jump target at every width, and a reader who
-// cannot see what they select has no use for being told they exist. That it
-// drops the line from 70 columns to 62 at a 60-column terminal -- moving the
-// clip off the middle of "Esc clear", though "q quit" is still cut short
-// there, to "q qu" -- is the consequence, not the reason.
+// The span hint is the one hint here that also asks what the FRAME
+// contains, and that is the same rule again rather than a width budget. The
+// within-lane cursor's only visible effect is in the detail pane:
+// renderTimeline states the limit -- the bar draws no marker for it,
+// because a packed lane can put several spans in one column -- so wherever
+// that pane is absent, ←/→ move a selection nothing on screen reflects. A
+// hint there names a key that does nothing observable, which is exactly
+// what this group refuses. It costs nothing to drop: the keys still drive
+// Enter's jump target wherever they are bound, and a reader who cannot see
+// what they select has no use for being told they exist. That it drops the
+// line from 70 columns to 62 at a 60-column terminal -- moving the clip off
+// the middle of "Esc clear", though "q quit" is still cut short there, to
+// "q qu" -- is the consequence, not the reason.
+//
+// It asks detailPaneDrawn rather than the width, because width alone gets
+// the answer wrong in the band between detailInlineWidth and
+// facetInlineWidth: an open facet overlay replaces the whole pane row
+// there, leaving a frame with no timeline and no detail pane while the
+// terminal is still wide enough for both. In that state the keys are inert
+// as well, focus having moved to the facet pane.
 //
 // Each hint asks a predicate built on the same state its key handler reads
 // -- selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
@@ -429,7 +447,7 @@ func (m *Model) actionKeys(w int) string {
 	if m.selectedRowOpens() {
 		keys = append(keys, openHint)
 	}
-	if w >= detailInlineWidth && m.selectedLaneStepsThroughSpans() {
+	if m.detailPaneDrawn(w) && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
@@ -535,7 +553,7 @@ func loggingCaveat(h int) []string {
 //   - w < detailInlineWidth: detail collapses too, leaving the list
 //     full-width. The facet overlay still works the same way here.
 func (m *Model) renderPanes(w, h int) string {
-	if w < facetInlineWidth && m.showFacetOverlay {
+	if m.facetOverlayShowing(w) {
 		return m.renderFacets(w, h)
 	}
 	switch {
@@ -548,7 +566,7 @@ func (m *Model) renderPanes(w, h int) string {
 			pane{m.renderCentre(listW, h), listW},
 			pane{m.renderDetail(detailW, h), detailW},
 		)
-	case w >= detailInlineWidth:
+	case m.detailPaneDrawn(w):
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - detailW - paneSepWidth
 		return joinPanes(h,
@@ -564,6 +582,33 @@ func (m *Model) renderPanes(w, h int) string {
 		// frame, on the one layout that has no other pane to absorb it.
 		return clipLines(m.renderCentre(w, h), h)
 	}
+}
+
+// facetOverlayShowing reports whether the facet pane is currently taking
+// the WHOLE pane row: the flag is set (see toggleFacetFocus) and the
+// terminal is narrow enough that the facets have no column of their own to
+// live in. It is one predicate rather than the pair of comparisons repeated
+// at each site, because everything that has to know what the frame contains
+// -- what renderPanes draws, which panes Tab can reach, which keys the
+// footer advertises -- must read the same answer.
+func (m *Model) facetOverlayShowing(w int) bool {
+	return w < facetInlineWidth && m.showFacetOverlay
+}
+
+// detailPaneDrawn reports whether the frame at width w actually has a
+// detail pane in it. Width alone does not answer that: between
+// detailInlineWidth and facetInlineWidth an open facet overlay replaces the
+// entire pane row, so a terminal wide enough for the pane still shows none.
+//
+// The footer asks it for the same reason renderPanes branches on it. The
+// within-lane cursor's only visible effect is in that pane, so a hint for
+// ←/→ shown over a frame that has neither the pane nor the timeline names a
+// key with nothing on screen to reflect it -- and with the overlay open
+// those keys are inert besides, since Update binds them to the list pane.
+// Two copies of the rule are what let the footer and the renderer drift
+// apart, so there is one.
+func (m *Model) detailPaneDrawn(w int) bool {
+	return !m.facetOverlayShowing(w) && w >= detailInlineWidth
 }
 
 // clipLines truncates s to at most h lines, the same bound joinPanes applies
@@ -600,7 +645,7 @@ func (m *Model) paneWidth() int {
 // facet, which changes the ranked numbers this tool exists to report, with
 // nothing on screen to say why the rows moved.
 func (m *Model) focusablePanes(w int) []Pane {
-	if w < facetInlineWidth && m.showFacetOverlay {
+	if m.facetOverlayShowing(w) {
 		// The overlay replaces the whole pane row, so it is the only pane
 		// on screen and the only one Tab can reach.
 		return []Pane{PaneFacets}
@@ -610,7 +655,7 @@ func (m *Model) focusablePanes(w int) []Pane {
 		panes = append(panes, PaneFacets)
 	}
 	panes = append(panes, PaneList)
-	if w >= detailInlineWidth {
+	if m.detailPaneDrawn(w) {
 		panes = append(panes, PaneDetail)
 	}
 	return panes
