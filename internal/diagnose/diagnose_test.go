@@ -1168,3 +1168,60 @@ func TestReportNeverPrintsAnAddress(t *testing.T) {
 		}
 	}
 }
+
+// --- Task 5 fix round 1: a log with terraform.ui context but zero RPC spans
+// must not present an unqualified 0.0% share or 0-span/0ms confidence lines
+// as though attribution ran and failed -- there was nothing to attribute.
+// structured-ui.log is exactly this shape: INFO-level terraform.ui with no
+// TRACE-level provider RPC entries.
+
+// structuredCompleteLine closes the context structuredHookLine opens -- same
+// address and action -- so cc.CompletedPairs() > 0 without any RPC span
+// existing anywhere in the input: UI-hook completions and RPC spans come
+// from entirely different sinks (span.UIHookBuilder vs span.ReportedBuilder),
+// so this line alone cannot manufacture the RPC span this test must have
+// none of.
+const structuredCompleteLine = `{"@level":"info","@message":"module.module_name[\"key\"].data.local_file.thing: Refresh complete after 1s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.556000+10:00","hook":{"resource":{"addr":"module.module_name[\"key\"].data.local_file.thing","module":"module.module_name[\"key\"]","resource":"data.local_file.thing","implied_provider":"local","resource_type":"local_file","resource_name":"thing","resource_key":null},"action":"read","elapsed_seconds":1,"id_key":"id","id_value":"deadbeef"},"type":"apply_complete"}`
+
+func TestReportDoesNotClaimMeasuredCoverageWithoutRPCSpans(t *testing.T) {
+	r := build(t, structuredVersionLine+"\n"+structuredHookLine+"\n"+structuredCompleteLine+"\n")
+	if r.SpanCount != 0 {
+		t.Fatalf("fixture carries %d RPC spans; this test proves nothing", r.SpanCount)
+	}
+	if !r.HasContext {
+		t.Fatal("fixture carries no address context; this test proves nothing")
+	}
+	if r.HasSpans {
+		t.Fatal("HasSpans = true with zero RPC spans")
+	}
+	out := render(t, r)
+	// Scoped to the ADDRESS ATTRIBUTION section itself: SIZE legitimately
+	// prints an unrelated "0.0%" for a fixture with no continuation bytes,
+	// and that must not make this test pass vacuously.
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+	if strings.Contains(section, "nameable share") {
+		t.Errorf("report presents a nameable share with no RPC spans to measure it from:\n%s", section)
+	}
+	for _, unqualified := range []string{"0 spans, 0 ms", "0.0%"} {
+		if strings.Contains(section, unqualified) {
+			t.Errorf("report contains an unqualified %q, indistinguishable from a real measurement:\n%s", unqualified, section)
+		}
+	}
+	if !strings.Contains(section, "no provider RPC spans to attribute") {
+		t.Errorf("report does not explain that nothing was measured:\n%s", section)
+	}
+}
+
+// The real fixture this shape was found on: terraform.ui context throughout,
+// no hclog-timestamped lines at all, so the stream offset is also never
+// derived and must say so rather than rendering a genuine-looking 0ms.
+func TestReportOnPureStructuredFixtureDoesNotClaimMeasuredOffset(t *testing.T) {
+	out := renderFixture(t, fixture(t, "structured-ui.log"))
+	if strings.Contains(out, "stream offset             0 ms") {
+		t.Errorf("report renders an unmeasured stream offset as a genuine 0ms:\n%s", out)
+	}
+	if !strings.Contains(out, "not derived") {
+		t.Errorf("report does not say the stream offset was never derived:\n%s", out)
+	}
+}

@@ -217,12 +217,32 @@ type Report struct {
 	// Address-attribution figures. Counts and totals only -- no address
 	// appears in this report, which is the one output that leaves the
 	// machine.
-	HookTypes         []Template // structured-output "type" values and counts, recurring only
-	WithheldHookTypes uint64     // distinct types withheld for appearing once
-	Coverage          attrib.Coverage
-	Contexts          int // address context windows collected
-	HasContext        bool
-	StreamOffsetMs    int64 // logfmt.Stats.FirstTS to the structured stream's first timestamp
+	//
+	// HookTypes is never withheld for rarity, unlike TopFieldKeys/
+	// TopComponents/TopTemplates above: hook "type" values are a small
+	// closed vocabulary from Terraform's own source (see the
+	// opensContext/closesContext switches in internal/attrib/context.go),
+	// not free-form content a high-entropy token could masquerade as, and
+	// a type seen once -- e.g. apply_errored, the one signal a create
+	// failed -- is exactly the finding this histogram exists to surface.
+	HookTypes []Template // every structured-output "type" value and its count
+	Coverage  attrib.Coverage
+	// HasSpans is true only when there is at least one RPC span to
+	// attribute. A log can carry address context (HasContext) with zero
+	// RPC spans -- e.g. INFO-level terraform.ui without TRACE provider
+	// logging -- and Coverage/NameableShare must never be rendered as a
+	// measurement in that case: there was nothing to measure, which reads
+	// very differently from "everything measured failed".
+	HasSpans   bool
+	Contexts   int // address context windows collected
+	HasContext bool
+	// StreamOffsetMs is only meaningful when StreamOffsetKnown is true. A
+	// log with no hclog-timestamped lines at all (a pure structured-output
+	// capture) can never derive it, and the zero value must not be
+	// mistaken for a genuine "streams start at the same instant"
+	// measurement.
+	StreamOffsetMs    int64
+	StreamOffsetKnown bool
 
 	fieldKeys     map[string]uint64 // every distinct key seen, unfiltered -- unexported so a future caller cannot range over the singletons Amendment 1 withholds
 	templateCount map[string]uint64
@@ -390,14 +410,22 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	})
 	r.UIActionCounts = actions
 
-	hookTypes, withheldHookTypes := recurringTopN(cc.TypeCounts(), maxTemplates)
-	r.HookTypes, r.WithheldHookTypes = hookTypes, withheldHookTypes
+	// No withholding here (see the HookTypes doc comment): typeCounts is
+	// already the whole map, so topN's cap is set to its length rather
+	// than maxTemplates, which would silently drop real hook types once a
+	// capture used more than maxTemplates distinct ones.
+	typeCounts := cc.TypeCounts()
+	r.HookTypes = topN(typeCounts, len(typeCounts))
 	if cc.CompletedPairs() > 0 {
 		r.HasContext = true
 		r.Contexts = len(cc.Contexts())
-		r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, cc.Contexts()))
+		if len(spans) > 0 {
+			r.HasSpans = true
+			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, cc.Contexts()))
+		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
 			r.StreamOffsetMs = cc.FirstTS().Sub(st.FirstTS).Milliseconds()
+			r.StreamOffsetKnown = true
 		}
 	}
 
@@ -632,13 +660,25 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO at TRACE)\n")
 	} else {
 		fmt.Fprintf(b, "  %-25s %d\n", "contexts", r.Contexts)
-		fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
-		for _, c := range []attrib.Confidence{
-			attrib.Contained, attrib.Likely, attrib.Overlapping,
-			attrib.Ambiguous, attrib.Unattributed,
-		} {
-			fmt.Fprintf(b, "  %-25s %d spans, %d ms\n", c.String(),
-				r.Coverage.ByConfidence[c], r.Coverage.MsByConfidence[c])
+		if !r.HasSpans {
+			// Context exists but there is nothing to correlate it against --
+			// e.g. INFO-level terraform.ui without TRACE provider RPC
+			// logging. Printing a 0.0% share or 0-span confidence lines here
+			// would read as "attribution ran and every span failed", which is
+			// a different and false claim from "there was nothing to
+			// attribute".
+			fmt.Fprintf(b, "  no provider RPC spans to attribute -- this log has\n")
+			fmt.Fprintf(b, "  terraform.ui context but no TRACE-level provider RPC\n")
+			fmt.Fprintf(b, "  entries, so nothing was measured\n")
+		} else {
+			fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
+			for _, c := range []attrib.Confidence{
+				attrib.Contained, attrib.Likely, attrib.Overlapping,
+				attrib.Ambiguous, attrib.Unattributed,
+			} {
+				fmt.Fprintf(b, "  %-25s %d spans, %d ms\n", c.String(),
+					r.Coverage.ByConfidence[c], r.Coverage.MsByConfidence[c])
+			}
 		}
 		// The offset is the constant that re-bases the two streams onto one
 		// clock. It is NOT a check on clock agreement: the two baselines
@@ -646,17 +686,22 @@ func (r Report) Render(w io.Writer) error {
 		// Terraform process, terraform.ui only the plan phase within it --
 		// so their difference is real elapsed time plus any skew, and the
 		// two terms are not separable.
-		fmt.Fprintf(b, "  %-25s %d ms\n", "stream offset", r.StreamOffsetMs)
+		if r.StreamOffsetKnown {
+			fmt.Fprintf(b, "  %-25s %d ms\n", "stream offset", r.StreamOffsetMs)
+		} else {
+			// A pure structured-output capture has no hclog-timestamped
+			// lines at all, so there is no hclog baseline to re-base onto --
+			// the zero value must not render as a measured "streams start at
+			// the same instant".
+			fmt.Fprintf(b, "  %-25s not derived (no hclog-timestamped lines)\n", "stream offset")
+		}
 	}
-	fmt.Fprintf(b, "  hook types (recurring only, top %d)\n", len(r.HookTypes))
+	fmt.Fprintf(b, "  hook types (%d distinct)\n", len(r.HookTypes))
 	for _, t := range r.HookTypes {
 		fmt.Fprintf(b, "    %8d  %s\n", t.Count, t.Text)
 	}
 	if len(r.HookTypes) == 0 {
 		fmt.Fprintf(b, "    none\n")
-	}
-	if r.WithheldHookTypes > 0 {
-		fmt.Fprintf(b, "    %d hook types seen only once (withheld)\n", r.WithheldHookTypes)
 	}
 	fmt.Fprintf(b, "\n")
 
