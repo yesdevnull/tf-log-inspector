@@ -645,7 +645,7 @@ func (m *Model) renderTimeline(w, h int) string {
 		//
 		// A pane with no room for even the mark cannot say so. That is a
 		// pane of one line, which the lane row has taken -- the same
-		// unmarked case fitDetailSections has at that same height.
+		// unmarked case fitPaneSections has at that same height.
 		if room > 0 {
 			notes[room-1] = clipWidth(detailCutMark, w)
 		}
@@ -689,7 +689,7 @@ func (m *Model) renderTimeline(w, h int) string {
 //
 // A pane too short even for the axis cannot say it: at that height the
 // timeline has one lane row and, at best, the notes' own cut mark, which is
-// the same limit fitDetailSections states for a one-line detail pane.
+// the same limit fitPaneSections states for a one-line detail pane.
 func laneCutMark(hidden int) string {
 	if hidden <= 0 {
 		return ""

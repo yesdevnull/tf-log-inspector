@@ -379,8 +379,35 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // independently, because a 60-column terminal cannot show 62 columns of
 // action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
+	// While the help is open every binding but these two is inert (see
+	// Update), so these two are all the footer names. Leaving the ordinary
+	// hints up would advertise ⏎, s, f, Esc and the number keys over a
+	// screen where none of them do anything -- the defect this group removes
+	// wherever it finds it, at its most obvious: the key table saying what
+	// each key does is on screen at the time.
+	//
+	// It is not a loss of guidance either. Everything the footer would have
+	// abbreviated is spelled out in the pane above it, so what is left to
+	// say is how to leave.
+	if m.showHelp {
+		return clipWidth(helpCloseHint, w) + "\n" + clipWidth(quitHint, w)
+	}
 	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(w), w)
 }
+
+// The help and quit hints, named because the footer composes them two ways:
+// into the ordinary hint groups, and alone while the help is open.
+//
+// helpHint rides the VIEW-KEY line rather than the action line, which was
+// already at 70 columns -- the narrowest width that draws every pane --
+// before ? was bound. The view-key group is 45 columns at its widest, so it
+// has the room, and it is the group ? belongs to besides: help is a screen
+// the key takes you to, like the number keys beside it.
+const (
+	helpHint      = "? help"
+	helpCloseHint = "? close"
+	quitHint      = "q quit"
+)
 
 // openHint names the key that jumps from the selected row to the log entry
 // that closed its span.
@@ -477,7 +504,7 @@ func (m *Model) actionKeys(w int) string {
 	if _, sortable := tables[m.view]; sortable {
 		keys = append(keys, sortHint)
 	}
-	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
+	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", quitHint), "  ")
 }
 
 // viewKeyHints is the hint group naming the number keys that switch views,
@@ -490,13 +517,13 @@ func (m *Model) actionKeys(w int) string {
 // budget at 100 columns, and nothing is lost by it: the centre pane's title
 // names the current view already.
 func viewKeyHints(v View) string {
-	hints := make([]string, 0, len(views)-1)
+	hints := make([]string, 0, len(views))
 	for _, b := range views {
 		if b.view != v {
 			hints = append(hints, b.key+" "+b.name)
 		}
 	}
-	return strings.Join(hints, "  ")
+	return strings.Join(append(hints, helpHint), "  ")
 }
 
 // frameFixedLines is what a frame spends on everything but the pane row and
@@ -580,6 +607,12 @@ func loggingCaveat(h int) []string {
 //   - w < detailInlineWidth: detail collapses too, leaving the list
 //     full-width. The facet overlay still works the same way here.
 func (m *Model) renderPanes(w, h int) string {
+	// The help takes the whole pane row, at every width. It is not a fourth
+	// pane and has no focus of its own: while it is open every key but the
+	// three that leave it is inert, so there is nothing for Tab to reach.
+	if m.showHelp {
+		return renderHelp(w, h)
+	}
 	if m.facetOverlayShowing(w) {
 		return m.renderFacets(w, h)
 	}
@@ -774,7 +807,7 @@ func joinPanes(h int, panes ...pane) string {
 	return strings.Join(rows, "\n")
 }
 
-// detailSection is one block of the detail pane's body: lines a short pane
+// paneSection is one block of a pane's body: lines a short pane
 // keeps or drops TOGETHER.
 //
 // The unit exists because the pane's lines are not independent of each
@@ -782,7 +815,7 @@ func joinPanes(h int, panes ...pane) string {
 // render, and a labelled figure whose label survived while its number was
 // cut away reads as a complete answer to the question the label asks --
 // which is worse, because nothing on screen says the number is missing.
-type detailSection []string
+type paneSection []string
 
 // renderDetail renders the detail pane: what the selected row stands for,
 // at most w columns wide and h lines tall. The spec has the pane persist
@@ -796,7 +829,7 @@ type detailSection []string
 // a selection index outside the rows there are.
 //
 // The title and the body come from one dispatch (selectedDetail) and the
-// height budget is applied by another (fitDetailSections); all this adds is
+// height budget is applied by another (fitPaneSections); all this adds is
 // the focus marking, which belongs to neither.
 func (m *Model) renderDetail(w, h int) string {
 	if h <= 0 {
@@ -811,7 +844,7 @@ func (m *Model) renderDetail(w, h int) string {
 	if m.pane == PaneDetail {
 		line = cursorBar(line, w, true)
 	}
-	return strings.Join(fitDetailSections(line, sections, w, h), "\n")
+	return strings.Join(fitPaneSections(line, sections, w, h), "\n")
 }
 
 // The detail pane's titles, one per KIND of row it can be describing.
@@ -848,12 +881,12 @@ const (
 // describe rather than indexed into RPCSpans on the strength of a spanIdx
 // that says it names no span: a degraded pane instead of a panic mid-frame
 // inside the alt screen.
-func (m *Model) selectedDetail(w int) (string, []detailSection) {
-	nothing := []detailSection{{clipWidth(noSelectionNote, w)}}
+func (m *Model) selectedDetail(w int) (string, []paneSection) {
+	nothing := []paneSection{{clipWidth(noSelectionNote, w)}}
 	hasContext := m.log.HasAddressContext()
 	if m.view == ViewTimeline {
 		if s, ok := m.selectedTimelineSpanValue(); ok {
-			return spanDetailTitle, []detailSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
+			return spanDetailTitle, []paneSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
 		}
 		return noSelectionTitle, nothing
 	}
@@ -862,7 +895,7 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 		return noSelectionTitle, nothing
 	}
 	if s, ok := m.spanForRow(r); ok {
-		return spanDetailTitle, []detailSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
+		return spanDetailTitle, []paneSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
 	}
 	if r.rollup != nil {
 		return rollupDetailTitle, rollupDetailSections(r.rollup, w)
@@ -878,20 +911,21 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 // figure rather than the tail of one.
 const detailCutMark = "…"
 
-// fitDetailSections composes a title and body sections into at most h
+// fitPaneSections composes a title and body sections into at most h
 // lines, marking any cut with detailCutMark.
 //
-// The FIRST section is always appended: it describes the selected row
-// itself, so a pane with room for anything at all shows as much of it as
-// fits, clipped by line as a last resort. Every LATER section is kept or
-// dropped whole -- the height is checked before it is appended, not after
-// -- so a pane cannot end on a heading with nothing under it, or on a
-// figure's label with the figure gone.
+// The FIRST section is always appended, so a pane with room for anything at
+// all shows as much of its most important block as fits, clipped by line as
+// a last resort -- the selected row's own fields in the detail pane, the
+// number keys in the help. Every LATER section is kept or dropped whole --
+// the height is checked before it is appended, not after -- so a pane cannot
+// end on a heading with nothing under it, or on a figure's label with the
+// figure gone.
 //
 // The title survives every cut, since it names the pane and carries its
 // focus (see renderDetail). At h of 1 that leaves no line for the mark, and
 // a one-line pane is the one case where a cut goes unmarked.
-func fitDetailSections(title string, sections []detailSection, w, h int) []string {
+func fitPaneSections(title string, sections []paneSection, w, h int) []string {
 	lines := []string{title}
 	cut := false
 	for i, s := range sections {
@@ -1077,7 +1111,7 @@ const noRPCCallsNote = "no RPC-tier calls"
 // then the one call behind it that took longest, separated by a blank line.
 //
 // They are two SECTIONS because a short pane keeps or drops the second
-// whole (see fitDetailSections), and that ORDER is load-bearing: what a
+// whole (see fitPaneSections), and that ORDER is load-bearing: what a
 // pane too short for both keeps is the summary of the row the cursor is
 // actually on, and what it gives up is the one call behind it.
 //
@@ -1086,11 +1120,11 @@ const noRPCCallsNote = "no RPC-tier calls"
 // the two functions the pane is built from must agree on what a missing
 // group means. detailNaturalWidth hands it every rollup row in the log
 // without asking, and a row can be built with no detail at all.
-func rollupDetailSections(d *rollupDetail, w int) []detailSection {
+func rollupDetailSections(d *rollupDetail, w int) []paneSection {
 	if d == nil {
 		return nil
 	}
-	return []detailSection{
+	return []paneSection{
 		detailFieldLines(d.aggregate, w),
 		{"", slowestLine(d.slowest, w)},
 	}

@@ -248,6 +248,13 @@ type Model struct {
 	// a table the user has since moved through.
 	blockedJump bool
 
+	// showHelp is whether the key table is open in place of the pane row.
+	// It is a MODAL state: while it is set every key but the three that
+	// leave it is inert (see Update), the same treatment a search in
+	// progress gets, so a reader who opened it cannot move the view or the
+	// filter underneath it without seeing that they have.
+	showHelp bool
+
 	// showFacetOverlay is whether the facet pane is open as an overlay, in
 	// place of the list and detail panes, below the width it would otherwise
 	// show inline at. It is only ever set below that width (see
@@ -375,6 +382,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
 		// happens to render it as " " too, but dispatching on Type is the
 		// documented, unambiguous way to recognise it.
+		// The help is modal, so it is answered before any other binding --
+		// the same precedence a search in progress takes above. Only the
+		// keys that LEAVE it do anything: ? and Esc close it, q quits, and
+		// every other key is swallowed rather than acting on a view the
+		// reader cannot see. Quit is the exception because help is the
+		// screen a lost reader opens, and being unable to leave the program
+		// from it is the worst place to strand them.
+		if m.showHelp {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
+			case "?", "esc":
+				m.showHelp = false
+			}
+			return m, nil
+		}
 		if msg.Type == tea.KeySpace {
 			if m.pane == PaneFacets {
 				m.toggleSelectedFacetValue()
@@ -445,6 +469,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.searchAgain(-1)
 			}
+		case "?":
+			m.showHelp = true
 		case "s":
 			m.cycleSort()
 		case "f":

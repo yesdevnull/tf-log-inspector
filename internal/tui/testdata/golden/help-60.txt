@@ -1,0 +1,38 @@
+tfli -- x.log -- 3 RPC spans, 3 UI spans
+
+KEYS
+
+VIEWS
+  1          providers
+  2          types
+  4          calls
+  5          timeline
+  6          raw log
+
+THE LIST
+  ↑ ↓ j k    move the cursor in the focused pane
+  ← → h l    step within a timeline lane -- the footer's ↔
+  PgUp PgDn  page through the raw log
+  ⏎ Enter    open the selected call in the raw log
+  s          sort by the next column, in the table views
+
+FILTERING
+  ␣ Space    toggle the facet value under the cursor
+  f          show the facets and give them the keyboard
+  Esc        clear every active filter
+  /          search the raw log for a pattern
+  n N        step to the next or previous match
+
+EVERYWHERE
+  ⇥ Tab      move focus between panes
+  ?          open or close this help
+  q          quit
+
+Durations here are measured under logging, which is not
+free: one workspace planned in 24.1s unlogged and 522.2s
+with debug plus provider TRACE. Rankings hold, since every
+span paid the same cost, but absolute times do not transfer
+to an unlogged run.
+
+? close
+q quit

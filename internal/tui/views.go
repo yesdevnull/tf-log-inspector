@@ -117,7 +117,7 @@ type rollupDetail struct {
 	// aggregate is the group's own figures, in the order they are shown.
 	// It is the pane's FIRST section, so a pane too short for the whole of
 	// a rollup's detail keeps this and drops the slowest call beneath it
-	// (see fitDetailSections): what survives is the summary of the row the
+	// (see fitPaneSections): what survives is the summary of the row the
 	// cursor is actually on.
 	aggregate []detailField
 	// slowest is the longest RPC-tier call in the group, or nil when the
@@ -694,7 +694,7 @@ const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_
 // The mark is detailCutMark, the same ellipsis the detail pane marks its own
 // height cut with, so the two cuts tell a reader the same amount about
 // themselves. A pane of one line has no room for it, the single unmarked
-// case fitDetailSections has for the same reason.
+// case fitPaneSections has for the same reason.
 func fitCaptureGuidance(w, h int) string {
 	if h <= 0 {
 		return ""

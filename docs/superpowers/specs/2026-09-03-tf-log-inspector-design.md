@@ -1055,6 +1055,12 @@ something went wrong.
 span in the raw log at its byte offset · `s` cycle sort · `/` search · `Esc`
 clear filters · `?` help · `q` quit.
 
+**Added 2026-09-07, with `s`:** the sorted column is marked in the table
+header, in the direction its kind implies. That states the DEFAULT ranking
+too, which every table has always had and no frame said anything about — a
+sort the reader cannot see is a keystroke that reorders the table and
+accounts for nothing.
+
 ### Width degradation
 
 The three-pane layout must never render as garbage in a small terminal:
@@ -1141,6 +1147,19 @@ anything is built on top of it.
    `docs/superpowers/plans/2026-09-04-phase-3-tui.md`. `s` (cycle sort) and
    `?` (help) from the key table are deliberately not in that plan: neither is
    named in this phase's scope line and both are cheap once the panes exist.
+   **Shipped 2026-09-07**, after phase 5 rather than with this phase, closing
+   the last gap between the key table below and what the interface binds. Two
+   things about them were decided in building them and are recorded here
+   because neither is derivable from the key table. `s` cycles the sort
+   through the columns of whichever table is on screen, taking its DIRECTION
+   from each column's kind — numeric descending, identifier ascending — so
+   there is no second key to reverse it; and while the sort sits on the
+   column a view already ranked by, the row builder's order is served
+   untouched rather than re-sorted, because each builder breaks ties its own
+   way and the calls view's tie-break is also how the detail pane picks a
+   group's slowest call. `?` opens over the pane row, is modal — every other
+   binding is inert while it is up — and its footer hint rides the view-key
+   line, the action line having already been at its 70-column budget.
    Free-text search ships synchronous rather than as the cancellable
    goroutine described below, for the same reason the whole-file read replaced
    `mmap` — the design was sized against 1GB, and measured logs are 17-37MB — provider and type rollups, the

@@ -1021,7 +1021,7 @@ func TestTheShortestPanesStillDrawALaneRow(t *testing.T) {
 		}
 		if h == 1 {
 			// One line has room for the lane row and nothing else, the
-			// same unmarked cut fitDetailSections has at that height.
+			// same unmarked cut fitPaneSections has at that height.
 			continue
 		}
 		if got := lines[len(lines)-1]; got != detailCutMark {
@@ -1069,7 +1069,7 @@ func TestCaptureGuidanceCutForHeightSaysSo(t *testing.T) {
 	}
 
 	// A pane of one line has no room for the mark either -- the same
-	// unmarked cut fitDetailSections has at that height -- so what it does
+	// unmarked cut fitPaneSections has at that height -- so what it does
 	// show has to stand on its own.
 	if got := m.renderTimeline(w, 1); !strings.HasSuffix(got, ".") {
 		t.Errorf("guidance in a 1-line pane = %q, want a finished sentence: there is no room to mark what follows it", got)
