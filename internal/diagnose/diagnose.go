@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -213,6 +214,16 @@ type Report struct {
 	UIBackwardsTimestamps uint64              // UI-hook timestamps earlier than the builder's base, clamped to 0
 	UISaturatedDurations  uint64              // UI-hook durations that hit math.MaxUint32ms rather than the real value
 
+	// Address-attribution figures. Counts and totals only -- no address
+	// appears in this report, which is the one output that leaves the
+	// machine.
+	HookTypes         []Template // structured-output "type" values and counts, recurring only
+	WithheldHookTypes uint64     // distinct types withheld for appearing once
+	Coverage          attrib.Coverage
+	Contexts          int // address context windows collected
+	HasContext        bool
+	StreamOffsetMs    int64 // logfmt.Stats.FirstTS to the structured stream's first timestamp
+
 	fieldKeys     map[string]uint64 // every distinct key seen, unfiltered -- unexported so a future caller cannot range over the singletons Amendment 1 withholds
 	templateCount map[string]uint64
 }
@@ -232,7 +243,12 @@ const maxResourceRows = 10
 // not stop the scan but must not go unmentioned in ANOMALIES, since a log
 // this tool cannot be run again on (the whole reason it exists) that had
 // its schema drift or get truncated would otherwise read as ordinary.
-func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span, uiMalformed, uiBackwards, uiSaturated uint64, c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
+// cc is the same scan's attrib.ContextCollector: its hook-type histogram and
+// address contexts are what let this report measure attribution coverage
+// without ever naming an address itself.
+func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span,
+	uiMalformed, uiBackwards, uiSaturated uint64, cc *attrib.ContextCollector,
+	c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
 	tier, usable := caps.BestFidelity()
 	topFieldKeys, withheldFieldKeys := recurringTopN(c.fieldKeys, maxFieldKeys)
 	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
@@ -373,6 +389,17 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		return actions[i].Text < actions[j].Text
 	})
 	r.UIActionCounts = actions
+
+	hookTypes, withheldHookTypes := recurringTopN(cc.TypeCounts(), maxTemplates)
+	r.HookTypes, r.WithheldHookTypes = hookTypes, withheldHookTypes
+	if cc.CompletedPairs() > 0 {
+		r.HasContext = true
+		r.Contexts = len(cc.Contexts())
+		r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, cc.Contexts()))
+		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
+			r.StreamOffsetMs = cc.FirstTS().Sub(st.FirstTS).Milliseconds()
+		}
+	}
 
 	return r
 }
@@ -597,6 +624,41 @@ func (r Report) Render(w io.Writer) error {
 		}
 		fmt.Fprintf(b, "\n")
 	}
+
+	fmt.Fprintf(b, "ADDRESS ATTRIBUTION\n")
+	if !r.HasContext {
+		fmt.Fprintf(b, "  no address context in this log -- attribution needs the\n")
+		fmt.Fprintf(b, "  terraform.ui stream (debug toggle plus TF_LOG_PROVIDER and\n")
+		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO at TRACE)\n")
+	} else {
+		fmt.Fprintf(b, "  %-25s %d\n", "contexts", r.Contexts)
+		fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
+		for _, c := range []attrib.Confidence{
+			attrib.Contained, attrib.Likely, attrib.Overlapping,
+			attrib.Ambiguous, attrib.Unattributed,
+		} {
+			fmt.Fprintf(b, "  %-25s %d spans, %d ms\n", c.String(),
+				r.Coverage.ByConfidence[c], r.Coverage.MsByConfidence[c])
+		}
+		// The offset is the constant that re-bases the two streams onto one
+		// clock. It is NOT a check on clock agreement: the two baselines
+		// mark different events -- the hclog stream brackets the whole
+		// Terraform process, terraform.ui only the plan phase within it --
+		// so their difference is real elapsed time plus any skew, and the
+		// two terms are not separable.
+		fmt.Fprintf(b, "  %-25s %d ms\n", "stream offset", r.StreamOffsetMs)
+	}
+	fmt.Fprintf(b, "  hook types (recurring only, top %d)\n", len(r.HookTypes))
+	for _, t := range r.HookTypes {
+		fmt.Fprintf(b, "    %8d  %s\n", t.Count, t.Text)
+	}
+	if len(r.HookTypes) == 0 {
+		fmt.Fprintf(b, "    none\n")
+	}
+	if r.WithheldHookTypes > 0 {
+		fmt.Fprintf(b, "    %d hook types seen only once (withheld)\n", r.WithheldHookTypes)
+	}
+	fmt.Fprintf(b, "\n")
 
 	if r.Stats.BackwardsTimestamps > 0 || r.InternOverflow > 0 || r.DroppedKeys > 0 || r.Stats.LinesSaturated > 0 ||
 		r.UIMalformedLines > 0 || r.UIBackwardsTimestamps > 0 || r.UISaturatedDurations > 0 {

@@ -2,14 +2,26 @@ package diagnose
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unsafe"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+// fixture mirrors internal/model/log_test.go's helper of the same name --
+// this package has its own testdata-relative path from its own directory,
+// so the two cannot share one definition.
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join("..", "..", "testdata", name)
+}
 
 func build(t *testing.T, in string) Report {
 	t.Helper()
@@ -18,12 +30,13 @@ func build(t *testing.T, in string) Report {
 	sn := span.NewSniffer(&comps)
 	var b span.ReportedBuilder
 	var ui span.UIHookBuilder
-	st, err := logfmt.Scan(strings.NewReader(in), &comps, c, sn, &b, &ui)
+	var cc attrib.ContextCollector
+	st, err := logfmt.Scan(strings.NewReader(in), &comps, c, sn, &b, &ui, &cc)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	return Build(st, sn.Report(), b.Spans(), ui.Spans(),
-		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(),
+		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
 		c, &comps, 5*time.Millisecond)
 }
 
@@ -34,6 +47,33 @@ func render(t *testing.T, r Report) string {
 		t.Fatalf("Render: %v", err)
 	}
 	return sb.String()
+}
+
+// renderFixture loads path through the same sinks runDiagnose wires
+// together and returns the rendered report, for tests that need a real
+// fixture file rather than an inline literal.
+func renderFixture(t *testing.T, path string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("opening %s: %v", path, err)
+	}
+	defer f.Close()
+
+	var comps logfmt.Interner
+	c := NewCollector(&comps)
+	sn := span.NewSniffer(&comps)
+	var b span.ReportedBuilder
+	var ui span.UIHookBuilder
+	var cc attrib.ContextCollector
+	st, err := logfmt.Scan(f, &comps, c, sn, &b, &ui, &cc)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	r := Build(st, sn.Report(), b.Spans(), ui.Spans(),
+		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
+		c, &comps, 5*time.Millisecond)
+	return render(t, r)
 }
 
 // Amendment 1 requires api_token to recur across entries before its key is
@@ -840,7 +880,8 @@ func TestReportMasksHostileResourceTypeAndAction(t *testing.T) {
 	}}
 	var comps logfmt.Interner
 	c := NewCollector(&comps)
-	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, 0, 0, 0, c, &comps, 0)
+	var cc attrib.ContextCollector
+	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, 0, 0, 0, &cc, c, &comps, 0)
 
 	if len(r.SlowestResources) != 1 {
 		t.Fatalf("SlowestResources has %d rows, want 1", len(r.SlowestResources))
@@ -1071,5 +1112,59 @@ func TestGuidanceDoesNotPromiseRPCDetailFromDebugLogging(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- Task 5: --diagnose publishes the address-attribution measurement. ---
+
+func TestReportRendersHookTypeHistogram(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	if !strings.Contains(out, "hook types") {
+		t.Errorf("report has no hook-type histogram:\n%s", out)
+	}
+	if !strings.Contains(out, "apply_start") {
+		t.Errorf("histogram does not name apply_start:\n%s", out)
+	}
+}
+
+func TestReportRendersCoverageAndConfidence(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	for _, want := range []string{"nameable share", "contained", "likely", "ambiguous", "unattributed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestReportRendersBaselineOffsetAsAConstantNotACheck(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	if !strings.Contains(out, "stream offset") {
+		t.Errorf("report has no baseline offset:\n%s", out)
+	}
+	// The offset is the re-basing constant, not a verification of clock
+	// agreement -- it cannot be one, because the two baselines mark
+	// different events. Wording that claims otherwise is the defect.
+	for _, forbidden := range []string{"clocks agree", "clock check", "verified"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("report claims the offset checks clock agreement (%q):\n%s", forbidden, out)
+		}
+	}
+}
+
+// The disclosure guarantee: --diagnose is the one output Dan shares, and no
+// resource address may appear in it.
+func TestReportNeverPrintsAnAddress(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	l, err := model.Load(fixture(t, "two-tier.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Contexts) == 0 {
+		t.Fatal("fixture carries no contexts; this test proves nothing")
+	}
+	for _, c := range l.Contexts {
+		if c.Address != "" && strings.Contains(out, c.Address) {
+			t.Errorf("report printed the address %q", c.Address)
+		}
 	}
 }

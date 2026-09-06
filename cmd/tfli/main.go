@@ -19,6 +19,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/diagnose"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -138,18 +139,22 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	// logfmt.StructuredSink, so Scan only ever calls it for structured-output
 	// lines, of which an hclog log has none.
 	var uiBuilder span.UIHookBuilder
+	// ContextCollector is the other logfmt.StructuredSink: it collects the
+	// address-attribution windows Build correlates against the RPC spans, so
+	// --diagnose can measure coverage without ever naming an address.
+	var cc attrib.ContextCollector
 
 	started := time.Now()
 	// Scan wraps r in its own 256KB bufio.Reader (internal/logfmt/scan.go), so
 	// wrapping f again here would only add a second, redundant buffer.
-	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder, &uiBuilder)
+	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder, &uiBuilder, &cc)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", path, err)
 	}
 	elapsed := time.Since(started)
 
 	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(),
-		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(),
+		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 
 	return writeReport(stdout, outPath, report.Render)
