@@ -940,6 +940,27 @@ func TestReportMasksHostileHookType(t *testing.T) {
 	}
 }
 
+// maskedTypeCounts sums with += rather than overwriting with =, deliberately,
+// so that two DISTINCT hostile "type" values which collapse onto the same
+// masked key ("<other>") both survive in the merged bucket's count. A single
+// hostile value (as TestReportMasksHostileHookType feeds) cannot distinguish
+// += from =, since there is nothing else in the bucket to lose: a lone value
+// mapped with either operator yields the same count of 1. Changing the += to
+// = makes this test fail (bucket count drops to 1, the count of whichever
+// key iteration visited last), confirmed and reverted.
+func TestMaskedTypeCountsSumsCollidingHostileValues(t *testing.T) {
+	hostileA := "INJECTED_SECRET_A;" + strings.Repeat("x", 300)
+	hostileB := "INJECTED_SECRET_B;" + strings.Repeat("y", 300)
+	got := maskedTypeCounts(map[string]uint64{hostileA: 1, hostileB: 1})
+
+	if len(got) != 1 {
+		t.Fatalf("maskedTypeCounts = %v, want a single merged bucket", got)
+	}
+	if got["<other>"] != 2 {
+		t.Errorf("maskedTypeCounts[<other>] = %d, want 2 (both hostile values merged)", got["<other>"])
+	}
+}
+
 // Finding 3: a malformed structured line must be counted and surfaced in
 // ANOMALIES, not silently absorbed. If HCP's schema drifts or a log is
 // truncated, this is the only trace of it, on the one machine holding the
@@ -1155,6 +1176,45 @@ func TestReportRendersHookTypeHistogram(t *testing.T) {
 	}
 	if !strings.Contains(out, "apply_start") {
 		t.Errorf("histogram does not name apply_start:\n%s", out)
+	}
+}
+
+// The spec requires --diagnose to report "what the candidate-count
+// distribution is across them" (the spans that fell inside at least one
+// candidate window) -- Coverage.Candidates was computed and read by nothing.
+// two-tier.log carries one Contained span (1 candidate) and one Ambiguous
+// span (2 candidates), so the breakdown must show both rows.
+func TestReportRendersCandidateCountBreakdown(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+	if !strings.Contains(section, "candidate counts") {
+		t.Fatalf("report has no candidate-count breakdown:\n%s", section)
+	}
+	for _, want := range []string{"1 candidate: 1 span", "2 candidates: 1 span"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("candidate-count breakdown missing %q:\n%s", want, section)
+		}
+	}
+}
+
+// The breakdown's row order must not depend on Go's randomised map
+// iteration: two distinct candidate counts seen by the SAME number of spans
+// must still print in the same order every time (candidate count ascending),
+// not whichever order ranging over the map happened to visit them.
+func TestCandidateBreakdownOrderIsDeterministic(t *testing.T) {
+	m := map[uint32]int{3: 2, 1: 2, 2: 2}
+	want := []CandidateCount{{Candidates: 1, Spans: 2}, {Candidates: 2, Spans: 2}, {Candidates: 3, Spans: 2}}
+	for i := 0; i < 20; i++ {
+		got := candidateBreakdown(m)
+		if len(got) != len(want) {
+			t.Fatalf("candidateBreakdown = %+v, want %+v", got, want)
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("candidateBreakdown = %+v, want %+v", got, want)
+			}
+		}
 	}
 }
 
@@ -1379,5 +1439,30 @@ func TestReportCountsMalformedStructuredLinesAndUnmatchedTerminators(t *testing.
 	}
 	if r.UnmatchedTerminators != 1 {
 		t.Errorf("UnmatchedTerminators = %d, want 1", r.UnmatchedTerminators)
+	}
+}
+
+// This fixture's malformed line and unmatched terminator never open a
+// context (the malformed one fails to decode at all; the terminator has no
+// matching start), so HasContext is false here -- exactly the "collected and
+// read by nothing" shape: both counts must still reach the rendered report,
+// not just the Report struct, even though the no-context branch is what
+// Render takes.
+func TestReportRendersMalformedAndUnmatchedCountsWithNoAddressContext(t *testing.T) {
+	const malformed = `{"@level":"info","@timestamp":"2026-09-04T09:15:05.000000+10:00","type":"apply_start","hook":`
+	const unmatchedTerminator = `{"@level":"info","@message":"aws_instance.c: Creation complete","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:06.000000+10:00","hook":{"resource":{"addr":"aws_instance.c","module":"","resource":"aws_instance.c","implied_provider":"aws","resource_type":"aws_instance","resource_name":"c","resource_key":null},"action":"create"},"type":"apply_complete"}`
+	r := build(t, structuredVersionLine+"\n"+malformed+"\n"+unmatchedTerminator+"\n")
+	if r.HasContext {
+		t.Fatal("fixture carries address context; this test proves nothing (needs HasContext = false)")
+	}
+
+	out := render(t, r)
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+	if !strings.Contains(section, "context lines malformed   1") {
+		t.Errorf("report drops the malformed-line count with no address context:\n%s", section)
+	}
+	if !strings.Contains(section, "unmatched terminators     1") {
+		t.Errorf("report drops the unmatched-terminator count with no address context:\n%s", section)
 	}
 }

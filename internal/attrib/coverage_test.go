@@ -90,3 +90,15 @@ func TestSummariseStopsAtTheShorterSlice(t *testing.T) {
 		t.Errorf("Spans = %d, want 1", got.Spans)
 	}
 }
+
+// The mirror of TestSummariseStopsAtTheShorterSlice: more attributions than
+// spans. min(len(spans), len(attribs)) picks len(spans) here, so replacing
+// the min with len(attribs) alone -- which the other direction's test cannot
+// catch, since there len(spans) is already the smaller of the two -- would
+// still pass that test while indexing spans out of range here.
+func TestSummariseStopsAtTheShorterSliceWhenAttribsIsLonger(t *testing.T) {
+	got := Summarise([]span.Span{{DurationMs: 5}}, []Attribution{{Confidence: Contained}, {Confidence: Likely}})
+	if got.Spans != 1 {
+		t.Errorf("Spans = %d, want 1", got.Spans)
+	}
+}

@@ -1,6 +1,7 @@
 package attrib
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -271,7 +272,19 @@ func correlateOne(s span.Span, base time.Time, ctxs []Context) Attribution {
 	}
 }
 
+// named is the only function that populates an Attribution's address fields,
+// and correlateOne never calls it with Ambiguous or Unattributed -- the spec
+// is emphatic that an ambiguous span must never assert an address ("a wrong
+// name marked ? is still a wrong name"). That invariant currently rests
+// entirely on correlateOne's switch, so it is pinned here too: a future
+// change to that switch that slips one of these two confidences past this
+// guard fails loudly at construction, the same way this package treats every
+// other programming error (see tui.unhandledView).
 func named(c Context, n uint32, conf Confidence) Attribution {
+	switch conf {
+	case Ambiguous, Unattributed:
+		panic(fmt.Sprintf("attrib: named called with %s, which must never carry an address", conf))
+	}
 	return Attribution{
 		Address:    c.Address,
 		Module:     c.Module,

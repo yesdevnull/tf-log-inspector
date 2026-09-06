@@ -403,6 +403,25 @@ func TestClampedSpanWithMultipleCandidatesIsAmbiguous(t *testing.T) {
 	}
 }
 
+// named is the only path that can put an address on an Attribution, and
+// correlateOne never reaches it with Ambiguous or Unattributed. This pins
+// that invariant at named itself, so a future edit to correlateOne's switch
+// that slips one of those two confidences past it fails loudly here rather
+// than shipping a labelled-but-unsupported address to the UI.
+func TestNamedPanicsOnAmbiguousOrUnattributed(t *testing.T) {
+	c := ctx("aws_instance.a", "aws_instance", "create", 0, 100)
+	for _, conf := range []Confidence{Ambiguous, Unattributed} {
+		t.Run(conf.String(), func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("named(%s) returned quietly instead of panicking", conf)
+				}
+			}()
+			named(c, 1, conf)
+		})
+	}
+}
+
 func TestConfidenceStrings(t *testing.T) {
 	for c, want := range map[Confidence]string{
 		Unattributed: "unattributed",

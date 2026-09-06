@@ -41,6 +41,15 @@ type Template struct {
 	Count uint64
 }
 
+// CandidateCount is one row of ADDRESS ATTRIBUTION's candidate-count
+// breakdown: how many spans saw exactly this many overlapping candidates.
+// Counts of candidates, never the candidates themselves (see attrib.
+// Coverage.Candidates), so it carries no address disclosure.
+type CandidateCount struct {
+	Candidates uint32
+	Spans      int
+}
+
 // Collector accumulates shape information during a scan. It satisfies
 // logfmt.Sink.
 type Collector struct {
@@ -235,6 +244,12 @@ type Report struct {
 	// masked the same way before ever becoming a histogram key (see Build).
 	HookTypes []Template // every structured-output "type" value and its count
 	Coverage  attrib.Coverage
+	// CandidateBreakdown is Coverage.Candidates in deterministic, renderable
+	// order (see candidateBreakdown) -- the spec's "what the candidate-count
+	// distribution is across them" figure, computed alongside Coverage since
+	// nothing cheaper yields it. Populated only when Coverage itself is (see
+	// HasSpans).
+	CandidateBreakdown []CandidateCount
 	// HasSpans is true only when context exists (HasContext) AND there is
 	// at least one RPC span to attribute it against -- both conditions
 	// gate the assignment in Build. A log can carry address context with
@@ -467,6 +482,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		if len(spans) > 0 {
 			r.HasSpans = true
 			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, ctxs))
+			r.CandidateBreakdown = candidateBreakdown(r.Coverage.Candidates)
 		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
 			r.StreamOffsetMs = cc.FirstTS().Sub(st.FirstTS).Milliseconds()
@@ -551,6 +567,42 @@ func recurringTopN(m map[string]uint64, n int) (top []Template, withheld uint64)
 		recurring[k] = v
 	}
 	return topN(recurring, n), withheld
+}
+
+// candidateBreakdown orders attrib.Coverage.Candidates -- a map, whose
+// iteration order Go randomises -- into a slice safe to render
+// deterministically: by span count descending (the shape a reader scans
+// first, same as topN), tie-broken by candidate count ascending so two
+// candidate counts seen by an equal number of spans always print in the same
+// order. Spans with zero candidates (Unattributed: nothing ever overlapped)
+// are excluded -- this breakdown is of spans that fell inside at least one
+// candidate window, per the spec, and Unattributed's own count already
+// covers that population.
+func candidateBreakdown(m map[uint32]int) []CandidateCount {
+	out := make([]CandidateCount, 0, len(m))
+	for k, v := range m {
+		if k == 0 {
+			continue
+		}
+		out = append(out, CandidateCount{Candidates: k, Spans: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Spans != out[j].Spans {
+			return out[i].Spans > out[j].Spans
+		}
+		return out[i].Candidates < out[j].Candidates
+	})
+	return out
+}
+
+// pluralCandidates renders "candidate" or "candidates" to match n, the same
+// grammar guard pluralSpans applies to a span count sitting beside its own
+// noun in prose.
+func pluralCandidates(n uint32) string {
+	if n == 1 {
+		return "candidate"
+	}
+	return "candidates"
 }
 
 // Render writes the report as plain text for pasting into a conversation.
@@ -726,6 +778,14 @@ func (r Report) Render(w io.Writer) error {
 	}
 
 	fmt.Fprintf(b, "ADDRESS ATTRIBUTION\n")
+	// MalformedStructuredLines and UnmatchedTerminators are counted by
+	// attrib.ContextCollector regardless of whether any context pair ever
+	// completes (see Build), so they are rendered unconditionally too -- a
+	// log with malformed structured lines or an unmatched terminator but no
+	// address context at all must not have both counts silently dropped by
+	// the branch below.
+	fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
+	fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 	if !r.HasContext {
 		// The HCP Terraform/CLI debug-logging toggle is what produces the
 		// terraform.ui stream this log is missing -- TF_LOG_PROVIDER and
@@ -738,14 +798,12 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  the terraform.ui stream, which the debug-logging\n")
 		fmt.Fprintf(b, "  toggle produces. TF_LOG_PROVIDER=TRACE and\n")
 		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO=TRACE govern the provider RPC\n")
-		fmt.Fprintf(b, "  entries above instead, and produce no terraform.ui\n")
-		fmt.Fprintf(b, "  context on their own\n")
+		fmt.Fprintf(b, "  entries above instead; set alone, they are not\n")
+		fmt.Fprintf(b, "  expected to add a terraform.ui stream of their own\n")
 	} else {
 		fmt.Fprintf(b, "  %-25s %d\n", "contexts", r.Contexts)
 		fmt.Fprintf(b, "  %-25s %d\n", "unclosed contexts", r.UnclosedContexts)
 		fmt.Fprintf(b, "  %-25s %d\n", "zero-extent contexts", r.ZeroExtentContexts)
-		fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
-		fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 		if !r.HasSpans {
 			// Context exists but there is nothing to correlate it against --
 			// e.g. INFO-level terraform.ui without TRACE provider RPC
@@ -774,6 +832,19 @@ func (r Report) Render(w io.Writer) error {
 			} {
 				fmt.Fprintf(b, "  %-25s %d %s, %d ms\n", c.String(),
 					r.Coverage.ByConfidence[c], pluralSpans(r.Coverage.ByConfidence[c]), r.Coverage.MsByConfidence[c])
+				// The candidate-count distribution sits under ambiguous
+				// specifically: it is the figure that explains why a span
+				// landed there rather than at Likely or Contained. It still
+				// covers every span with at least one candidate, not only
+				// ambiguous ones (see candidateBreakdown), so it is labelled
+				// as such rather than implied to be ambiguous-only.
+				if c == attrib.Ambiguous && len(r.CandidateBreakdown) > 0 {
+					fmt.Fprintf(b, "  %-25s (all spans with a candidate)\n", "candidate counts")
+					for _, cc := range r.CandidateBreakdown {
+						fmt.Fprintf(b, "      %d %s: %d %s\n",
+							cc.Candidates, pluralCandidates(cc.Candidates), cc.Spans, pluralSpans(cc.Spans))
+					}
+				}
 			}
 		}
 		// The offset is the constant that re-bases the two streams onto one

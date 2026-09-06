@@ -786,11 +786,16 @@ and told the reader to enable a stream their log demonstrably already
 carries. "Context source present" means **at least one context was
 collected at all** — `len(cc.Contexts()) > 0` — which `CompletedPairs()` and
 the unclosed-context count still report as the finer-grained figures
-alongside it. `span.Capabilities` gains a counter for it; `UIHookCompletions`
-does not serve, because it counts completion lines, which is
-`UIHookBuilder`'s precondition and not this one. Below one collected context
-the verdict for every span is `No context`, and the attribution table is not
-allocated at all.
+alongside it. ~~`span.Capabilities` gains a counter for it~~ **Corrected
+2026-09-07: implemented differently.** The presence gate is
+`attrib.ContextCollector.Contexts()`, read through `model.Log.
+HasAddressContext()` (and `len(ctxs) > 0` directly in `diagnose.Build`), not
+a `span.Capabilities` counter — `Capabilities` answers *what extraction tier
+this log can support*, and whether an address-context source is present is
+not part of that question. `UIHookCompletions` does not serve either, because
+it counts completion lines, which is `UIHookBuilder`'s precondition and not
+this one. Below one collected context the verdict for every span is
+`No context`, and the attribution table is not allocated at all.
 
 #### Ambiguity is never resolved by guessing
 
