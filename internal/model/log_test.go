@@ -1,11 +1,14 @@
 package model
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func fixture(t *testing.T, name string) string {
@@ -77,5 +80,74 @@ func TestLoadNamesTheFileOnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no-such-file.log") {
 		t.Errorf("error does not name the file: %v", err)
+	}
+}
+
+func TestLoadAttributesRPCSpansToAddresses(t *testing.T) {
+	l, err := Load(fixture(t, "two-tier.log"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !l.HasAddressContext() {
+		t.Fatal("HasAddressContext = false, want true for a log carrying terraform.ui hook pairs")
+	}
+	if len(l.Attribs) != len(l.RPCSpans) {
+		t.Fatalf("len(Attribs) = %d, len(RPCSpans) = %d -- the table must stay parallel",
+			len(l.Attribs), len(l.RPCSpans))
+	}
+}
+
+func TestLoadBuildsNoAttributionTableWithoutContext(t *testing.T) {
+	// A log with no terraform.ui stream has no address context at all, which
+	// is a property of the LOG. The table is not allocated rather than being
+	// filled with Unattributed, so "this log cannot answer the question" and
+	// "this log did not answer it for this span" stay distinguishable.
+	l, err := Load(fixture(t, "provider-rpc.log"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if l.HasAddressContext() {
+		t.Error("HasAddressContext = true, want false")
+	}
+	if l.Attribs != nil {
+		t.Errorf("Attribs = %v, want nil", l.Attribs)
+	}
+}
+
+// Attribution must never rewrite a span's timeline. model.PackLanes refuses a
+// mixed-fidelity slice on the premise that StartMs is not comparable across
+// builders, and that premise is keyed on Fidelity -- so an in-place re-base
+// would falsify it invisibly.
+func TestLoadDoesNotRewriteSpanTimelines(t *testing.T) {
+	path := fixture(t, "two-tier.log")
+
+	// The control: what ReportedBuilder produces with no attribution in the
+	// scan at all. Comparing Load against ITSELF would pass even if both
+	// runs re-based identically, which is exactly the bug being excluded.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comps := &logfmt.Interner{}
+	var rb span.ReportedBuilder
+	rb.Comps = comps
+	if _, err := logfmt.Scan(bytes.NewReader(data), comps, &rb); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	want := rb.Spans()
+
+	l, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(l.RPCSpans) != len(want) {
+		t.Fatalf("Load built %d spans, control built %d", len(l.RPCSpans), len(want))
+	}
+	for i, got := range l.RPCSpans {
+		if got.StartMs != want[i].StartMs || got.EndMs != want[i].EndMs {
+			t.Fatalf("span %d timeline = [%d,%d), want [%d,%d) -- attribution "+
+				"must correlate on local copies, never rewrite the span",
+				i, got.StartMs, got.EndMs, want[i].StartMs, want[i].EndMs)
+		}
 	}
 }

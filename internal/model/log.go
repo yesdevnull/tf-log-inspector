@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -32,6 +33,17 @@ type Log struct {
 	RPCSpans []span.Span
 	UISpans  []span.Span
 	Caps     span.Capabilities
+
+	// Contexts and Attribs are the address-attribution layer. Attribs is
+	// parallel to RPCSpans specifically -- never to a concatenation of
+	// RPCSpans and UISpans, which are kept apart above. UISpans need no
+	// attribution: their Address is observed, not inferred.
+	//
+	// Attribs is nil when the log carries no address context at all, which
+	// is a different fact from a span that context failed to resolve. See
+	// HasAddressContext.
+	Contexts []attrib.Context
+	Attribs  []attrib.Attribution
 }
 
 // entryIndex retains every entry Scan emits. It deliberately ignores msg and
@@ -62,10 +74,25 @@ func Load(path string) (*Log, error) {
 	// would change a disclosure surface for no benefit.
 	rb.Comps = comps
 	var ub span.UIHookBuilder
+	var cc attrib.ContextCollector
 
-	stats, err := logfmt.Scan(bytes.NewReader(data), comps, idx, sniffer, &rb, &ub)
+	stats, err := logfmt.Scan(bytes.NewReader(data), comps, idx, sniffer, &rb, &ub, &cc)
 	if err != nil {
 		return nil, fmt.Errorf("scanning %s: %w", path, err)
+	}
+
+	rpcSpans := rb.Spans()
+	// Attribution runs only where there is something to correlate against.
+	// Below one completed context pair the answer for every span would be
+	// the same, and recording it per span would make a property of the LOG
+	// look like a property of each call.
+	var (
+		ctxs    []attrib.Context
+		attribs []attrib.Attribution
+	)
+	if cc.CompletedPairs() > 0 {
+		ctxs = cc.Contexts()
+		attribs = attrib.Correlate(rpcSpans, stats.FirstTS, ctxs)
 	}
 
 	return &Log{
@@ -73,9 +100,11 @@ func Load(path string) (*Log, error) {
 		Entries:  idx.entries,
 		Comps:    comps,
 		Stats:    stats,
-		RPCSpans: rb.Spans(),
+		RPCSpans: rpcSpans,
 		UISpans:  ub.Spans(),
 		Caps:     sniffer.Report(),
+		Contexts: ctxs,
+		Attribs:  attribs,
 	}, nil
 }
 
@@ -83,3 +112,9 @@ func Load(path string) (*Log, error) {
 func (l *Log) Bytes(e logfmt.Entry) []byte {
 	return l.Data[e.Off : e.Off+uint64(e.Len)]
 }
+
+// HasAddressContext reports whether this log carries any address context at
+// all. It is the difference between "this log cannot answer which resource a
+// call belongs to" and "this log can, and did not for this call" -- two facts
+// the interface must not present in the same words.
+func (l *Log) HasAddressContext() bool { return len(l.Attribs) > 0 }
