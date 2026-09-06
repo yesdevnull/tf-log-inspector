@@ -36,11 +36,23 @@ type uiLine struct {
 // total elapsed_seconds. apply_progress is deliberately excluded: it also
 // carries elapsed_seconds, but as a partial "still working" figure -- taking
 // it as a completion would double-count and inflate durations.
+//
+// provision_complete/provision_errored and refresh_complete are also
+// deliberately excluded, even though they close a context in package attrib:
+// verified against hashicorp/terraform tag v1.14.9's
+// internal/command/views/json/hook.go, their backing structs --
+// provisionComplete/provisionErrored ({Resource, Provisioner}) and
+// refreshComplete ({Resource, IDKey, IDValue}) -- carry no elapsed_seconds
+// field at all, unlike operationComplete/operationErrored (used by
+// apply_complete/apply_errored and ephemeral_op_complete/ephemeral_op_errored),
+// which do. attrib's opensContext/closesContext admit provision_*/refresh_*
+// anyway because that package takes its context windows from the lines' own
+// timestamps rather than from elapsed_seconds -- a different admission
+// criterion answering a different question, not an inconsistency to reconcile.
 func isCompletionType(t string) bool {
 	switch t {
 	case "apply_complete", "apply_errored",
-		"ephemeral_op_complete", "ephemeral_op_errored",
-		"provision_complete", "provision_errored":
+		"ephemeral_op_complete", "ephemeral_op_errored":
 		return true
 	}
 	return false

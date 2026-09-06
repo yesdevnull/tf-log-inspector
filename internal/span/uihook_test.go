@@ -44,6 +44,42 @@ func uiLineWith(ts, typ string, elapsed float64, includeElapsed bool) string {
 		ts, elapsedField, typ)
 }
 
+// isCompletionType's full vocabulary, asserted directly rather than only
+// through builder behaviour -- mirrors
+// TestOpensAndClosesContextRecogniseEveryLifecycleType in
+// internal/attrib/context_test.go. provision_complete, provision_errored and
+// refresh_complete are excluded here even though attrib's closesContext
+// admits all three: those structs carry no elapsed_seconds (verified against
+// hashicorp/terraform tag v1.14.9's internal/command/views/json/hook.go), so
+// admitting them here would build a span with a zero DurationMs that isn't
+// real.
+func TestIsCompletionTypeRecognisesEveryLifecycleType(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{"apply_start", false},
+		{"apply_progress", false},
+		{"apply_complete", true},
+		{"apply_errored", true},
+		{"refresh_start", false},
+		{"refresh_complete", false},
+		{"ephemeral_op_start", false},
+		{"ephemeral_op_complete", true},
+		{"ephemeral_op_errored", true},
+		{"provision_start", false},
+		{"provision_complete", false},
+		{"provision_errored", false},
+		{"version", false},
+		{"diagnostic", false},
+	}
+	for _, tt := range tests {
+		if got := isCompletionType(tt.typ); got != tt.want {
+			t.Errorf("isCompletionType(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}
+
 // apply_progress carries a partial "still working" elapsed_seconds and must
 // never produce a span -- treating it as a completion would double-count and
 // inflate durations. This is the trap the spec calls out explicitly.
@@ -150,6 +186,21 @@ func TestUIHookBuilderMalformedLineSkippedAndCounted(t *testing.T) {
 	}
 	if b.Malformed() != 1 {
 		t.Errorf("Malformed() = %d, want 1", b.Malformed())
+	}
+}
+
+// provision_complete's backing struct (provisionComplete, verified against
+// hashicorp/terraform tag v1.14.9's internal/command/views/json/hook.go) is
+// {Resource, Provisioner} -- it carries no elapsed_seconds at all, so it must
+// never produce a span; doing so would build one with a phantom zero
+// DurationMs. Constructed inline rather than added to structured-ui.log,
+// which several other packages' expectations already index into.
+func TestUIHookBuilderProvisionCompleteProducesNoSpan(t *testing.T) {
+	const provisionComplete = `{"@level":"info","@message":"aws_instance.example (local-exec): Provisioning complete","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:05.500000+10:00","hook":{"resource":{"addr":"aws_instance.example","module":"","resource":"aws_instance.example","implied_provider":"aws","resource_type":"aws_instance","resource_name":"example","resource_key":null},"provisioner":"local-exec"},"type":"provision_complete"}`
+	var b UIHookBuilder
+	scanUIInto(t, provisionComplete+"\n", &b)
+	if got := b.Spans(); len(got) != 0 {
+		t.Fatalf("got %d spans from provision_complete, want 0", len(got))
 	}
 }
 
