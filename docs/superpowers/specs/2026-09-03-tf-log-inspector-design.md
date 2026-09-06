@@ -713,8 +713,18 @@ nearly every context in the log while appearing to *contain* several. Letting
 that drive a `Contained` or `Likely` verdict would build an inference on a number
 the log never stated, on precisely the longest calls in the capture. A
 `StartClamped` span is therefore correlated on its end instant alone: candidates
-are contexts whose window contains `EndMs`, and its confidence is capped at
-`Overlapping`. `--diagnose` already counts `ClampedSpans`, so the affected
+are contexts whose window contains the last instant the span **occupies**, and its
+confidence is capped at `Overlapping`.
+
+**Clarified 2026-09-06.** An earlier wording said "contexts whose window contains
+`EndMs`". Under the half-open convention a span never occupies `EndMs` -- that
+instant belongs to whatever comes next -- so the probe is the one-millisecond
+interval `[EndMs - 1ms, EndMs)`, which reuses the ordinary overlap predicate
+rather than needing containment logic of its own. A clamped span always has
+`DurationMs >= 1` (`ReportedBuilder` sets the flag only when the entry's offset
+is less than the duration), so that probe is never empty. The distinction is not
+academic: under the old wording a context beginning exactly at `EndMs` would be a
+candidate, and under the implemented rule it is not. `--diagnose` already counts `ClampedSpans`, so the affected
 population is visible.
 
 **"Context source present"** means at least one context was successfully opened
@@ -739,9 +749,17 @@ runs past 50 characters. So:
 - The headline reads `4 candidates`, a count and nothing else. An earlier draft
   wrote `1 of 4 azuread_service_principal`, which reads as "the first of four" and
   names a resource *type* where the reader expects an address.
-- **At most three candidates are listed**, longest-overlap first, each clipped by
+- ~~**At most three candidates are listed**, longest-overlap first, each clipped by
   `tailIdentifierColumn` so the resource name survives and the module path is what
-  is cut. A fourth and beyond are summarised as `+N more`.
+  is cut. A fourth and beyond are summarised as `+N more`.~~
+
+  **Not shipped in phase 5, 2026-09-06 -- deferred, not cut.** Only the headline
+  count shipped. `Attribution` carries `Candidates uint32` and no candidate
+  identities, so listing them needs a data-model change rather than a render
+  change. The Phasing entry's scope line requires only that an `Ambiguous` span
+  report a candidate count rather than a name, which is met. Recorded here rather
+  than left as a silent divergence between this document and the code; whether to
+  build it is an open decision, not a settled cut.
 - **Below 70 columns the detail pane is not drawn at all**, so the count and
   candidates are not shown; the row's own confidence marker is all that survives.
   This is existing degradation behaviour, stated here because the golden tests at
