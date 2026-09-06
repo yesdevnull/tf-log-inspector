@@ -1201,7 +1201,7 @@ anything is built on top of it.
      or more, only 79 resolved — **92.5% of multi-candidate spans could not be
      narrowed**. The histogram's mass sits at 3–10 candidates and tails to 19,
      which is Terraform's default parallelism of 10 against many resources of one
-     type: this capture plans 126 `azurerm_key_vault_secret` instances alone. A
+     type: this capture plans over a hundred instances of one type alone. A
      refresh window spans the whole refresh of its resource, so ten of them
      overlap and every RPC inside falls in all ten.
 
