@@ -210,10 +210,11 @@ func TestGoldenTimelineLayouts(t *testing.T) {
 }
 
 // The footer's view-key hints must never vanish. Composed onto one line with
-// the action keys they used to be dropped whole below 95 columns because the
-// line was clipped from its end and "q quit" had to survive; two lines lets
-// both groups keep their full names at every width this interface renders
-// at.
+// the action keys, both groups share one width budget and one clip -- and
+// that line runs to 112 columns at its widest (see keyHints), so a terminal
+// too narrow for the pair silences one of them. Two lines gives each group
+// its own budget, so both keep their full names at every width this
+// interface renders at.
 func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	for _, w := range []int{60, 70, 100, 160} {
@@ -228,10 +229,11 @@ func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
 			t.Errorf("footer(%d) view line lost its hints: %q", w, lines[0])
 		}
 		// The action line is clipped on its own, so it can still lose its
-		// own tail on a terminal narrower than its own 62 columns (see
-		// actionKeys) -- a pre-existing limit this task's split does not
-		// change, since actionKeys is untouched. "q quit" is only
-		// guaranteed once the action line itself fits.
+		// own tail on a terminal narrower than the line itself -- 54 columns
+		// bare, and 70 with both of actionKeys' conditional hints. The guard
+		// asks the line for its own width rather than naming a number, so
+		// what is pinned is that "q quit" survives wherever the line fits at
+		// all, whatever actionKeys comes to carry.
 		if w >= lipgloss.Width(m.actionKeys(w)) && !strings.Contains(lines[1], "q quit") {
 			t.Errorf("footer(%d) action line lost q quit: %q", w, lines[1])
 		}
@@ -1477,9 +1479,10 @@ func TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens(t *testing.T) {
 
 // The action line is clipped on its own, independently of the view-key line
 // above it, so nothing the view-key line says can still crowd "q quit" off
-// the end of the action line the way one composed line used to. This sweeps
-// every width from the one the action keys alone need, in every view -- the
-// open hint varies by view, so the width the action line needs does too.
+// the end of the action line, which is what one composed line's shared width
+// budget does. This sweeps every width from the one the action keys alone
+// need, in every view -- the open hint varies by view, so the width the
+// action line needs does too.
 func TestTheFooterNeverLosesQuitAtWidthsTheActionLineFits(t *testing.T) {
 	m := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, b := range views {

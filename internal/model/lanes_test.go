@@ -505,12 +505,13 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 }
 
 // Stalls maintains its running set incrementally rather than rescanning
-// every span per window, so the property the old scan made obvious is
-// pinned here instead, over spans dense enough to keep the bookkeeping
-// busy: the span named as Blocking runs somewhere in the window and no span
-// running in that window outranks it, -1 appears only where nothing runs at
-// all, every window's depth sits inside the capacity it is reported against,
-// and no two returned windows could still have been merged.
+// every span per window, so the properties a per-window rescan would make
+// self-evident are pinned here instead, over spans dense enough to keep the
+// bookkeeping busy: the span named as Blocking runs somewhere in the window
+// and no span running in that window outranks it, -1 appears only where
+// nothing runs at all, every window's depth sits inside the capacity it is
+// reported against, and no two returned windows could still have been
+// merged.
 func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	spans := make([]span.Span, 200)

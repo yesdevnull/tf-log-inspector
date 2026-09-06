@@ -1099,12 +1099,13 @@ func TestStallAnnotationMarksATruncatedLine(t *testing.T) {
 // call to the next four times before the log ends at 20.0s. That is ONE
 // 16.7-second wait behind one lane, and the annotation must say so.
 //
-// It was previously reported as three separate waits (3.3s-9.0s, 9.0s-14.0s,
-// 14.0s-18.0s) with the fourth fragment dropped under the threshold, which
-// both spent three lines on one fact and understated the wait by the two
-// seconds the dropped fragment covered. A reader deciding whether to tune
-// provider parallelism is looking at how long the wait was; three numbers
-// that each understate it are worse than no annotation.
+// Merging on the blocking SPAN rather than on contiguity splits it into four
+// fragments (3.3s-9.0s, 9.0s-14.0s, 14.0s-18.0s, 18.0s-20.0s), the last of
+// which falls under the threshold and is dropped: three lines spent on one
+// fact, and the wait understated by the two seconds that fragment covered. A
+// reader deciding whether to tune provider parallelism is looking at how long
+// the wait was; three numbers that each understate it are worse than no
+// annotation.
 //
 // The 3-second window before aws's first call is the fixture's only other
 // wait, and reads as core start-up rather than a mid-plan collapse (see
@@ -1121,9 +1122,9 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v (one continuous wait, longest first)", lines, want)
 	}
-	// The old three-line form's own boundaries. Each was a handover INSIDE
-	// the blocking lane, not the end of the wait, so any of them surfacing
-	// again means the merge has come apart.
+	// The fragment boundaries a per-span merge produces. Each is a handover
+	// INSIDE the blocking lane, not the end of the wait, so any of them
+	// surfacing here means the merge has come apart.
 	for _, boundary := range []string{"3.3s–9.0s", "9.0s–14.0s", "14.0s–18.0s", "18.0s–20.0s"} {
 		if strings.Contains(got, boundary) {
 			t.Errorf("stallAnnotation reports %s, a handover inside the blocking lane, as the end of a wait: %q", boundary, got)
@@ -1769,10 +1770,12 @@ func TestTheBusySummaryNeverExceedsTheWindow(t *testing.T) {
 	}
 }
 
-// TestTheClampedStartNoteUsesThePaneItIsGiven covers a caveat that was
-// pre-wrapped to 40 columns and so spent five lines of a twelve-line pane
-// however wide the pane actually was. Chrome never displaces content here,
-// so the note wraps to the width it has.
+// TestTheClampedStartNoteUsesThePaneItIsGiven covers a caveat that wraps to
+// the pane rather than to a fixed width. Pre-wrapped to captureGuidance's 40
+// columns it would take four lines of a twelve-line pane however wide the
+// pane actually was; wrapped to the pane it takes three at 44 columns and two
+// at the 74 a 160-column terminal gives it. Chrome never displaces content
+// here, so the note wraps to the width it has.
 func TestTheClampedStartNoteUsesThePaneItIsGiven(t *testing.T) {
 	for _, w := range []int{44, 60, 74, 160} {
 		lines := wrapToWidth(clampedStartNote, w)

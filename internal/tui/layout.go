@@ -222,16 +222,15 @@ const (
 // across a "\n" as it would across any other character, so clipping the
 // two-line block whole would spend the SECOND line's width budget
 // continuing from wherever the first line left off, cutting "q quit" away
-// again on exactly the terminals this task widened the footer to keep it
-// on.
+// on exactly the terminals the two-line footer exists to keep it on.
 //
 // The footer is never given more than h-1 of those lines, so the header
 // always keeps at least one -- the h == 1 guard above already refuses to
 // let the footer push the header off the only line there is, and a
 // two-line footer must not undo that one line later at h == 2. What gives
 // way is the view-key line, not the action line: a footer trimmed to one
-// line keeps its LAST line, the same line a single-line footer always was
-// before this task split it in two, so "q quit" survives here as well.
+// line keeps its LAST line, which is the one carrying "q quit", so the
+// reminder survives here as well.
 func (m *Model) View() string {
 	w, h := m.paneWidth(), m.height
 	if h <= 0 {
@@ -345,13 +344,16 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // keyHints is the footer's two hint lines: which number keys switch views,
 // then which keys act on what is on screen.
 //
-// They are two lines rather than one because a single composed line ran to
-// 107 display columns once the timeline joined it, and the line is clipped
-// from its END -- so the tail it lost was "q quit", the one key a user must
-// never lose sight of. Splitting them lets both groups keep their full names
-// at every width this interface renders at, and costs one line of pane
-// height. Each line is still clipped independently, because a 60-column
-// terminal cannot show 62 columns of action keys however they are arranged.
+// They are two lines rather than one because a single composed line runs to
+// 112 display columns at its widest, and the line is clipped from its END --
+// so the tail it loses is "q quit", the one key a user must never lose sight
+// of. The widest is the TIMELINE view, which drops its own key from the
+// view-key group and carries both the open hint and the span hint on the
+// action line; no other view's composed line exceeds 107. Splitting them
+// lets both groups keep their full names at every width this interface
+// renders at, and costs one line of pane height. Each line is still clipped
+// independently, because a 60-column terminal cannot show 62 columns of
+// action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
 	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(w), w)
 }
@@ -368,8 +370,10 @@ const openHint = "⏎ open"
 // DETAIL) -- because the action line fitted a 70-column terminal exactly at
 // 62 columns and the line is clipped from its END, where "q quit" is. Six
 // columns plus the two-space separator lands it on 70 exactly; seven would
-// have cost the quit hint its last letter at the narrowest width that still
-// draws all three panes.
+// cost the quit hint its last letter at detailInlineWidth, the narrowest
+// terminal that still draws the detail pane these keys step through --
+// renderPanes collapses the facet pane well above that, at facetInlineWidth,
+// so the three-pane layout is never the width under pressure here.
 const spanCursorHint = "↔ span"
 
 // actionKeys is the hint group for the keys that DO something to what is on

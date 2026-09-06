@@ -625,8 +625,9 @@ func (m *Model) renderTimeline(w, h int) string {
 // line, and it is the pane's whole content, so the lines it spends displace
 // nothing. This note is the opposite on both counts -- it is prose with no
 // identifier in it, and it is chrome competing with the lane rows for a
-// twelve-line pane. Pre-wrapped narrow it cost five of those lines at every
-// width, including the 74-column pane a 160-column terminal gives it.
+// twelve-line pane. Pre-wrapped to captureGuidance's 40 columns it would
+// take four of those lines at every width, including the 74-column pane a
+// 160-column terminal gives it, where wrapping to the pane costs two.
 //
 // It is also kept SHORT for the same reason. The cause is stated once here
 // and in full by --profile and the detail pane's own Start field
@@ -875,12 +876,12 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 // learn an order for.
 //
 // Each is one display column. U+2591 is East Asian width class Neutral;
-// U+2592, U+2593 and U+2588 are Ambiguous, the same class as the │ and ─
-// this package already renders at one column each (see paneSepWidth), and
-// the same class the bar's previous single glyph was. Width is measured
-// with lipgloss.Width wherever it matters -- never a rune count -- and
-// TestEveryLaneShadeIsOneDisplayColumn holds every one of them to a single
-// column.
+// U+2592, U+2593 and U+2588 are Ambiguous, the same class as the │ this
+// package already renders at one column each (see paneSepWidth) -- so what a
+// terminal resolves Ambiguous to, it resolves for the pane separators too
+// and not for the bars alone. Width is measured with lipgloss.Width wherever
+// it matters -- never a rune count -- and the whole ramp is held to a single
+// column each by TestEveryLaneShadeIsOneDisplayColumn.
 var laneShades = []rune{'░', '▒', '▓', '█'}
 
 // laneShadeFor picks the glyph for one column: the space for a column no
@@ -1173,26 +1174,25 @@ func concurrencyClause(s model.Stall) string {
 // concurrency figure, because the line is clipped from its end
 // (clipValueEnd) and the centre pane is 44 columns at the 100-column
 // terminal this tool is actually run at -- narrower than at 70 or 160, both
-// of which give it more. With the lane last, that pane rendered "…waiting
-// on aws…" and dropped the one thing the line names a lane FOR. Ordering it
-// first makes the lane structurally safe rather than usually safe: it is
-// what survives at every width, whatever the label and the window measure,
-// and what a narrow pane gives up is the tail of "concurrency 1 of 2",
-// which is arithmetic the reader can also take off the bars.
+// of which give it more. With the lane last, that pane's clip lands on the
+// lane itself: it keeps the arithmetic and drops the one thing the line
+// names a lane FOR. Ordering it first makes the lane structurally safe
+// rather than usually safe: it is what survives at every width, whatever the
+// label and the window measure, and what a narrow pane gives up is the tail
+// of "concurrency 1 of 2", which is arithmetic the reader can also take off
+// the bars.
 //
 // None of the three says "lane", and that is the point of the wording. The
 // number model.Stalls carries is measured against the spans' PEAK
 // CONCURRENCY, not against the rows this view draws, and per-provider
 // packing (see packLanesByProvider) makes the two diverge by construction:
 // a provider that has finished still occupies a row but is no longer
-// capacity a later window can leave idle. The old "N lanes idle" therefore
-// made a claim about the screen that its number was not entitled to make,
+// capacity a later window can leave idle. "N lanes idle" would therefore
+// make a claim about the screen that its number is not entitled to make,
 // and could be read straight off as false -- "no stalls" beside a visibly
-// blank row, or "2 lanes idle" on a five-row timeline. Concurrency is
-// still the right measure for "was this work or waiting", so the measure
-// is kept and the word that misdescribed it is gone: the line names what
-// the number is ("concurrency 1 of 2") rather than what a reader might
-// count.
+// blank row, or "2 lanes idle" on a five-row timeline. Concurrency is the
+// right measure for "was this work or waiting", so the line names what the
+// number is ("concurrency 1 of 2") rather than what a reader might count.
 //
 // A blocked wait states the concurrency that REMAINED and the peak it fell
 // from, because a drop is only legible against what it dropped from -- "1"
