@@ -7,6 +7,12 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
+func TestConfidenceCountMatchesEnum(t *testing.T) {
+	if confidenceCount != int(Contained)+1 {
+		t.Fatalf("confidenceCount = %d, want %d (Contained+1) -- update coverage.go's arrays", confidenceCount, int(Contained)+1)
+	}
+}
+
 func TestSummariseCountsAndTimesByConfidence(t *testing.T) {
 	spans := []span.Span{
 		{DurationMs: 100}, {DurationMs: 200}, {DurationMs: 300},

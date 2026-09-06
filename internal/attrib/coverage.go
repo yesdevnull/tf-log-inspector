@@ -2,9 +2,11 @@ package attrib
 
 import "github.com/yesdevnull/tf-log-inspector/internal/span"
 
-// confidenceCount is how many Confidence values there are. Kept as a named
-// constant next to the arrays it sizes so adding a value forces this to be
-// updated rather than silently truncating a distribution.
+// confidenceCount is how many Confidence values there are. It is used with
+// the guard in Summarise to prevent out-of-range panic when indexing
+// ByConfidence and MsByConfidence. Drift is caught at test time by
+// TestConfidenceCountMatchesEnum, which ties the constant to the Confidence
+// enum in correlate.go.
 const confidenceCount = 5
 
 // Coverage is the published distribution of attribution outcomes. It is what
