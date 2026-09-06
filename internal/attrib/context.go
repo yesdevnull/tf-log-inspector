@@ -57,7 +57,7 @@ type Context struct {
 	Action       string // hook.action: read, create, update, delete
 	IsData       bool   // the address names a data source, not a managed resource
 	Start, End   time.Time
-	Unclosed     bool // no terminator before end-of-log; End is the log's last timestamp
+	Unclosed     bool // true when the context was never closed by a matching terminator before end-of-log; End is the log's last timestamp for end-of-log closures, but may be earlier if a duplicate-start closed it
 }
 
 // opensContext and closesContext name the hook types literally rather than
@@ -180,10 +180,10 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 	}
 }
 
-// decodeKey renders hook.resource.resource_key, which is null for a resource
-// with no index, a JSON string for a for_each key and a JSON number for a
-// count index. The literal is used for a number and the quotes are stripped
-// from a string, so both read the way they do inside an address.
+// decodeKey renders hook.resource.resource_key, which may be null, a JSON
+// number, or a JSON string. Null and empty values return an empty string.
+// JSON numbers are rendered as their literal string form. JSON strings are
+// unquoted so they read as they do inside a resource address.
 func decodeKey(raw json.RawMessage) string {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {

@@ -25,8 +25,8 @@ func collect(t *testing.T, path string) (*ContextCollector, []Context) {
 
 func TestCollectorPairsStartWithComplete(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
-	if len(ctxs) != 3 {
-		t.Fatalf("contexts = %d, want 3", len(ctxs))
+	if len(ctxs) != 5 {
+		t.Fatalf("contexts = %d, want 5", len(ctxs))
 	}
 	got := ctxs[0]
 	if got.Address != "data.local_file.a" {
@@ -97,18 +97,30 @@ func TestModuleNameAndKeyAreDecoded(t *testing.T) {
 
 func TestUnclosedContextEndsAtLastTimestamp(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
-	got := ctxs[2]
-	if got.Address != "aws_instance.orphan" {
-		t.Fatalf("Address = %q", got.Address)
+	// Find the final unclosed orphan context (second orphan, opened at 09:15:12,
+	// unclosed at end-of-log which is 09:15:13 when aws_instance.final opens).
+	var got Context
+	for _, c := range ctxs {
+		if c.Address == "aws_instance.orphan" && c.Start.Equal(c.End.Add(-time.Second)) {
+			got = c
+			break
+		}
+	}
+	if got.Address == "" {
+		t.Fatalf("no orphan context with End > Start found")
 	}
 	if !got.Unclosed {
 		t.Error("Unclosed = false, want true")
 	}
-	if !got.End.Equal(got.Start) {
-		// The orphan's start IS the last timestamp in the fixture, so its
-		// window is zero-extent. That is the honest answer: nothing in the
-		// log says it ran for any measurable time.
-		t.Errorf("End = %v, want equal to Start %v", got.End, got.Start)
+	// The fixture now continues after the second orphan start at 09:15:12, so
+	// lastTS is 09:15:13. The unclosed orphan's End must equal that later timestamp.
+	wantStart, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:12.000000+10:00")
+	wantEnd, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:13.000000+10:00")
+	if !got.Start.Equal(wantStart) {
+		t.Errorf("Start = %v, want %v", got.Start, wantStart)
+	}
+	if !got.End.Equal(wantEnd) {
+		t.Errorf("End = %v, want %v (strictly later than Start)", got.End, wantEnd)
 	}
 }
 
@@ -123,8 +135,8 @@ func TestTypeCountsHistogram(t *testing.T) {
 	c, _ := collect(t, "testdata/context.log")
 	want := map[string]uint64{
 		"version":        1,
-		"apply_start":    3,
-		"apply_complete": 1,
+		"apply_start":    5,
+		"apply_complete": 2,
 		"apply_progress": 1,
 		"apply_errored":  1,
 	}
@@ -165,5 +177,87 @@ func TestFirstTSIsTheFirstParseableTimestamp(t *testing.T) {
 	want, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:02.000000+10:00")
 	if !c.FirstTS().Equal(want) {
 		t.Errorf("FirstTS = %v, want %v", c.FirstTS(), want)
+	}
+}
+
+// A duplicate-start for the same address+action closes the prior context
+// unclosed at the new start's timestamp, then opens a fresh one.
+func TestDuplicateStartClosesAndReopens(t *testing.T) {
+	_, ctxs := collect(t, "testdata/context.log")
+	// Find both orphan contexts (same address and action, different times)
+	var orphans []Context
+	for _, c := range ctxs {
+		if c.Address == "aws_instance.orphan" && c.Action == "create" {
+			orphans = append(orphans, c)
+		}
+	}
+	if len(orphans) != 2 {
+		t.Fatalf("found %d orphan contexts, want 2", len(orphans))
+	}
+
+	// First orphan: opened at 09:15:10, closed by duplicate-start at 09:15:12
+	first := orphans[0]
+	wantStart1, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:10.000000+10:00")
+	if !first.Start.Equal(wantStart1) {
+		t.Errorf("first orphan Start = %v, want %v", first.Start, wantStart1)
+	}
+	if !first.Unclosed {
+		t.Error("first orphan Unclosed = false, want true (closed by duplicate-start, not by terminator)")
+	}
+	wantEnd1, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:12.000000+10:00")
+	if !first.End.Equal(wantEnd1) {
+		t.Errorf("first orphan End = %v, want %v (closed at second start)", first.End, wantEnd1)
+	}
+
+	// Second orphan: opened at 09:15:12, unclosed at end-of-log (09:15:13)
+	second := orphans[1]
+	if !second.Unclosed {
+		t.Error("second orphan Unclosed = false, want true")
+	}
+	if second.End.Before(second.Start) {
+		t.Errorf("second orphan End < Start, which violates interval semantics")
+	}
+}
+
+// An apply_complete with no prior apply_start is an unmatched terminator: it is
+// counted rather than creating a spurious context.
+func TestUnmatchedTerminatorCountedNotCreated(t *testing.T) {
+	c, ctxs := collect(t, "testdata/context.log")
+
+	// aws_instance.unmatched has an apply_complete but no apply_start.
+	// It should NOT appear in contexts.
+	for _, ctx := range ctxs {
+		if ctx.Address == "aws_instance.unmatched" {
+			t.Fatalf("unmatched terminator should not create a context, but found one")
+		}
+	}
+
+	// The unmatched terminator should be counted.
+	if got := c.UnmatchedTerminators(); got != 1 {
+		t.Errorf("UnmatchedTerminators = %d, want 1", got)
+	}
+}
+
+// decodeKey handles null (empty string), JSON numbers (rendered as literal),
+// and JSON strings (unquoted).
+func TestDecodeKey(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"null", "null", ""},
+		{"empty", "", ""},
+		{"number zero", "0", "0"},
+		{"number positive", "42", "42"},
+		{"string key", `"mykey"`, "mykey"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeKey([]byte(tt.raw))
+			if got != tt.want {
+				t.Errorf("decodeKey(%s) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
 	}
 }
