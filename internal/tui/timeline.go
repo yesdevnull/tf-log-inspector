@@ -806,6 +806,7 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 		return ""
 	}
 	touched := make([]bool, barW)
+	covered := make([]bool, barW)
 	busyMs := make([]uint64, barW)
 	for _, idx := range lane.Spans {
 		s := spans[idx]
@@ -844,13 +845,26 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 			if hi > lo {
 				busyMs[c] += hi - lo
 			}
+			// covered is the same question busyMs answers, asked in the one
+			// form that still works for a column standing for NO
+			// milliseconds: does this one span's interval contain the
+			// column's whole interval? For a column with milliseconds of its
+			// own that is already implied by busyMs reaching colMs, so this
+			// changes nothing there; for an empty column, where the fraction
+			// would be 0/0, it is the only thing that can distinguish a span
+			// running through the column from one that merely marked it.
+			// A zero-extent span occupies no instant and so covers nothing,
+			// which is what keeps its minimum-one-column mark a mark.
+			if s.EndMs > s.StartMs && uint64(s.StartMs) <= colStart && colEnd <= uint64(s.EndMs) {
+				covered[c] = true
+			}
 		}
 	}
 
 	var b strings.Builder
 	for c := range barW {
 		colStart, colEnd := laneColBounds(c, spanMs, barW)
-		b.WriteRune(laneShadeFor(touched[c], busyMs[c], colEnd-colStart))
+		b.WriteRune(laneShadeFor(touched[c], covered[c], busyMs[c], colEnd-colStart))
 	}
 	return b.String()
 }
@@ -884,18 +898,29 @@ var laneShades = []rune{'░', '▒', '▓', '█'}
 // the compression hazard lives in.
 //
 // A column with no milliseconds of its own -- barW columns over a window of
-// fewer than barW milliseconds, or the zero window laneCol handles -- gets
-// the lightest shade rather than a division by zero: it was touched, so the
-// minimum-one-column rule says it must show something, and there is no
-// occupancy to measure.
+// fewer than barW milliseconds, or the zero window laneCol handles -- cannot
+// be judged by that fraction at all, since it would be 0/0. covered answers
+// it instead (see laneBar): a span with real extent running through the
+// column covers the whole of it, there being no time in it to be idle, and
+// gets the top of the ramp on the same terms every other solid column does.
+// A column merely TOUCHED -- by a zero-extent span, which occupies no
+// instant -- keeps the lightest shade, so the minimum-one-column rule still
+// draws a mark rather than a claim about work.
+//
+// covered is redundant wherever the column has milliseconds of its own: one
+// span containing the whole column contributes colMs of busy time by itself.
+// It is asked first because it is the only test that survives an empty
+// column, not because the two can disagree.
 //
 // The comparisons are integer throughout, matching the rest of this
 // package's column arithmetic: busyMs and colMs are both bounded by a
 // uint32 window, so tripling either cannot overflow a uint64.
-func laneShadeFor(touched bool, busyMs, colMs uint64) rune {
+func laneShadeFor(touched, covered bool, busyMs, colMs uint64) rune {
 	switch {
 	case !touched:
 		return ' '
+	case covered:
+		return laneShades[3]
 	case colMs == 0:
 		return laneShades[0]
 	case busyMs >= colMs:

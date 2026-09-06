@@ -43,6 +43,67 @@ func TestTimelineCursorStopsAtTheLastSpanInALane(t *testing.T) {
 	}
 }
 
+// TestHAndLStepTheSpanCursorLikeTheArrowKeys pins the vi aliases the README
+// and spanCursorHint both promise. ←/→ and h/l are the only way to reach any
+// span in a lane but the first, and the footer advertises the pair as one
+// hint, so a reader who reaches for h and l is reaching for what the
+// interface told them was there.
+func TestHAndLStepTheSpanCursorLikeTheArrowKeys(t *testing.T) {
+	m := timelineModel(t)
+	if n := len(m.timelineLanes()[m.timeline.lane].Spans); n < 2 {
+		t.Fatalf("the selected lane holds %d spans, want at least 2 so the cursor has somewhere to step", n)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.timeline.span != 1 {
+		t.Errorf("span = %d after l, want 1", m.timeline.span)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	if m.timeline.span != 0 {
+		t.Errorf("span = %d after h, want 0", m.timeline.span)
+	}
+}
+
+// TestTheSpanCursorDoesNotMoveWhileTheFacetPaneHasFocus pins the focus gate
+// on ←/→ and h/l. The within-lane cursor chooses what the detail pane
+// describes and what Enter jumps to, so moving it while the keyboard is on
+// the facet pane would rewrite one pane's selection from another pane's
+// keys, with nothing on screen tying the two together -- the same rule Enter
+// itself follows, acting only from the list pane.
+func TestTheSpanCursorDoesNotMoveWhileTheFacetPaneHasFocus(t *testing.T) {
+	// A lane of three, with the cursor parked in the middle of it, so that
+	// BOTH directions have somewhere to go: on a lane of two the cursor
+	// reaches an end after one step and an ungated key is indistinguishable
+	// from a clamp.
+	const aws = "registry.terraform.io/hashicorp/aws"
+	spans := []span.Span{
+		{Provider: aws, RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: aws, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: aws, RPC: "ReadResource", StartMs: 4000, EndMs: 5000, DurationMs: 1000, Fidelity: span.FidelityReported},
+	}
+	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	was := m.timeline.span
+	if was != 1 {
+		t.Fatalf("span = %d after one → from the list pane, want 1 -- the cursor must start with a step available in each direction", was)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if m.Focus() != PaneFacets {
+		t.Fatalf("focus = %v after f, want the facet pane", m.Focus())
+	}
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyRight},
+		{Type: tea.KeyLeft},
+		{Type: tea.KeyRunes, Runes: []rune{'l'}},
+		{Type: tea.KeyRunes, Runes: []rune{'h'}},
+	} {
+		m = update(t, m, key)
+		if m.timeline.span != was {
+			t.Errorf("%s moved the span cursor to %d from the facet pane, want it left where the list pane put it, %d", key, m.timeline.span, was)
+		}
+	}
+}
+
 func TestChangingLanesClampsTheSpanCursor(t *testing.T) {
 	// Step deep into a long lane, then move to a shorter one. Leaving the
 	// index where it was would point past the end of the new lane, and
@@ -119,6 +180,60 @@ func TestAFilterChangeStillClampsTheLaneCursorInTheTimeline(t *testing.T) {
 	}
 	if m.timeline.lane != 0 {
 		t.Errorf("lane = %d over a single-lane timeline, want 0", m.timeline.lane)
+	}
+}
+
+// TestAFilterThatNarrowsTheTimelineKeepsALiveCursor covers the state that
+// makes invalidateRows' clamp load-bearing: a filter that NARROWS the
+// timeline rather than emptying it.
+//
+// selectedTimelineSpan bounds-checks its own lane and span indices, so a
+// filter that leaves nothing at all reads as "nothing selected" whether the
+// clamp ran or not -- which is why TestAFilterThatEmptiesTheTimelineSelects
+// Nothing cannot see the clamp. A filter that leaves lanes the cursor is
+// past the end of is where the two answers differ: unclamped, the lane
+// cursor names a lane that no longer exists and the span cursor sits past
+// the end of the one it would land on, so the pane draws no cursor at all
+// and the detail pane beside it falls to its placeholder, with nothing on
+// screen saying why.
+//
+// The spans are synthetic because both cursors have to be out of range at
+// once: the lane the cursor is on must disappear, and the lane it falls back
+// to must hold fewer spans than the span cursor is at. No fixture packs a
+// second lane deep enough for that.
+func TestAFilterThatNarrowsTheTimelineKeepsALiveCursor(t *testing.T) {
+	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
+	spans := []span.Span{
+		{Provider: aws, RPC: "ApplyResourceChange", StartMs: 0, EndMs: 9000, DurationMs: 9000, Fidelity: span.FidelityReported},
+		{Provider: google, RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: google, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: google, RPC: "ReadResource", StartMs: 4000, EndMs: 5000, DurationMs: 1000, Fidelity: span.FidelityReported},
+	}
+	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.timeline.lane != 1 || m.timeline.span != 2 {
+		t.Fatalf("cursor = lane %d span %d, want lane 1 span 2 -- google's three calls do not overlap, so they pack into one lane", m.timeline.lane, m.timeline.span)
+	}
+
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {aws: true}}
+	m.invalidateRows()
+
+	lanes := m.timelineLanes()
+	if len(lanes) != 1 || len(lanes[0].Spans) != 1 {
+		t.Fatalf("aws alone packs into %d lanes, the first holding %d spans, want 1 and 1", len(lanes), len(lanes[0].Spans))
+	}
+	if m.timeline.lane != 0 || m.timeline.span != 0 {
+		t.Errorf("cursor = lane %d span %d over a one-lane, one-span timeline, want lane 0 span 0", m.timeline.lane, m.timeline.span)
+	}
+	if _, ok := m.selectedTimelineSpan(); !ok {
+		t.Error("selectedTimelineSpan reports nothing selected over a timeline that still draws a bar")
+	}
+	row := strings.Split(m.renderTimeline(60, 10), "\n")[0]
+	if !strings.Contains(row, "\x1b[") {
+		t.Errorf("the lane row %q carries no cursor styling, so the timeline draws no cursor at all", row)
 	}
 }
 
@@ -398,6 +513,72 @@ func TestLaneBarGivesAShortSpanOneColumn(t *testing.T) {
 	}
 	if strings.Count(got, string(laneShades[0])) != 1 {
 		t.Errorf("laneBar = %q, want its one column at the lightest shade %q", got, string(laneShades[0]))
+	}
+}
+
+// TestLaneBarDrawsAZeroExtentSpanOnAColumnBoundary covers the two rules that
+// keep an instantaneous call visible, both of which only bite on a span of
+// no extent landing on a column boundary.
+//
+// A zero-extent span's start floors and its end ceils to the SAME column, so
+// without the minimum-one-column bump its column range is empty and the call
+// leaves no mark at all. A span at the window's LAST instant maps to column
+// barW, one past the end, so without the start clamp the bump opens a range
+// beyond the bar that the barW cap then closes straight back down to empty.
+// Either failure draws a lane row with no bar in it over calls the log
+// recorded -- work rendered as idle time, which is the inversion this view
+// exists to refuse.
+//
+// The UI-hook tier makes this the ordinary shape rather than an edge case:
+// Terraform rounds hook timings to whole seconds, so every resource it
+// reports as "0s" is a zero-extent span (see callStartedBefore).
+func TestLaneBarDrawsAZeroExtentSpanOnAColumnBoundary(t *testing.T) {
+	spans := []span.Span{
+		{StartMs: 0, EndMs: 0},
+		{StartMs: 500, EndMs: 500},
+		{StartMs: 1000, EndMs: 1000},
+	}
+	got := laneBar(spans, model.Lane{Spans: []int{0, 1, 2}}, 1000, 20)
+	want := "░         ░        ░"
+	if got != want {
+		t.Errorf("laneBar = %q, want %q -- one mark per call, at the window's first column, its middle and its last", got, want)
+	}
+}
+
+// TestTheUITierDrawsALaneOfZeroSecondWork is the same rule reached the way a
+// reader reaches it. testdata/structured-ui.log has one of its two resources
+// reported as "0s", and that resource is the only one of its provider, so
+// per-provider packing gives it a lane of its own: lose the mark and the
+// timeline draws a labelled row with nothing in it beside a lane that is
+// nearly all bar.
+func TestTheUITierDrawsALaneOfZeroSecondWork(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	tier, spans := m.timelineSpans()
+	if tier != tierUI {
+		t.Fatalf("tier = %v, want tierUI", tier)
+	}
+	lanes := m.timelineLanes()
+	labels := laneLabels(spans, lanes)
+	i := slices.Index(labels, "local/1")
+	if i < 0 {
+		t.Fatalf("lanes = %v, want one labelled local/1 (the 0s resource's own provider)", labels)
+	}
+	if len(lanes[i].Spans) != 1 {
+		t.Fatalf("local/1 holds %d spans, want 1", len(lanes[i].Spans))
+	}
+	if s := spans[lanes[i].Spans[0]]; s.StartMs != s.EndMs {
+		t.Fatalf("local/1's span runs %d-%dms, so the fixture no longer carries a 0s resource", s.StartMs, s.EndMs)
+	}
+
+	const barW = 46
+	got := laneBar(spans, lanes[i], timelineWallClockMs(spans), barW)
+	if strings.Count(got, string(laneShades[0])) != 1 {
+		t.Errorf("the 0s resource's lane renders as %q, want exactly one %q mark", got, string(laneShades[0]))
+	}
+	if strings.Count(got, " ") != barW-1 {
+		t.Errorf("the 0s resource's lane renders as %q, want its one mark and %d blank columns", got, barW-1)
 	}
 }
 
@@ -1279,10 +1460,19 @@ func TestEveryLaneShadeIsOneDisplayColumn(t *testing.T) {
 	}
 }
 
-// TestLaneBarShadesAColumnByHowMuchOfItIsBusy pins the shading thresholds
-// against a single span sized to land in each band. 20 columns over a 1000ms
-// window is 50ms per column, so a span's length in a column IS its
-// occupancy as a percentage of 50.
+// TestLaneBarShadesAColumnByHowMuchOfItIsBusy pins the shading thresholds AT
+// their boundaries, one millisecond either side of each. 20 columns over a
+// 1000ms window is 50ms per column, so a span's length in column 0 IS its
+// occupancy as a percentage of 50, and each boundary is one millisecond
+// wide: a sample sitting comfortably inside a band moves with the band and
+// reports nothing when it does.
+//
+// The top boundary is the one that matters most. The solid glyph is reserved
+// for a column a span occupies ENTIRELY (see laneShadeFor), which is what
+// lets a reader trust a run of █ to be continuous work; a threshold admitting
+// 49 of a column's 50ms would draw a column with a millisecond of waiting in
+// it as unbroken work -- waiting drawn as work, the same class of defect as a
+// dense lane drawn solid (TestADenseLaneIsNotDrawnSolid).
 func TestLaneBarShadesAColumnByHowMuchOfItIsBusy(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1290,9 +1480,11 @@ func TestLaneBarShadesAColumnByHowMuchOfItIsBusy(t *testing.T) {
 		want       rune
 	}{
 		{"the whole column", 0, 50, '█'},
-		{"three quarters of it", 0, 38, '▓'},
-		{"half of it", 0, 25, '▒'},
-		{"a tenth of it", 0, 5, '░'},
+		{"all but a millisecond of it", 0, 49, '▓'},
+		{"two thirds of it", 0, 34, '▓'},
+		{"a millisecond short of two thirds", 0, 33, '▒'},
+		{"a third of it", 0, 17, '▒'},
+		{"a millisecond short of a third", 0, 16, '░'},
 		{"a single millisecond", 0, 1, '░'},
 	}
 	for _, c := range cases {
@@ -1332,6 +1524,47 @@ func TestADenseLaneIsNotDrawnSolid(t *testing.T) {
 	}
 	if !strings.ContainsRune(got, '░') {
 		t.Errorf("a barely-occupied lane is not drawn at its lightest shade: %q", got)
+	}
+}
+
+// TestAColumnStandingForNoTimeIsShadedByWhatCoversIt covers the columns
+// laneColBounds tiles to an EMPTY millisecond interval: a window shorter in
+// milliseconds than the bar is wide in columns divides into columns most of
+// which stand for no time at all.
+//
+// Such a column has no occupancy to divide, so the busy fraction that shades
+// every other column is 0/0 there. Answering it with the lightest glyph drew
+// a lane busy for every millisecond of the window as a mostly idle bar --
+// TestADenseLaneIsNotDrawnSolid's defect inverted, and the reading a
+// light-dominated bar is meant to rule out. A span with real extent running
+// through such a column covers the whole of it, there being nothing there to
+// be idle, so the column is solid.
+//
+// A ZERO-EXTENT span is the case that keeps the rule honest. It occupies no
+// instant, so it covers nothing however narrow the column: it keeps the
+// minimum-one-column mark that says a call happened here, and is not
+// promoted to a claim that work ran through the column.
+//
+// The first case is reachable in the interface through a filter leaving only
+// spans inside a very short offset window; laneBar is measured directly here
+// because the bar is what the defect is about.
+func TestAColumnStandingForNoTimeIsShadedByWhatCoversIt(t *testing.T) {
+	// 65 columns over a 20ms window: every column but a handful is empty,
+	// and one span covers the whole window.
+	busy := []span.Span{{StartMs: 0, EndMs: 20, DurationMs: 20}}
+	if got, want := laneBar(busy, model.Lane{Spans: []int{0}}, 20, 65), strings.Repeat("█", 65); got != want {
+		t.Errorf("a lane busy for the whole window renders as %q, want %q", got, want)
+	}
+
+	// 40 columns over a 20ms window puts column 20 at [10,10). A call
+	// Terraform reported as instantaneous is a mark, not continuous work.
+	instant := []span.Span{{StartMs: 10, EndMs: 10}}
+	got := laneBar(instant, model.Lane{Spans: []int{0}}, 20, 40)
+	if strings.ContainsRune(got, '█') {
+		t.Errorf("a zero-extent span renders as %q, which claims a column of continuous work", got)
+	}
+	if strings.Count(got, string(laneShades[0])) != 1 {
+		t.Errorf("a zero-extent span renders as %q, want exactly one %q mark", got, string(laneShades[0]))
 	}
 }
 
