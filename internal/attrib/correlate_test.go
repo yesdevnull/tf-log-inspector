@@ -54,6 +54,17 @@ func TestContainmentIncludesASpanEndingExactlyAtTheContextEnd(t *testing.T) {
 	}
 }
 
+// Containment is inclusive on the START boundary too: a span starting
+// exactly when its context starts is still wholly inside it, the sibling of
+// the end-boundary case above.
+func TestContainmentIncludesASpanStartingExactlyAtTheContextStart(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 100, 1000)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
+	if got[0].Confidence != Contained {
+		t.Errorf("Confidence = %v, want Contained for a span starting exactly at the context's start", got[0].Confidence)
+	}
+}
+
 // The top label must require containment, not merely uniqueness. A span
 // sharing one millisecond with a lone window is weaker evidence than one
 // sitting wholly inside a window, and an earlier draft had it the other way
@@ -140,6 +151,27 @@ func TestZeroExtentContextIsNeverACandidate(t *testing.T) {
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
 	if got[0].Confidence != Unattributed {
 		t.Errorf("Confidence = %v, want Unattributed for a zero-extent context", got[0].Confidence)
+	}
+}
+
+// Two half-open intervals that are exactly adjacent -- one ending precisely
+// where the other starts -- share no instant. Both directions are asserted:
+// a span ending where a context starts, and a context ending where a span
+// starts.
+func TestAdjacentIntervalsDoNotOverlap(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 200, 1000)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
+	if got[0].Confidence != Unattributed {
+		t.Errorf("Confidence = %v, want Unattributed -- span ends exactly where context starts", got[0].Confidence)
+	}
+	if got[0].Candidates != 0 {
+		t.Errorf("Candidates = %d, want 0", got[0].Candidates)
+	}
+
+	ctxs = []Context{ctx("aws_instance.a", "aws_instance", "read", 0, 100)}
+	got = Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
+	if got[0].Confidence != Unattributed {
+		t.Errorf("Confidence = %v, want Unattributed -- context ends exactly where span starts", got[0].Confidence)
 	}
 }
 
