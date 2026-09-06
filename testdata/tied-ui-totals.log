@@ -1,0 +1,21 @@
+# SYNTHESISED to pin the types view's tie-break, which no other fixture can
+# reach: model.JoinByResourceType ranks by UI total and breaks ties by RPC
+# total, and every other fixture's UI totals are distinct, so the tie-break
+# never runs. Both types here total 2s of UI-hook time and differ only in
+# RPC time, so the join's own order (aws_zulu first, on 500ms of RPC) is
+# the opposite of what ranking by UI total and breaking ties by NAME would
+# give (aws_alpha first). That disagreement is the point: it is what lets a
+# test tell the builder's order apart from a generic re-sort of it.
+#
+# The hclog lines follow testdata/provider-rpc.log's "Received downstream
+# response" shape; the terraform.ui JSON lines follow
+# testdata/structured-ui.log's apply_start/apply_complete shape. Values are
+# invented; no line here is from a real run. Both elapsed_seconds are WHOLE
+# numbers, as a real log's always are.
+{"@level":"info","@message":"Terraform 1.14.9","@module":"terraform.ui","@timestamp":"2026-09-07T11:00:00.000000+10:00","terraform":"1.14.9","type":"version","ui":"1.2"}
+{"@level":"info","@message":"aws_alpha.one: Creating...","@module":"terraform.ui","@timestamp":"2026-09-07T11:00:01.000000+10:00","hook":{"resource":{"addr":"aws_alpha.one","module":"","resource":"aws_alpha.one","implied_provider":"aws","resource_type":"aws_alpha","resource_name":"one","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"aws_alpha.one: Creation complete after 2s","@module":"terraform.ui","@timestamp":"2026-09-07T11:00:03.000000+10:00","hook":{"resource":{"addr":"aws_alpha.one","module":"","resource":"aws_alpha.one","implied_provider":"aws","resource_type":"aws_alpha","resource_name":"one","resource_key":null},"action":"create","elapsed_seconds":2,"id_key":"id","id_value":"alpha-0000000000001"},"type":"apply_complete"}
+{"@level":"info","@message":"aws_zulu.one: Creating...","@module":"terraform.ui","@timestamp":"2026-09-07T11:00:03.500000+10:00","hook":{"resource":{"addr":"aws_zulu.one","module":"","resource":"aws_zulu.one","implied_provider":"aws","resource_type":"aws_zulu","resource_name":"one","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"aws_zulu.one: Creation complete after 2s","@module":"terraform.ui","@timestamp":"2026-09-07T11:00:05.500000+10:00","hook":{"resource":{"addr":"aws_zulu.one","module":"","resource":"aws_zulu.one","implied_provider":"aws","resource_type":"aws_zulu","resource_name":"one","resource_key":null},"action":"create","elapsed_seconds":2,"id_key":"id","id_value":"zulu-00000000000001"},"type":"apply_complete"}
+2026-09-07T11:00:02.100+1000 [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=5c6d7e8f-0001-4a1b-8c2d-000000000001 tf_resource_type=aws_alpha tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=10 @caller=github.com/hashicorp/terraform-plugin-go@v0.23.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2026-09-07T11:00:02.099+1000
+2026-09-07T11:00:04.600+1000 [TRACE] provider.terraform-provider-aws_v5.60.0_x5: Received downstream response: tf_req_id=5c6d7e8f-0002-4a1b-8c2d-000000000002 tf_resource_type=aws_zulu tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=500 @caller=github.com/hashicorp/terraform-plugin-go@v0.23.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2026-09-07T11:00:04.599+1000

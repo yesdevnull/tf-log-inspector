@@ -129,6 +129,16 @@ type Model struct {
 	pane     Pane
 	selected int
 
+	// sortCol is which column each table view's rows are sorted by, indexed
+	// by View. It is per view because a column index names a DIFFERENT
+	// column in each table -- column 2 is "calls" among providers and
+	// "resource type" among calls -- so a single index carried across a view
+	// switch would sort by whatever column happened to sit at that index
+	// there. New sets each to the column that view's row builder already
+	// ranks by, so the interface opens on the order it has always opened on;
+	// see tables and rows().
+	sortCol [viewCount]int
+
 	// facets is built once from the whole log -- its RPC spans for the
 	// three span dimensions, its entries for the level dimension (see
 	// levelFacet) -- so a value's count always reflects the log, never the
@@ -274,6 +284,13 @@ func New(l *model.Log, path string) Model {
 	// rather than spans, and it filters only the raw log.
 	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
 	m := Model{log: l, name: filepath.Base(path), view: ViewCalls, pane: PaneList, facets: facets}
+	// Every table view starts on the column its own builder already ranks
+	// by, which is what makes the opening frame identical to the one this
+	// interface drew before a sort could be cycled at all. A view with no
+	// table has no entry here and keeps the zero value, which nothing reads.
+	for v, t := range tables {
+		m.sortCol[v] = t.defaultCol
+	}
 	m.facetCursor = firstFacetCursor(facets)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
 	m.detailPaneNatural = detailNaturalWidth(l)
@@ -428,6 +445,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.searchAgain(-1)
 			}
+		case "s":
+			m.cycleSort()
 		case "f":
 			m.toggleFacetFocus()
 		default:
@@ -478,6 +497,29 @@ func (m *Model) keepFocusOnADrawnPane() {
 		}
 	}
 	m.pane = fallback
+}
+
+// cycleSort is 's': it moves the sort to the next column of the table on
+// screen, wrapping back round to the column the view's builder already ranks
+// by after every column has had a turn.
+//
+// A view with no table -- the timeline, the raw log -- has no entry in
+// tables, so the press does nothing there. That is the absence doing the
+// work rather than a condition spelled out here: a view added with a table
+// gets the sort by being listed in tables, and one added without a table
+// cannot acquire a sort that reorders nothing.
+//
+// The selection is left on its index rather than followed to the row it was
+// on. The table reordering under a fixed cursor is what every other thing
+// that reorders this list does -- a facet toggle, a view switch -- and
+// invalidateRows is what clamps it against the list it rebuilds.
+func (m *Model) cycleSort() {
+	t, ok := tables[m.view]
+	if !ok {
+		return
+	}
+	m.sortCol[m.view] = (m.sortCol[m.view] + 1) % len(t.cols)
+	m.invalidateRows()
 }
 
 // toggleFacetFocus is 'f': it puts the facet pane in front of the user and

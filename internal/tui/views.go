@@ -24,6 +24,17 @@ type row struct {
 	// a programming error, and an out-of-range panic at the first render
 	// says so where a quietly missing column would not.
 	cells []string
+	// numeric holds the NUMBER behind each of cells, one per column, and is
+	// meaningful only where that column's kind is numericColumn -- it is
+	// zero everywhere else and nothing reads it there.
+	//
+	// It exists because cells are formatted for a reader and sorting them as
+	// text gives the wrong order: formatMs renders 2000ms as "2.0s" and
+	// 500ms as "500ms", and "2.0s" sorts below "500ms" on every rule a
+	// string comparison has. The builders hold the raw figure already, so
+	// they record it here rather than leaving the sort to parse a rendered
+	// duration back into one.
+	numeric []uint64
 	// spanIdx is the index into m.log.RPCSpans that this row represents, or
 	// noSpanIdx when the row is a rollup rather than a single span. The raw
 	// log's jump-to-log resolves a row to a span through it, so every row
@@ -42,8 +53,8 @@ type row struct {
 
 // callRow builds the row standing for ONE span: its display cells, and the
 // index into m.log.RPCSpans of the span it is.
-func callRow(cells []string, spanIdx int) row {
-	return row{cells: cells, spanIdx: spanIdx}
+func callRow(cells []string, numeric []uint64, spanIdx int) row {
+	return row{cells: cells, numeric: numeric, spanIdx: spanIdx}
 }
 
 // rollupRow builds the row standing for a GROUP of spans: its display cells,
@@ -54,8 +65,8 @@ func callRow(cells []string, spanIdx int) row {
 // sentinel would leave a row indexing whichever span happens to sit at
 // index 0 -- rendering that span's RPC, provider and duration as the
 // selected GROUP's own figures.
-func rollupRow(cells []string, d *rollupDetail) row {
-	return row{cells: cells, spanIdx: noSpanIdx, rollup: d}
+func rollupRow(cells []string, numeric []uint64, d *rollupDetail) row {
+	return row{cells: cells, numeric: numeric, spanIdx: noSpanIdx, rollup: d}
 }
 
 // noSpanIdx is the spanIdx of a row that stands for no single span. It is
@@ -191,6 +202,40 @@ var callColumns = []column{
 	{header: "provider", kind: tailIdentifierColumn},
 }
 
+// tableBinding is the table one view draws: its columns, and the index of
+// the column its row builder ALREADY ranks by.
+//
+// The two are held together for the reason viewBinding gives for its own
+// three fields. defaultCol is not a preference -- it is a statement about
+// what providerRows, typeRows and callRows produce, and stating it beside
+// the columns it indexes is what stops it drifting into naming a column the
+// builder does not rank by. TestTheDefaultSortServesTheBuildersOrderRather
+// ThanReSortingIt is what holds that claim true.
+type tableBinding struct {
+	cols       []column
+	defaultCol int
+}
+
+// tables is the single source of truth for which columns a view draws and
+// which of them it arrives sorted by. renderList selects its columns from
+// here, the sort cycles through them, and the header marker names one of
+// them, so a view cannot draw one set of columns while the sort cycles
+// another.
+//
+// A view absent from this map has no table: the timeline draws lanes and the
+// raw log draws entries, and neither has a column for a sort to reorder. The
+// absence is what makes 's' inert there, rather than a condition spelled out
+// at the key handler.
+var tables = map[View]tableBinding{
+	// RollupBy ranks buckets by TotalMs descending.
+	ViewProviders: {cols: providerColumns, defaultCol: 1},
+	// model.JoinByResourceType ranks by UITotalMs descending, breaking ties
+	// by RPCTotalMs and then by name.
+	ViewTypes: {cols: typeColumns, defaultCol: 2},
+	// callRows sorts by rankedBefore: duration descending, ties by RPC name.
+	ViewCalls: {cols: callColumns, defaultCol: 0},
+}
+
 // rows returns the current view's rows, restricted to the active facet
 // filter. ViewRawLog is not a rollup and has no rows of its own -- it
 // renders directly from m.log.Entries -- so it returns nil here.
@@ -227,6 +272,14 @@ func (m *Model) rows() []row {
 		r = nil
 	default:
 		panic(unhandledView(m.view))
+	}
+	// The sort runs ONLY where the user has moved it off the column the
+	// builder already ranks by. On the default it does not run at all, and
+	// the builder's own order -- including its own tie-break, which a
+	// generic sort by one column knows nothing about -- is what reaches the
+	// table. See tableBinding.
+	if t, ok := tables[m.view]; ok && m.sortCol[m.view] != t.defaultCol {
+		sortRows(t.cols, r, m.sortCol[m.view])
 	}
 	m.rowsCache = r
 	m.rowsCached = true
@@ -323,6 +376,7 @@ func providerRows(rpcSpans []span.Span) []row {
 				strconv.Itoa(b.Count),
 				formatMs(uint64(b.MaxMs)),
 			},
+			[]uint64{0, b.TotalMs, uint64(b.Count), uint64(b.MaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "Prov", value: b.Key, kind: tailIdentifierColumn},
@@ -364,6 +418,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				formatMs(r.RPCTotalMs),
 				formatMs(uint64(r.RPCMaxMs)),
 			},
+			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "Type", value: r.ResourceType, kind: tailIdentifierColumn},
@@ -396,6 +451,50 @@ func rankedBefore(a, b span.Span) bool {
 		return a.DurationMs > b.DurationMs
 	}
 	return a.RPC < b.RPC
+}
+
+// sortRows reorders data by column col of cols, in the direction that
+// column's KIND implies: a numeric column descending, because biggest-first
+// is what every ranked view in this tool means by an order, and an
+// identifier column ascending, because alphabetical is how a reader scans a
+// list of names. The direction is therefore not a second thing the user
+// chooses, and there is no key to reverse it.
+//
+// Ties break on column 0 ascending -- the identifier column in every table
+// but the calls view -- and rows that column cannot separate hold the order
+// they arrived in: the sort is STABLE, so two rows a tie-break genuinely
+// cannot tell apart do not swap places from one keystroke to the next.
+func sortRows(cols []column, data []row, col int) {
+	sort.SliceStable(data, func(i, j int) bool {
+		if less, decided := compareCell(cols[col].kind, data[i], data[j], col); decided {
+			return less
+		}
+		if col == 0 {
+			return false
+		}
+		less, _ := compareCell(cols[0].kind, data[i], data[j], 0)
+		return less
+	})
+}
+
+// compareCell reports whether a comes before b at column col, and whether
+// that column tells them apart at all. The second return is what lets
+// sortRows fall through to its tie-break rather than reading "not before"
+// as "after".
+//
+// A numeric column compares the NUMBERS behind the cells, never the cells:
+// see row.numeric for why the rendered text sorts wrongly.
+func compareCell(kind columnKind, a, b row, col int) (less, decided bool) {
+	if kind == numericColumn {
+		if a.numeric[col] != b.numeric[col] {
+			return a.numeric[col] > b.numeric[col], true
+		}
+		return false, false
+	}
+	if a.cells[col] != b.cells[col] {
+		return a.cells[col] < b.cells[col], true
+	}
+	return false, false
 }
 
 // rpcGroup is what one group of RPC spans holds that a model rollup does
@@ -486,7 +585,7 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 			s.RPC,
 			s.ResourceType,
 			s.Provider,
-		}, si)
+		}, []uint64{uint64(s.DurationMs), 0, 0, 0}, si)
 	}
 	return rows
 }
@@ -523,27 +622,24 @@ func (m *Model) renderList(w, h int) string {
 	if m.filterActive() {
 		empty = noMatchNote
 	}
-	// Only the columns and the preamble differ between the table views;
-	// everything else renderTable needs is the same for all of them, so the
-	// switch selects those two and the call itself is made once.
-	var cols []column
-	var preamble []string
-	switch m.view {
-	case ViewProviders:
-		cols = providerColumns
-	case ViewTypes:
-		cols = typeColumns
-		preamble = typesPreamble(m.uiFilter().SpansMatching(m.log.UISpans))
-	case ViewCalls:
-		cols = callColumns
-	default:
+	// The columns come from tables, which the sort cycle and the header
+	// marker read as well, so the table DRAWN and the table sorted cannot
+	// come to be two different tables. Only the preamble is left to select
+	// here, and everything else renderTable needs is the same for every
+	// table view, so the call itself is made once.
+	t, ok := tables[m.view]
+	if !ok {
 		// ViewRawLog and ViewTimeline never reach here -- renderCentre
 		// routes them to renderRawLog and renderTimeline respectively -- so
-		// anything landing in this case is a view with no table of its own.
+		// anything landing here is a view with no table of its own.
 		// See unhandledView.
 		panic(unhandledView(m.view))
 	}
-	return renderTable(preamble, cols, m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+	var preamble []string
+	if m.view == ViewTypes {
+		preamble = typesPreamble(m.uiFilter().SpansMatching(m.log.UISpans))
+	}
+	return renderTable(preamble, t.cols, m.sortCol[m.view], m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 }
 
 // captureGuidance is what the centre pane shows for a log with no spans at
@@ -724,15 +820,20 @@ func typesPreamble(uiSpans []span.Span) []string {
 // table of a preamble and a header with nothing beneath it reads as a
 // rendering that failed rather than as a filter that matched nothing, and
 // those are the two situations a reader most needs told apart.
-func renderTable(preamble []string, cols []column, data []row, emptyNote string, selected int, focused bool, w, h int) string {
-	widths := fitColumnWidths(cols, columnWidths(cols, data), w)
+func renderTable(preamble []string, cols []column, sortCol int, data []row, emptyNote string, selected int, focused bool, w, h int) string {
+	// The headers are built ONCE and then both measured and drawn, so the
+	// width a sorted column is reserved and the marked header rendered into
+	// it are the same string. Deriving them twice is how a marker comes to
+	// be drawn a column wider than the space measured for it.
+	headers := headerCells(cols, sortCol)
+	widths := fitColumnWidths(cols, columnWidths(headers, data), w)
 	kinds := columnKinds(cols)
 
 	lines := make([]string, 0, len(preamble)+1+len(data))
 	for _, p := range preamble {
 		lines = append(lines, clipWidth(p, w))
 	}
-	lines = append(lines, clipWidth(formatRow(headerCells(cols), headerKinds(cols), widths), w))
+	lines = append(lines, clipWidth(formatRow(headers, headerKinds(cols), widths), w))
 
 	if len(data) == 0 {
 		lines = append(lines, clipWidth(emptyNote, w))
@@ -847,13 +948,41 @@ func scrollWindow(selected, total, dataH int) (top, visible int) {
 	return top, visible
 }
 
-func headerCells(cols []column) []string {
+func headerCells(cols []column, sortCol int) []string {
 	cells := make([]string, len(cols))
 	for i, c := range cols {
 		cells[i] = c.header
+		if i == sortCol {
+			cells[i] += sortMark(c.kind)
+		}
 	}
 	return cells
 }
+
+// sortMark is the glyph the sorted column's header wears, naming which way
+// that column is ordered. It is derived from the column's kind rather than
+// stored, for the same reason sortRows takes its direction from there: the
+// marker and the order it describes cannot then disagree.
+func sortMark(k columnKind) string {
+	if k == numericColumn {
+		return sortDescMark
+	}
+	return sortAscMark
+}
+
+// The sort markers. A sort nothing on screen accounts for is a keystroke
+// that silently reorders the table, so the marker is drawn from the first
+// frame: a view's default ranking is a sort too, and went unstated before
+// these existed.
+//
+// The glyph is appended with no separating space, so a sorted column costs
+// one display column rather than two -- fitColumnWidths reserves a numeric
+// column at its full natural width, and every column reserved wider is a
+// column taken off the identifier columns that share what remains.
+const (
+	sortDescMark = "▾"
+	sortAscMark  = "▴"
+)
 
 // columnKinds is each column's kind, in order: what formatRow needs to
 // align and clip that column's VALUES.
@@ -889,10 +1018,15 @@ func headerKinds(cols []column) []columnKind {
 // to fit its header and every cell in data, the same data-driven approach
 // internal/profile uses for its resource-type column rather than a width
 // fixed in advance.
-func columnWidths(cols []column, data []row) []int {
-	widths := make([]int, len(cols))
-	for i, c := range cols {
-		widths[i] = lipgloss.Width(c.header)
+//
+// It measures the headers AS RENDERED -- the strings headerCells produced,
+// sort marker and all -- rather than re-deriving them from cols. A column
+// whose marker went unmeasured is reserved one column short of the header
+// drawn into it.
+func columnWidths(headers []string, data []row) []int {
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = lipgloss.Width(h)
 	}
 	for _, r := range data {
 		for i, c := range r.cells {

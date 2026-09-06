@@ -500,16 +500,20 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 		{header: "resource type", kind: tailIdentifierColumn},
 		{header: "n", kind: numericColumn},
 	}
-	data := []row{rollupRow([]string{"registry.terraform.io/hashicorp/aws", "1"}, nil)}
+	data := []row{rollupRow([]string{"registry.terraform.io/hashicorp/aws", "1"}, []uint64{0, 1}, nil)}
 
-	lines := strings.Split(renderTable(nil, cols, data, "", -1, true, 12, 10), "\n")
+	// Sorted on the numeric column, so its header carries a marker and is
+	// reserved a column wider than the bare "n" -- which is exactly the
+	// column the identifier beside it loses. Measuring the marked header is
+	// what keeps the two in step; see columnWidths.
+	lines := strings.Split(renderTable(nil, cols, 1, data, "", -1, true, 12, 10), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want a header and one data row:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if want := "resource…  n"; lines[0] != want {
+	if want := "resourc…  n▾"; lines[0] != want {
 		t.Errorf("header row = %q, want %q -- a header must keep its head and mark the cut", lines[0], want)
 	}
-	if want := "…corp/aws  1"; lines[1] != want {
+	if want := "…orp/aws   1"; lines[1] != want {
 		t.Errorf("data row = %q, want %q -- an identifier value must keep its tail", lines[1], want)
 	}
 }
@@ -638,4 +642,227 @@ func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
 	if strings.Contains(centre, "total  calls  max") {
 		t.Errorf("an empty providers table was rendered instead of the guidance:\n%s", centre)
 	}
+}
+
+// sortKey is the 's' press, spelled once: every sort test sends it several
+// times over and the literal is long enough to bury what the test is doing.
+var sortKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+
+// The sort cycle is PER VIEW because a column index means a different column
+// in each table: column 2 is "calls" among providers and "resource type"
+// among calls. Cycling through one view's columns and carrying the index
+// into another would sort by whatever column happened to sit at that index
+// there, which is not a thing the user asked for.
+//
+// Every stop is asserted distinct rather than just counted, because a cycle
+// that revisits a column before it has shown them all leaves columns the
+// user cannot reach at all -- the failure a modulus off by one produces, and
+// one a bare "returns to the start after N presses" assertion passes over.
+func TestSortCycleVisitsEveryColumnAndReturnsToTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		view    View
+		key     rune
+		fixture string
+	}{
+		{ViewProviders, '1', "two-providers.log"},
+		{ViewTypes, '2', "two-tier.log"},
+		{ViewCalls, '4', "provider-rpc.log"},
+	} {
+		t.Run(viewTitle(tc.view), func(t *testing.T) {
+			m := update(t, New(testLog(t, tc.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+			cols := tables[tc.view].cols
+			start := m.sortCol[tc.view]
+			if want := tables[tc.view].defaultCol; start != want {
+				t.Fatalf("a fresh model sorts by column %d, want the column the builder already ranks by (%d)", start, want)
+			}
+			seen := map[int]bool{start: true}
+			for press := 1; press < len(cols); press++ {
+				m = update(t, m, sortKey)
+				got := m.sortCol[tc.view]
+				if got < 0 || got >= len(cols) {
+					t.Fatalf("press %d put the sort on column %d, outside this table's %d columns", press, got, len(cols))
+				}
+				if seen[got] {
+					t.Fatalf("press %d returned to column %d before every column had a turn -- %d of %d columns are unreachable", press, got, len(cols)-len(seen), len(cols))
+				}
+				seen[got] = true
+			}
+			if m = update(t, m, sortKey); m.sortCol[tc.view] != start {
+				t.Errorf("after %d presses the sort is on column %d, want it wrapped back to %d", len(cols), m.sortCol[tc.view], start)
+			}
+		})
+	}
+}
+
+// An identifier column sorts ASCENDING -- alphabetically, the order a reader
+// scans a list of names in -- where a numeric column sorts descending. The
+// direction is not a separate choice the user makes: it falls out of the
+// column's kind, so there is no second key for it.
+//
+// provider-rpc.log is what tells the two orders apart. Its two calls rank
+// aws_subnet (5ms) above aws_internet_gateway (1ms) by duration, which is
+// the exact reverse of their alphabetical order, so a sort that quietly did
+// nothing would fail here rather than pass by coincidence.
+func TestSortingByAnIdentifierColumnOrdersItAscending(t *testing.T) {
+	m := update(t, callsModel(t, "provider-rpc.log", "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, gateway, _ := findPaneRow(centrePaneOf(m.View()), "1ms")
+	_, subnet, _ := findPaneRow(centrePaneOf(m.View()), "5ms")
+	if gateway <= subnet {
+		t.Fatalf("fixture assumption changed: the 1ms call already sorts above the 5ms one by duration, so this test cannot tell a reversal from a no-op")
+	}
+
+	// callColumns is duration, RPC, resource type, provider: two presses
+	// from the duration default lands on resource type.
+	m = update(t, update(t, m, sortKey), sortKey)
+	if got := callColumns[m.sortCol[ViewCalls]].header; got != "resource type" {
+		t.Fatalf("two presses landed the sort on %q, want resource type", got)
+	}
+
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+	_, gatewayLine := paneRowStartingWith(t, centre, "1ms")
+	_, subnetLine := paneRowStartingWith(t, centre, "5ms")
+	if gatewayLine >= subnetLine {
+		t.Errorf("aws_internet_gateway rendered on line %d, at or below aws_subnet on line %d -- sorting by resource type did not order it ascending:\n%s", gatewayLine, subnetLine, centre)
+	}
+}
+
+// A numeric column sorts DESCENDING, biggest first, because that is what
+// every ranked view in this tool means by an order: the slowest thing is the
+// thing worth looking at.
+//
+// two-tier.log tells this apart from the default. Ranked by UI total the
+// order is aws_instance (5s), local_file (1s), aws_subnet (none); ranked by
+// RPC total it is aws_instance (370ms), aws_subnet (40ms), local_file
+// (none). local_file and aws_subnet swap, so the assertion fails if the
+// press left the table on its default ranking.
+func TestSortingByANumericColumnOrdersItDescending(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	_, subnet, _ := findPaneRow(centrePaneOf(m.View()), "aws_subnet")
+	_, local, _ := findPaneRow(centrePaneOf(m.View()), "local_file")
+	if subnet <= local {
+		t.Fatalf("fixture assumption changed: aws_subnet already ranks above local_file by UI total, so this test cannot tell a re-sort from the default")
+	}
+
+	// typeColumns is resource type, UI res., UI total, RPC calls, RPC total,
+	// RPC max: two presses from the UI total default lands on RPC total.
+	m = update(t, update(t, m, sortKey), sortKey)
+	if got := typeColumns[m.sortCol[ViewTypes]].header; got != "RPC total" {
+		t.Fatalf("two presses landed the sort on %q, want RPC total", got)
+	}
+
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+	_, subnetLine := paneRowStartingWith(t, centre, "aws_subnet")
+	_, localLine := paneRowStartingWith(t, centre, "local_file")
+	if subnetLine >= localLine {
+		t.Errorf("aws_subnet (40ms of RPC) rendered on line %d, at or below local_file (none) on line %d -- sorting by RPC total did not order it descending:\n%s", subnetLine, localLine, centre)
+	}
+}
+
+// While the sort sits on the column a view's builder already ranks by, the
+// builder's order is served UNTOUCHED rather than re-sorted into an
+// equivalent one. The two are not equivalent: each builder breaks ties its
+// own way -- model.JoinByResourceType breaks a UI-total tie by RPC total,
+// and rankedBefore breaks a duration tie by RPC name -- and a generic
+// re-sort by one column knows none of that.
+//
+// It matters beyond tidiness for the calls view, where rankedBefore is also
+// what each rollup group's slowest call is chosen by: re-sort the table by a
+// different tie-break and the detail pane can name one call as a group's
+// slowest while the table ranks another above it, which is the disagreement
+// rankedBefore exists as a single rule to prevent.
+//
+// tied-ui-totals.log is the only fixture that can observe this. Both its
+// types total 2s of UI-hook time, so the join's tie-break decides the order
+// (aws_zulu first, on 500ms of RPC against 10ms) and ranking by UI total
+// alone would put aws_alpha first on its name.
+func TestTheDefaultSortServesTheBuildersOrderRatherThanReSortingIt(t *testing.T) {
+	m := update(t, New(testLog(t, "tied-ui-totals.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
+
+	alpha, alphaLine := paneRowStartingWith(t, centre, "aws_alpha")
+	zulu, zuluLine := paneRowStartingWith(t, centre, "aws_zulu")
+	if alpha[2] != zulu[2] {
+		t.Fatalf("fixture assumption changed: UI totals are %q and %q, want them tied so the join's tie-break decides the order", alpha[2], zulu[2])
+	}
+	if zuluLine >= alphaLine {
+		t.Errorf("aws_zulu (500ms of RPC) rendered on line %d, at or below aws_alpha (10ms) on line %d -- the table was re-sorted by UI total and broke the tie by name, discarding the join's own tie-break:\n%s", zuluLine, alphaLine, centre)
+	}
+}
+
+// A sort the reader cannot see is a keystroke that reorders the table and
+// accounts for nothing. The marker names the sorted column in the place a
+// reader already looks to find out what a column means, and it is present
+// from the first frame: the default ranking is a sort too, and was
+// unstated before this.
+//
+// Exactly one marker, because two would name two sorted columns and the
+// table has one.
+func TestTheSortedColumnIsMarkedInTheHeader(t *testing.T) {
+	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+
+	for press := 0; press < len(providerColumns); press++ {
+		header := tableHeaderOf(t, centrePaneOf(m.View()))
+		if got := strings.Count(header, sortDescMark) + strings.Count(header, sortAscMark); got != 1 {
+			t.Fatalf("press %d: header carries %d sort markers, want exactly one:\n%s", press, got, header)
+		}
+		col := providerColumns[m.sortCol[ViewProviders]]
+		want := col.header + sortDescMark
+		if col.kind != numericColumn {
+			want = col.header + sortAscMark
+		}
+		if !strings.Contains(header, want) {
+			t.Errorf("press %d: sort is on %q but the header does not carry %q:\n%s", press, col.header, want, header)
+		}
+		m = update(t, m, sortKey)
+	}
+}
+
+// The timeline and the raw log have no rows and no columns, so there is
+// nothing for a sort to reorder. Pressing s there must do nothing at all --
+// not panic reaching for a column set that does not exist, and not quietly
+// advance a counter that would then apply itself the next time a table view
+// came up.
+func TestSortIsInertInTheViewsWithNoTable(t *testing.T) {
+	for _, tc := range []struct {
+		view View
+		key  rune
+	}{
+		{ViewTimeline, '5'},
+		{ViewRawLog, '6'},
+	} {
+		t.Run(viewTitle(tc.view), func(t *testing.T) {
+			m := update(t, New(testLog(t, "timeline.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+			before := m.sortCol
+			after := update(t, m, sortKey)
+			if after.sortCol != before {
+				t.Errorf("s in %s moved the sort from %v to %v, but this view has no table to sort", viewTitle(tc.view), before, after.sortCol)
+			}
+			if after.ActiveView() != tc.view {
+				t.Errorf("s in %s changed the view to %v", viewTitle(tc.view), after.ActiveView())
+			}
+		})
+	}
+}
+
+// tableHeaderOf returns the centre pane's column-header line: the first line
+// of the pane that is not part of a preamble. The types view carries a
+// two-line preamble about UI-hook resolution, so the header is not reliably
+// the first line, and every table's header ends with a column name rather
+// than a sentence.
+func tableHeaderOf(t *testing.T, centre string) string {
+	t.Helper()
+	for _, ln := range strings.Split(centre, "\n") {
+		plain, _ := logfmt.StripANSI(ln, nil)
+		for _, c := range append(append(append([]column(nil), providerColumns...), typeColumns...), callColumns...) {
+			if strings.Contains(plain, c.header) && !strings.Contains(plain, "whole seconds") {
+				return strings.TrimRight(plain, " ")
+			}
+		}
+	}
+	t.Fatalf("no column header line in:\n%s", centre)
+	return ""
 }

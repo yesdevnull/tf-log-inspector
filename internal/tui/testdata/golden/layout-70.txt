@@ -1,9 +1,9 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 CALLS                                            │ SPAN DETAIL        
-duration  RPC           resource t…  provider    │ RPC   ApplyResourc…
-[7m     8ms  ApplyResour…  …e_instance  …orp/google[0m │ Type  …ute_instance
-     5ms  ApplyResour…  aws_subnet   …hicorp/aws │ Prov  …icorp/google
+duration▾  RPC          resource t…  provider    │ RPC   ApplyResourc…
+[7m      8ms  ApplyResou…  …e_instance  …orp/google[0m │ Type  …ute_instance
+      5ms  ApplyResou…  aws_subnet   …hicorp/aws │ Prov  …icorp/google
                                                  │ Dur   8ms          
                                                  │ Res   no address c…
                                                  │                    
@@ -37,4 +37,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  5 timeline  6 raw log
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+⇥ pane  ␣ facet  ⏎ open  s sort  f facets  / search  Esc clear  q quit

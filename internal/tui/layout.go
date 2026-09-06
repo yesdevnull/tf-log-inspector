@@ -400,12 +400,23 @@ const openHint = "⏎ open"
 // so the three-pane layout is never the width under pressure here.
 const spanCursorHint = "↔ span"
 
+// sortHint names the key that moves the sort to the next column of the
+// table on screen. It is shown only where there IS a table -- the two rollup
+// views and the calls view -- for the same reason the open hint is shown
+// only over a row that opens: the timeline and the raw log have no columns
+// for a sort to reorder, so s does nothing there.
+const sortHint = "s sort"
+
 // actionKeys is the hint group for the keys that DO something to what is on
 // screen, as opposed to the ones that change which view is on screen. It is
-// 54 display columns bare, 62 with the open hint, and 70 in the timeline at
-// a width that draws the detail pane, which carries both that and the span
-// hint; every binding added to it pushes "q quit" closer to the edge a
-// narrow terminal cuts from, which is what keeps it this terse.
+// 54 display columns in the raw log, which carries none of its conditional
+// hints; 62 in the two rollup views, which carry the sort hint; and 70 in
+// both the calls view, which carries the sort and open hints, and the
+// timeline at a width that draws the detail pane, which carries the open and
+// span hints instead. Every binding added to it pushes "q quit" closer to
+// the edge a narrow terminal cuts from, which is what keeps it this terse,
+// and TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth is what holds
+// the widest of them inside the budget.
 //
 // The open hint is shown only where Enter has something to open: a call
 // row's own span in the table views, or the timeline's selected span, which
@@ -462,6 +473,9 @@ func (m *Model) actionKeys(w int) string {
 	}
 	if m.detailPaneDrawn(w) && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)
+	}
+	if _, sortable := tables[m.view]; sortable {
+		keys = append(keys, sortHint)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", "q quit"), "  ")
 }

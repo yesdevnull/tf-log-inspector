@@ -661,7 +661,7 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 	}
 
 	centreWidth := layoutCentreWidth(m, 160)
-	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
+	widths := fitColumnWidths(callColumns, columnWidths(headerCells(callColumns, tables[ViewCalls].defaultCol), rows), centreWidth)
 	providerWidth := widths[len(callColumns)-1] // provider is callColumns' last column
 	if providerWidth >= lipgloss.Width(aws) && providerWidth >= lipgloss.Width(google) {
 		t.Fatalf("provider column is %d display columns wide at 160 columns, wide enough for both addresses whole -- this test no longer exercises clipping", providerWidth)
@@ -713,7 +713,7 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 	}
 
 	centreWidth := layoutCentreWidth(m, 100)
-	widths := fitColumnWidths(callColumns, columnWidths(callColumns, rows), centreWidth)
+	widths := fitColumnWidths(callColumns, columnWidths(headerCells(callColumns, tables[ViewCalls].defaultCol), rows), centreWidth)
 	rpcWidth := widths[1] // RPC is callColumns' second column, after duration
 	if rpcWidth >= lipgloss.Width(first) && rpcWidth >= lipgloss.Width(second) {
 		t.Fatalf("RPC column is %d display columns wide at 100 columns, wide enough for both names whole -- this test no longer exercises clipping", rpcWidth)
@@ -1988,17 +1988,24 @@ func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
 	if strings.Contains(narrow, spanCursorHint) {
 		t.Errorf("at %d columns the footer offers %q, but the detail pane it steps is not drawn: %q", narrowW, spanCursorHint, narrow)
 	}
-	// The action line has been over budget at this width since before the
-	// span hint existed (see keyHints), so what is asserted is that the
-	// hint costs the quit end of it NOTHING: the timeline's line here is
-	// the same line every other view with something to open draws.
-	calls := update(t, small, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	action := func(footer string) string {
 		lines := strings.Split(footer, "\n")
 		return lines[len(lines)-1]
 	}
-	if got, want := action(narrow), action(footerOf(calls.View())); got != want {
-		t.Errorf("at %d columns the timeline's action line is %q, want the same line the calls view draws, %q", narrowW, got, want)
+	// The action line has been over budget at this width since before the
+	// span hint existed (see keyHints), so what is asserted is that dropping
+	// the hint buys back exactly what carrying it costs -- its own width
+	// plus the two-space separator before it -- rather than some of it.
+	//
+	// actionKeys takes the width it is answering for, so both lines come
+	// from the one timeline model: at 100 columns it carries the span hint,
+	// at 60 the detail pane it steps is gone and it does not.
+	withSpan, withoutSpan := m.actionKeys(100), m.actionKeys(narrowW)
+	if !strings.Contains(withSpan, spanCursorHint) {
+		t.Fatalf("the timeline's action line at 100 columns does not carry the span hint, so this asserts nothing: %q", withSpan)
+	}
+	if got, want := lipgloss.Width(withSpan)-lipgloss.Width(withoutSpan), lipgloss.Width(spanCursorHint)+lipgloss.Width("  "); got != want {
+		t.Errorf("dropping the span hint below %d columns saves %d display columns, want the %d the hint and its separator cost: %q against %q", detailInlineWidth, got, want, withSpan, withoutSpan)
 	}
 	// Asserted as the line's own ENDING, not as a substring: "q qu" is a
 	// substring of "q quit" too, so a containment check passes in both of
@@ -2015,5 +2022,50 @@ func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
 		if !strings.Contains(wide, want) {
 			t.Errorf("at 100 columns the footer does not offer %q: %q", want, wide)
 		}
+	}
+}
+
+// The sort hint follows the same rule the open and span hints do: a key is
+// advertised where it does something and nowhere else. The timeline draws
+// lanes and the raw log draws entries, neither of which has a column for a
+// sort to reorder, so s is inert in both and must not be offered there.
+func TestActionKeysOfferSortOnlyWhereThereIsATableToSort(t *testing.T) {
+	for _, b := range views {
+		t.Run(b.name, func(t *testing.T) {
+			m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune(b.key[0])}})
+			_, sortable := tables[m.ActiveView()]
+			if got := strings.Contains(m.actionKeys(160), sortHint); got != sortable {
+				verb := "does not offer"
+				if got {
+					verb = "offers"
+				}
+				t.Errorf("%s view: has a table = %v, but the footer %s %q: %q", b.name, sortable, verb, sortHint, m.actionKeys(160))
+			}
+		})
+	}
+}
+
+// The action line is clipped from its END, where "q quit" is, so its width
+// is a budget every hint added to it spends from. detailInlineWidth is the
+// narrowest terminal that still draws all three panes, and no view may
+// exceed it: the reader of a 70-column terminal must still be able to see
+// how to leave.
+//
+// This sweeps every view rather than naming one, because the widest line has
+// moved twice already -- to the timeline when the span hint was added, and
+// to the calls view when the sort hint was -- and a test naming the view
+// that was widest at the time it was written stops covering the question the
+// moment a hint lands somewhere else.
+func TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth(t *testing.T) {
+	for _, b := range views {
+		t.Run(b.name, func(t *testing.T) {
+			m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune(b.key[0])}})
+			line := m.actionKeys(detailInlineWidth)
+			if n := lipgloss.Width(line); n > detailInlineWidth {
+				t.Errorf("the %s view's action line is %d columns, more than the %d a %d-column terminal gives it: %q", b.name, n, detailInlineWidth, detailInlineWidth, line)
+			}
+		})
 	}
 }

@@ -1,9 +1,9 @@
 tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                                │ CALLS                                                                      │ SPAN DETAIL                             
-[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ duration  RPC                  resource type          provider             │ RPC   ApplyResourceChange               
-[ ] …ry.terraform.io/hashicorp/google  1 │ [7m     8ms  ApplyResourceChange  …gle_compute_instance  …io/hashicorp/google[0m │ Type  google_compute_instance           
-RPCS                                     │      5ms  ApplyResourceChange  aws_subnet             …rm.io/hashicorp/aws │ Prov  …try.terraform.io/hashicorp/google
+[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ duration▾  RPC                  resource type         provider             │ RPC   ApplyResourceChange               
+[ ] …ry.terraform.io/hashicorp/google  1 │ [7m      8ms  ApplyResourceChange  …le_compute_instance  …io/hashicorp/google[0m │ Type  google_compute_instance           
+RPCS                                     │       5ms  ApplyResourceChange  aws_subnet            …rm.io/hashicorp/aws │ Prov  …try.terraform.io/hashicorp/google
 [ ] ApplyResourceChange  2               │                                                                            │ Dur   8ms                               
 RESOURCE TYPES                           │                                                                            │ Res   no address context in log         
 [ ] aws_subnet  1                        │                                                                            │                                         
@@ -37,4 +37,4 @@ span paid the same cost, but absolute times do not transfer
 to an unlogged run.
 
 1 providers  2 types  5 timeline  6 raw log
-⇥ pane  ␣ facet  ⏎ open  f facets  / search  Esc clear  q quit
+⇥ pane  ␣ facet  ⏎ open  s sort  f facets  / search  Esc clear  q quit
