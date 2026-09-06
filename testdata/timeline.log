@@ -1,7 +1,9 @@
 # SYNTHESISED to exercise the swimlane timeline's lane packing and stall
 # detection. Two RPC spans -- one aws, one google -- genuinely overlap in
-# time, which packs them into two lanes; a third aws span then runs alone
-# for 5s after both earlier spans have finished, giving the stall
+# time, which is what gives the log a peak concurrency of 2 for the stall
+# annotation to measure its windows against; per-provider lane packing draws
+# them on separate rows whether they overlap or not. A third aws span then
+# runs alone for 5s after both earlier spans have finished, giving the stall
 # annotation a real solo window to find. The line shape is
 # testdata/two-providers.log's "Received downstream response" verbatim. The
 # first line is not itself a response: it exists only to anchor the

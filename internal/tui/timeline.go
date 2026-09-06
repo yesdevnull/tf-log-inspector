@@ -882,7 +882,7 @@ func laneBar(spans []span.Span, lane model.Lane, spanMs uint32, barW int) string
 // and not for the bars alone. Width is measured with lipgloss.Width wherever
 // it matters -- never a rune count -- and the whole ramp is held to a single
 // column each by TestEveryLaneShadeIsOneDisplayColumn.
-var laneShades = []rune{'░', '▒', '▓', '█'}
+var laneShades = [4]rune{'░', '▒', '▓', '█'}
 
 // laneShadeFor picks the glyph for one column: the space for a column no
 // span touched, and otherwise a shade chosen by what fraction of the

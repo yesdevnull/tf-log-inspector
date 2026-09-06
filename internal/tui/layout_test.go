@@ -69,6 +69,38 @@ func TestLayoutDegradesByWidth(t *testing.T) {
 	}
 }
 
+// wholeFrameCase is one frame the three whole-frame invariants below are
+// swept over, named so a failure says which one produced it.
+type wholeFrameCase struct {
+	name string
+	m    Model
+}
+
+// wholeFrameCases are the frames those invariants sweep: the view the
+// interface opens on, and the timeline in each of its two tiers.
+//
+// The timeline earns its place because it is the most arithmetic-heavy
+// renderer in this package. Every lane row is composed from a label column
+// whose width is measured over the labels and a bar whose width is whatever
+// is left of the pane (see renderTimeline), and its notes block is cut
+// against a height budget of its own -- so it is the renderer most able to
+// produce a row a column too wide or a frame a line too tall. Both tiers are
+// swept because they draw different spans through different builders (see
+// timelineSpans): an RPC-only pass leaves the UI tier's own lanes, labels
+// and whole-second axis unmeasured, and testdata/structured-ui.log is the
+// fixture that has them.
+func wholeFrameCases(t *testing.T) []wholeFrameCase {
+	t.Helper()
+	timeline := func(fixture string) Model {
+		return update(t, New(testLog(t, fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	}
+	return []wholeFrameCase{
+		{"calls/mixed-hcp.log", New(testLog(t, "mixed-hcp.log"), "x.log")},
+		{"timeline/mixed-hcp.log", timeline("mixed-hcp.log")},
+		{"timeline/structured-ui.log", timeline("structured-ui.log")},
+	}
+}
+
 // No rendered line may exceed the terminal width at any supported size, or
 // the terminal wraps and the layout becomes wreckage.
 //
@@ -77,13 +109,20 @@ func TestLayoutDegradesByWidth(t *testing.T) {
 // columns at all, so a rune count both overstates their width and lets a
 // row that is actually SHORT than the rest pass unnoticed. The companion
 // check below pins that short case, which a per-line maximum cannot see.
+//
+// Heights are swept alongside widths because what a pane DRAWS depends on
+// both: the timeline's notes block is cut against its own height budget, and
+// the lane rows it keeps are windowed around the cursor.
 func TestNoLineExceedsTerminalWidth(t *testing.T) {
-	base := New(testLog(t, "mixed-hcp.log"), "x.log")
-	for _, w := range []int{70, 100, 160} {
-		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
-		for _, line := range strings.Split(m.View(), "\n") {
-			if n := lipgloss.Width(line); n > w {
-				t.Errorf("width %d: line of %d columns: %q", w, n, line)
+	for _, c := range wholeFrameCases(t) {
+		for _, w := range []int{70, 100, 160} {
+			for _, h := range []int{40, 24, 12} {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
+				for _, line := range strings.Split(m.View(), "\n") {
+					if n := lipgloss.Width(line); n > w {
+						t.Errorf("%s at %dx%d: line of %d columns: %q", c.name, w, h, n, line)
+					}
+				}
 			}
 		}
 	}
@@ -98,15 +137,18 @@ func TestNoLineExceedsTerminalWidth(t *testing.T) {
 // content is short or whose line carries ANSI escapes still occupies its
 // full share of the row.
 func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
-	base := New(testLog(t, "mixed-hcp.log"), "x.log")
-	for _, w := range []int{70, 100, 160} {
-		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
-		for _, line := range strings.Split(m.View(), "\n") {
-			if !strings.Contains(line, paneSep) {
-				continue // header, caveat and footer are not pane rows
-			}
-			if n := lipgloss.Width(line); n != w {
-				t.Errorf("width %d: pane row is %d columns, want %d: %q", w, n, w, line)
+	for _, c := range wholeFrameCases(t) {
+		for _, w := range []int{70, 100, 160} {
+			for _, h := range []int{40, 24, 12} {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
+				for _, line := range strings.Split(m.View(), "\n") {
+					if !strings.Contains(line, paneSep) {
+						continue // header, caveat and footer are not pane rows
+					}
+					if n := lipgloss.Width(line); n != w {
+						t.Errorf("%s at %dx%d: pane row is %d columns, want %d: %q", c.name, w, h, n, w, line)
+					}
+				}
 			}
 		}
 	}
@@ -120,15 +162,18 @@ func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
 // any test that asserts on View()'s text. This pins the invariant the
 // renderer actually enforces instead.
 func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
-	base := New(testLog(t, "mixed-hcp.log"), "x.log")
-	for _, h := range []int{60, 40, 24, 12, 11, 10, 5, 1} {
-		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: h})
-		view := m.View()
-		if n := len(strings.Split(view, "\n")); n > h {
-			t.Errorf("height %d: View() is %d lines, which loses its top %d:\n%s", h, n, n-h, view)
-		}
-		if !strings.HasPrefix(view, "tfli -- ") {
-			t.Errorf("height %d: View() does not start with the header line:\n%s", h, view)
+	for _, c := range wholeFrameCases(t) {
+		for _, h := range []int{60, 40, 24, 12, 11, 10, 5, 1} {
+			for _, w := range []int{60, 100, 160} {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
+				view := m.View()
+				if n := len(strings.Split(view, "\n")); n > h {
+					t.Errorf("%s at %dx%d: View() is %d lines, which loses its top %d:\n%s", c.name, w, h, n, n-h, view)
+				}
+				if !strings.HasPrefix(view, "tfli -- ") {
+					t.Errorf("%s at %dx%d: View() does not start with the header line:\n%s", c.name, w, h, view)
+				}
+			}
 		}
 	}
 }
@@ -1665,8 +1710,13 @@ func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
 	if got, want := action(narrow), action(footerOf(calls.View())); got != want {
 		t.Errorf("at %d columns the timeline's action line is %q, want the same line the calls view draws, %q", narrowW, got, want)
 	}
-	if !strings.Contains(narrow, "q qu") {
-		t.Errorf("at %d columns the action line no longer reaches the quit hint at all: %q", narrowW, narrow)
+	// Asserted as the line's own ENDING, not as a substring: "q qu" is a
+	// substring of "q quit" too, so a containment check passes in both of
+	// the states this is about -- the hint clipped to its last two letters,
+	// and the hint whole. What is pinned is that the clip lands exactly
+	// where actionKeys' 62 columns say it does at 60.
+	if !strings.HasSuffix(action(narrow), "q qu") {
+		t.Errorf("at %d columns the action line %q does not end on the clipped quit hint %q", narrowW, action(narrow), "q qu")
 	}
 
 	big := update(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
