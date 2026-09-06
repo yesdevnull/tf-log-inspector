@@ -529,9 +529,19 @@ func (m *Model) setView(v View) {
 //
 // The timeline's lane and span cursors are clamped here too, for the same
 // reason the row selection is: a filter change can shrink or empty the lane
-// the cursor was on, whether or not the timeline is the view currently on
-// screen, and clampTimelineSelection is what keeps it pointing at something
-// that still exists.
+// the cursor was on, and clampTimelineSelection is what keeps it pointing
+// at something that still exists.
+//
+// That clamp runs ONLY while the timeline is the view on screen, because
+// clamping packs the lanes (timelineLanes), and packing is the one thing in
+// this package that can fail: model.PackLanes refuses a mixed-fidelity
+// slice and timelineLanes turns that refusal into a panic. Run from here
+// unconditionally, a condition confined to view 5 would take down a facet
+// toggle or a view switch in any view -- an alt-screen crash on a keystroke
+// with nothing to do with the timeline, which is the outcome spanForRow
+// argues against by name. Nothing is missed by waiting: every route INTO
+// the timeline goes through setView, which sets m.view before calling this,
+// so the clamp runs on arrival against the filter in force then.
 func (m *Model) invalidateRows() {
 	m.rowsCache = nil
 	m.rowsCached = false
@@ -542,7 +552,9 @@ func (m *Model) invalidateRows() {
 	m.timelineLanesCached = false
 	m.raw.notFound = false
 	m.clampSelection()
-	m.clampTimelineSelection()
+	if m.view == ViewTimeline {
+		m.clampTimelineSelection()
+	}
 }
 
 // moveCursor routes an up/down/j/k press to whichever pane has focus: the

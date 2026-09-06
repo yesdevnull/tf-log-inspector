@@ -70,6 +70,58 @@ func TestAFilterThatEmptiesTheTimelineSelectsNothing(t *testing.T) {
 	}
 }
 
+// mixedFidelityModel is a model over one provider's spans carrying two
+// different span.Fidelity values, which is what model.PackLanes refuses
+// (model.ErrMixedTimelines) and what timelineLanes deliberately panics on.
+//
+// No builder produces such a log today -- ReportedBuilder is the only
+// RPC-tier builder, so the tier is single-fidelity by construction -- so
+// the shape is written here rather than captured.
+func mixedFidelityModel(t *testing.T) Model {
+	t.Helper()
+	const aws = "registry.terraform.io/hashicorp/aws"
+	return New(&model.Log{RPCSpans: []span.Span{
+		{Provider: aws, RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
+		{Provider: aws, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelitySequential},
+	}}, "x.log")
+}
+
+// TestAViewThatDrawsNoTimelineDoesNotPackItsLanes covers the blast radius
+// of that panic. clampTimelineSelection packs lanes, and invalidateRows
+// called it on every filter change and view switch, so a condition confined
+// to view 5 fired in views that never draw a timeline -- an alt-screen
+// crash, which is what leaves the user's terminal wrecked, on a keystroke
+// that has nothing to do with the timeline. internal/profile returns this
+// same condition as an error.
+func TestAViewThatDrawsNoTimelineDoesNotPackItsLanes(t *testing.T) {
+	m := update(t, mixedFidelityModel(t), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	if m.ActiveView() != ViewProviders {
+		t.Fatalf("view = %v after pressing 1, want the providers view", m.ActiveView())
+	}
+	if got := m.renderList(80, 20); got == "" {
+		t.Error("the providers view drew nothing")
+	}
+}
+
+// The gate must not cost the timeline its own clamp: a filter change while
+// view 5 is on screen can empty the very lane the cursor is on, and a lane
+// cursor left past the end of the lanes is what the clamp exists to catch.
+func TestAFilterChangeStillClampsTheLaneCursorInTheTimeline(t *testing.T) {
+	m := timelineModel(t)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.timeline.lane != 1 {
+		t.Fatalf("lane = %d after ↓, want 1 -- timeline.log is meant to pack into two lanes", m.timeline.lane)
+	}
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/aws": true}}
+	m.invalidateRows()
+	if lanes := m.timelineLanes(); len(lanes) != 1 {
+		t.Fatalf("aws alone packs into %d lanes, want 1", len(lanes))
+	}
+	if m.timeline.lane != 0 {
+		t.Errorf("lane = %d over a single-lane timeline, want 0", m.timeline.lane)
+	}
+}
+
 func TestEnterFromTheTimelineOpensTheSelectedSpanInTheRawLog(t *testing.T) {
 	m := timelineModel(t)
 	idx, ok := m.selectedTimelineSpan()
@@ -570,23 +622,127 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 // TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit checks that a pane too
 // short for every lane still keeps the axis rather than losing it to
 // whichever lane happened to come last -- the axis is what every lane bar is
-// drawn against, so it survives ahead of any of them.
+// drawn against, so it survives ahead of the SECOND lane row and of every
+// one after it.
+//
+// It does not survive ahead of the FIRST: at the two heights where the axis
+// and one bar cannot both be drawn, the bar is what the pane is for. See
+// TestTheShortestPanesStillDrawALaneRow, which pins those.
+//
+// timeline.log packs into two lanes, and h=3 has room for one of them, the
+// axis, and the mark for the notes that then go unsaid.
 func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
-	got := m.renderTimeline(40, 1)
+	lanes := m.timelineLanes()
+	if len(lanes) != 2 {
+		t.Fatalf("timeline.log packs into %d lanes, want 2", len(lanes))
+	}
+	got := m.renderTimeline(40, 3)
 	lines := strings.Split(got, "\n")
-	if len(lines) != 1 {
-		t.Fatalf("renderTimeline(h=1) produced %d lines, want 1", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("renderTimeline(h=3) produced %d lines, want 3", len(lines))
 	}
 
-	lanes := m.timelineLanes()
 	_, spans := m.timelineSpans()
 	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	want := strings.Repeat(" ", labelW+1) + timeAxis(timelineWallClockMs(spans), barW)
-	if lines[0] != want {
-		t.Errorf("renderTimeline(h=1) = %q, want the axis alone: %q", lines[0], want)
+	if lines[1] != want {
+		t.Errorf("renderTimeline(h=3) = %q, want the axis on its second line: %q", lines, want)
+	}
+}
+
+// TestTheShortestPanesStillDrawALaneRow covers the two heights at which
+// this view used to draw everything except the thing it exists for.
+//
+// At h == 1 the axis was appended unconditionally and the lane rows got
+// what was left of the height, which was nothing: two lanes holding 7.5s of
+// work rendered as an axis over empty space. Blank lane area is precisely
+// how this view says "nothing ran", so that frame did not show less than
+// the truth, it showed the opposite of it.
+//
+// At h == 2 the notes block had no room at all and was dropped whole -- the
+// busy summary and every stall line -- with no mark, so the frame read as a
+// complete one-lane timeline with nothing worth noting beneath it. The
+// detail pane in the very same frame marks its own height cut with an
+// ellipsis.
+func TestTheShortestPanesStillDrawALaneRow(t *testing.T) {
+	m := timelineModel(t)
+	if len(m.timelineNotes(commonCentrePaneWidth)) < 2 {
+		t.Fatal("timeline.log is meant to have notes worth cutting, so this test no longer covers the unmarked cut")
+	}
+	for h := 1; h <= 3; h++ {
+		lines := strings.Split(m.renderTimeline(commonCentrePaneWidth, h), "\n")
+		if len(lines) != h {
+			t.Fatalf("h=%d: renderTimeline produced %d lines, want %d", h, len(lines), h)
+		}
+		bar, _ := logfmt.StripANSI(lines[0], nil)
+		if !strings.ContainsAny(bar, "░▒▓█") {
+			t.Errorf("h=%d: the first line is not a lane bar, so the pane drew chrome in place of the only content this view has: %q", h, bar)
+		}
+		if h == 1 {
+			// One line has room for the lane row and nothing else, the
+			// same unmarked cut fitDetailSections has at that height.
+			continue
+		}
+		if got := lines[len(lines)-1]; got != detailCutMark {
+			t.Errorf("h=%d: last line = %q, want %q -- the notes went unsaid with nothing marking it", h, got, detailCutMark)
+		}
+	}
+}
+
+// TestCaptureGuidanceCutForHeightSaysSo covers the first-run case the
+// guidance was written for: a log captured without TF_LOG_PROVIDER=TRACE,
+// read in a pane too short for eighteen lines of advice. The block was
+// clipped to the pane's height with no marker, leaving "This log contains
+// no provider RPC" as a fragment that reads as a finished sentence with the
+// actionable half -- the two variables to set -- gone.
+//
+// This is the height twin of the width defect captureGuidance's own 40-column
+// pre-wrap closes.
+func TestCaptureGuidanceCutForHeightSaysSo(t *testing.T) {
+	m := New(&model.Log{}, "x.log")
+	const w = commonCentrePaneWidth
+
+	// Tall enough for every line: the full guidance, unchanged.
+	if got, want := m.renderTimeline(w, 20), clipEachWidth(captureGuidance, w); got != want {
+		t.Errorf("renderTimeline(h=20) =\n%s\nwant the full guidance:\n%s", got, want)
+	}
+
+	// Too short for that, but with room for a whole shorter answer: both
+	// variables survive, because they are what the reader has to act on.
+	short := m.renderTimeline(w, 4)
+	for _, name := range []string{"TF_LOG_PROVIDER=TRACE", "TF_LOG_SDK_PROTO=TRACE"} {
+		if !strings.Contains(short, name) {
+			t.Errorf("guidance in a %d-line pane lost %s, the actionable half of it:\n%s", 4, name, short)
+		}
+	}
+	for _, line := range strings.Split(short, "\n") {
+		if n := lipgloss.Width(line); n > w {
+			t.Errorf("guidance line %q is %d columns, want at most %d", line, n, w)
+		}
+	}
+
+	// Too short even for that: the cut is marked rather than left reading
+	// as a finished sentence.
+	if lines := strings.Split(m.renderTimeline(w, 2), "\n"); lines[len(lines)-1] != detailCutMark {
+		t.Errorf("guidance in a 2-line pane = %q, want its cut marked with %q", lines, detailCutMark)
+	}
+
+	// A pane of one line has no room for the mark either -- the same
+	// unmarked cut fitDetailSections has at that height -- so what it does
+	// show has to stand on its own.
+	if got := m.renderTimeline(w, 1); !strings.HasSuffix(got, ".") {
+		t.Errorf("guidance in a 1-line pane = %q, want a finished sentence: there is no room to mark what follows it", got)
+	}
+
+	// The table views answer this log with the same text at the same
+	// height, so a reader who has seen one recognises the other.
+	for _, h := range []int{2, 4, 20} {
+		if got, want := m.renderTimeline(w, h), m.renderList(w, h); got != want {
+			t.Errorf("h=%d: renderTimeline =\n%s\nwant renderList's own guidance:\n%s", h, got, want)
+		}
 	}
 }
 
@@ -839,6 +995,62 @@ func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
 	}
 	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
+	}
+}
+
+// drainingLanesModel is a model over three providers that finish one at a
+// time -- google at 20s, azurerm at 40s, aws at 60s, all three starting
+// together -- which is what produces ONE contiguous wait whose depth
+// CHANGES inside it: two spans still running from 20s, one from 40s.
+// model.Stalls merges contiguous segments of the same kind, so the window
+// it reports covers a range of depths rather than a single one.
+//
+// It is synthetic because no fixture in this repository produces a merged
+// window of differing depth at the timeline's own threshold, so the
+// annotation's range wording has no other way to be exercised. Three
+// providers draining one at a time is the ordinary shape that makes one.
+func drainingLanesModel(t *testing.T) Model {
+	t.Helper()
+	const base = "registry.terraform.io/hashicorp/"
+	spans := []span.Span{
+		{Provider: base + "aws", RPC: "ApplyResourceChange", StartMs: 0, EndMs: 60000, DurationMs: 60000, Fidelity: span.FidelityReported},
+		{Provider: base + "google", RPC: "ReadResource", StartMs: 0, EndMs: 20000, DurationMs: 20000, Fidelity: span.FidelityReported},
+		{Provider: base + "azurerm", RPC: "ReadResource", StartMs: 0, EndMs: 40000, DurationMs: 40000, Fidelity: span.FidelityReported},
+	}
+	return update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+}
+
+// TestAWaitWhoseDepthChangesReportsBothEnds covers the window a merge
+// produces out of segments of differing depth. Reporting its floor alone
+// ("concurrency 1 of 3") would say the whole forty seconds ran one-up, when
+// half of it ran two-up; reporting it as a direction ("2 to 1") would claim
+// a ramp the merge cannot promise, since merging on contiguity admits a
+// window whose depth falls and rises again.
+func TestAWaitWhoseDepthChangesReportsBothEnds(t *testing.T) {
+	m := drainingLanesModel(t)
+	want := []string{"waiting on aws/1, 20.0s–60.0s — concurrency 1–2 of 3"}
+	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
+		t.Errorf("stallAnnotation = %v, want %v", lines, want)
+	}
+}
+
+// TestARangeClipsItsOwnTailAtTheCommonPaneWidth measures what the wider
+// range wording costs at the pane this tool is actually read in. The line
+// is ordered lane-first precisely so clipValueEnd eats the concurrency tail
+// rather than the lane name (see stallAnnotation), and a range pushes that
+// cut earlier: the reader keeps the lane to go and look at and the window
+// on the axis above, and gives up arithmetic the bars themselves carry.
+func TestARangeClipsItsOwnTailAtTheCommonPaneWidth(t *testing.T) {
+	m := drainingLanesModel(t)
+	got := m.stallAnnotation(commonCentrePaneWidth)
+	if n := lipgloss.Width(got); n > commonCentrePaneWidth {
+		t.Errorf("line %q is %d columns, want at most %d", got, n, commonCentrePaneWidth)
+	}
+	if want := "waiting on aws/1, 20.0s–60.0s"; !strings.HasPrefix(got, want) {
+		t.Errorf("stallAnnotation at %d columns = %q, which no longer opens on %q -- the lane and the window are what the ordering exists to keep", commonCentrePaneWidth, got, want)
+	}
+	if !strings.HasSuffix(got, detailCutMark) {
+		t.Errorf("stallAnnotation at %d columns = %q, want the cut marked", commonCentrePaneWidth, got)
 	}
 }
 
@@ -1196,10 +1408,11 @@ func TestTheAnnotationSpellsZeroTheWayTheAxisDoes(t *testing.T) {
 
 // TestTheTimelineReportsHowMuchOfTheWindowWasBusy covers the hole the stall
 // list structurally cannot: timeline-dense-lane.log is 2.4s of work spread
-// over a 180s window, and every stall rule is correctly silent about it --
-// concurrency never drops below its peak of 1, and no single gap reaches
-// the threshold. "no stalls" on a run that was 98% idle answers the one
-// question this view exists for wrongly.
+// over a 180s window, and the annotation is correctly silent about it.
+// Concurrency does fall to zero between every pair of calls -- model.Stalls
+// opens a window in each of the 59 gaps -- but each gap is 2.96s against a
+// 9s threshold, so every one of them is dropped. "no stalls" on a run that
+// was 98% idle answers the one question this view exists for wrongly.
 func TestTheTimelineReportsHowMuchOfTheWindowWasBusy(t *testing.T) {
 	m := update(t, New(testLog(t, "timeline-dense-lane.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
@@ -1230,6 +1443,78 @@ func TestTheBusySummarySitsAboveTheStallList(t *testing.T) {
 	}
 	if !strings.Contains(notes[1], "concurrency") {
 		t.Errorf("notes[1] = %q, want the stall list beneath the summary", notes[1])
+	}
+}
+
+// TestAFilteredTimelineSaysSoWhereTheFiguresAre covers the whole notes
+// block being computed over the FILTERED spans while wording itself as a
+// statement about the plan.
+//
+// timeline.log's google call runs 1.5s-3.5s. Ticking aws deletes the log's
+// one real finding and manufactures a window reporting "nothing running --
+// between calls" over a stretch in which google was demonstrably working --
+// the clause this annotation reserves for "the time is not in the
+// providers, so tuning provider parallelism will not touch it". A reader
+// acting on that goes to look at Terraform core. The busy percentage moves
+// the same way, from 83% to 77%, and is the figure most likely to be
+// quoted.
+//
+// The header's "1 of 3 RPC spans" is three panes away and is a sentence
+// about span counts, not about these figures, so the note has to sit where
+// the figures are.
+func TestAFilteredTimelineSaysSoWhereTheFiguresAre(t *testing.T) {
+	m := timelineModel(t)
+	if got := m.timelineNotes(commonCentrePaneWidth); slices.ContainsFunc(got, mentionsTheFilter) {
+		t.Fatalf("the unfiltered notes already mention a filter (%q), so this test asserts nothing", got)
+	}
+
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/aws": true}}
+	m.invalidateRows()
+	notes := m.timelineNotes(commonCentrePaneWidth)
+
+	busy := slices.IndexFunc(notes, func(l string) bool { return strings.HasPrefix(l, "busy ") })
+	if busy < 0 {
+		t.Fatalf("notes = %q, with no busy summary in them", notes)
+	}
+	if !slices.ContainsFunc(notes[:busy], mentionsTheFilter) {
+		t.Errorf("notes = %q: every figure from the busy summary down covers the filtered spans only, and nothing above it says so", notes)
+	}
+	if !strings.Contains(strings.Join(notes[:busy], " "), "Esc") {
+		t.Errorf("notes = %q: the filter note does not name the key that clears the filter, as every other filtered-state note in this package does", notes)
+	}
+	for _, line := range notes {
+		if n := lipgloss.Width(line); n > commonCentrePaneWidth {
+			t.Errorf("line %q is %d columns, want at most %d", line, n, commonCentrePaneWidth)
+		}
+	}
+}
+
+// mentionsTheFilter reports whether a note line tells the reader a filter
+// is narrowing what the figures beneath it cover. It matches on the word
+// rather than on the note's exact text, so the wording can be changed
+// without the test having to be rewritten to keep asserting the same thing.
+func mentionsTheFilter(line string) bool {
+	return strings.Contains(line, "filter")
+}
+
+// A filter selecting values that hide nothing leaves the figures whole, so
+// there is nothing to qualify: the note is about what the figures COVER,
+// not about which checkboxes are ticked. Selecting every provider in
+// timeline.log is that case, and a note there would tell a reader their
+// numbers are narrowed when they are not.
+func TestATimelineFilterThatHidesNothingIsNotAnnounced(t *testing.T) {
+	m := timelineModel(t)
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {
+		"registry.terraform.io/hashicorp/aws":    true,
+		"registry.terraform.io/hashicorp/google": true,
+	}}
+	m.invalidateRows()
+	_, spans := m.timelineSpans()
+	if len(spans) != len(m.log.RPCSpans) {
+		t.Fatalf("the filter hides %d of %d spans, so this test no longer covers a filter that hides nothing", len(m.log.RPCSpans)-len(spans), len(m.log.RPCSpans))
+	}
+	if got := m.timelineNotes(commonCentrePaneWidth); slices.ContainsFunc(got, mentionsTheFilter) {
+		t.Errorf("notes = %q, which qualifies figures that are the whole log's", got)
 	}
 }
 

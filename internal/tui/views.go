@@ -517,7 +517,7 @@ const noRowsNote = "this view has no rows for this log"
 // the same advice.
 func (m *Model) renderList(w, h int) string {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
-		return clipLines(clipEachWidth(captureGuidance, w), h)
+		return fitCaptureGuidance(w, h)
 	}
 	empty := noRowsNote
 	if m.filterActive() {
@@ -571,6 +571,54 @@ var captureGuidance = []string{
 	"",
 	"Run tfli --diagnose on this file to",
 	"check its structure.",
+}
+
+// shortCaptureGuidance is the same advice in one sentence, for a pane with
+// no room for the full text. It is a rewrite rather than the first lines of
+// captureGuidance, the same answer shortLoggingCaveat is to a frame short of
+// HEIGHT: a block cut off partway reads as a rendering fault, and what the
+// cut takes here is the actionable half -- "This log contains no provider
+// RPC" is a finished-looking sentence with the two variables to set gone.
+//
+// Both variables are named because both gate the entries: the provider must
+// write them and Terraform must keep them. It is wrapped to the pane rather
+// than pre-wrapped, since a fixed wrap would spend lines a short pane does
+// not have (see wrapToWidth).
+//
+// It opens on the full guidance's own first sentence, complete, so that the
+// one height too short even for the mark -- a pane of one line -- still
+// leaves a finished sentence naming what this log is missing, with only the
+// remedy cut.
+const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE, then re-run."
+
+// fitCaptureGuidance is the capture guidance for a pane w columns wide and h
+// lines tall: the full text where it fits, one sentence where it does not,
+// and a marked cut where even that does not.
+//
+// The mark is detailCutMark, the same ellipsis the detail pane marks its own
+// height cut with, so the two cuts tell a reader the same amount about
+// themselves. A pane of one line has no room for it, the single unmarked
+// case fitDetailSections has for the same reason.
+func fitCaptureGuidance(w, h int) string {
+	if h <= 0 {
+		return ""
+	}
+	lines := captureGuidance
+	if h < len(lines) {
+		lines = wrapToWidth(shortCaptureGuidance, w)
+	}
+	if len(lines) > h {
+		// Copied rather than resliced: captureGuidance is a package-level
+		// block every pane shares, and the mark is written over the last
+		// line the pane has room for.
+		cut := make([]string, h)
+		copy(cut, lines)
+		if h > 1 {
+			cut[h-1] = detailCutMark
+		}
+		lines = cut
+	}
+	return clipEachWidth(lines, w)
 }
 
 // clipEachWidth clips every line of a block to w columns and joins them, the

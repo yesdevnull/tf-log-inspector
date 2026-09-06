@@ -23,8 +23,8 @@ type timelineState struct {
 
 // timelineTier is which of the log's two span sets the timeline draws.
 // model.PackLanes refuses a slice mixing fidelities (see the doc comment on
-// span.Span's StartMs/EndMs), so the timeline can only ever draw one of
-// them.
+// span.Span's StartMs/EndMs), and the two tiers are built by different
+// builders, so the timeline can only ever draw one of them.
 type timelineTier uint8
 
 const (
@@ -152,12 +152,20 @@ func (m *Model) timelineLanes() []model.Lane {
 	_, spans := m.timelineSpans()
 	lanes, err := packLanesByProvider(spans)
 	if err != nil {
-		// timelineSpans hands PackLanes spans of a single tier by
-		// construction, so ErrMixedTimelines reaching here means that
-		// guarantee broke somewhere upstream -- a programming error to fail
-		// loudly on, the same treatment unhandledView gives its own
-		// can't-happen case, rather than a blank pane that looks like this
-		// view was never built.
+		// timelineSpans hands PackLanes spans of a single FIDELITY by
+		// construction -- which holds while ReportedBuilder is the sole
+		// RPC-tier builder, since the guard is on span.Fidelity and the RPC
+		// tier has three fidelities defined for it. A second RPC-tier
+		// builder anchoring to its own zero point, as UIHookBuilder already
+		// must, would put two fidelities in this slice and reach here.
+		// Until then ErrMixedTimelines means that guarantee broke somewhere
+		// upstream -- a programming error to fail loudly on, the same
+		// treatment unhandledView gives its own can't-happen case, rather
+		// than a blank pane that looks like this view was never built.
+		//
+		// Failing loudly is contained to the view that draws the timeline:
+		// see invalidateRows on why the clamp does not pack lanes for a
+		// view that does not.
 		panic(fmt.Sprintf("tui: timelineLanes: %v", err))
 	}
 	m.timelineLanesCache = lanes
@@ -229,9 +237,10 @@ func packLanesByProvider(spans []span.Span) ([]model.Lane, error) {
 // Both are clamped from the one place because changing lanes changes what
 // the span cursor is clamped against -- a lane's own span count has nothing
 // to do with the one the cursor just left -- and because a filter change can
-// shrink or empty the very lane the cursor was on, which invalidateRows must
-// catch the same way it catches a row selection run off the end of a
-// shortened table.
+// shrink or empty the very lane the cursor was on, which invalidateRows
+// catches the same way it catches a row selection run off the end of a
+// shortened table, whenever the timeline is the view on screen (see
+// invalidateRows for why it waits until then).
 func (m *Model) clampTimelineSelection() {
 	lanes := m.timelineLanes()
 	if last := len(lanes) - 1; m.timeline.lane > last {
@@ -491,23 +500,28 @@ func laneLabelWidth(labels []string) int {
 // The lane rows are windowed around the lane cursor by the same
 // scrollWindow the centre table uses for its own row cursor, so a log with
 // more lanes than the pane is tall keeps the selected one on screen instead
-// of always showing the first screenful. The axis, indented under the bar
-// area by the same label width the lane rows reserve so it still names
-// both ends of what the bars above it are measuring against, is never
-// dropped for want of height -- it is the one thing every lane bar is
-// drawn relative to. It is not the LAST line once there is anything to note
-// beneath it, though: the notes block -- the clamped-start caveat where
-// there is one, then the stall annotation (see timelineNotes) -- reserves
-// its own room below the axis (see the comment on that reservation, below)
-// and is appended after it, so on any pane tall enough to show both, the
-// axis sits second-to-last and the notes close the pane instead.
+// of always showing the first screenful.
+//
+// The axis is indented under the bar area by the same label width the lane
+// rows reserve, so it still names both ends of what the bars above it are
+// measuring against, and it outranks every lane row but the first -- it is
+// the one thing they are all drawn relative to, so a pane too short for all
+// of them keeps it and drops the surplus rows. It is not the LAST line once
+// there is anything to note beneath it: the notes block -- the clamped-start
+// caveat where there is one, the filter note where the figures are
+// narrowed, then the busy summary and the stall annotation (see
+// timelineNotes) -- is appended after it, so on any pane tall enough to
+// show both, the axis sits second-to-last and the notes close the pane.
+//
+// What the axis does NOT outrank is the first lane row or the first line of
+// notes; see the height budget below.
 func (m *Model) renderTimeline(w, h int) string {
 	if h <= 0 {
 		return ""
 	}
 	tier, spans := m.timelineSpans()
 	if tier == tierNone {
-		return clipLines(clipEachWidth(captureGuidance, w), h)
+		return fitCaptureGuidance(w, h)
 	}
 	if len(spans) == 0 {
 		return clipWidth(noMatchNote, w)
@@ -520,24 +534,37 @@ func (m *Model) renderTimeline(w, h int) string {
 	labelW := laneLabelWidth(labels)
 	barW := max(w-labelW-1, 0)
 
-	// The notes are reserved room below the axis before the lane rows get
-	// whatever is left of h: they are bounded to a handful of short lines
-	// (see maxStallsShown and clampedStartNote), so on a pane with room to
-	// spare they cost nothing the lanes would otherwise have used, and only
-	// compete with them on a pane too short to show both.
+	// h is spent in priority order: one lane row, then one line of notes,
+	// then the axis, and only then more lane rows and more notes. The notes
+	// are bounded to a handful of short lines (see maxStallsShown and
+	// clampedStartNote), so on a pane with room to spare this costs the
+	// lanes nothing; it decides only what a pane too short for everything
+	// gives up.
 	//
-	// On such a pane the notes give way, not the bars. They exist to
-	// explain the lanes, so they can never be worth the last lane row: a
-	// timeline drawing the axis and three stall lines and not one bar has
-	// dropped the only thing this view is for -- idle time rendered as
-	// visible blank space. One lane row is therefore held back from the
-	// notes' room whenever there is a lane to draw, the same
-	// content-outranks-chrome ordering the axis's own never-dropped rule
-	// states above, and the frame states again when it shortens the logging
-	// caveat rather than the footer.
-	annotationLines := m.timelineNotes(w)
-	if room := max(h-1-min(1, len(lanes)), 0); len(annotationLines) > room {
-		annotationLines = annotationLines[:room]
+	// A lane row comes first because the bars are the only thing this view
+	// is for -- idle time rendered as visible blank space -- and because an
+	// empty lane area is how this view SAYS nothing ran: a pane drawing the
+	// axis and three stall lines and not one bar does not show less than
+	// the truth, it shows the opposite of it. That is the same
+	// content-outranks-chrome ordering the frame states when it shortens
+	// the logging caveat rather than the footer.
+	//
+	// One line of notes comes next because it is the line that carries the
+	// cut mark: with the notes dropped whole and unmarked, a one-lane
+	// timeline reads as a complete frame with nothing worth reporting
+	// beneath it, while the detail pane in the same frame marks its own
+	// height cut with an ellipsis. Silence there is exactly what
+	// stallAnnotationNoStalls exists to refuse.
+	notes := m.timelineNotes(w)
+	laneReserve, noteReserve := min(1, len(lanes)), min(1, len(notes))
+	// The axis is drawn only once those two reservations are met, and takes
+	// no line before them.
+	axisH := 0
+	if h > laneReserve+noteReserve {
+		axisH = 1
+	}
+	if room := max(h-axisH-laneReserve, 0); len(notes) > room {
+		notes = notes[:room]
 		// The cut is marked the same way the detail pane marks its own
 		// height cut (see detailCutMark), and for the stronger version of
 		// the same reason: the stalls are ordered longest first, so what a
@@ -549,16 +576,17 @@ func (m *Model) renderTimeline(w, h int) string {
 		// being added beside them, since by definition there is no room to
 		// add one.
 		//
-		// A pane with no annotation room at all cannot say so -- the same
-		// unmarked case fitDetailSections has at a height of one line.
+		// A pane with no room for even the mark cannot say so. That is a
+		// pane of one line, which the lane row has taken -- the same
+		// unmarked case fitDetailSections has at that same height.
 		if room > 0 {
-			annotationLines[room-1] = clipWidth(detailCutMark, w)
+			notes[room-1] = clipWidth(detailCutMark, w)
 		}
 	}
 
-	dataH := h - 1 - len(annotationLines)
+	dataH := h - axisH - len(notes)
 	top, visible := scrollWindow(m.timeline.lane, len(lanes), dataH)
-	lines := make([]string, 0, visible+1+len(annotationLines))
+	lines := make([]string, 0, visible+axisH+len(notes))
 	for i := top; i < top+visible; i++ {
 		// The label column and the bar are composed separately because
 		// only the label may carry the cursor's styling; see the comment
@@ -569,8 +597,10 @@ func (m *Model) renderTimeline(w, h int) string {
 		}
 		lines = append(lines, clipWidth(label+laneBar(spans, lanes[i], wallClock, barW), w))
 	}
-	lines = append(lines, clipWidth(strings.Repeat(" ", labelW+1)+timeAxis(wallClock, barW), w))
-	lines = append(lines, annotationLines...)
+	if axisH > 0 {
+		lines = append(lines, clipWidth(strings.Repeat(" ", labelW+1)+timeAxis(wallClock, barW), w))
+	}
+	lines = append(lines, notes...)
 	return strings.Join(lines, "\n")
 }
 
@@ -605,17 +635,24 @@ func (m *Model) renderTimeline(w, h int) string {
 const clampedStartNote = "Note: a clamped start -- duration exceeding the offset from the log's start -- draws from 0, shorter than its duration."
 
 // timelineNotes is everything drawn beneath the axis: the clamped-start
-// note where there is one, then the busy summary, then the stall
-// annotation.
+// note where there is one, the filter note where the figures cover only
+// part of the log, then the busy summary, then the stall annotation.
 //
-// The note comes FIRST because a short pane cuts this block from its tail
-// (see renderTimeline), and of the three the note is the one whose absence
-// misleads. It qualifies the bars themselves, which have no room to carry a
-// caveat of their own; a reader who never sees it reads a bar's position as
-// a fact. A stall line lost to the cut is a finding not shown, and
-// detailCutMark says so on the reader's behalf -- the same distinction
-// noMatchNote is justified by, between a pane that shows less and a pane
-// that misleads.
+// The two notes come FIRST because a short pane cuts this block from its
+// tail (see renderTimeline), and of the four they are the ones whose
+// absence misleads. Each qualifies something that has no room to carry a
+// caveat of its own -- the clamped-start note the bars' positions, the
+// filter note every figure below it -- and a reader who never sees one
+// reads what it qualifies as a fact about the plan. A stall line lost to
+// the cut is a finding not shown, and detailCutMark says so on the reader's
+// behalf -- the same distinction noMatchNote is justified by, between a
+// pane that shows less and a pane that misleads.
+//
+// The clamped-start note precedes the filter note only because it is about
+// the bars ABOVE the block while the filter note is about the figures
+// BELOW it, so each sits beside what it qualifies. What matters to the cut
+// is that both outrank the busy summary: the summary can never be the
+// first line a reader sees with its qualification gone.
 //
 // The busy summary sits above the stall list, and so outranks it in the
 // cut, because it is the whole answer where the list is the breakdown: a
@@ -627,8 +664,60 @@ func (m *Model) timelineNotes(w int) []string {
 	if slices.ContainsFunc(spans, func(s span.Span) bool { return s.StartClamped }) {
 		lines = wrapToWidth(clampedStartNote, w)
 	}
+	if m.timelineNarrowed() {
+		lines = append(lines, wrapToWidth(timelineFilterNote, w)...)
+	}
 	lines = append(lines, clipValueEnd(busyNote(spans), w))
 	return append(lines, strings.Split(m.stallAnnotation(w), "\n")...)
+}
+
+// timelineFilterNote is what the notes block says when the figures beneath
+// it were computed over a SUBSET of the log.
+//
+// Every one of those figures -- the busy summary, and every window the
+// stall annotation names -- is swept over the spans the filter left, while
+// each is worded as a statement about the plan. On testdata/timeline.log,
+// ticking aws deletes the log's one real finding and opens a window
+// reporting "nothing running -- between calls" across a stretch google was
+// working in: the clause this view reserves for "the time is not in the
+// providers", handed to a reader who would act on it by going to look at
+// Terraform core. The busy percentage moves the same way, and is the figure
+// most likely to be quoted.
+//
+// The note therefore sits WHERE THE FIGURES ARE. The header's "1 of 3 RPC
+// spans" already says a filter is on, but it is three panes away and is a
+// sentence about span counts, not about these numbers. This is the class
+// noMatchNote and jumpBlockedNote exist for -- a filtered state that
+// renders as an unfiltered one -- and it names Esc as they both do.
+//
+// It says "everything below" rather than naming the summary, because the
+// all-idle stall lines are the sentences most wrong under a filter and they
+// have no room to carry the qualification themselves: both fit the common
+// centre pane only just (see betweenCallsClause), with a column or two of
+// slack that a longer pair of offsets spends, so a word added to either is
+// a word clipped off its end.
+const timelineFilterNote = "Note: a filter is active -- everything below covers the spans shown only. Esc clears it."
+
+// timelineNarrowed reports whether the active filter is actually hiding
+// spans of the tier the timeline draws, which is the question the note
+// above answers -- not whether a facet is ticked.
+//
+// The two differ in both directions. A level-only selection filters the raw
+// log and no spans at all (see filter), so filterActive alone would qualify
+// figures that are the whole log's. A selection covering every value hides
+// nothing either. And the UI tier is narrowed through uiFilter's own
+// translation, so what a ticked provider hides there is not read off the
+// same map. Counting what survived answers all three at once, over slices
+// both already computed.
+func (m *Model) timelineNarrowed() bool {
+	tier, spans := m.timelineSpans()
+	switch tier {
+	case tierRPC:
+		return len(spans) < len(m.log.RPCSpans)
+	case tierUI:
+		return len(spans) < len(m.log.UISpans)
+	}
+	return false
 }
 
 // busyNote is the timeline's headline figure: how much of the window the
@@ -636,14 +725,22 @@ func (m *Model) timelineNotes(w int) []string {
 // that window.
 //
 // It exists because the stall list structurally cannot answer the question
-// this view is for. A stall is a window where concurrency DROPPED, or where
-// nothing ran for long enough to clear stallThresholdMs; a run of sixty
-// forty-millisecond calls three seconds apart -- rate-limited API polling,
-// an ordinary shape -- drops nothing and opens no long enough gap, so every
-// stall rule is correctly silent while the run is 98% idle.
-// "no stalls" is then a true sentence that answers "was this work or
-// waiting" wrongly, and no threshold tuning fixes it: the idle time is real
-// and is simply spread thin. testdata/timeline-dense-lane.log is that shape.
+// this view is for. A stall is a window in which fewer spans ran than the
+// log's peak concurrency -- including none at all -- AND which lasted long
+// enough to clear stallThresholdMs; the threshold applies to every such
+// window, not only to the ones nothing ran in.
+//
+// A run of sixty forty-millisecond calls three seconds apart --
+// rate-limited API polling, an ordinary shape -- opens a window in every
+// one of its fifty-nine gaps, and concurrency really does fall to zero in
+// each. What silences the annotation is the THRESHOLD alone: each gap is
+// 2.96s against the 9s stallThresholdMs takes off a 180s window, so all
+// sixty windows are dropped and "no stalls" is the correct answer to the
+// question the annotation asks. It is the wrong answer to the question this
+// view is for, and no threshold tuning fixes that: the idle time is real,
+// 98% of the run, and is simply spread too thin for any window to reach a
+// threshold worth having. testdata/timeline-dense-lane.log is that shape,
+// measured above.
 //
 // The number is a UNION of the spans' intervals (model.BusyMs), not a sum
 // of their durations, so a window with four providers working in parallel
@@ -668,8 +765,9 @@ func busyNote(spans []span.Span) string {
 	window := timelineWallClockMs(spans)
 	busy, err := model.BusyMs(spans)
 	if err != nil {
-		// One tier by construction, the same guarantee timelineLanes and
-		// stallAnnotation lean on: see timelineLanes' own panic comment.
+		// One fidelity by construction, the same guarantee timelineLanes
+		// and stallAnnotation lean on: see timelineLanes' own panic
+		// comment, including what would break it.
 		panic(fmt.Sprintf("tui: busyNote: %v", err))
 	}
 	var pct uint64
@@ -991,6 +1089,30 @@ func callStartedBefore(spans []span.Span, ms uint32) bool {
 	return false
 }
 
+// concurrencyClause is how many spans a blocked wait left running, against
+// the capacity model.Stalls measured it against: "concurrency 1 of 3".
+//
+// Both numbers come off the Stall itself. They are only a pair while they
+// come from ONE sweep of ONE slice -- a capacity taken over some other
+// slice, or over the lanes this view happens to draw, prints an "of N" the
+// figure beside it was never measured against -- so the annotation reads
+// the pair model gave it rather than recomputing half of it per frame.
+//
+// A window merged out of segments of differing depth reports the RANGE it
+// covered ("concurrency 1–2 of 3"), because its floor alone would say the
+// whole window ran that shallow when part of it did not. The range is
+// written low to high and states no direction: model.Stalls merges on
+// contiguity, which admits a window whose depth falls and rises again, so
+// "2→1" would be a claim about the shape of the wait that the numbers do
+// not carry. The en dash is the same one the window's own offsets are
+// joined with directly beside it, rather than a second spelling of "to".
+func concurrencyClause(s model.Stall) string {
+	if s.MinRunning == s.MaxRunning {
+		return fmt.Sprintf("concurrency %d of %d", s.MinRunning, s.Capacity)
+	}
+	return fmt.Sprintf("concurrency %d–%d of %d", s.MinRunning, s.MaxRunning, s.Capacity)
+}
+
 // stallAnnotation renders the windows model.Stalls found beneath the lanes
 // and axis, naming each by the lane label the reader already sees the bars
 // under -- "waiting on aws/1" points at exactly one bar, the way naming the
@@ -1007,7 +1129,9 @@ func callStartedBefore(spans []span.Span, ms uint32) bool {
 // different findings:
 //
 //   - A blocked wait names the lane still working, which is where a reader
-//     goes to look ("waiting on aws/1, 3.3s–20.0s — concurrency 1 of 2").
+//     goes to look ("waiting on aws/1, 3.3s–20.0s — concurrency 1 of 2",
+//     or "concurrency 1–2 of 3" for a window whose depth changed inside it;
+//     see concurrencyClause).
 //   - A window with nothing running anywhere has no lane to blame, and
 //     says so ("nothing running, 5.5s–9.0s — between calls"): the time is
 //     not in the providers, so tuning provider parallelism will not touch
@@ -1048,8 +1172,18 @@ func callStartedBefore(spans []span.Span, ms uint32) bool {
 // A blocked wait states the concurrency that REMAINED and the peak it fell
 // from, because a drop is only legible against what it dropped from -- "1"
 // alone says nothing about whether the plan was running wide or narrow.
-// The two all-idle windows state the finding in words instead (see
-// nothingRunningClause).
+// Both numbers are read off the Stall rather than swept again here, which is
+// what keeps the two halves of "M of N" one measurement; see
+// concurrencyClause. The two all-idle windows state the finding in words
+// instead (see nothingRunningClause).
+//
+// Every one of the three is measured over the spans the active filter
+// leaves, so a narrowed timeline can report a window nothing SHOWN ran in
+// across a stretch a hidden provider was working through. The all-idle
+// wording is the reading that goes furthest wrong there, and it is a
+// sentence with no room to qualify itself -- both all-idle lines only just
+// fit the common centre pane (see betweenCallsClause) -- so the
+// qualification is carried above the block instead, by timelineFilterNote.
 //
 // Offsets are rendered with formatMs, the same duration formatter every
 // other number in this package uses, rather than a wall-clock time: span
@@ -1070,10 +1204,11 @@ func (m *Model) stallAnnotation(w int) string {
 	wallClock := timelineWallClockMs(spans)
 	stalls, err := model.Stalls(spans, stallThresholdMs(wallClock))
 	if err != nil {
-		// timelineSpans hands a single tier's spans by construction, the
-		// same guarantee timelineLanes leans on for PackLanes -- see its
-		// own panic comment for why this is a programming error to fail
-		// loudly on rather than an annotation that quietly says nothing.
+		// timelineSpans hands spans of a single fidelity by construction,
+		// the same guarantee timelineLanes leans on for PackLanes -- see
+		// its own panic comment for what that rests on, and for why this is
+		// a programming error to fail loudly on rather than an annotation
+		// that quietly says nothing.
 		panic(fmt.Sprintf("tui: stallAnnotation: %v", err))
 	}
 	if len(stalls) == 0 {
@@ -1106,18 +1241,6 @@ func (m *Model) stallAnnotation(w int) string {
 	// on screen.
 	labels := laneLabels(spans, lanes)
 	labelW := laneLabelWidth(labels)
-	// The capacity every line is measured against, and the number the
-	// blocked-wait line names as its "of N". It is the spans' own peak
-	// concurrency, which is what model.Stalls counts a window's idle
-	// capacity against; asking model here rather than counting lanes is
-	// what keeps the two halves of "M of N" the same measure.
-	peak, err := model.PeakConcurrency(spans)
-	if err != nil {
-		// Same guarantee, same treatment as the model.Stalls call above:
-		// the spans are one tier by construction, so a mixed-fidelity
-		// error here is a broken invariant rather than a case to word.
-		panic(fmt.Sprintf("tui: stallAnnotation: %v", err))
-	}
 	lines := make([]string, 0, len(stalls)+1)
 	for i, s := range stalls {
 		// The window is the SECOND field of every line, whichever of the
@@ -1143,8 +1266,8 @@ func (m *Model) stallAnnotation(w int) string {
 				// would actually be.
 				panic(fmt.Sprintf("tui: stallAnnotation: span %d (stall %d's Blocking) is not in any lane", s.Blocking, i))
 			}
-			line = fmt.Sprintf("waiting on %s, %s — concurrency %d of %d",
-				clipValueForKind(labels[l], labelW, tailIdentifierColumn), window, peak-s.Idle, peak)
+			line = fmt.Sprintf("waiting on %s, %s — %s",
+				clipValueForKind(labels[l], labelW, tailIdentifierColumn), window, concurrencyClause(s))
 		}
 		// clipValueEnd rather than clipWidth: clipWidth cuts with no marker,
 		// so a pane too narrow for the whole sentence would render the
