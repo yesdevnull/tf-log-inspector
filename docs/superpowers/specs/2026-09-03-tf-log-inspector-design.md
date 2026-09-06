@@ -1181,6 +1181,51 @@ anything is built on top of it.
      before the result is known rather than after. Revise it against the real
      distribution if the reasoning turns out wrong, in this document, with a date.
 
+     **MEASURED 2026-09-07: the gate fails. View 3 does not ship as a view.**
+     Against the standardised 30 MB capture — 2,174 RPC spans over 1,503,968 ms
+     of summed span time, 651 context windows (385 refresh, 266 apply):
+
+     | verdict | spans | ms | share of time |
+     |---|---|---|---|
+     | `Contained` | 122 | 17,140 | 1.1% |
+     | `Likely` | 79 | 222,654 | 14.8% |
+     | `Overlapping` | 24 | 48,287 | 3.2% |
+     | `Ambiguous` | **975** | **868,061** | **57.7%** |
+     | `Unattributed` | 974 | 347,826 | 23.1% |
+
+     **Nameable share 15.9%**, against a threshold of 50%.
+
+     **The cause is concurrency, exactly as open question 2 predicted, and not a
+     defect in the correlator.** The candidate histogram settles it: 146 spans saw
+     exactly one candidate and *all 146 resolved*. Of the 1,054 spans that saw two
+     or more, only 79 resolved — **92.5% of multi-candidate spans could not be
+     narrowed**. The histogram's mass sits at 3–10 candidates and tails to 19,
+     which is Terraform's default parallelism of 10 against many resources of one
+     type: this capture plans 126 `azurerm_key_vault_secret` instances alone. A
+     refresh window spans the whole refresh of its resource, so ten of them
+     overlap and every RPC inside falls in all ten.
+
+     One denominator caveat, checked and found not to change the answer. Provider-
+     level RPCs — `Configure`, `GetProviderSchema` — carry no `tf_resource_type`
+     and can never be attributed however well the correlator works, so they inflate
+     the denominator; this capture's slowest single span is a 116,591 ms `azurerm`
+     `Configure`. Excluding all 347,826 ms of unattributed time gives **20.7%**,
+     still far below the threshold. The gate fails on either denominator, so the
+     threshold is left at half rather than respecified.
+
+     **What this vindicates.** The interface states a candidate count and names
+     nothing when ambiguous. Had it followed this document's original instruction —
+     show the best candidate suffixed with `?` — it would have asserted a specific,
+     probably wrong, resource on roughly 900 spans of this capture. The measurement
+     is the evidence for that choice, not merely an argument for it.
+
+     **What this makes newly interesting.** Mechanism A is the only route to exact
+     addresses, and this figure quantifies what it would buy: the ~58% of RPC time
+     now lost to ambiguity is time core's `vertex` lines would resolve exactly. Its
+     cost is unchanged — a 730 s run, and no `terraform.ui` stream in the same
+     capture. That trade is now a decision with a number attached rather than a
+     hypothesis.
+
    The old second condition dissolved rather than being accepted. Core addressing
    does require core at TRACE, which suppresses `terraform.ui` (open question 8),
    and that alone would have made the address view and the resource view mutually
