@@ -448,7 +448,8 @@ func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 // under them.
 func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	m := callsModel(t, "provider-rpc.log", "x.log")
-	want := m.log.RPCSpans[m.rows()[0].spanIdx]
+	spanIdx := m.rows()[0].spanIdx
+	want := m.log.RPCSpans[spanIdx]
 	// 80 columns is wide enough that the full provider address is not clipped.
 	got := detailBody(t, m, spanDetailTitle, 80, 20)
 	for _, s := range []string{want.RPC, want.Provider, formatMs(uint64(want.DurationMs))} {
@@ -459,7 +460,15 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	if strings.Contains(got, slowestHeading) {
 		t.Errorf("calls view detail pane carries a rollup's %q section for a row that is one span:\n%s", slowestHeading, got)
 	}
-	if expect := strings.Join(spanDetailLines(want, attrib.Attribution{}, m.log.HasAddressContext(), 80), "\n"); got != expect {
+	// Indexed the same way selectedDetail itself does, rather than passing
+	// the zero Attribution: provider-rpc.log carries no address context, so
+	// the two happen to agree here, but only because of that fixture
+	// property rather than because the pane never reads a real attribution.
+	var a attrib.Attribution
+	if spanIdx < len(m.log.Attribs) {
+		a = m.log.Attribs[spanIdx]
+	}
+	if expect := strings.Join(spanDetailLines(want, a, m.log.HasAddressContext(), 80), "\n"); got != expect {
 		t.Errorf("calls view detail pane =\n%s\nwant\n%s", got, expect)
 	}
 }
@@ -506,6 +515,25 @@ func TestSpanDetailNamesTheResource(t *testing.T) {
 	}
 }
 
+// I5: a data source and a managed resource of the same type must not render
+// identically -- the correlator itself keeps their candidate pools separate
+// (c.IsData != (s.RPC == "ReadDataSource")), and the pane must say which one
+// this is rather than showing the same "Res thing" either way.
+func TestSpanDetailPrefixesADataSourceName(t *testing.T) {
+	s := span.Span{RPC: "ReadDataSource", ResourceType: "local_file", DurationMs: 5, Fidelity: span.FidelityReported}
+	a := attrib.Attribution{Name: "thing", IsData: true, Candidates: 1, Confidence: attrib.Contained}
+	got := strings.Join(spanDetailLines(s, a, true, 40), "\n")
+	if !strings.Contains(got, "data.thing") {
+		t.Errorf("detail pane does not prefix a data source's name with \"data.\":\n%s", got)
+	}
+
+	managed := attrib.Attribution{Name: "thing", Candidates: 1, Confidence: attrib.Contained}
+	gotManaged := strings.Join(spanDetailLines(s, managed, true, 40), "\n")
+	if strings.Contains(gotManaged, "data.thing") {
+		t.Errorf("detail pane prefixes a managed resource's name with \"data.\":\n%s", gotManaged)
+	}
+}
+
 // The standing defect this task closes: callColumns has a resource-type
 // column and the detail pane never rendered it, so the pane showed LESS than
 // the row it describes.
@@ -520,13 +548,24 @@ func TestSpanDetailRendersResourceType(t *testing.T) {
 // An Ambiguous span states a count and names no resource.
 func TestSpanDetailAmbiguousStatesACountAndNamesNothing(t *testing.T) {
 	s := span.Span{RPC: "ReadResource", ResourceType: "azuread_service_principal", DurationMs: 5}
-	a := attrib.Attribution{Candidates: 4, Confidence: attrib.Ambiguous}
+	// The fixture carries a real Name, Module and Address -- a fixture that
+	// leaves them zero-valued cannot catch a mutant that renders
+	// a.Name+"?" (the "best candidate with a ?" the spec forbids): the
+	// mutant's output would still contain none of an empty Name, and the
+	// assertions below would pass regardless of whether the branch withheld
+	// the name or simply had none to withhold.
+	a := attrib.Attribution{
+		Address: "module.a.azuread_service_principal.first", Module: "module.a",
+		Name: "first", Candidates: 4, Confidence: attrib.Ambiguous,
+	}
 	got := strings.Join(spanDetailLines(s, a, true, 40), "\n")
 	if !strings.Contains(got, "4 candidates") {
 		t.Errorf("detail pane does not state the candidate count:\n%s", got)
 	}
-	if strings.Contains(got, "azuread_service_principal.") {
-		t.Errorf("detail pane named a resource for an Ambiguous span:\n%s", got)
+	for _, forbidden := range []string{"first", "module.a", "?"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("detail pane named a resource for an Ambiguous span (%q present):\n%s", forbidden, got)
+		}
 	}
 }
 
@@ -1718,7 +1757,16 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	if !rows[m.Selected()].isCall() {
 		t.Fatalf("the opening screen's selected row is a rollup, not a call: %+v", rows[m.Selected()])
 	}
-	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], attrib.Attribution{}, m.log.HasAddressContext(), 50), "\n")
+	spanIdx := rows[m.Selected()].spanIdx
+	// Indexed the same way selectedDetail itself does (see the same note on
+	// TestDetailPaneShowsTheSelectedSpan): provider-rpc.log carries no
+	// address context, so this and the zero Attribution agree, but that is
+	// a fixture property, not a premise this test states without it.
+	var a attrib.Attribution
+	if spanIdx < len(m.log.Attribs) {
+		a = m.log.Attribs[spanIdx]
+	}
+	want := strings.Join(spanDetailLines(m.log.RPCSpans[spanIdx], a, m.log.HasAddressContext(), 50), "\n")
 	if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want {
 		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
 	}

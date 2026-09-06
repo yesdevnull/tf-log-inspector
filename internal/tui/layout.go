@@ -1023,6 +1023,16 @@ func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 	}
 
 	name := a.Name
+	if a.IsData {
+		// Terraform's own address syntax puts "data." before the type, not
+		// the name -- but the resource type has its own field elsewhere in
+		// the pane (spanDetailLines' Type), and this Res field is the only
+		// place the name itself appears, so the prefix goes here instead.
+		// a.IsData rather than a prefix check on a.Address is what keeps
+		// this correct under a module: "data." sits after the module
+		// segments there, not at the address string's front.
+		name = "data." + name
+	}
 	if a.Key != "" {
 		// a.Key already carries whatever bracket syntax it needs -- bare
 		// for a count key, quoted for a for_each key -- decided at decode

@@ -1,6 +1,7 @@
 package attrib
 
 import (
+	"slices"
 	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -69,6 +70,13 @@ type Attribution struct {
 	// Terraform's own address uses, so a caller building one concatenates
 	// Name (or Module) directly against "[" + Key + "]" (see decodeKey).
 	Key string
+	// IsData is carried straight through from Context.IsData, rather than
+	// re-derived from Address: a caller deriving it from a "data." prefix
+	// would have to account for the module segments a moduled address puts
+	// before that prefix, which this field lets it skip entirely. Without
+	// it a data source and a managed resource of the same type render
+	// identically, since Name/Module/Key alone do not say which one this is.
+	IsData bool
 
 	// Candidates is the number of overlapping candidates CONSIDERED, which
 	// has a well-defined value in every state: 1 for Contained and
@@ -95,12 +103,7 @@ func actionMatches(rpc, ctxAction string) bool {
 	if !mapped {
 		return true
 	}
-	for _, a := range allowed {
-		if a == ctxAction {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, ctxAction)
 }
 
 // overlaps reports whether two half-open intervals share any instant. An
@@ -117,6 +120,13 @@ func overlaps(aStart, aEnd, bStart, bEnd time.Time) bool {
 
 // contains reports whether the half-open interval [oStart, oEnd) encloses
 // [iStart, iEnd). An empty interval neither contains nor is contained.
+//
+// That guard is unreachable from this function's sole call site in
+// correlateOne, which only ever calls contains after overlaps has already
+// confirmed both intervals are non-empty. It is kept anyway, for symmetry
+// with overlaps and so contains stays correct if a future caller reaches it
+// without going through that guard first -- not because it fires today. A
+// test written to exercise it here would find nothing broken.
 func contains(oStart, oEnd, iStart, iEnd time.Time) bool {
 	if !oStart.Before(oEnd) || !iStart.Before(iEnd) {
 		return false
@@ -215,6 +225,7 @@ func named(c Context, n uint32, conf Confidence) Attribution {
 		Module:     c.Module,
 		Name:       c.Name,
 		Key:        c.Key,
+		IsData:     c.IsData,
 		Candidates: n,
 		Confidence: conf,
 	}

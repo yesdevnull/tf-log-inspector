@@ -219,23 +219,53 @@ type Report struct {
 	// machine.
 	//
 	// HookTypes is never withheld for rarity, unlike TopFieldKeys/
-	// TopComponents/TopTemplates above: hook "type" values are a small
-	// closed vocabulary from Terraform's own source (see the
+	// TopComponents/TopTemplates above: a type seen once -- e.g.
+	// apply_errored, the one signal a create failed -- is exactly the
+	// finding this histogram exists to surface, and rarity alone is not
+	// evidence of hostile content the way it is for a field key or a
+	// message template.
+	//
+	// That is a decision about WITHHOLDING, not about trust in the value
+	// itself. Hook "type" values are EXPECTED to be a small closed
+	// vocabulary from Terraform's own source (see the
 	// opensContext/closesContext switches in internal/attrib/context.go),
-	// not free-form content a high-entropy token could masquerade as, and
-	// a type seen once -- e.g. apply_errored, the one signal a create
-	// failed -- is exactly the finding this histogram exists to surface.
+	// but nothing enforces that: the value is read straight off a
+	// structured-output line's JSON, the same hazard maskIdentifier
+	// already guards resource type and action names against, so it is
+	// masked the same way before ever becoming a histogram key (see Build).
 	HookTypes []Template // every structured-output "type" value and its count
 	Coverage  attrib.Coverage
-	// HasSpans is true only when there is at least one RPC span to
-	// attribute. A log can carry address context (HasContext) with zero
-	// RPC spans -- e.g. INFO-level terraform.ui without TRACE provider
-	// logging -- and Coverage/NameableShare must never be rendered as a
-	// measurement in that case: there was nothing to measure, which reads
-	// very differently from "everything measured failed".
-	HasSpans   bool
-	Contexts   int // address context windows collected
-	HasContext bool
+	// HasSpans is true only when context exists (HasContext) AND there is
+	// at least one RPC span to attribute it against -- both conditions
+	// gate the assignment in Build. A log can carry address context with
+	// zero RPC spans -- e.g. INFO-level terraform.ui without TRACE
+	// provider logging -- and Coverage/NameableShare must never be
+	// rendered as a measurement in that case: there was nothing to
+	// measure, which reads very differently from "everything measured
+	// failed". HasSpans is never read outside the HasContext branch of
+	// Render, so a log with RPC spans and no context (HasContext false)
+	// reporting HasSpans false as well is not a case anything relies on.
+	HasSpans bool
+	Contexts int // address context windows collected
+	// UnclosedContexts and ZeroExtentContexts are counted so their loss is
+	// visible rather than silent, per the spec: an unclosed context was
+	// still open when the log ended, and a zero-extent one -- Start not
+	// strictly before End -- can never be a candidate for any span (see
+	// attrib.Context's half-open-window doc comment). The same capture cut
+	// that produces an unclosed context can produce a zero-extent one: a
+	// resource still running when the log ends gets an End equal to the
+	// log's own last timestamp, which is also its Start.
+	UnclosedContexts   int
+	ZeroExtentContexts int
+	// MalformedStructuredLines and UnmatchedTerminators are
+	// attrib.ContextCollector's own Malformed and UnmatchedTerminators
+	// counts: structured lines the context collector could not decode as
+	// JSON, and terminators seen with no matching start (a capture that
+	// begins mid-run). Counts only, so reporting them adds no disclosure
+	// surface.
+	MalformedStructuredLines uint64
+	UnmatchedTerminators     uint64
+	HasContext               bool
 	// StreamOffsetMs is only meaningful when StreamOffsetKnown is true. A
 	// log with no hclog-timestamped lines at all (a pure structured-output
 	// capture) can never derive it, and the zero value must not be
@@ -410,18 +440,27 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	})
 	r.UIActionCounts = actions
 
-	// No withholding here (see the HookTypes doc comment): typeCounts is
-	// already the whole map, so topN's cap is set to its length rather
+	// No withholding here (see the HookTypes doc comment): maskedTypeCounts
+	// is already the whole map, so topN's cap is set to its length rather
 	// than maxTemplates, which would silently drop real hook types once a
 	// capture used more than maxTemplates distinct ones.
-	typeCounts := cc.TypeCounts()
+	typeCounts := maskedTypeCounts(cc.TypeCounts())
 	r.HookTypes = topN(typeCounts, len(typeCounts))
+	r.MalformedStructuredLines = cc.Malformed()
+	r.UnmatchedTerminators = cc.UnmatchedTerminators()
 	if cc.CompletedPairs() > 0 {
 		r.HasContext = true
-		r.Contexts = len(cc.Contexts())
+		ctxs := cc.Contexts()
+		r.Contexts = len(ctxs)
+		for _, ctx := range ctxs {
+			if ctx.Unclosed {
+				r.UnclosedContexts++
+			}
+		}
+		r.ZeroExtentContexts = int(cc.ZeroExtentContexts())
 		if len(spans) > 0 {
 			r.HasSpans = true
-			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, cc.Contexts()))
+			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, ctxs))
 		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
 			r.StreamOffsetMs = cc.FirstTS().Sub(st.FirstTS).Milliseconds()
@@ -430,6 +469,21 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	}
 
 	return r
+}
+
+// maskedTypeCounts rebuilds a hook-type histogram with every key masked by
+// maskIdentifier before use, summing the counts of any keys that collide
+// once masked. A structured-output line's "type" value has nothing upstream
+// constraining its shape (see the HookTypes doc comment), so this is what
+// keeps a crafted value from reaching --diagnose, the one artefact that
+// leaves the machine, verbatim: it collapses into the shared "<other>"
+// bucket with every other hostile value instead.
+func maskedTypeCounts(m map[string]uint64) map[string]uint64 {
+	out := make(map[string]uint64, len(m))
+	for k, v := range m {
+		out[maskIdentifier(k)] += v
+	}
+	return out
 }
 
 // formatMs renders a millisecond duration for SLOWEST RESOURCES and BY
@@ -444,6 +498,18 @@ func formatMs(ms uint64) string {
 		return fmt.Sprintf("%dms", ms)
 	}
 	return fmt.Sprintf("%.1fs", float64(ms)/1000)
+}
+
+// pluralSpans renders "span" or "spans" to match n. The confidence lines in
+// ADDRESS ATTRIBUTION are the one place in this report a count sits directly
+// beside its own noun in prose rather than a fixed column label, so a bare
+// "%d spans" reads as a grammar mistake -- "1 spans" -- on exactly the
+// output a reader pastes into a conversation.
+func pluralSpans(n int) string {
+	if n == 1 {
+		return "span"
+	}
+	return "spans"
 }
 
 func topN(m map[string]uint64, n int) []Template {
@@ -655,11 +721,25 @@ func (r Report) Render(w io.Writer) error {
 
 	fmt.Fprintf(b, "ADDRESS ATTRIBUTION\n")
 	if !r.HasContext {
-		fmt.Fprintf(b, "  no address context in this log -- attribution needs the\n")
-		fmt.Fprintf(b, "  terraform.ui stream (debug toggle plus TF_LOG_PROVIDER and\n")
-		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO at TRACE)\n")
+		// The HCP Terraform/CLI debug-logging toggle is what produces the
+		// terraform.ui stream this log is missing -- TF_LOG_PROVIDER and
+		// TF_LOG_SDK_PROTO produce no terraform.ui context on their own.
+		// They instead govern the provider RPC entries reported in SPANS
+		// above, which this log may already carry: a reader who already set
+		// those two and is missing only the toggle must not be told to set
+		// what they already have.
+		fmt.Fprintf(b, "  no address context in this log -- attribution needs\n")
+		fmt.Fprintf(b, "  the terraform.ui stream, which the debug-logging\n")
+		fmt.Fprintf(b, "  toggle produces. TF_LOG_PROVIDER=TRACE and\n")
+		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO=TRACE govern the provider RPC\n")
+		fmt.Fprintf(b, "  entries above instead, and produce no terraform.ui\n")
+		fmt.Fprintf(b, "  context on their own\n")
 	} else {
 		fmt.Fprintf(b, "  %-25s %d\n", "contexts", r.Contexts)
+		fmt.Fprintf(b, "  %-25s %d\n", "unclosed contexts", r.UnclosedContexts)
+		fmt.Fprintf(b, "  %-25s %d\n", "zero-extent contexts", r.ZeroExtentContexts)
+		fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
+		fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 		if !r.HasSpans {
 			// Context exists but there is nothing to correlate it against --
 			// e.g. INFO-level terraform.ui without TRACE provider RPC
@@ -676,8 +756,8 @@ func (r Report) Render(w io.Writer) error {
 				attrib.Contained, attrib.Likely, attrib.Overlapping,
 				attrib.Ambiguous, attrib.Unattributed,
 			} {
-				fmt.Fprintf(b, "  %-25s %d spans, %d ms\n", c.String(),
-					r.Coverage.ByConfidence[c], r.Coverage.MsByConfidence[c])
+				fmt.Fprintf(b, "  %-25s %d %s, %d ms\n", c.String(),
+					r.Coverage.ByConfidence[c], pluralSpans(r.Coverage.ByConfidence[c]), r.Coverage.MsByConfidence[c])
 			}
 		}
 		// The offset is the constant that re-bases the two streams onto one
@@ -696,12 +776,14 @@ func (r Report) Render(w io.Writer) error {
 			fmt.Fprintf(b, "  %-25s not derived (no hclog-timestamped lines)\n", "stream offset")
 		}
 	}
-	fmt.Fprintf(b, "  hook types (%d distinct)\n", len(r.HookTypes))
+	fmt.Fprintf(b, "\n")
+
+	fmt.Fprintf(b, "HOOK TYPES (%d distinct)\n", len(r.HookTypes))
 	for _, t := range r.HookTypes {
-		fmt.Fprintf(b, "    %8d  %s\n", t.Count, t.Text)
+		fmt.Fprintf(b, "  %8d  %s\n", t.Count, t.Text)
 	}
 	if len(r.HookTypes) == 0 {
-		fmt.Fprintf(b, "    none\n")
+		fmt.Fprintf(b, "  none\n")
 	}
 	fmt.Fprintf(b, "\n")
 

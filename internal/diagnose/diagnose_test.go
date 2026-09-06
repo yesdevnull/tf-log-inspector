@@ -562,13 +562,13 @@ func TestReportLabelsTotalSpanTimeAsSumWithOverlaps(t *testing.T) {
 func TestReportRendersNoneForEmptySections(t *testing.T) {
 	r := build(t, "")
 	out := render(t, r)
-	for _, section := range []string{"LEVELS", "COMPONENTS", "FIELD KEYS", "MESSAGE TEMPLATES"} {
+	for _, section := range []string{"LEVELS", "HOOK TYPES", "COMPONENTS", "FIELD KEYS", "MESSAGE TEMPLATES"} {
 		if !strings.Contains(out, section) {
 			t.Fatalf("report missing %s section:\n%s", section, out)
 		}
 	}
-	if got := strings.Count(out, "\n  none\n"); got != 4 {
-		t.Errorf("report renders %d empty sections as \"none\", want 4:\n%s", got, out)
+	if got := strings.Count(out, "\n  none\n"); got != 5 {
+		t.Errorf("report renders %d empty sections as \"none\", want 5:\n%s", got, out)
 	}
 }
 
@@ -909,6 +909,37 @@ func TestReportMasksHostileResourceTypeAndAction(t *testing.T) {
 	}
 }
 
+// C1: a structured-output line's "type" value has nothing upstream
+// constraining its shape either, the same hazard
+// TestReportMasksHostileResourceTypeAndAction pins for ResourceType/Action.
+// Demonstrated against the real binary: an unmasked, uncapped hook-type
+// histogram put a crafted "type" value straight into --diagnose, the one
+// artefact that leaves the machine. A hostile value must collapse into
+// "<other>" the same way, singleton or not -- HookTypes is deliberately
+// never withheld for rarity (see its doc comment), so masking, not
+// withholding, is what has to catch this one.
+func TestReportMasksHostileHookType(t *testing.T) {
+	hostileType := "INJECTED_SECRET;" + strings.Repeat("x", 300)
+	line := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-09-04T09:15:02.556000+10:00","type":%q}`, hostileType)
+	r := build(t, line+"\n")
+
+	if len(r.HookTypes) != 1 || r.HookTypes[0].Text != "<other>" {
+		t.Fatalf("HookTypes = %+v, want a single <other> row", r.HookTypes)
+	}
+
+	out := render(t, r)
+	for _, leak := range []string{"INJECTED_SECRET", hostileType} {
+		if strings.Contains(out, leak) {
+			t.Errorf("hostile hook type reached the report: %q leaked:\n%s", leak, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) > 200 {
+			t.Errorf("report line is %d bytes -- hostile input may have broken the column layout: %q", len(line), line)
+		}
+	}
+}
+
 // Finding 3: a malformed structured line must be counted and surfaced in
 // ANOMALIES, not silently absorbed. If HCP's schema drifts or a log is
 // truncated, this is the only trace of it, on the one machine holding the
@@ -1119,7 +1150,7 @@ func TestGuidanceDoesNotPromiseRPCDetailFromDebugLogging(t *testing.T) {
 
 func TestReportRendersHookTypeHistogram(t *testing.T) {
 	out := renderFixture(t, fixture(t, "two-tier.log"))
-	if !strings.Contains(out, "hook types") {
+	if !strings.Contains(out, "HOOK TYPES") {
 		t.Errorf("report has no hook-type histogram:\n%s", out)
 	}
 	if !strings.Contains(out, "apply_start") {
@@ -1223,5 +1254,80 @@ func TestReportOnPureStructuredFixtureDoesNotClaimMeasuredOffset(t *testing.T) {
 	}
 	if !strings.Contains(out, "not derived") {
 		t.Errorf("report does not say the stream offset was never derived:\n%s", out)
+	}
+}
+
+// I6: the no-context guidance must attach the debug-logging toggle to what
+// produces terraform.ui, and TF_LOG_PROVIDER/TF_LOG_SDK_PROTO to the
+// provider RPC entries the log may already carry -- provider-rpc.log has
+// exactly that shape: real RPC spans (so SPANS above is non-zero) and no
+// terraform.ui stream at all. Telling this reader to set the two RPC
+// variables would send them to set what SPANS already proves they set.
+func TestNoContextGuidanceAttachesTheDebugToggleToTheStreamItProduces(t *testing.T) {
+	out := renderFixture(t, fixture(t, "provider-rpc.log"))
+	idx := strings.Index(out, "ADDRESS ATTRIBUTION")
+	if idx < 0 {
+		t.Fatal("report missing ADDRESS ATTRIBUTION section")
+	}
+	section := out[idx:]
+	section = section[:strings.Index(section, "\n\n")]
+	if strings.Contains(section, "contexts") {
+		t.Fatalf("fixture carries address context; this test proves nothing:\n%s", section)
+	}
+	if !strings.Contains(section, "debug") {
+		t.Errorf("no-context guidance does not name the debug-logging toggle:\n%s", section)
+	}
+	for _, v := range []string{"TF_LOG_PROVIDER", "TF_LOG_SDK_PROTO"} {
+		if !strings.Contains(section, v) {
+			t.Errorf("no-context guidance does not name %s:\n%s", v, section)
+		}
+	}
+}
+
+// --- Fix wave: I3, the counts attribution loses silently must be reported. ---
+
+// contextsWithUnclosedAndZeroExtent builds a log carrying one completed
+// context pair (so HasContext is true) plus one context still open at
+// end-of-log, whose own End lands on the log's last timestamp -- Start
+// equal to End, the exact zero-extent shape a cut-off capture produces.
+func contextsWithUnclosedAndZeroExtent() string {
+	const stillRunning = `{"@level":"info","@message":"aws_instance.b: Still creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:04.000000+10:00","hook":{"resource":{"addr":"aws_instance.b","module":"","resource":"aws_instance.b","implied_provider":"aws","resource_type":"aws_instance","resource_name":"b","resource_key":null},"action":"create"},"type":"apply_start"}`
+	return structuredVersionLine + "\n" + structuredHookLine + "\n" + structuredCompleteLine + "\n" + stillRunning + "\n"
+}
+
+func TestReportCountsUnclosedAndZeroExtentContexts(t *testing.T) {
+	r := build(t, contextsWithUnclosedAndZeroExtent())
+	if !r.HasContext {
+		t.Fatal("fixture carries no address context; this test proves nothing")
+	}
+	if r.UnclosedContexts != 1 {
+		t.Errorf("UnclosedContexts = %d, want 1", r.UnclosedContexts)
+	}
+	if r.ZeroExtentContexts != 1 {
+		t.Errorf("ZeroExtentContexts = %d, want 1", r.ZeroExtentContexts)
+	}
+
+	out := render(t, r)
+	for _, want := range []string{"unclosed contexts         1", "zero-extent contexts      1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report does not render %q:\n%s", want, out)
+		}
+	}
+}
+
+// A malformed structured line and an unmatched terminator are counted by
+// attrib.ContextCollector regardless of whether any pair ever completes, so
+// Build must read them unconditionally rather than only inside the
+// CompletedPairs() > 0 gate the other new counts sit behind.
+func TestReportCountsMalformedStructuredLinesAndUnmatchedTerminators(t *testing.T) {
+	const malformed = `{"@level":"info","@timestamp":"2026-09-04T09:15:05.000000+10:00","type":"apply_start","hook":`
+	const unmatchedTerminator = `{"@level":"info","@message":"aws_instance.c: Creation complete","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:06.000000+10:00","hook":{"resource":{"addr":"aws_instance.c","module":"","resource":"aws_instance.c","implied_provider":"aws","resource_type":"aws_instance","resource_name":"c","resource_key":null},"action":"create"},"type":"apply_complete"}`
+	r := build(t, structuredVersionLine+"\n"+malformed+"\n"+unmatchedTerminator+"\n")
+
+	if r.MalformedStructuredLines != 1 {
+		t.Errorf("MalformedStructuredLines = %d, want 1", r.MalformedStructuredLines)
+	}
+	if r.UnmatchedTerminators != 1 {
+		t.Errorf("UnmatchedTerminators = %d, want 1", r.UnmatchedTerminators)
 	}
 }

@@ -37,6 +37,12 @@ func TestSummariseCountsAndTimesByConfidence(t *testing.T) {
 	if got.MsByConfidence[Likely] != 300 {
 		t.Errorf("MsByConfidence[Likely] = %d, want 300", got.MsByConfidence[Likely])
 	}
+	// The one slot the two assertions above leave unchecked -- an
+	// off-by-one in the ByConfidence/MsByConfidence indexing could shift
+	// Ambiguous's figure onto a neighbour and still pass both.
+	if got.MsByConfidence[Ambiguous] != 200 {
+		t.Errorf("MsByConfidence[Ambiguous] = %d, want 200", got.MsByConfidence[Ambiguous])
+	}
 }
 
 // The gate is on TIME, not on span count. This fixture inverts the two: two

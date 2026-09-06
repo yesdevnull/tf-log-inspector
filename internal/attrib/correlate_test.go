@@ -265,6 +265,91 @@ func TestCorrelateReturnsOneAttributionPerSpan(t *testing.T) {
 	}
 }
 
+// I2: replacing actionMatches' loop body with `return allowed[0] == ctxAction`
+// passed the whole suite before this test existed, because every existing
+// case exercised only "create", which is allowed[0] for both
+// PlanResourceChange and ApplyResourceChange. This asserts a match for
+// EVERY action each RPC's list allows, and a non-match for one that is not
+// in any list.
+func TestActionMatchesEveryAllowedActionForEveryMappedRPC(t *testing.T) {
+	for rpc, allowed := range rpcActions {
+		for _, action := range allowed {
+			if !actionMatches(rpc, action) {
+				t.Errorf("actionMatches(%q, %q) = false, want true", rpc, action)
+			}
+		}
+	}
+	// "destroy" names no action any RPC in rpcActions allows.
+	for rpc := range rpcActions {
+		if actionMatches(rpc, "destroy") {
+			t.Errorf("actionMatches(%q, \"destroy\") = true, want false", rpc)
+		}
+	}
+}
+
+// I5: IsData travels from Context through to Attribution the same way
+// Module, Name and Key already do -- named() must not drop it.
+func TestIsDataTravelsWithTheAttribution(t *testing.T) {
+	c := ctx("data.local_file.a", "local_file", "read", 0, 1000)
+	c.IsData = true
+	got := Correlate([]span.Span{rpc("local_file", "ReadDataSource", 100, 200)}, base, []Context{c})
+	if !got[0].IsData {
+		t.Error("IsData = false, want true")
+	}
+
+	managed := ctx("local_file.b", "local_file", "create", 0, 1000)
+	got = Correlate([]span.Span{rpc("local_file", "ApplyResourceChange", 100, 200)}, base, []Context{managed})
+	if got[0].IsData {
+		t.Error("IsData = true, want false for a managed-resource context")
+	}
+}
+
+// M3: the clamped-span probe is [end-1ms, end) -- the LAST instant the span
+// occupies -- not a window built from EndMs itself, since a half-open
+// context can never contain its own EndMs. Pinned here so a plausible
+// off-by-one (probing from EndMs rather than up to it) would be caught: a
+// context ending exactly at EndMs must still match, and one starting
+// exactly at EndMs must not.
+func TestClampedSpanProbesTheLastInstantItOccupies(t *testing.T) {
+	s := rpc("aws_instance", "ReadResource", 0, 200)
+	s.DurationMs = 900
+	s.StartClamped = true
+
+	endsAtEndMs := []Context{ctx("aws_instance.a", "aws_instance", "read", 0, 200)}
+	got := Correlate([]span.Span{s}, base, endsAtEndMs)
+	if got[0].Confidence != Overlapping {
+		t.Errorf("Confidence = %v, want Overlapping -- a context ending exactly at EndMs must still match the probe", got[0].Confidence)
+	}
+
+	startsAtEndMs := []Context{ctx("aws_instance.a", "aws_instance", "read", 200, 1000)}
+	got = Correlate([]span.Span{s}, base, startsAtEndMs)
+	if got[0].Confidence != Unattributed {
+		t.Errorf("Confidence = %v, want Unattributed -- a context starting exactly at EndMs must not match the probe", got[0].Confidence)
+	}
+}
+
+// M3: the capped && n > 1 branch had no test of its own.
+func TestClampedSpanWithMultipleCandidatesIsAmbiguous(t *testing.T) {
+	s := rpc("aws_instance", "ReadResource", 0, 200)
+	s.DurationMs = 900
+	s.StartClamped = true
+
+	ctxs := []Context{
+		ctx("aws_instance.a", "aws_instance", "read", 0, 1000),
+		ctx("aws_instance.b", "aws_instance", "read", 0, 1000),
+	}
+	got := Correlate([]span.Span{s}, base, ctxs)
+	if got[0].Confidence != Ambiguous {
+		t.Errorf("Confidence = %v, want Ambiguous -- a capped span with more than one matching candidate must not assert an address", got[0].Confidence)
+	}
+	if got[0].Candidates != 2 {
+		t.Errorf("Candidates = %d, want 2", got[0].Candidates)
+	}
+	if got[0].Address != "" {
+		t.Errorf("Address = %q, want empty -- Ambiguous must assert nothing even when capped", got[0].Address)
+	}
+}
+
 func TestConfidenceStrings(t *testing.T) {
 	for c, want := range map[Confidence]string{
 		Unattributed: "unattributed",

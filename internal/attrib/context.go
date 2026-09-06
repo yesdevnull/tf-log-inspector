@@ -101,6 +101,12 @@ type ContextCollector struct {
 	malformed   uint64
 	unmatched   uint64
 	closedPairs int
+	zeroExtent  uint64
+	// closedOut marks that Contexts' close-out (draining c.open,
+	// back-filling End, tallying zeroExtent) has already run, so a second
+	// call is a plain getter rather than a second mutation. See Contexts'
+	// own doc comment.
+	closedOut bool
 }
 
 // Entry implements logfmt.Sink as a no-op: this collector only cares about
@@ -210,10 +216,33 @@ func decodeKey(raw json.RawMessage) string {
 // appeared. A context still open at end-of-log has its End set to the last
 // timestamp seen and stays marked Unclosed, matching how an unclosed SPAN is
 // handled -- measured to end-of-log and flagged, never discarded.
+//
+// The close-out this does -- draining c.open, back-filling End, tallying
+// zero-extent contexts for ZeroExtentContexts -- runs once and is memoised:
+// a second call is a plain getter over the first call's result, not a
+// second mutation. Without that, a future caller that took a snapshot of
+// the pre-close-out state (e.g. to correlate against it directly) could see
+// every still-open context gain a zero-extent window under it on whichever
+// call ran second, rather than the mutation being over and done with after
+// the first.
 func (c *ContextCollector) Contexts() []Context {
-	for key, i := range c.open {
-		c.ctxs[i].End = c.lastTS
-		delete(c.open, key)
+	if !c.closedOut {
+		for key, i := range c.open {
+			c.ctxs[i].End = c.lastTS
+			delete(c.open, key)
+		}
+		for _, ctx := range c.ctxs {
+			// A zero-extent window occupies no instant (see Context's
+			// half-open-window doc comment) and is never a candidate for
+			// anything. This is the case the end-of-log close-out above can
+			// itself produce: a resource still running when the capture is
+			// cut gets an End equal to the log's own last timestamp, which
+			// is also its Start.
+			if !ctx.Start.Before(ctx.End) {
+				c.zeroExtent++
+			}
+		}
+		c.closedOut = true
 	}
 	return c.ctxs
 }
@@ -237,6 +266,16 @@ func (c *ContextCollector) Malformed() uint64 { return c.malformed }
 // UnmatchedTerminators reports terminators seen with no matching start,
 // which is what a log captured from partway through a run produces.
 func (c *ContextCollector) UnmatchedTerminators() uint64 { return c.unmatched }
+
+// ZeroExtentContexts reports how many collected contexts have zero
+// duration -- Start not strictly before End -- and so can never be a
+// candidate for any span (see Context's half-open-window doc comment). It
+// calls Contexts to force the close-out that can itself produce one, so the
+// count is accurate whether or not a caller has fetched Contexts yet.
+func (c *ContextCollector) ZeroExtentContexts() uint64 {
+	c.Contexts()
+	return c.zeroExtent
+}
 
 // CompletedPairs reports how many contexts were both opened and closed. It
 // is attribution's precondition: below one completed pair there is no

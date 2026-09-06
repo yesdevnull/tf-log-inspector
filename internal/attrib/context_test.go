@@ -157,6 +157,62 @@ func TestUnclosedContextEndsAtLastTimestamp(t *testing.T) {
 	}
 }
 
+// M2: a second call to Contexts must not re-run the close-out. Draining
+// c.open is itself idempotent once it is already empty, so this pins the
+// CONTRACT (a second call is a plain getter) rather than a behaviour a
+// second drain would visibly break today -- see Contexts' own doc comment.
+func TestContextsIsIdempotentAcrossRepeatedCalls(t *testing.T) {
+	c, first := collect(t, "testdata/context.log")
+	second := c.Contexts()
+	if len(first) != len(second) {
+		t.Fatalf("len(second call) = %d, want %d (same as the first)", len(second), len(first))
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			t.Errorf("Contexts()[%d] changed between calls: %+v -> %+v", i, first[i], second[i])
+		}
+	}
+}
+
+// I3: a context still open at end-of-log whose own End lands on its own
+// Start -- a resource still running when the capture was cut -- is
+// zero-extent and must be counted so the loss is visible.
+func TestZeroExtentContextsCountsAResourceStillRunningAtEndOfLog(t *testing.T) {
+	const lines = `{"@level":"info","@message":"aws_instance.a: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","hook":{"resource":{"addr":"aws_instance.a","module":"","resource":"aws_instance.a","implied_provider":"aws","resource_type":"aws_instance","resource_name":"a","resource_key":null},"action":"create"},"type":"apply_start"}
+`
+	c, ctxs := collectLines(t, lines)
+	if len(ctxs) != 1 {
+		t.Fatalf("contexts = %d, want 1", len(ctxs))
+	}
+	if !ctxs[0].Start.Equal(ctxs[0].End) {
+		t.Fatalf("fixture assumption changed: Start = %v, End = %v, want equal", ctxs[0].Start, ctxs[0].End)
+	}
+	if got := c.ZeroExtentContexts(); got != 1 {
+		t.Errorf("ZeroExtentContexts = %d, want 1", got)
+	}
+}
+
+// A context closed normally, well before end-of-log, must not be counted as
+// zero-extent -- the sibling case to
+// TestZeroExtentContextsCountsAResourceStillRunningAtEndOfLog. A trailing
+// line after the close keeps lastTS later than the closed context's own
+// End, so this cannot pass by accident the way it would if the closed
+// context's End happened to equal the log's last timestamp too.
+func TestZeroExtentContextsExcludesNormallyClosedContexts(t *testing.T) {
+	const lines = `{"@level":"info","@message":"aws_instance.a: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","hook":{"resource":{"addr":"aws_instance.a","module":"","resource":"aws_instance.a","implied_provider":"aws","resource_type":"aws_instance","resource_name":"a","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"aws_instance.a: Creation complete after 2s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:05.000000+10:00","hook":{"resource":{"addr":"aws_instance.a","module":"","resource":"aws_instance.a","implied_provider":"aws","resource_type":"aws_instance","resource_name":"a","resource_key":null},"action":"create"},"type":"apply_complete"}
+{"@level":"info","@message":"aws_instance.b: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:06.000000+10:00","hook":{"resource":{"addr":"aws_instance.b","module":"","resource":"aws_instance.b","implied_provider":"aws","resource_type":"aws_instance","resource_name":"b","resource_key":null},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"aws_instance.b: Creation complete after 1s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:07.000000+10:00","hook":{"resource":{"addr":"aws_instance.b","module":"","resource":"aws_instance.b","implied_provider":"aws","resource_type":"aws_instance","resource_name":"b","resource_key":null},"action":"create"},"type":"apply_complete"}
+`
+	c, ctxs := collectLines(t, lines)
+	if len(ctxs) != 2 {
+		t.Fatalf("contexts = %d, want 2", len(ctxs))
+	}
+	if got := c.ZeroExtentContexts(); got != 0 {
+		t.Errorf("ZeroExtentContexts = %d, want 0 for two normally-closed contexts", got)
+	}
+}
+
 func TestCompletedPairsCountsOnlyClosedContexts(t *testing.T) {
 	c, _ := collect(t, "testdata/context.log")
 	if got := c.CompletedPairs(); got != 2 {
