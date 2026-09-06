@@ -64,7 +64,11 @@ type Attribution struct {
 	Address string
 	Module  string // "" when the resource is not in a module
 	Name    string
-	Key     string // "" when the resource has no index key
+	// Key is "" when the resource has no index key, and otherwise carried
+	// straight through from Context.Key -- already in the bracket syntax
+	// Terraform's own address uses, so a caller building one concatenates
+	// Name (or Module) directly against "[" + Key + "]" (see decodeKey).
+	Key string
 
 	// Candidates is the number of overlapping candidates CONSIDERED, which
 	// has a well-defined value in every state: 1 for Contained and

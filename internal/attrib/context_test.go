@@ -16,8 +16,17 @@ func collect(t *testing.T, path string) (*ContextCollector, []Context) {
 	if err != nil {
 		t.Fatalf("ReadFile %s: %v", path, err)
 	}
+	return collectLines(t, string(data))
+}
+
+// collectLines is collect's own scan step, over a log given inline rather
+// than read from testdata/context.log -- for a case that needs one or two
+// synthetic lines and would otherwise have to grow the shared fixture, whose
+// contents several other tests already index into by position.
+func collectLines(t *testing.T, content string) (*ContextCollector, []Context) {
+	t.Helper()
 	var c ContextCollector
-	if _, err := logfmt.Scan(strings.NewReader(string(data)), &logfmt.Interner{}, &c); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(content), &logfmt.Interner{}, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	return &c, c.Contexts()
@@ -92,6 +101,30 @@ func TestModuleNameAndKeyAreDecoded(t *testing.T) {
 	}
 	if ctxs[0].Key != "" {
 		t.Errorf("null resource_key = %q, want empty", ctxs[0].Key)
+	}
+}
+
+// A for_each key and a count key decode to DIFFERENT bracket syntax, end to
+// end from the raw structured-output line through to the string a caller
+// would actually concatenate onto a resource's name -- module.m.web["mykey"]
+// for a for_each key, module.m.db[0] for a count key. Terraform's own JSON
+// distinguishes the two only by the resource_key value's JSON TYPE (a
+// string versus a number), which is why this decodes real lines rather
+// than constructing a Context directly: the distinction has to survive
+// encoding/json's own unmarshalling, not just decodeKey in isolation.
+func TestKeyDecodesToValidAddressBracketSyntaxForBothJSONKinds(t *testing.T) {
+	const lines = `{"@level":"info","@message":"aws_instance.web: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","hook":{"resource":{"addr":"aws_instance.web[\"mykey\"]","module":"","resource":"aws_instance.web[\"mykey\"]","implied_provider":"aws","resource_type":"aws_instance","resource_name":"web","resource_key":"mykey"},"action":"create"},"type":"apply_start"}
+{"@level":"info","@message":"aws_instance.db: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:04.000000+10:00","hook":{"resource":{"addr":"aws_instance.db[0]","module":"","resource":"aws_instance.db[0]","implied_provider":"aws","resource_type":"aws_instance","resource_name":"db","resource_key":0},"action":"create"},"type":"apply_start"}
+`
+	_, ctxs := collectLines(t, lines)
+	if len(ctxs) != 2 {
+		t.Fatalf("contexts = %d, want 2", len(ctxs))
+	}
+	if got, want := ctxs[0].Name+"["+ctxs[0].Key+"]", `web["mykey"]`; got != want {
+		t.Errorf("for_each (string) key built address suffix %q, want %q", got, want)
+	}
+	if got, want := ctxs[1].Name+"["+ctxs[1].Key+"]", "db[0]"; got != want {
+		t.Errorf("count (number) key built address suffix %q, want %q", got, want)
 	}
 }
 
@@ -238,8 +271,12 @@ func TestUnmatchedTerminatorCountedNotCreated(t *testing.T) {
 	}
 }
 
-// decodeKey handles null (empty string), JSON numbers (rendered as literal),
-// and JSON strings (unquoted).
+// decodeKey handles null (empty string), JSON numbers (rendered as their
+// bare literal), and JSON strings (kept quoted -- see decodeKey's own doc
+// comment for why a string key must not be unquoted: "0" the JSON string
+// and 0 the JSON number bracket differently in Terraform's own address
+// syntax, and a decoded value with the quotes already stripped cannot be
+// told apart from the other case any more).
 func TestDecodeKey(t *testing.T) {
 	tests := []struct {
 		name string
@@ -250,7 +287,8 @@ func TestDecodeKey(t *testing.T) {
 		{"empty", "", ""},
 		{"number zero", "0", "0"},
 		{"number positive", "42", "42"},
-		{"string key", `"mykey"`, "mykey"},
+		{"string key", `"mykey"`, `"mykey"`},
+		{"string key that looks numeric", `"0"`, `"0"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

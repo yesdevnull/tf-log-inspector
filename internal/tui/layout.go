@@ -864,11 +864,16 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 // Filter.SpansMatching) whenever a facet selection is active, so the
 // position selectedTimelineSpanValue hands back no longer lines up with
 // Attribs' indexing into the unfiltered slice the way a table row's spanIdx
-// does (see callRows). A span this log never attributed -- entry 0 from a
-// zero-value span.Span, or a UI-hook span, whose Entry belongs to a
-// different builder's numbering -- matches nothing and returns the zero
-// Attribution, which spanDetailLines' Fidelity gate never asks about for a
-// UI-hook span in any case.
+// does (see callRows).
+//
+// logfmt.Scan feeds every sink from ONE shared ordinal counter, so Entry
+// values are unique log-wide, not per builder: each ordinal closes at most
+// one entry, and so at most one span, whichever tier built it. A UI-hook
+// span's Entry is therefore never equal to any m.log.RPCSpans[i].Entry --
+// its closing entry was a structured-output line, not an RPC-tier one -- so
+// passing one here simply finds nothing and returns the zero Attribution,
+// which spanDetailLines' Fidelity gate never asks about for a UI-hook span
+// in any case.
 func (m *Model) attributionForEntry(entry uint32) attrib.Attribution {
 	for i, s := range m.log.RPCSpans {
 		if s.Entry == entry && i < len(m.log.Attribs) {
@@ -1019,6 +1024,10 @@ func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 
 	name := a.Name
 	if a.Key != "" {
+		// a.Key already carries whatever bracket syntax it needs -- bare
+		// for a count key, quoted for a for_each key -- decided at decode
+		// time (attrib.decodeKey), where the raw JSON's own type is still
+		// known. There is nothing left for this concatenation to decide.
 		name += "[" + a.Key + "]"
 	}
 	fields := []detailField{

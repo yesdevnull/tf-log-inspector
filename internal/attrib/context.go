@@ -9,7 +9,6 @@ package attrib
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,10 +48,15 @@ type ctxLine struct {
 // zero-extent window occupies no instant and is never a candidate for
 // anything.
 type Context struct {
-	Address      string
-	Module       string // "" when the resource is not in a module
-	Name         string
-	Key          string // "" when the resource has no index key
+	Address string
+	Module  string // "" when the resource is not in a module
+	Name    string
+	// Key is "" when the resource has no index key, and otherwise already
+	// in the syntax Terraform's own address puts inside the trailing
+	// brackets -- bare for a count key, quoted for a for_each key (see
+	// decodeKey) -- so building an address is Name (or Module) directly
+	// against "[" + Key + "]", with nothing left for the caller to decide.
+	Key          string
 	ResourceType string
 	Action       string // hook.action: read, create, update, delete
 	IsData       bool   // the address names a data source, not a managed resource
@@ -181,16 +185,23 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 }
 
 // decodeKey renders hook.resource.resource_key, which may be null, a JSON
-// number, or a JSON string. Null and empty values return an empty string.
-// JSON numbers are rendered as their literal string form. JSON strings are
-// unquoted so they read as they do inside a resource address.
+// number, or a JSON string, as the bracket suffix Terraform's own address
+// syntax puts it in: bare for a numeric (count) key, module.m.web[0], and
+// still double-quoted for a string (for_each) key, module.m.web["mykey"].
+// The two are NOT interchangeable syntax, and a string that happens to look
+// numeric -- for_each = toset(["0"]) produces the JSON STRING "0", not the
+// number 0 -- makes which one it was undecidable from the decoded value
+// alone. It is only decidable here, from the raw JSON's own type, which is
+// why this keeps the JSON string's quoting rather than stripping it: every
+// caller of Context.Key and Attribution.Key builds an address by
+// concatenating Name (or Module) directly against "[" + Key + "]", and does
+// so without re-deriving what this function already knows.
+//
+// Null and empty values return an empty string, for a key-less resource.
 func decodeKey(raw json.RawMessage) string {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
 		return ""
-	}
-	if unquoted, err := strconv.Unquote(s); err == nil {
-		return unquoted
 	}
 	return s
 }

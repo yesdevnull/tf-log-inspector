@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -474,6 +475,78 @@ func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	}
 	if len(spans) != 0 {
 		t.Errorf("spans = %d, want 0: the filter matches nothing", len(spans))
+	}
+}
+
+// A facet filter compacts timelineSpans' copy of m.log.RPCSpans (see
+// Filter.SpansMatching), so a span after a REMOVED one shifts position while
+// m.log.Attribs stays indexed against the unfiltered slice. selectedDetail
+// resolves the selected timeline span's attribution through
+// attributionForEntry, keyed on span.Span.Entry rather than position,
+// specifically so this cannot happen; this pins that against a naive
+// positional lookup, which would misreport the span after the removed one
+// as carrying the removed span's own neighbour's attribution.
+//
+// two-tier.log's RPCSpans are, in order: [0] PlanResourceChange, Ambiguous
+// (2 candidates); [1] ApplyResourceChange/aws_instance, Contained ("web");
+// [2] ApplyResourceChange/aws_subnet, Unattributed. Filtering to
+// ApplyResourceChange only drops [0], so the filtered slice is [1, 2] at
+// filtered positions 0 and 1. A positional lookup for filtered position 1
+// would find Attribs[1] -- "web", Contained -- when the span actually
+// there is [2], Unattributed.
+func TestTimelineAttributionSurvivesAFacetFilterThatReindexesSpans(t *testing.T) {
+	l := testLog(t, "two-tier.log")
+	if len(l.RPCSpans) < 3 || len(l.Attribs) < 3 {
+		t.Fatalf("fixture assumption changed: two-tier.log has %d RPC spans and %d attributions, want at least 3 of each", len(l.RPCSpans), len(l.Attribs))
+	}
+	if l.Attribs[0].Confidence != attrib.Ambiguous {
+		t.Fatalf("fixture assumption changed: RPCSpans[0] is %v, want Ambiguous", l.Attribs[0].Confidence)
+	}
+	if l.Attribs[1].Confidence != attrib.Contained || l.Attribs[1].Name != "web" {
+		t.Fatalf("fixture assumption changed: RPCSpans[1] is %v %q, want Contained \"web\"", l.Attribs[1].Confidence, l.Attribs[1].Name)
+	}
+	if l.Attribs[2].Confidence != attrib.Unattributed {
+		t.Fatalf("fixture assumption changed: RPCSpans[2] is %v, want Unattributed", l.Attribs[2].Confidence)
+	}
+
+	m := update(t, New(l, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	// Narrow to ApplyResourceChange, dropping the Ambiguous PlanResourceChange
+	// span at RPCSpans[0]. See TestFilteringOutEveryRPCSpanDoesNotSwitchTiers
+	// for why this test sets the facet map directly rather than driving the
+	// facet pane's own cursor.
+	m.selectedFacets = map[string]map[string]bool{dimRPC: {"ApplyResourceChange": true}}
+	m.invalidateRows()
+
+	_, spans := m.timelineSpans()
+	if len(spans) != 2 {
+		t.Fatalf("filtered RPC spans = %d, want 2", len(spans))
+	}
+
+	// Put the cursor on wherever RPCSpans[2] (by Entry, since the filter
+	// shifted its position) landed among the packed lanes.
+	var onTarget bool
+	for laneIdx, lane := range m.timelineLanes() {
+		for pos, si := range lane.Spans {
+			if spans[si].Entry == l.RPCSpans[2].Entry {
+				m.timeline.lane, m.timeline.span, onTarget = laneIdx, pos, true
+			}
+		}
+	}
+	if !onTarget {
+		t.Fatal("RPCSpans[2] did not survive the filter into any lane")
+	}
+
+	_, sections := m.selectedDetail(80)
+	var got string
+	for _, s := range sections {
+		got += strings.Join(s, "\n")
+	}
+	if !strings.Contains(got, unattributedValue) {
+		t.Errorf("filtered timeline selection =\n%s\nwant it to contain %q, RPCSpans[2]'s own verdict", got, unattributedValue)
+	}
+	if strings.Contains(got, "web") || strings.Contains(got, attrib.Contained.String()) {
+		t.Errorf("filtered timeline selection =\n%s\nwrongly carries RPCSpans[1]'s attribution (\"web\", Contained) -- a positional lookup reused RPCSpans[1] instead of following RPCSpans[2] to its new position", got)
 	}
 }
 

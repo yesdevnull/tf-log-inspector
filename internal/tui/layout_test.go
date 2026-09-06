@@ -1211,6 +1211,50 @@ func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
 	}
 }
 
+// The phase's acceptance criterion, exercised through the REAL pipeline --
+// model.Log.Attribs, indexed by row.spanIdx, reaching the screen through
+// selectedDetail and View() -- rather than by calling spanDetailLines
+// directly the way the unit tests above do. two-tier.log is the fixture
+// that carries completed address context alongside RPC spans, so it is the
+// one place this can be exercised end to end.
+//
+// Ranked by duration descending: 250ms is ApplyResourceChange/aws_instance,
+// Contained as "web" (a top-level resource, so no Mod line -- that half of
+// attributionFields is exercised directly by TestSpanDetailNamesTheResource,
+// which supplies a moduled one); 120ms is PlanResourceChange, Ambiguous over
+// 2 candidates and names neither of them.
+func TestTheCallsDetailPaneNamesTheResourceThroughAttribs(t *testing.T) {
+	m := callsModel(t, "two-tier.log", "x.log")
+	if got := len(m.rows()); got != 3 {
+		t.Fatalf("fixture assumption changed: %d call rows, want 3", got)
+	}
+	named := strings.Join([]string{
+		"RPC   ApplyResourceChange",
+		"Type  aws_instance",
+		"Prov  registry.terraform.io/hashicorp/aws",
+		"Dur   250ms",
+		"Res   web",
+		"Attr  contained",
+	}, "\n")
+	if got := detailBody(t, m, spanDetailTitle, 100, 20); got != named {
+		t.Errorf("named row's detail pane =\n%s\n\nwant\n%s", got, named)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	ambiguous := strings.Join([]string{
+		"RPC   PlanResourceChange",
+		"Type  aws_instance",
+		"Prov  registry.terraform.io/hashicorp/aws",
+		"Dur   120ms",
+		"Start clamped to zero",
+		"Res   2 candidates",
+		"Attr  ambiguous",
+	}, "\n")
+	if got := detailBody(t, m, spanDetailTitle, 100, 20); got != ambiguous {
+		t.Errorf("ambiguous row's detail pane =\n%s\n\nwant\n%s", got, ambiguous)
+	}
+}
+
 // A resource-type row spans both tiers, so its aggregate must too: the
 // UI-hook tier's resource count and total beside the RPC tier's calls,
 // total and max, under the labels the table's own header uses so the pane
