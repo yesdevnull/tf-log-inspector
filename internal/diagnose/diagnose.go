@@ -778,15 +778,15 @@ func (r Report) Render(w io.Writer) error {
 	}
 
 	fmt.Fprintf(b, "ADDRESS ATTRIBUTION\n")
-	// MalformedStructuredLines and UnmatchedTerminators are counted by
-	// attrib.ContextCollector regardless of whether any context pair ever
-	// completes (see Build), so they are rendered unconditionally too -- a
-	// log with malformed structured lines or an unmatched terminator but no
-	// address context at all must not have both counts silently dropped by
-	// the branch below.
-	fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
-	fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 	if !r.HasContext {
+		// MalformedStructuredLines and UnmatchedTerminators are counted by
+		// attrib.ContextCollector regardless of whether any context pair
+		// ever completes (see Build). They lead here because there is
+		// nothing else this branch has to report -- a log with malformed
+		// structured lines or an unmatched terminator but no address context
+		// at all must not have both counts silently dropped.
+		fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
+		fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 		// The HCP Terraform/CLI debug-logging toggle is what produces the
 		// terraform.ui stream this log is missing -- TF_LOG_PROVIDER and
 		// TF_LOG_SDK_PROTO produce no terraform.ui context on their own.
@@ -801,9 +801,16 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  entries above instead; set alone, they are not\n")
 		fmt.Fprintf(b, "  expected to add a terraform.ui stream of their own\n")
 	} else {
+		// Substance first, caveats after: how much context there is, then
+		// how much of it is suspect. context lines malformed/unmatched
+		// terminators are the same attrib.ContextCollector counts as the
+		// no-context branch above, just no longer leading here -- there is
+		// something more informative to put first once contexts exist.
 		fmt.Fprintf(b, "  %-25s %d\n", "contexts", r.Contexts)
 		fmt.Fprintf(b, "  %-25s %d\n", "unclosed contexts", r.UnclosedContexts)
 		fmt.Fprintf(b, "  %-25s %d\n", "zero-extent contexts", r.ZeroExtentContexts)
+		fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
+		fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
 		if !r.HasSpans {
 			// Context exists but there is nothing to correlate it against --
 			// e.g. INFO-level terraform.ui without TRACE provider RPC
@@ -832,18 +839,17 @@ func (r Report) Render(w io.Writer) error {
 			} {
 				fmt.Fprintf(b, "  %-25s %d %s, %d ms\n", c.String(),
 					r.Coverage.ByConfidence[c], pluralSpans(r.Coverage.ByConfidence[c]), r.Coverage.MsByConfidence[c])
-				// The candidate-count distribution sits under ambiguous
-				// specifically: it is the figure that explains why a span
-				// landed there rather than at Likely or Contained. It still
-				// covers every span with at least one candidate, not only
-				// ambiguous ones (see candidateBreakdown), so it is labelled
-				// as such rather than implied to be ambiguous-only.
-				if c == attrib.Ambiguous && len(r.CandidateBreakdown) > 0 {
-					fmt.Fprintf(b, "  %-25s (all spans with a candidate)\n", "candidate counts")
-					for _, cc := range r.CandidateBreakdown {
-						fmt.Fprintf(b, "      %d %s: %d %s\n",
-							cc.Candidates, pluralCandidates(cc.Candidates), cc.Spans, pluralSpans(cc.Spans))
-					}
+			}
+			// Its own group, after the confidence list rather than nested
+			// inside it: indenting this under the ambiguous row read as
+			// ambiguous's own detail, when it in fact covers every span with
+			// at least one candidate (see candidateBreakdown), Contained and
+			// Likely included.
+			if len(r.CandidateBreakdown) > 0 {
+				fmt.Fprintf(b, "  %-25s (spans with a candidate)\n", "candidate counts")
+				for _, cc := range r.CandidateBreakdown {
+					fmt.Fprintf(b, "      %d %s: %d %s\n",
+						cc.Candidates, pluralCandidates(cc.Candidates), cc.Spans, pluralSpans(cc.Spans))
 				}
 			}
 		}

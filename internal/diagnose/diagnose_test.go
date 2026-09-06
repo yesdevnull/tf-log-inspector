@@ -1198,6 +1198,27 @@ func TestReportRendersCandidateCountBreakdown(t *testing.T) {
 	}
 }
 
+// The breakdown must sit outside the confidence list, as its own group,
+// rather than nested under the ambiguous row -- a reader skimming the
+// confidence rows top to bottom would otherwise read an indented block
+// hanging off ambiguous as ambiguous's own detail, when it in fact covers
+// every confidence with at least one candidate (Contained included).
+func TestCandidateCountsFollowTheWholeConfidenceListNotJustAmbiguous(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+
+	ambiguous := strings.Index(section, "ambiguous")
+	unattributed := strings.Index(section, "unattributed")
+	candidates := strings.Index(section, "candidate counts")
+	if ambiguous < 0 || unattributed < 0 || candidates < 0 {
+		t.Fatalf("section is missing one of ambiguous/unattributed/candidate counts:\n%s", section)
+	}
+	if !(ambiguous < unattributed && unattributed < candidates) {
+		t.Errorf("candidate counts must follow the whole confidence list (ambiguous, then unattributed, then candidate counts):\n%s", section)
+	}
+}
+
 // The breakdown's row order must not depend on Go's randomised map
 // iteration: two distinct candidate counts seen by the SAME number of spans
 // must still print in the same order every time (candidate count ascending),
@@ -1372,6 +1393,28 @@ func TestReportCountsUnclosedAndZeroExtentContexts(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("report does not render %q:\n%s", want, out)
 		}
+	}
+}
+
+// Substance first, caveats after: once a log carries address context, how
+// much of it there is (contexts, unclosed, zero-extent) must lead, with the
+// data-quality counts (malformed lines, unmatched terminators) following --
+// not the reverse, which is what a reader with real context would see if
+// the section opened with a wall of zeros before saying anything was found
+// at all.
+func TestHasContextBranchLeadsWithContextCountsBeforeDataQualityCounts(t *testing.T) {
+	out := renderFixture(t, fixture(t, "two-tier.log"))
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+
+	contexts := strings.Index(section, "contexts")
+	malformed := strings.Index(section, "context lines malformed")
+	unmatched := strings.Index(section, "unmatched terminators")
+	if contexts < 0 || malformed < 0 || unmatched < 0 {
+		t.Fatalf("section is missing contexts/malformed/unmatched:\n%s", section)
+	}
+	if !(contexts < malformed && malformed < unmatched) {
+		t.Errorf("has-context branch must lead with contexts, then the data-quality counts:\n%s", section)
 	}
 }
 
