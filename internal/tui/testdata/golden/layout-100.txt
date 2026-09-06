@@ -2,10 +2,10 @@ tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                 │ CALLS                                        │ SPAN DETAIL              
 [7;2m[ ] ….io/hashicorp/aws  1[0m │ duration  RPC         resource …  provider   │ RPC   ApplyResourceChange
-[ ] …/hashicorp/google  1 │ [7m     8ms  ApplyReso…  …_instance  …rp/google[0m │ Prov  …o/hashicorp/google
-RPCS                      │      5ms  ApplyReso…  aws_subnet  …icorp/aws │ Dur   8ms                
-[ ] ApplyResourceChan…  2 │                                              │                          
-RESOURCE TYPES            │                                              │                          
+[ ] …/hashicorp/google  1 │ [7m     8ms  ApplyReso…  …_instance  …rp/google[0m │ Type  …e_compute_instance
+RPCS                      │      5ms  ApplyReso…  aws_subnet  …icorp/aws │ Prov  …o/hashicorp/google
+[ ] ApplyResourceChan…  2 │                                              │ Dur   8ms                
+RESOURCE TYPES            │                                              │ Res   no address context…
 [ ] aws_subnet  1         │                                              │                          
 [ ] …_compute_instance  1 │                                              │                          
 LEVELS                    │                                              │                          

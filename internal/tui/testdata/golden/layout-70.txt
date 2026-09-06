@@ -2,10 +2,10 @@ tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 CALLS                                            │ SPAN DETAIL        
 duration  RPC           resource t…  provider    │ RPC   ApplyResourc…
-[7m     8ms  ApplyResour…  …e_instance  …orp/google[0m │ Prov  …icorp/google
-     5ms  ApplyResour…  aws_subnet   …hicorp/aws │ Dur   8ms          
-                                                 │                    
-                                                 │                    
+[7m     8ms  ApplyResour…  …e_instance  …orp/google[0m │ Type  …ute_instance
+     5ms  ApplyResour…  aws_subnet   …hicorp/aws │ Prov  …icorp/google
+                                                 │ Dur   8ms          
+                                                 │ Res   no address c…
                                                  │                    
                                                  │                    
                                                  │                    

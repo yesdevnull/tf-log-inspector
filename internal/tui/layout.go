@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -111,11 +112,20 @@ func facetNaturalWidth(facets []model.Facet) int {
 func detailNaturalWidth(l *model.Log) int {
 	width := minDetailPaneWidth
 	spans := l.RPCSpans
-	if timelineTierFor(l) == tierUI {
+	uiTier := timelineTierFor(l) == tierUI
+	if uiTier {
 		spans = l.UISpans
 	}
-	for _, s := range spans {
-		for _, line := range spanDetailLines(s, hugeWidth) {
+	hasContext := l.HasAddressContext()
+	for i, s := range spans {
+		// Attribs is parallel to RPCSpans only -- a UI-hook span's address is
+		// observed rather than inferred, so it carries none, and spanDetailLines
+		// never asks attributionFields about one anyway (see its Fidelity gate).
+		var a attrib.Attribution
+		if !uiTier && i < len(l.Attribs) {
+			a = l.Attribs[i]
+		}
+		for _, line := range spanDetailLines(s, a, hasContext, hugeWidth) {
 			width = max(width, lipgloss.Width(line))
 		}
 	}
@@ -823,9 +833,10 @@ const (
 // inside the alt screen.
 func (m *Model) selectedDetail(w int) (string, []detailSection) {
 	nothing := []detailSection{{clipWidth(noSelectionNote, w)}}
+	hasContext := m.log.HasAddressContext()
 	if m.view == ViewTimeline {
 		if s, ok := m.selectedTimelineSpanValue(); ok {
-			return spanDetailTitle, []detailSection{spanDetailLines(s, w)}
+			return spanDetailTitle, []detailSection{spanDetailLines(s, m.attributionForEntry(s.Entry), hasContext, w)}
 		}
 		return noSelectionTitle, nothing
 	}
@@ -834,12 +845,37 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 		return noSelectionTitle, nothing
 	}
 	if s, ok := m.spanForRow(r); ok {
-		return spanDetailTitle, []detailSection{spanDetailLines(s, w)}
+		var a attrib.Attribution
+		if r.spanIdx < len(m.log.Attribs) {
+			a = m.log.Attribs[r.spanIdx]
+		}
+		return spanDetailTitle, []detailSection{spanDetailLines(s, a, hasContext, w)}
 	}
 	if r.rollup != nil {
 		return rollupDetailTitle, rollupDetailSections(r.rollup, w)
 	}
 	return noSelectionTitle, nothing
+}
+
+// attributionForEntry finds the attribution recorded for the RPC span that
+// closed log entry `entry`, the same identifier jumpToSpan already trusts to
+// name a span uniquely. It exists because the timeline's selected span can
+// come from timelineSpans' FILTERED copy of m.log.RPCSpans (see
+// Filter.SpansMatching) whenever a facet selection is active, so the
+// position selectedTimelineSpanValue hands back no longer lines up with
+// Attribs' indexing into the unfiltered slice the way a table row's spanIdx
+// does (see callRows). A span this log never attributed -- entry 0 from a
+// zero-value span.Span, or a UI-hook span, whose Entry belongs to a
+// different builder's numbering -- matches nothing and returns the zero
+// Attribution, which spanDetailLines' Fidelity gate never asks about for a
+// UI-hook span in any case.
+func (m *Model) attributionForEntry(entry uint32) attrib.Attribution {
+	for i, s := range m.log.RPCSpans {
+		if s.Entry == entry && i < len(m.log.Attribs) {
+			return m.log.Attribs[i]
+		}
+	}
+	return attrib.Attribution{}
 }
 
 // detailCutMark is the last line of a detail pane that had more to show
@@ -885,12 +921,21 @@ func fitDetailSections(title string, sections []detailSection, w, h int) []strin
 	return lines
 }
 
-// spanDetailLines formats one span's detail fields: RPC, provider and
-// duration always, and its resource address in addition when it is a
-// UI-hook span. Span.Address is populated only for spans FidelityUIReported
-// -- an RPC-tier span never carries one -- so gating on Fidelity, not just
-// on Address being non-empty, documents that this is a property of the
-// span's kind rather than an incidental absence.
+// spanDetailLines formats one span's detail fields: RPC, resource type,
+// provider and duration always; its resource address in addition when it is
+// a UI-hook span; and its ATTRIBUTION in addition otherwise -- which
+// resource this call belongs to, when the log can answer that at all (see
+// attributionFields). Span.Address is populated only for spans
+// FidelityUIReported -- an RPC-tier span never carries one -- so the address
+// branch gates on Fidelity, not just on Address being non-empty, to document
+// that this is a property of the span's kind rather than an incidental
+// absence.
+//
+// a is the span's own attribution and hasContext says whether the LOG
+// carries any address context at all -- two different facts a caller must
+// not blur together before calling this: "this log cannot answer which
+// resource this call belongs to" is not "this log can, and did not for this
+// call" (see noAddressContextValue and unattributedValue).
 //
 // The UI-hook branch is reached through the timeline, whose cursor can
 // select an individual span from m.log.UISpans (via
@@ -911,21 +956,27 @@ func fitDetailSections(title string, sections []detailSection, w, h int) []strin
 // rather than an identifier and is told apart by its head, so it end-clips
 // (see columnKind).
 //
-// RPC, Prov and Addr are all identifier values, and all three go through
-// clipIdentifierField, each clipped from the end its kind allows (see
-// columnKind): the same value clipped here, in the facet pane and in the
-// calls table is then clipped the same way and carries the same marker.
-// Prov and Addr front-clip, so two providers or addresses sharing a long
-// prefix -- ".../hashicorp/azuread" and ".../azurerm" -- do not both clip
-// down to their identical shared head. RPC end-clips, since it names one of
-// a short, closed set of plugin-protocol methods that share long suffixes
-// and diverge within their first few characters -- the same reasoning
+// RPC, Type, Prov and Addr are all identifier values, and all four go
+// through clipIdentifierField, each clipped from the end its kind allows
+// (see columnKind): the same value clipped here, in the facet pane and in
+// the calls table is then clipped the same way and carries the same marker.
+// Type, Prov and Addr front-clip, so two resource types, providers or
+// addresses sharing a long prefix -- ".../hashicorp/azuread" and
+// ".../azurerm" -- do not both clip down to their identical shared head.
+// RPC end-clips, since it names one of a short, closed set of
+// plugin-protocol methods that share long suffixes and diverge within their
+// first few characters -- the same reasoning
 // internal/profile.actionColWidth uses for its own closed-vocabulary action
 // column. Dur is a formatted number and is never long enough to need either
 // treatment.
-func spanDetailLines(s span.Span, w int) []string {
+//
+// Type closes a standing gap between this pane and callColumns, which has
+// carried a resource-type column since the calls table existed: without it
+// the pane showed less about the selected call than the row describing it.
+func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) []string {
 	fields := []detailField{
 		{label: "RPC", value: s.RPC, kind: headIdentifierColumn},
+		{label: "Type", value: s.ResourceType, kind: tailIdentifierColumn},
 		{label: "Prov", value: s.Provider, kind: tailIdentifierColumn},
 		{label: "Dur", value: formatMs(uint64(s.DurationMs)), kind: numericColumn},
 	}
@@ -933,10 +984,60 @@ func spanDetailLines(s span.Span, w int) []string {
 		fields = append(fields, detailField{label: "Start", value: clampedStartValue, kind: headIdentifierColumn})
 	}
 	if s.Fidelity == span.FidelityUIReported {
+		// An observed address, stated by the log rather than inferred from
+		// it, so it carries no confidence marker.
 		fields = append(fields, detailField{label: "Addr", value: s.Address, kind: tailIdentifierColumn})
+		return detailFieldLines(fields, w)
 	}
-	return detailFieldLines(fields, w)
+	return detailFieldLines(append(fields, attributionFields(a, hasContext)...), w)
 }
+
+// attributionFields renders the inferred half of a span's identity. Every
+// value here is inference and is marked as such: an Ambiguous span reports
+// how many candidates there were and names none of them, because naming one
+// of several equally plausible resources asserts what the evidence does not
+// support. The resource name and the module path are separate fields rather
+// than one address line because the pane is at most maxDetailPaneWidth
+// columns and a real address routinely exceeds that; splitting them lets
+// the NAME -- the identifying part, kept whole by headIdentifierColumn --
+// survive a narrow pane while the module path, front-clipped by
+// tailIdentifierColumn to keep the tail that distinguishes sibling modules,
+// gives way instead.
+func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
+	if !hasContext {
+		return []detailField{{label: "Res", value: noAddressContextValue, kind: headIdentifierColumn}}
+	}
+	switch a.Confidence {
+	case attrib.Ambiguous:
+		return []detailField{
+			{label: "Res", value: fmt.Sprintf("%d candidates", a.Candidates), kind: headIdentifierColumn},
+			{label: "Attr", value: a.Confidence.String(), kind: headIdentifierColumn},
+		}
+	case attrib.Unattributed:
+		return []detailField{{label: "Res", value: unattributedValue, kind: headIdentifierColumn}}
+	}
+
+	name := a.Name
+	if a.Key != "" {
+		name += "[" + a.Key + "]"
+	}
+	fields := []detailField{
+		{label: "Res", value: name, kind: headIdentifierColumn},
+	}
+	if a.Module != "" {
+		fields = append(fields, detailField{label: "Mod", value: a.Module, kind: tailIdentifierColumn})
+	}
+	return append(fields, detailField{label: "Attr", value: a.Confidence.String(), kind: headIdentifierColumn})
+}
+
+// noAddressContextValue and unattributedValue say two different things. The
+// first is a fact about the LOG -- it carries no terraform.ui stream, so no
+// call in it can be attributed. The second is a fact about this CALL -- the
+// log could answer the question and did not answer it here.
+const (
+	noAddressContextValue = "no address context in log"
+	unattributedValue     = "not matched"
+)
 
 // clampedStartValue is what the detail pane puts under Start for a span
 // whose start was clamped. It states the clamp and the value it was clamped
@@ -1013,10 +1114,10 @@ func slowestLine(slowest *span.Span, w int) string {
 }
 
 // detailLabelWidth is the floor for the label column every detail block
-// lines its values up on: the span fields' longest label ("Addr") plus two
-// spaces. A block whose own labels are wider than that -- the types view
-// heads its figures with the table's own "RPC calls" -- widens to fit them,
-// so the label and the value it labels can never run together.
+// lines its values up on: the span fields' longest labels ("Addr", "Attr")
+// plus two spaces. A block whose own labels are wider than that -- the types
+// view heads its figures with the table's own "RPC calls" -- widens to fit
+// them, so the label and the value it labels can never run together.
 const detailLabelWidth = 6
 
 // detailFieldLines lays fields out as one labelled value per line, at most w

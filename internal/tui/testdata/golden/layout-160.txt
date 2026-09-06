@@ -2,10 +2,10 @@ tfli -- plan.log -- 2 RPC spans, 0 UI spans
 
 PROVIDERS                                │ CALLS                                                                      │ SPAN DETAIL                             
 [7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m │ duration  RPC                  resource type          provider             │ RPC   ApplyResourceChange               
-[ ] …ry.terraform.io/hashicorp/google  1 │ [7m     8ms  ApplyResourceChange  …gle_compute_instance  …io/hashicorp/google[0m │ Prov  …try.terraform.io/hashicorp/google
-RPCS                                     │      5ms  ApplyResourceChange  aws_subnet             …rm.io/hashicorp/aws │ Dur   8ms                               
-[ ] ApplyResourceChange  2               │                                                                            │                                         
-RESOURCE TYPES                           │                                                                            │                                         
+[ ] …ry.terraform.io/hashicorp/google  1 │ [7m     8ms  ApplyResourceChange  …gle_compute_instance  …io/hashicorp/google[0m │ Type  google_compute_instance           
+RPCS                                     │      5ms  ApplyResourceChange  aws_subnet             …rm.io/hashicorp/aws │ Prov  …try.terraform.io/hashicorp/google
+[ ] ApplyResourceChange  2               │                                                                            │ Dur   8ms                               
+RESOURCE TYPES                           │                                                                            │ Res   no address context in log         
 [ ] aws_subnet  1                        │                                                                            │                                         
 [ ] google_compute_instance  1           │                                                                            │                                         
 LEVELS                                   │                                                                            │                                         

@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -458,7 +459,7 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	if strings.Contains(got, slowestHeading) {
 		t.Errorf("calls view detail pane carries a rollup's %q section for a row that is one span:\n%s", slowestHeading, got)
 	}
-	if expect := strings.Join(spanDetailLines(want, 80), "\n"); got != expect {
+	if expect := strings.Join(spanDetailLines(want, attrib.Attribution{}, m.log.HasAddressContext(), 80), "\n"); got != expect {
 		t.Errorf("calls view detail pane =\n%s\nwant\n%s", got, expect)
 	}
 }
@@ -470,7 +471,7 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 // which view's cursor happens to reach it.
 func TestSpanDetailLinesShowsAddressForUIHookSpans(t *testing.T) {
 	s := span.Span{RPC: "create", Provider: "aws", DurationMs: 2500, Fidelity: span.FidelityUIReported, Address: "aws_instance.example"}
-	out := strings.Join(spanDetailLines(s, 60), "\n")
+	out := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 60), "\n")
 	if !strings.Contains(out, "aws_instance.example") {
 		t.Errorf("UI-hook span detail omits its address:\n%s", out)
 	}
@@ -480,9 +481,80 @@ func TestSpanDetailLinesShowsAddressForUIHookSpans(t *testing.T) {
 // for UI-hook spans), so its detail must not show an address line at all.
 func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 	s := span.Span{RPC: "ApplyResourceChange", Provider: "aws", DurationMs: 5, Fidelity: span.FidelityReported}
-	out := strings.Join(spanDetailLines(s, 60), "\n")
+	out := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 60), "\n")
 	if strings.Contains(out, "Addr") {
 		t.Errorf("RPC-fidelity span detail shows an address line:\n%s", out)
+	}
+}
+
+// The phase's acceptance criterion: a Contained attribution names the
+// resource, its module and its resource type -- the fields the interface
+// exists to add.
+func TestSpanDetailNamesTheResource(t *testing.T) {
+	s := span.Span{RPC: "ReadResource", Provider: "registry.terraform.io/hashicorp/aws",
+		ResourceType: "aws_instance", DurationMs: 1200, Fidelity: span.FidelityReported}
+	a := attrib.Attribution{
+		Address: `module.m["k"].aws_instance.web[0]`, Module: `module.m["k"]`,
+		Name: "web", Key: "0", Candidates: 1, Confidence: attrib.Contained,
+	}
+	got := strings.Join(spanDetailLines(s, a, true, 40), "\n")
+
+	for _, want := range []string{"web", `module.m["k"]`, "aws_instance"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("detail pane missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The standing defect this task closes: callColumns has a resource-type
+// column and the detail pane never rendered it, so the pane showed LESS than
+// the row it describes.
+func TestSpanDetailRendersResourceType(t *testing.T) {
+	s := span.Span{RPC: "ReadResource", ResourceType: "aws_instance", DurationMs: 5}
+	got := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 40), "\n")
+	if !strings.Contains(got, "aws_instance") {
+		t.Errorf("detail pane omits ResourceType:\n%s", got)
+	}
+}
+
+// An Ambiguous span states a count and names no resource.
+func TestSpanDetailAmbiguousStatesACountAndNamesNothing(t *testing.T) {
+	s := span.Span{RPC: "ReadResource", ResourceType: "azuread_service_principal", DurationMs: 5}
+	a := attrib.Attribution{Candidates: 4, Confidence: attrib.Ambiguous}
+	got := strings.Join(spanDetailLines(s, a, true, 40), "\n")
+	if !strings.Contains(got, "4 candidates") {
+		t.Errorf("detail pane does not state the candidate count:\n%s", got)
+	}
+	if strings.Contains(got, "azuread_service_principal.") {
+		t.Errorf("detail pane named a resource for an Ambiguous span:\n%s", got)
+	}
+}
+
+// Two facts the interface must not state in the same words.
+func TestSpanDetailDistinguishesNoContextFromUnattributed(t *testing.T) {
+	s := span.Span{RPC: "ReadResource", ResourceType: "aws_instance", DurationMs: 5}
+
+	noContext := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 40), "\n")
+	unattributed := strings.Join(
+		spanDetailLines(s, attrib.Attribution{Confidence: attrib.Unattributed}, true, 40), "\n")
+
+	if noContext == unattributed {
+		t.Error("no-context and unattributed render identically; they are different facts")
+	}
+}
+
+// The name is the identifying part and must survive a narrow pane; the
+// module path is what gives way.
+func TestSpanDetailKeepsTheNameWhenThePaneIsNarrow(t *testing.T) {
+	a := attrib.Attribution{
+		Address: `module.very_long_module_name_here.aws_instance.web`,
+		Module:  "module.very_long_module_name_here",
+		Name:    "web", Confidence: attrib.Contained,
+	}
+	s := span.Span{RPC: "ReadResource", ResourceType: "aws_instance", DurationMs: 5}
+	got := strings.Join(spanDetailLines(s, a, true, 19), "\n")
+	if !strings.Contains(got, "web") {
+		t.Errorf("the resource name did not survive a %d-column pane:\n%s", 19, got)
 	}
 }
 
@@ -723,7 +795,7 @@ func paneSepColumns(t *testing.T, view string) []int {
 // reads as a complete name.
 func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	s := span.Span{RPC: "ValidateResourceTypeConfig", Provider: "aws", DurationMs: 5}
-	line := spanDetailLines(s, 20)[0]
+	line := spanDetailLines(s, attrib.Attribution{}, false, 20)[0]
 	if strings.Contains(line, s.RPC) {
 		t.Fatalf("the RPC name fits whole at width 20, so this no longer exercises clipping: %q", line)
 	}
@@ -1104,11 +1176,17 @@ func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
 	want := []string{
 		strings.Join([]string{
 			"RPC   ApplyResourceChange",
+			"Type  google_compute_instance",
 			"Prov  registry.terraform.io/hashicorp/google",
 			"Dur   8ms",
+			// two-providers.log carries no terraform.ui stream, so no call
+			// in it can be attributed to a resource -- a fact about the LOG,
+			// not about this call.
+			"Res   no address context in log",
 		}, "\n"),
 		strings.Join([]string{
 			"RPC   ApplyResourceChange",
+			"Type  aws_subnet",
 			"Prov  registry.terraform.io/hashicorp/aws",
 			"Dur   5ms",
 			// two-providers.log opens on this very call, so its 5ms
@@ -1117,6 +1195,7 @@ func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
 			// span.Span.StartClamped). The pane says so: the timeline
 			// draws such a span somewhere it did not run.
 			"Start clamped to zero",
+			"Res   no address context in log",
 		}, "\n"),
 	}
 	for i := range want {
@@ -1595,7 +1674,7 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	if !rows[m.Selected()].isCall() {
 		t.Fatalf("the opening screen's selected row is a rollup, not a call: %+v", rows[m.Selected()])
 	}
-	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], 50), "\n")
+	want := strings.Join(spanDetailLines(m.log.RPCSpans[rows[m.Selected()].spanIdx], attrib.Attribution{}, m.log.HasAddressContext(), 50), "\n")
 	if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want {
 		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
 	}
@@ -1608,12 +1687,12 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 // nothing accounting for the difference.
 func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 	s := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 0, EndMs: 2000, DurationMs: 45000, StartClamped: true, Fidelity: span.FidelityReported}
-	out := strings.Join(spanDetailLines(s, 60), "\n")
+	out := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 60), "\n")
 	if !strings.Contains(out, "clamped") {
 		t.Errorf("clamped span detail says nothing about its clamped start:\n%s", out)
 	}
 	unclamped := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 1000, EndMs: 2000, DurationMs: 1000, Fidelity: span.FidelityReported}
-	if out := strings.Join(spanDetailLines(unclamped, 60), "\n"); strings.Contains(out, "clamped") {
+	if out := strings.Join(spanDetailLines(unclamped, attrib.Attribution{}, false, 60), "\n"); strings.Contains(out, "clamped") {
 		t.Errorf("an unclamped span's detail claims a clamped start:\n%s", out)
 	}
 }
@@ -1633,7 +1712,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 	}
 	var widest string
 	for _, s := range l.UISpans {
-		for _, line := range spanDetailLines(s, hugeWidth) {
+		for _, line := range spanDetailLines(s, attrib.Attribution{}, false, hugeWidth) {
 			if lipgloss.Width(line) > lipgloss.Width(widest) {
 				widest = line
 			}
@@ -1674,7 +1753,7 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 	}
 
 	var addr string
-	for _, line := range spanDetailLines(ui, hugeWidth) {
+	for _, line := range spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth) {
 		if strings.HasPrefix(line, "Addr") {
 			addr = line
 		}
@@ -1702,8 +1781,13 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 // detailNaturalWidth is measured to fit.
 func reachableDetailLines(l *model.Log) []string {
 	var lines []string
-	for _, s := range l.RPCSpans {
-		lines = append(lines, spanDetailLines(s, hugeWidth)...)
+	hasContext := l.HasAddressContext()
+	for i, s := range l.RPCSpans {
+		var a attrib.Attribution
+		if i < len(l.Attribs) {
+			a = l.Attribs[i]
+		}
+		lines = append(lines, spanDetailLines(s, a, hasContext, hugeWidth)...)
 	}
 	for _, r := range append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...) {
 		for _, section := range rollupDetailSections(r.rollup, hugeWidth) {

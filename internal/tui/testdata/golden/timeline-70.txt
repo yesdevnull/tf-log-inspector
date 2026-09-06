@@ -2,10 +2,10 @@ tfli -- plan.log -- 3 RPC spans, 0 UI spans
 
 TIMELINE (rpc)                                   │ SPAN DETAIL        
 [7maws/1    [0m    ▒████████    ▒█████████████████████ │ RPC   ApplyResourc…
-google/1       ▒████████░                        │ Prov  …ashicorp/aws
-         0s                                 9.0s │ Dur   2.0s         
-busy 7.5s of 9.0s (83%)                          │                    
-waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2 │                    
+google/1       ▒████████░                        │ Type  aws_instance 
+         0s                                 9.0s │ Prov  …ashicorp/aws
+busy 7.5s of 9.0s (83%)                          │ Dur   2.0s         
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2 │ Res   no address c…
 nothing running, 0s–1.0s — before any call       │                    
                                                  │                    
                                                  │                    
