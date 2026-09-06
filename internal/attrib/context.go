@@ -68,9 +68,20 @@ type Context struct {
 // by glob. A glob over "apply_*" would admit apply_progress, which carries a
 // PARTIAL elapsed_seconds and must never terminate a context -- the same
 // guard span.isCompletionType applies when building durations.
+//
+// refresh_start/refresh_complete are Terraform's plan-time drift-detection
+// walk (PreRefresh/PostRefresh in hashicorp/terraform's
+// internal/command/views/hook_json.go), a different hook pair from
+// apply_start/apply_complete's action:"read" data-source read (PreApply with
+// plans.Read). Both are real; conflating them was a false claim this spec
+// carried until 2026-09-07 (see the spec's Address attribution section).
+// There is no refresh_errored: refresh closes only via refresh_complete, or
+// stays unclosed -- confirmed against hashicorp/terraform tag v1.14.9's
+// internal/command/views/json/message_types.go, which defines no such
+// constant.
 func opensContext(t string) bool {
 	switch t {
-	case "apply_start", "ephemeral_op_start", "provision_start":
+	case "apply_start", "refresh_start", "ephemeral_op_start", "provision_start":
 		return true
 	}
 	return false
@@ -79,6 +90,7 @@ func opensContext(t string) bool {
 func closesContext(t string) bool {
 	switch t {
 	case "apply_complete", "apply_errored",
+		"refresh_complete",
 		"ephemeral_op_complete", "ephemeral_op_errored",
 		"provision_complete", "provision_errored":
 		return true

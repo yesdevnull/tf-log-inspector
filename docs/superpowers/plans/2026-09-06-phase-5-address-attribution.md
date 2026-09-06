@@ -64,7 +64,9 @@ Builds the input half of attribution: a `logfmt.StructuredSink` that turns UI-ho
 
 Terraform's structured-output stream emits one JSON object per line with `@module":"terraform.ui"`. `logfmt.Scan` detects those lines and delivers their raw text to any sink implementing `StructuredSink`; a sink that does not implement it never sees the text, which is how the diagnostic report's disclosure guarantee stays true by construction. Your collector deliberately decodes only the keys listed below.
 
-**A refresh is `apply_start`/`apply_complete` with `action:"read"`.** There is no `refresh_*` hook type. This is confirmed against a real run and recorded in `testdata/structured-ui.log`'s header — read that header before writing the decoder.
+~~**A refresh is `apply_start`/`apply_complete` with `action:"read"`.** There is no `refresh_*` hook type. This is confirmed against a real run and recorded in `testdata/structured-ui.log`'s header — read that header before writing the decoder.~~
+
+**Corrected 2026-09-07: this was a false generalisation, caught by a later PR review.** `apply_start`/`apply_complete` with `action:"read"` is what a **data-source read** looks like (`PreApply` with `plans.Read`), confirmed against `testdata/structured-ui.log`'s header as before. A **managed-resource refresh** is a different hook pair, `refresh_start`/`refresh_complete`, verified against `hashicorp/terraform` tag `v1.14.9`'s `internal/command/views/json/message_types.go` and `hook_json.go`; it carries no `action` field at all. Both are real. See the spec's `### Address attribution` section for the full correction, and `internal/attrib/context.go`'s `opensContext`/`closesContext` for the implementation.
 
 - [ ] **Step 1: Write the fixture**
 

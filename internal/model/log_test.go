@@ -123,6 +123,34 @@ func TestLoadReportsAddressContextWithNoRPCSpans(t *testing.T) {
 	}
 }
 
+// C2: a capture killed mid-run -- every resource started, none finished --
+// has real context windows even though no pair ever completes. Gating on
+// CompletedPairs() reported no address context at all for a log that
+// plainly carries some.
+func TestLoadReportsAddressContextWhenNoContextHasClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "truncated.log")
+	const line = `{"@level":"info","@message":"aws_instance.a: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","hook":{"resource":{"addr":"aws_instance.a","module":"","resource":"aws_instance.a","implied_provider":"aws","resource_type":"aws_instance","resource_name":"a","resource_key":null},"action":"create"},"type":"apply_start"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(l.Contexts) == 0 {
+		t.Fatal("fixture produced no contexts; test premise requires at least one open context")
+	}
+	for _, c := range l.Contexts {
+		if !c.Unclosed {
+			t.Fatal("fixture produced a closed context; test premise requires every context to remain open")
+		}
+	}
+	if !l.HasAddressContext() {
+		t.Error("HasAddressContext = false, want true: an open (never-closed) context is still address context")
+	}
+}
+
 func TestLoadBuildsNoAttributionTableWithoutContext(t *testing.T) {
 	// A log with no terraform.ui stream has no address context at all, which
 	// is a property of the LOG. The table is not allocated rather than being

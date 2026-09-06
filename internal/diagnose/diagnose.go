@@ -448,9 +448,15 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	r.HookTypes = topN(typeCounts, len(typeCounts))
 	r.MalformedStructuredLines = cc.Malformed()
 	r.UnmatchedTerminators = cc.UnmatchedTerminators()
-	if cc.CompletedPairs() > 0 {
+	ctxs := cc.Contexts()
+	// The gate is whether any context was collected at all, not whether one
+	// has CLOSED: a context is appended the moment a _start hook is seen, so
+	// a capture killed mid-run -- every resource started, none finished --
+	// has real context windows despite zero completed pairs. Gating on
+	// CompletedPairs() here told a reader with exactly this kind of log to
+	// enable a stream their log already carries.
+	if len(ctxs) > 0 {
 		r.HasContext = true
-		ctxs := cc.Contexts()
 		r.Contexts = len(ctxs)
 		for _, ctx := range ctxs {
 			if ctx.Unclosed {
@@ -751,7 +757,17 @@ func (r Report) Render(w io.Writer) error {
 			fmt.Fprintf(b, "  terraform.ui context but no TRACE-level provider RPC\n")
 			fmt.Fprintf(b, "  entries, so nothing was measured\n")
 		} else {
-			fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
+			if r.Coverage.TotalMs == 0 {
+				// Every RPC span measured 0ms (e.g. a batch of genuinely
+				// instantaneous provider calls). NameableShare's
+				// TotalMs == 0 guard returns a plain 0 there, which would
+				// print identically to a real "nothing was nameable"
+				// measurement -- the same distinction !r.HasSpans already
+				// draws for "no spans at all", extended to its sibling case.
+				fmt.Fprintf(b, "  %-25s %s\n", "nameable share", "n/a (every span measured 0ms)")
+			} else {
+				fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
+			}
 			for _, c := range []attrib.Confidence{
 				attrib.Contained, attrib.Likely, attrib.Overlapping,
 				attrib.Ambiguous, attrib.Unattributed,

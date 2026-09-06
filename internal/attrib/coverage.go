@@ -4,10 +4,11 @@ import "github.com/yesdevnull/tf-log-inspector/internal/span"
 
 // confidenceCount is how many Confidence values there are. It is used with
 // the guard in Summarise to prevent out-of-range panic when indexing
-// ByConfidence and MsByConfidence. Drift is caught at test time by
-// TestConfidenceCountMatchesEnum, which ties the constant to the Confidence
-// enum in correlate.go.
-const confidenceCount = 5
+// ByConfidence and MsByConfidence. Tied to the Confidence enum in
+// correlate.go as a compile-time fact rather than a hand-copied number: this
+// breaks at build time if Contained ever stops being the highest-valued
+// Confidence.
+const confidenceCount = int(Contained) + 1
 
 // Coverage is the published distribution of attribution outcomes. It is what
 // --diagnose reports and what gates view 3, and it carries both a count and

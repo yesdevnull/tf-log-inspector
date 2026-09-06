@@ -135,14 +135,37 @@ func TestResourceTypeMustMatch(t *testing.T) {
 	}
 }
 
-// A zero-extent interval occupies no instant under [start, end) and so
-// overlaps nothing. Both directions are asserted: this is the boundary this
-// project has already had to pin once, for PeakConcurrency.
-func TestZeroExtentSpanOverlapsNothing(t *testing.T) {
+// C3: a genuinely instantaneous span (StartMs == EndMs, a real
+// tf_req_duration_ms == 0) is a real observation of an instant, not the
+// truncation artefact a zero-extent CONTEXT is -- so it must be tested by
+// point membership rather than excluded outright. A point plainly inside one
+// context's window is Contained: there is no weaker "overlaps but does not
+// contain" outcome for a single instant the way there is for an interval.
+func TestZeroDurationSpanInsideOneContextIsAttributed(t *testing.T) {
 	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 0, 1000)}
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 100)}, base, ctxs)
-	if got[0].Confidence != Unattributed {
-		t.Errorf("Confidence = %v, want Unattributed for a zero-extent span", got[0].Confidence)
+	if got[0].Confidence != Contained {
+		t.Errorf("Confidence = %v, want Contained for a zero-duration span inside one context", got[0].Confidence)
+	}
+	if got[0].Address != "aws_instance.a" {
+		t.Errorf("Address = %q, want aws_instance.a", got[0].Address)
+	}
+}
+
+// The sibling case: a zero-duration span whose instant falls inside TWO
+// candidate contexts is Ambiguous, the same as an interval span overlapping
+// several without uniquely containing the span.
+func TestZeroDurationSpanInsideTwoContextsIsAmbiguous(t *testing.T) {
+	ctxs := []Context{
+		ctx("aws_instance.a", "aws_instance", "read", 0, 1000),
+		ctx("aws_instance.b", "aws_instance", "read", 0, 1000),
+	}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 100)}, base, ctxs)
+	if got[0].Confidence != Ambiguous {
+		t.Errorf("Confidence = %v, want Ambiguous for a zero-duration span inside two contexts", got[0].Confidence)
+	}
+	if got[0].Address != "" {
+		t.Errorf("Address = %q, want empty -- Ambiguous must assert nothing", got[0].Address)
 	}
 }
 
@@ -151,6 +174,19 @@ func TestZeroExtentContextIsNeverACandidate(t *testing.T) {
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
 	if got[0].Confidence != Unattributed {
 		t.Errorf("Confidence = %v, want Unattributed for a zero-extent context", got[0].Confidence)
+	}
+}
+
+// A zero-extent CONTEXT is still never a candidate for a zero-duration SPAN
+// even when the two instants coincide -- the truncation-artefact exclusion
+// and the real-instant admission are two different rules and neither must
+// bleed into the other. pointOverlaps excludes this case with no separate
+// guard: see its own doc comment for why.
+func TestZeroExtentContextIsNeverACandidateForAZeroDurationSpanEither(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "read", 100, 100)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 100)}, base, ctxs)
+	if got[0].Confidence != Unattributed {
+		t.Errorf("Confidence = %v, want Unattributed -- a zero-extent context must not match even a coincident zero-duration span", got[0].Confidence)
 	}
 }
 
@@ -229,6 +265,23 @@ func TestOperationMustMatchWhereTheRPCIsMapped(t *testing.T) {
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
 	if got[0].Confidence != Unattributed {
 		t.Errorf("Confidence = %v, want Unattributed across differing operations", got[0].Confidence)
+	}
+}
+
+// C1: a refresh context carries no action at all (refresh_start/
+// refresh_complete have no action field -- see opensContext), which must
+// not exclude it as a candidate for a mapped RPC the way a real action
+// mismatch would. This is the mirror of TestUnmappedRPCMatchesAnyAction
+// below: that one declines to constrain on an unmapped RPC, this one
+// declines to constrain on an absent context action.
+func TestRefreshContextWithNoActionMatchesAnyRPC(t *testing.T) {
+	ctxs := []Context{ctx("aws_instance.a", "aws_instance", "", 0, 1000)}
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, ctxs)
+	if got[0].Confidence != Contained {
+		t.Errorf("Confidence = %v, want Contained -- an empty context action must not exclude a candidate", got[0].Confidence)
+	}
+	if got[0].Address != "aws_instance.a" {
+		t.Errorf("Address = %q, want aws_instance.a", got[0].Address)
 	}
 }
 

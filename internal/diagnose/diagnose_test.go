@@ -1315,6 +1315,56 @@ func TestReportCountsUnclosedAndZeroExtentContexts(t *testing.T) {
 	}
 }
 
+// C2: a capture killed mid-run has every resource STARTED and none
+// COMPLETED, so CompletedPairs() is 0 even though real context was
+// collected. Gating on CompletedPairs() reported "no address context in
+// this log" here and told the reader to enable a stream their log already
+// carries -- structuredHookLine alone (apply_start, never closed) is
+// exactly this shape.
+func TestReportRecognisesContextFromATruncatedCaptureWithNoCompletedPairs(t *testing.T) {
+	r := build(t, structuredVersionLine+"\n"+structuredHookLine+"\n")
+	if r.Contexts == 0 {
+		t.Fatal("fixture carries no contexts; this test proves nothing")
+	}
+	if !r.HasContext {
+		t.Errorf("HasContext = false, want true -- a truncated capture still carries context")
+	}
+
+	out := render(t, r)
+	if strings.Contains(out, "no address context in this log") {
+		t.Errorf("report claims no address context for a truncated capture that plainly has some:\n%s", out)
+	}
+}
+
+// I1: NameableShare's TotalMs == 0 guard returns a plain 0, which prints
+// identically to a genuine "nothing was nameable" 0.0% measurement. The
+// !r.HasSpans branch already distinguishes "no spans exist"; this is the
+// sibling case, "spans exist and every one of them measured 0ms".
+func TestReportDoesNotPrintAnUnmarkedZeroNameableShareWhenEverySpanIsZeroMs(t *testing.T) {
+	in := structuredVersionLine + "\n" + structuredHookLine + "\n" + completionHookLine + "\n" +
+		"2022-12-15T00:16:20.800Z [TRACE] provider.local: Received downstream response: tf_rpc=ReadDataSource tf_req_duration_ms=0\n"
+	r := build(t, in)
+	if !r.HasContext {
+		t.Fatal("fixture carries no address context; this test proves nothing")
+	}
+	if !r.HasSpans {
+		t.Fatal("HasSpans = false; this test proves nothing (needs at least one RPC span)")
+	}
+	if r.Coverage.TotalMs != 0 {
+		t.Fatalf("Coverage.TotalMs = %d, want 0 -- test premise requires every span to measure 0ms", r.Coverage.TotalMs)
+	}
+
+	out := render(t, r)
+	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
+	section = section[:strings.Index(section, "\n\n")]
+	if strings.Contains(section, "0.0%") {
+		t.Errorf("report renders an unmarked 0.0%% nameable share from a guarded 0/0:\n%s", section)
+	}
+	if !strings.Contains(section, "0ms") {
+		t.Errorf("report does not explain that every span measured 0ms:\n%s", section)
+	}
+}
+
 // A malformed structured line and an unmatched terminator are counted by
 // attrib.ContextCollector regardless of whether any pair ever completes, so
 // Build must read them unconditionally rather than only inside the

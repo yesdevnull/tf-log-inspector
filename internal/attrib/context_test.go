@@ -34,8 +34,8 @@ func collectLines(t *testing.T, content string) (*ContextCollector, []Context) {
 
 func TestCollectorPairsStartWithComplete(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
-	if len(ctxs) != 5 {
-		t.Fatalf("contexts = %d, want 5", len(ctxs))
+	if len(ctxs) != 6 {
+		t.Fatalf("contexts = %d, want 6", len(ctxs))
 	}
 	got := ctxs[0]
 	if got.Address != "data.local_file.a" {
@@ -58,16 +58,87 @@ func TestCollectorPairsStartWithComplete(t *testing.T) {
 	}
 }
 
-// A refresh is apply_start/apply_complete with action:"read" -- there is no
-// refresh_* hook type. Asserted here because an earlier design draft assumed
-// otherwise and the assumption reached a committed spec.
-func TestRefreshIsAnApplyPairWithReadAction(t *testing.T) {
+// A DATA SOURCE READ during apply is an apply_start/apply_complete pair with
+// action:"read" (PreApply with plans.Read, in hashicorp/terraform's
+// internal/command/views/hook_json.go) -- this is real, and distinct from a
+// MANAGED RESOURCE refresh, which is refresh_start/refresh_complete and
+// carries no action at all (see TestRefreshHookOpensAndClosesAContext). An
+// earlier design draft conflated the two and the mistake reached a
+// committed spec, corrected 2026-09-07.
+func TestDataSourceReadIsAnApplyPairWithReadAction(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
 	if ctxs[0].Action != "read" {
 		t.Fatalf("first context action = %q, want read", ctxs[0].Action)
 	}
+	if !ctxs[0].IsData {
+		t.Fatal("first context IsData = false, want true -- this test is about a data source read")
+	}
 	if !ctxs[0].End.After(ctxs[0].Start) {
-		t.Error("refresh produced no window")
+		t.Error("data source read produced no window")
+	}
+}
+
+// C1: a MANAGED RESOURCE refresh -- Terraform's plan-time drift-detection
+// walk -- is refresh_start/refresh_complete, verified against
+// hashicorp/terraform tag v1.14.9's
+// internal/command/views/json/message_types.go and hook_json.go. Unlike
+// apply_start's operationStart, refreshStart/refreshComplete carry no
+// action field at all, so Context.Action is "" for it.
+func TestRefreshHookOpensAndClosesAContext(t *testing.T) {
+	_, ctxs := collect(t, "testdata/context.log")
+	got := ctxs[5]
+	if got.Address != "aws_instance.tracked" {
+		t.Fatalf("Address = %q, want aws_instance.tracked", got.Address)
+	}
+	if got.ResourceType != "aws_instance" {
+		t.Errorf("ResourceType = %q, want aws_instance", got.ResourceType)
+	}
+	if got.Action != "" {
+		t.Errorf("Action = %q, want empty -- refresh_start/refresh_complete carry no action", got.Action)
+	}
+	if got.IsData {
+		t.Error("IsData = true, want false -- this is a managed resource")
+	}
+	if got.Unclosed {
+		t.Error("Unclosed = true, want false -- refresh_complete closed it")
+	}
+	if d := got.End.Sub(got.Start); d != 2*time.Second {
+		t.Errorf("window = %v, want 2s", d)
+	}
+}
+
+// I2: opensContext/closesContext's full vocabulary, asserted directly rather
+// than only through fixture behaviour -- deleting ephemeral_op_* or
+// provision_* from either switch left every package green before this
+// existed, and the same was true of refresh_* before C1.
+func TestOpensAndClosesContextRecogniseEveryLifecycleType(t *testing.T) {
+	tests := []struct {
+		typ    string
+		opens  bool
+		closes bool
+	}{
+		{"apply_start", true, false},
+		{"apply_progress", false, false},
+		{"apply_complete", false, true},
+		{"apply_errored", false, true},
+		{"refresh_start", true, false},
+		{"refresh_complete", false, true},
+		{"ephemeral_op_start", true, false},
+		{"ephemeral_op_complete", false, true},
+		{"ephemeral_op_errored", false, true},
+		{"provision_start", true, false},
+		{"provision_complete", false, true},
+		{"provision_errored", false, true},
+		{"version", false, false},
+		{"diagnostic", false, false},
+	}
+	for _, tt := range tests {
+		if got := opensContext(tt.typ); got != tt.opens {
+			t.Errorf("opensContext(%q) = %v, want %v", tt.typ, got, tt.opens)
+		}
+		if got := closesContext(tt.typ); got != tt.closes {
+			t.Errorf("closesContext(%q) = %v, want %v", tt.typ, got, tt.closes)
+		}
 	}
 }
 
@@ -130,30 +201,26 @@ func TestKeyDecodesToValidAddressBracketSyntaxForBothJSONKinds(t *testing.T) {
 
 func TestUnclosedContextEndsAtLastTimestamp(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
-	// Find the final unclosed orphan context (second orphan, opened at 09:15:12,
-	// unclosed at end-of-log which is 09:15:13 when aws_instance.final opens).
+	// Find the second orphan context, opened at 09:15:12 and never closed.
+	wantStart, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:12.000000+10:00")
 	var got Context
 	for _, c := range ctxs {
-		if c.Address == "aws_instance.orphan" && c.Start.Equal(c.End.Add(-time.Second)) {
+		if c.Address == "aws_instance.orphan" && c.Start.Equal(wantStart) {
 			got = c
 			break
 		}
 	}
 	if got.Address == "" {
-		t.Fatalf("no orphan context with End > Start found")
+		t.Fatalf("no orphan context starting at %v found", wantStart)
 	}
 	if !got.Unclosed {
 		t.Error("Unclosed = false, want true")
 	}
-	// The fixture now continues after the second orphan start at 09:15:12, so
-	// lastTS is 09:15:13. The unclosed orphan's End must equal that later timestamp.
-	wantStart, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:12.000000+10:00")
-	wantEnd, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:13.000000+10:00")
-	if !got.Start.Equal(wantStart) {
-		t.Errorf("Start = %v, want %v", got.Start, wantStart)
-	}
+	// The fixture's last line is aws_instance.tracked's refresh_complete at
+	// 09:15:16, so that is lastTS -- the unclosed orphan's End must equal it.
+	wantEnd, _ := time.Parse(time.RFC3339Nano, "2026-09-04T09:15:16.000000+10:00")
 	if !got.End.Equal(wantEnd) {
-		t.Errorf("End = %v, want %v (strictly later than Start)", got.End, wantEnd)
+		t.Errorf("End = %v, want %v (the log's last timestamp)", got.End, wantEnd)
 	}
 }
 
@@ -215,19 +282,21 @@ func TestZeroExtentContextsExcludesNormallyClosedContexts(t *testing.T) {
 
 func TestCompletedPairsCountsOnlyClosedContexts(t *testing.T) {
 	c, _ := collect(t, "testdata/context.log")
-	if got := c.CompletedPairs(); got != 2 {
-		t.Errorf("CompletedPairs = %d, want 2", got)
+	if got := c.CompletedPairs(); got != 3 {
+		t.Errorf("CompletedPairs = %d, want 3", got)
 	}
 }
 
 func TestTypeCountsHistogram(t *testing.T) {
 	c, _ := collect(t, "testdata/context.log")
 	want := map[string]uint64{
-		"version":        1,
-		"apply_start":    5,
-		"apply_complete": 2,
-		"apply_progress": 1,
-		"apply_errored":  1,
+		"version":          1,
+		"apply_start":      5,
+		"apply_complete":   2,
+		"apply_progress":   1,
+		"apply_errored":    1,
+		"refresh_start":    1,
+		"refresh_complete": 1,
 	}
 	got := c.TypeCounts()
 	for k, v := range want {
@@ -298,7 +367,7 @@ func TestDuplicateStartClosesAndReopens(t *testing.T) {
 		t.Errorf("first orphan End = %v, want %v (closed at second start)", first.End, wantEnd1)
 	}
 
-	// Second orphan: opened at 09:15:12, unclosed at end-of-log (09:15:13)
+	// Second orphan: opened at 09:15:12, unclosed at end-of-log (09:15:16)
 	second := orphans[1]
 	if !second.Unclosed {
 		t.Error("second orphan Unclosed = false, want true")

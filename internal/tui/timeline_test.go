@@ -482,10 +482,10 @@ func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 // Filter.SpansMatching), so a span after a REMOVED one shifts position while
 // m.log.Attribs stays indexed against the unfiltered slice. selectedDetail
 // resolves the selected timeline span's attribution through
-// attributionForEntry, keyed on span.Span.Entry rather than position,
-// specifically so this cannot happen; this pins that against a naive
-// positional lookup, which would misreport the span after the removed one
-// as carrying the removed span's own neighbour's attribution.
+// model.Log.AttributionForEntry, keyed on span.Span.Entry rather than
+// position, specifically so this cannot happen; this pins that against a
+// naive positional lookup, which would misreport the span after the removed
+// one as carrying the removed span's own neighbour's attribution.
 //
 // two-tier.log's RPCSpans are, in order: [0] PlanResourceChange, Ambiguous
 // (2 candidates); [1] ApplyResourceChange/aws_instance, Contained ("web");

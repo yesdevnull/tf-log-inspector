@@ -117,13 +117,16 @@ func detailNaturalWidth(l *model.Log) int {
 		spans = l.UISpans
 	}
 	hasContext := l.HasAddressContext()
-	for i, s := range spans {
+	for _, s := range spans {
 		// Attribs is parallel to RPCSpans only -- a UI-hook span's address is
 		// observed rather than inferred, so it carries none, and spanDetailLines
 		// never asks attributionFields about one anyway (see its Fidelity gate).
+		// Looked up by entry (model.Log.AttributionForEntry) rather than by
+		// position, the one supported way to do this lookup -- see its own
+		// doc comment for why a positional index is not safe in general.
 		var a attrib.Attribution
-		if !uiTier && i < len(l.Attribs) {
-			a = l.Attribs[i]
+		if !uiTier {
+			a = l.AttributionForEntry(s.Entry)
 		}
 		for _, line := range spanDetailLines(s, a, hasContext, hugeWidth) {
 			width = max(width, lipgloss.Width(line))
@@ -836,7 +839,7 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 	hasContext := m.log.HasAddressContext()
 	if m.view == ViewTimeline {
 		if s, ok := m.selectedTimelineSpanValue(); ok {
-			return spanDetailTitle, []detailSection{spanDetailLines(s, m.attributionForEntry(s.Entry), hasContext, w)}
+			return spanDetailTitle, []detailSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
 		}
 		return noSelectionTitle, nothing
 	}
@@ -845,42 +848,12 @@ func (m *Model) selectedDetail(w int) (string, []detailSection) {
 		return noSelectionTitle, nothing
 	}
 	if s, ok := m.spanForRow(r); ok {
-		var a attrib.Attribution
-		if r.spanIdx < len(m.log.Attribs) {
-			a = m.log.Attribs[r.spanIdx]
-		}
-		return spanDetailTitle, []detailSection{spanDetailLines(s, a, hasContext, w)}
+		return spanDetailTitle, []detailSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
 	}
 	if r.rollup != nil {
 		return rollupDetailTitle, rollupDetailSections(r.rollup, w)
 	}
 	return noSelectionTitle, nothing
-}
-
-// attributionForEntry finds the attribution recorded for the RPC span that
-// closed log entry `entry`, the same identifier jumpToSpan already trusts to
-// name a span uniquely. It exists because the timeline's selected span can
-// come from timelineSpans' FILTERED copy of m.log.RPCSpans (see
-// Filter.SpansMatching) whenever a facet selection is active, so the
-// position selectedTimelineSpanValue hands back no longer lines up with
-// Attribs' indexing into the unfiltered slice the way a table row's spanIdx
-// does (see callRows).
-//
-// logfmt.Scan feeds every sink from ONE shared ordinal counter, so Entry
-// values are unique log-wide, not per builder: each ordinal closes at most
-// one entry, and so at most one span, whichever tier built it. A UI-hook
-// span's Entry is therefore never equal to any m.log.RPCSpans[i].Entry --
-// its closing entry was a structured-output line, not an RPC-tier one -- so
-// passing one here simply finds nothing and returns the zero Attribution,
-// which spanDetailLines' Fidelity gate never asks about for a UI-hook span
-// in any case.
-func (m *Model) attributionForEntry(entry uint32) attrib.Attribution {
-	for i, s := range m.log.RPCSpans {
-		if s.Entry == entry && i < len(m.log.Attribs) {
-			return m.log.Attribs[i]
-		}
-	}
-	return attrib.Attribution{}
 }
 
 // detailCutMark is the last line of a detail pane that had more to show

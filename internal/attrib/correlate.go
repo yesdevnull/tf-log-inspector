@@ -97,8 +97,17 @@ var rpcActions = map[string][]string{
 	"ApplyResourceChange": {"create", "update", "delete"},
 }
 
-// actionMatches reports whether ctxAction is one this RPC can belong to.
+// actionMatches reports whether ctxAction is one this RPC can belong to. An
+// empty ctxAction -- a refresh context, whose hook carries no action field
+// at all (see opensContext) -- matches any RPC. This is the exact mirror of
+// the rule below it: an RPC absent from rpcActions matches any action.
+// Both decline to constrain a match on information the log does not carry,
+// rather than invent one -- asserting that a refresh means "read" would be
+// a mapping nothing in the log states, not an absence of one.
 func actionMatches(rpc, ctxAction string) bool {
+	if ctxAction == "" {
+		return true
+	}
 	allowed, mapped := rpcActions[rpc]
 	if !mapped {
 		return true
@@ -111,11 +120,34 @@ func actionMatches(rpc, ctxAction string) bool {
 // another empty interval at the same point. Both emptiness checks are
 // necessary: without them a zero-extent interval inside another would report
 // an overlap it does not have.
+//
+// This rejects an empty SPAN interval too, which is correct for a
+// zero-extent CONTEXT (a truncation artefact) but not for a genuinely
+// instantaneous RPC (a real sub-millisecond call, StartMs == EndMs): see
+// pointOverlaps and its use in correlateOne, which is what a degenerate span
+// is tested against instead of this function.
 func overlaps(aStart, aEnd, bStart, bEnd time.Time) bool {
 	if !aStart.Before(aEnd) || !bStart.Before(bEnd) {
 		return false
 	}
 	return aStart.Before(bEnd) && bStart.Before(aEnd)
+}
+
+// pointOverlaps reports whether the instant t falls inside a context's
+// half-open window [c.Start, c.End). It is the point-membership analogue of
+// overlaps, used only for a genuinely instantaneous span -- one whose
+// StartMs equals its EndMs, a real observation (tf_req_duration_ms == 0) and
+// not the truncation artefact a zero-extent CONTEXT is. overlaps excludes
+// every empty interval on either side; this exists so that exclusion does
+// not also fall on the span side, where it would wrongly discard an instant
+// that plainly happened.
+//
+// A zero-extent CONTEXT still matches nothing here, with no separate guard:
+// c.Start == c.End makes t.Before(c.End) and !t.Before(c.Start) mutually
+// exclusive, so the same rule that admits a real instant excludes the
+// truncation-artefact case too.
+func pointOverlaps(t time.Time, c *Context) bool {
+	return !t.Before(c.Start) && t.Before(c.End)
 }
 
 // contains reports whether the half-open interval [oStart, oEnd) encloses
@@ -165,6 +197,13 @@ func correlateOne(s span.Span, base time.Time, ctxs []Context) Attribution {
 		start = end.Add(-time.Millisecond)
 	}
 
+	// A genuinely instantaneous span -- StartMs == EndMs, a real
+	// tf_req_duration_ms == 0 -- is a real observation of an instant, not
+	// the truncation artefact a zero-extent CONTEXT is (see pointOverlaps).
+	// capped is excluded here because its start was already moved to
+	// end-1ms above, one millisecond before end, so it is never degenerate.
+	degenerate := !capped && !start.Before(end)
+
 	var (
 		n         uint32
 		lone      *Context
@@ -182,14 +221,27 @@ func correlateOne(s span.Span, base time.Time, ctxs []Context) Attribution {
 		if !actionMatches(s.RPC, c.Action) {
 			continue
 		}
-		if !overlaps(start, end, c.Start, c.End) {
+
+		var matched, contained bool
+		if degenerate {
+			matched = pointOverlaps(start, c)
+			// An instant that is a member of a context's window is,
+			// definitionally, contained by it -- there is no weaker
+			// "overlaps but does not contain" outcome for a single instant
+			// the way there is for an interval.
+			contained = matched
+		} else {
+			matched = overlaps(start, end, c.Start, c.End)
+			contained = matched && contains(c.Start, c.End, start, end)
+		}
+		if !matched {
 			continue
 		}
 		n++
 		if lone == nil {
 			lone = c
 		}
-		if contains(c.Start, c.End, start, end) {
+		if contained {
 			if container != nil {
 				multiple = true
 			}

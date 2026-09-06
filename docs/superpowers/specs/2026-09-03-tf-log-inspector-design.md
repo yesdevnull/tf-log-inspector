@@ -542,13 +542,38 @@ Address context is taken from hook `_start` and terminator lines, **not** from
 **Corrected 2026-09-06, and the correction matters because the original reason
 was false.** An earlier draft justified this by saying `UIHookBuilder` admits
 "no refresh types at all" and so would miss a plan's refresh work. That is
-wrong: **a refresh emits `apply_start`/`apply_complete` with `action:"read"`** —
+wrong: ~~a refresh emits `apply_start`/`apply_complete` with `action:"read"` —
 confirmed against a real run and recorded in `testdata/structured-ui.log`'s
 header. There is no `refresh_*` type; refresh coverage arrives under the
-`apply_*` name and is already inside `isCompletionType`. The same draft said the
-builder filters on `elapsed_seconds`; it filters on `isCompletionType` alone
-(`internal/span/uihook.go`) and emits a span with `DurationMs` 0 when elapsed is
-absent.
+`apply_*` name and is already inside `isCompletionType`.~~
+
+**Corrected 2026-09-07, and this correction matters too: refresh has its own
+hook type after all.** Verified against `hashicorp/terraform` at tag
+`v1.14.9`: `internal/command/views/json/message_types.go` defines
+`MessageRefreshStart = "refresh_start"` and
+`MessageRefreshComplete = "refresh_complete"`; `hook_json.go`'s
+`PreRefresh`/`PostRefresh` emit them from the plan's resource-refresh walk.
+There is no `refresh_errored` — refresh closes only via `refresh_complete`,
+or stays unclosed. Both structs use the same `ResourceAddr` shape
+`apply_start` uses, but unlike `operationStart` (which backs `apply_start`
+and carries `Action ChangeAction`), neither carries an `action` field at
+all.
+
+The `testdata/structured-ui.log` observation that started the 2026-09-06
+correction was real but over-generalised: `apply_start`/`apply_complete`
+with `action:"read"` is what a **data-source read** looks like (`PreApply`
+with `plans.Read`, a different code path), not a managed-resource refresh.
+Both behaviours are real and coexist. `internal/attrib/context.go`'s
+`opensContext`/`closesContext` now recognise `refresh_start`/
+`refresh_complete` too, and `actionMatches` treats a context with no
+`action` (every refresh context) as matching any RPC — the exact mirror of
+the existing rule that an RPC absent from `rpcActions` matches any action,
+not a new inferred mapping from refresh to "read".
+
+The same 2026-09-06 draft said the builder filters on `elapsed_seconds`; it
+filters on `isCompletionType` alone (`internal/span/uihook.go`) and emits a
+span with `DurationMs` 0 when elapsed is absent. That part of the
+2026-09-06 correction still holds.
 
 The three reasons that do hold:
 
@@ -567,9 +592,17 @@ mistake above:
 
 | Event | Types |
 |---|---|
-| Opens a context | `apply_start`, `ephemeral_op_start`, `provision_start` |
-| Closes it | `apply_complete`, `apply_errored`, `ephemeral_op_complete`, `ephemeral_op_errored`, `provision_complete`, `provision_errored` |
+| Opens a context | `apply_start`, `refresh_start`, `ephemeral_op_start`, `provision_start` |
+| Closes it | `apply_complete`, `apply_errored`, `refresh_complete`, `ephemeral_op_complete`, `ephemeral_op_errored`, `provision_complete`, `provision_errored` |
 | Neither | `apply_progress` and every non-hook type |
+
+**Added 2026-09-07:** `refresh_start`/`refresh_complete` were missing from
+this table entirely, a direct consequence of the false claim corrected
+above — every `ReadResource` RPC issued during a plan's drift-detection
+refresh walk got no address context and silently fell to `Unattributed`,
+typically the largest source of RPC volume in a plan against existing
+infrastructure. There is no `refresh_errored`, unlike the other three
+lifecycles.
 
 `apply_progress` carries a partial `elapsed_seconds` and must never close a
 context, the same guard `isCompletionType` already applies for durations.
@@ -699,10 +732,24 @@ table. Inference does not get to reuse observation's vocabulary. `Contained` and
 claims more than the geometry supports.
 
 **Zero-extent intervals.** Under `[start, end)` a zero-extent interval contains
-no instant and therefore overlaps nothing. A span with `tf_req_duration_ms=0` is
-`Unattributed`; a context whose start and terminator share a millisecond is never
-a candidate. Both are counted and reported rather than silently dropped — the
-same treatment `PeakConcurrency` needed for the same reason.
+no instant and therefore overlaps nothing. ~~A span with `tf_req_duration_ms=0`
+is `Unattributed`~~; a context whose start and terminator share a millisecond is
+never a candidate. Both are counted and reported rather than silently dropped —
+the same treatment `PeakConcurrency` needed for the same reason.
+
+**Corrected 2026-09-07: one rule was wrongly applied to two different
+things.** A zero-extent *context* is a truncation artefact — a resource
+still running when the capture was cut, so its start and the log's own last
+timestamp coincide — and must stay a non-candidate for anything, exactly as
+above. A zero-extent *span* is different: `tf_req_duration_ms=0` is a real
+observation of a genuinely instantaneous provider call, not an artefact, and
+excluding it outright meant a call that plainly fell inside exactly one
+context could never be attributed. `internal/attrib/correlate.go` now tests
+a degenerate span's single instant for point membership in each candidate
+context (`!start.Before(c.Start) && start.Before(c.End)`) instead of
+excluding it via the interval-overlap predicate. A zero-extent context is
+still never a candidate under this rule either, with no separate guard: its
+own `Start == End` makes the point-membership condition self-contradictory.
 
 **Clamped starts are excluded from containment.** `ReportedBuilder` clamps a
 span's start to zero when its duration exceeds the offset from the first
@@ -727,11 +774,22 @@ academic: under the old wording a context beginning exactly at `EndMs` would be 
 candidate, and under the implemented rule it is not. `--diagnose` already counts `ClampedSpans`, so the affected
 population is visible.
 
-**"Context source present"** means at least one context was successfully opened
-*and* closed — a completed pair. `span.Capabilities` gains a counter for it;
-`UIHookCompletions` does not serve, because it counts completion lines, which is
-`UIHookBuilder`'s precondition and not this one. Below one completed pair the
-verdict for every span is `No context`, and the attribution table is not
+~~**"Context source present"** means at least one context was successfully
+opened *and* closed — a completed pair.~~ **Corrected 2026-09-07, and the
+correction matters because this definition produced a real bug.** A context
+is appended to `ContextCollector` the moment a `_start` hook is seen, before
+it ever closes — so a capture killed mid-run, with every resource started
+and none finished, has real context windows despite zero completed pairs.
+Gating presence on `CompletedPairs() > 0` (both in `model.Log` and
+`--diagnose`) reported "no address context in this log" for such a capture,
+and told the reader to enable a stream their log demonstrably already
+carries. "Context source present" means **at least one context was
+collected at all** — `len(cc.Contexts()) > 0` — which `CompletedPairs()` and
+the unclosed-context count still report as the finer-grained figures
+alongside it. `span.Capabilities` gains a counter for it; `UIHookCompletions`
+does not serve, because it counts completion lines, which is
+`UIHookBuilder`'s precondition and not this one. Below one collected context
+the verdict for every span is `No context`, and the attribution table is not
 allocated at all.
 
 #### Ambiguity is never resolved by guessing

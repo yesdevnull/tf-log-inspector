@@ -83,14 +83,17 @@ func Load(path string) (*Log, error) {
 
 	rpcSpans := rb.Spans()
 	// Attribution runs only where there is something to correlate against.
-	// Below one completed context pair the answer for every span would be
-	// the same, and recording it per span would make a property of the LOG
-	// look like a property of each call.
+	// The gate is whether ANY context was collected, not whether one has
+	// CLOSED: a context is appended the moment a _start hook is seen, so a
+	// capture killed mid-run -- every resource started, none finished -- has
+	// real context windows despite zero completed pairs. Gating on
+	// CompletedPairs() here reported no context at all for a log that
+	// plainly carried some (see Log.HasAddressContext).
 	var (
 		ctxs    []attrib.Context
 		attribs []attrib.Attribution
 	)
-	if cc.CompletedPairs() > 0 {
+	if len(cc.Contexts()) > 0 {
 		ctxs = cc.Contexts()
 		attribs = attrib.Correlate(rpcSpans, stats.FirstTS, ctxs)
 	}
@@ -119,11 +122,35 @@ func (l *Log) Bytes(e logfmt.Entry) []byte {
 // the interface must not present in the same words.
 //
 // This tests Contexts, not Attribs. attrib.Correlate always allocates
-// make([]Attribution, len(spans)), so a log with completed context but zero
-// RPC spans (e.g. a plan with no provider calls at all) gets a non-nil,
-// zero-length Attribs -- len(Attribs) > 0 would wrongly report no context for
-// a log that plainly has some. Contexts is only ever populated under the same
-// CompletedPairs() > 0 gate in Load, and a completed pair guarantees at least
-// one entry in ContextCollector.Contexts(), so this reflects the log-level
-// property regardless of how many RPC spans exist to attribute.
+// make([]Attribution, len(spans)), so a log with context but zero RPC spans
+// (e.g. a plan with no provider calls at all) gets a non-nil, zero-length
+// Attribs -- len(Attribs) > 0 would wrongly report no context for a log that
+// plainly has some. Contexts is only ever populated under the same
+// len(cc.Contexts()) > 0 gate in Load, which requires no context to have
+// CLOSED: a context still open at end-of-log is real context too (see
+// Load's own comment), so this reflects the log-level property regardless
+// of how many RPC spans exist to attribute, or how many contexts finished.
 func (l *Log) HasAddressContext() bool { return len(l.Contexts) > 0 }
+
+// AttributionForEntry finds the attribution recorded for the RPC span that
+// closed log entry `entry`, the same identifier jumpToSpan already trusts to
+// name a span uniquely. It is the one supported way to look up a span's
+// Attribution: a lookup BY POSITION into Attribs is only safe against the
+// unfiltered RPCSpans it is parallel to, and a caller holding a filtered
+// copy (e.g. the TUI timeline's filtered slice) has no position that still
+// lines up -- so this is entry-keyed instead, which is safe against either.
+//
+// logfmt.Scan feeds every sink from ONE shared ordinal counter, so Entry
+// values are unique log-wide, not per builder: each ordinal closes at most
+// one entry, and so at most one span, whichever tier built it. A UI-hook
+// span's Entry is therefore never equal to any RPCSpans[i].Entry -- its
+// closing entry was a structured-output line, not an RPC-tier one -- so
+// passing one here simply finds nothing and returns the zero Attribution.
+func (l *Log) AttributionForEntry(entry uint32) attrib.Attribution {
+	for i, s := range l.RPCSpans {
+		if s.Entry == entry && i < len(l.Attribs) {
+			return l.Attribs[i]
+		}
+	}
+	return attrib.Attribution{}
+}
