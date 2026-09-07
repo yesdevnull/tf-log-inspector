@@ -2783,3 +2783,54 @@ func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
 		}
 	}
 }
+
+// The frame fills the terminal exactly, at every height. Not merely "no
+// taller than": a frame one line SHORT leaves a strip of dead terminal under
+// the footer, and one line too tall loses its topmost line -- the header
+// naming the open file -- off the top of the screen, since bubbletea's
+// renderer keeps only the last h lines of what View returns.
+//
+// This is the whole height budget in one assertion: frameFixedLines against
+// what the header, the caveat block, the blank above the footer and the
+// footer itself actually spend, and paneHeight against what the pane row
+// draws. Every one of those is a number that can only be checked by adding
+// it to the others.
+func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
+	for _, c := range wholeFrameCases(t) {
+		for _, w := range []int{160, 100, 70, 40} {
+			for h := 1; h <= 40; h++ {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
+				if n := len(strings.Split(m.View(), "\n")); n != h {
+					t.Errorf("%s at %dx%d: View() is %d lines\n%s", c.name, w, h, n, unstyled(m.View()))
+				}
+			}
+		}
+	}
+}
+
+// paneBodyHeight is what a pane's renderer is given, and framePanes is what
+// the row actually has room for. They are two statements of one rule --
+// content before chrome, on a row too short for both rules -- and nothing
+// but this holds them together. Out of step, a pane renders to a height the
+// row cannot show (content composed and then dropped, unmarked) or to fewer
+// lines than it has (a blank line where content should be).
+func TestPaneBodyHeightAgreesWithWhatTheRowShows(t *testing.T) {
+	// More body lines than any height under test, each one identifiable, so
+	// what the row shows is counted rather than inferred from blanks.
+	body := make([]string, 12)
+	for i := range body {
+		body[i] = fmt.Sprintf("line%d", i)
+	}
+	for h := 0; h <= len(body); h++ {
+		p := pane{title: "CALLS", content: strings.Join(body, "\n"), width: 20}
+		shown := 0
+		for _, ln := range strings.Split(unstyled(framePanes(h, p)), "\n") {
+			if strings.HasPrefix(ln, "line") {
+				shown++
+			}
+		}
+		if want := paneBodyHeight(h); shown != want {
+			t.Errorf("row of %d lines shows %d body lines, paneBodyHeight says %d", h, shown, want)
+		}
+	}
+}
