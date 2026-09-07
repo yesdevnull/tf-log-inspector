@@ -222,7 +222,7 @@ func (m Model) renderRawLog(w, h int) string {
 		// clamped inside the log (scrollRawLog), so with no filter active
 		// the only way to render nothing is a log with no entries at all.
 		if m.filterActive() {
-			return clipWidth(noMatchNote, w)
+			return styles.note.Render(clipWidth(noMatchNote, w))
 		}
 		return clipWidth("this log has no entries", w)
 	}

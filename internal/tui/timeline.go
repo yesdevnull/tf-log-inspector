@@ -593,7 +593,7 @@ func (m *Model) renderTimeline(w, h int) string {
 		return fitCaptureGuidance(w, h)
 	}
 	if len(spans) == 0 {
-		return clipWidth(noMatchNote, w)
+		return styles.note.Render(clipWidth(noMatchNote, w))
 	}
 
 	lanes := m.timelineLanes()

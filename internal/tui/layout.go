@@ -962,7 +962,7 @@ const (
 // that says it names no span: a degraded pane instead of a panic mid-frame
 // inside the alt screen.
 func (m *Model) selectedDetail(w int) (string, []paneSection) {
-	nothing := []paneSection{{clipWidth(noSelectionNote, w)}}
+	nothing := []paneSection{{styles.note.Render(clipWidth(noSelectionNote, w))}}
 	hasContext := m.log.HasAddressContext()
 	if m.view == ViewTimeline {
 		if s, ok := m.selectedTimelineSpanValue(); ok {

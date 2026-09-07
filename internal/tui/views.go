@@ -854,7 +854,7 @@ func renderTable(preamble []string, cols []column, sortCol int, data []row, empt
 	lines = append(lines, clipWidth(formatHeaderRow(headers, headerKinds(cols), widths, sortCol), w))
 
 	if len(data) == 0 {
-		lines = append(lines, clipWidth(emptyNote, w))
+		lines = append(lines, styles.note.Render(clipWidth(emptyNote, w)))
 	}
 	dataH := h - len(lines)
 	top, visible := scrollWindow(selected, len(data), dataH)

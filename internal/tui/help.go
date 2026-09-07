@@ -111,7 +111,7 @@ func renderHelp(w, h int) string {
 		// because fitPaneSections drops a group whole: a separator left
 		// outside would survive the group it separated and end the pane on
 		// a blank line.
-		lines := []string{"", clipWidth(g.title, w)}
+		lines := []string{"", styles.title.Render(clipWidth(g.title, w))}
 		for _, e := range g.entries {
 			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
 			// clipValueEnd rather than clipWidth, because what a cut takes
@@ -121,9 +121,19 @@ func renderHelp(w, h int) string {
 			// unconditional binding on the one screen a reader consults to
 			// learn what a key does, which is the opposite of what s does
 			// in the timeline and the raw log.
-			lines = append(lines, clipValueEnd("  "+e.keys+pad+helpKeyGap+e.what, w))
+			// The keys are accented and their descriptions left plain, the
+			// same division the footer makes: a reader on this screen is
+			// looking down the key column for the one they want, not
+			// reading the page as prose.
+			//
+			// The clip is applied to the styled line rather than to the
+			// text before it, because what the width budget has to hold is
+			// what reaches the screen -- and an escape sequence occupies
+			// none of it, which clipValueEnd measures correctly and a
+			// rune count would not.
+			lines = append(lines, clipValueEnd("  "+styles.key.Render(e.keys)+pad+helpKeyGap+e.what, w))
 		}
 		sections = append(sections, lines)
 	}
-	return strings.Join(fitPaneSections(clipWidth(helpTitle, w), sections, w, h), "\n")
+	return strings.Join(fitPaneSections(styles.title.Render(clipWidth(helpTitle, w)), sections, w, h), "\n")
 }

@@ -820,7 +820,7 @@ func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
 	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
 	m.invalidateRows()
-	if got := m.renderTimeline(80, 10); got != noMatchNote {
+	if got := unstyled(m.renderTimeline(80, 10)); got != noMatchNote {
 		t.Errorf("renderTimeline over a filter matching nothing = %q, want %q", got, noMatchNote)
 	}
 }

@@ -1,32 +1,32 @@
 [1;36mtfli -- x.log -- 3 RPC spans, 3 UI spans[0m
 
-KEYS
+[1;36mKEYS[0m
 
-VIEWS
-  1          providers
-  2          types
-  4          calls
-  5          timeline
-  6          raw log
+[1;36mVIEWS[0m
+  [36m1[0m          providers
+  [36m2[0m          types
+  [36m4[0m          calls
+  [36m5[0m          timeline
+  [36m6[0m          raw log
 
-THE LIST
-  ↑ ↓ j k    move the cursor in the focused pane
-  ← → h l    step within a timeline lane -- the footer's ↔
-  PgUp PgDn  page through the raw log
-  ⏎ Enter    open the selected call in the raw log
-  s          sort by the next column, in the table views
+[1;36mTHE LIST[0m
+  [36m↑ ↓ j k[0m    move the cursor in the focused pane
+  [36m← → h l[0m    step within a timeline lane -- the footer's ↔
+  [36mPgUp PgDn[0m  page through the raw log
+  [36m⏎ Enter[0m    open the selected call in the raw log
+  [36ms[0m          sort by the next column, in the table views
 
-FILTERING
-  ␣ Space    toggle the facet value under the cursor
-  f          show the facets and give them the keyboard
-  Esc        clear every active filter -- or close this help
-  /          search the raw log for a pattern
-  n N        step to the next or previous match
+[1;36mFILTERING[0m
+  [36m␣ Space[0m    toggle the facet value under the cursor
+  [36mf[0m          show the facets and give them the keyboard
+  [36mEsc[0m        clear every active filter -- or close this help
+  [36m/[0m          search the raw log for a pattern
+  [36mn N[0m        step to the next or previous match
 
-EVERYWHERE
-  ⇥ Tab      move focus between panes
-  ?          open or close this help (Esc closes it too)
-  q          quit
+[1;36mEVERYWHERE[0m
+  [36m⇥ Tab[0m      move focus between panes
+  [36m?[0m          open or close this help (Esc closes it too)
+  [36mq[0m          quit
 
 [36m?[0m close
 [36mq[0m quit
