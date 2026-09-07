@@ -1059,22 +1059,72 @@ arrives is the whole log parked on one line of itself, not the call. The
 model agreed — `Span.Entry` is *the entry that closed the span*, a span is
 built from that single line, and nothing bounds a call's extent in the log.
 
-**`tf_req_id` is what bounds it, and the capture says so.** The measurement
-above under *Verified log format facts* was taken for a different question
-and answers this one: `request entries 2174`, `correlated req ids 2174`,
-`spans built 2174`. Every response pairs with a request and every span's
-`tf_req_id` was also seen on a request entry, so on a real capture each call
-has at least two entries sharing its id, plus whatever provider traffic
-between them carries it. Scoping the raw log to that id is therefore a real
-set of lines rather than a synonym for the one entry `⏎` already lands on.
+**`tf_req_id` bounds it, and the capture sizes the bound.** A `--diagnose`
+run on 2026-09-07 over the standardised capture — 30,053,976 bytes, 46,403
+physical lines, 38,379 logical entries, 522.3s wall clock; the capture open
+question 8 recommends, and where its 2174-span figures are recorded — reports
+`req id fields 24370` beside `spans built 2174`. The mean scope is therefore
+**24370 ÷ 2174 = 11.21 entries per call**, and 24370 of that log's 34363
+`provider entries` carry the field: 70.9% of everything the providers wrote
+is attributable to a named call.
+
+**Those eleven entries are the answer to "what did this call do".** The same
+report's MESSAGE TEMPLATES section names the recurring shapes, and every one
+of these carries `tf_req_id`:
+
+| count | message template |
+|---|---|
+| 1581 | the four protocol lines — `Sending request downstream`, `Received request`, `Served request`, `Received downstream response` |
+| 1260 | `Value switched to prior value due to semantic equality logic` |
+| 1203 | `Found resource type` |
+| 1141 | `Found resource identity type` |
+| 900 | `Calling provider defined planmodifier.String` (and 900 `Called`) |
+| 791 | `Calling provider defined validator.String` (and 791 `Called`) |
+| 626 | `Checking ResourceTypes lock` |
+
+So a scope is not two protocol bookends with the reader's imagination in
+between. It is the provider's own work on that call — its validators, its
+plan modifiers, its schema and resource-identity lookups, its
+semantic-equality decisions — which is exactly the content `⏎` promises and
+today does not deliver.
+
+**What the 2174 triple does and does not license.** `response entries 2174`,
+`request entries 2174`, `correlated req ids 2174` and `spans built 2174` on
+their own license only "every call has a request line and a response line" —
+a two-entry scope. `CorrelatedReqIDs` increments once per RESPONSE entry
+whose id was already in the sniffer's request-side set, so it says nothing
+about traffic between the two; `req id fields` above is the figure that sizes
+the scope. The triple does establish
+two facts this design rests on. Every span's response entry carries its id on
+its HEADER line, because `Sniffer.Entry` reads `tf_req_id` out of the parsed
+header fields and 2174 responses correlated against 2174 spans built — so
+`Span.ReqID` is never lost to the header-only parse discussed below. And the
+request-side set is filled in scan order, so for all 2174 spans an entry
+carrying the same id appears EARLIER in the file than the response.
 
 **Data model.** `logfmt.Entry` gains `ReqID uint16` and `span.Span` the same,
-interned as `Entry.Comp` already is — empty string interns to 0, which is the
-"no request id" case and needs no separate flag. The scan parses fields on
-every header line already, so this costs one `Fields.Get` and one intern per
-entry, not a second pass. Continuation lines are not parsed for fields (see
-`--diagnose`'s own caveat), so an id appearing only on a continuation is not
-seen — the same limit every other field has.
+interned as `Entry.Comp` already is — the empty string interns to 0, which is
+the "no request id" case and needs no separate flag.
+
+The field's PLACE in the struct is part of the design, not a formatting
+detail. `Entry` is 24 bytes today with one byte of tail padding. `ReqID
+uint16` appended after `Timestamped` makes it 32, which would take the Sizing
+paragraph's ~190MB index for a 1GB log to ~254MB — a number that paragraph
+does not say and this feature has no claim on. Moving `Timestamped` up beside
+`Level` puts `ReqID` in the padding and the struct stays 24 bytes. The field
+order is therefore `Off, Len, TSms, Level, Timestamped, Comp, Lines, ReqID`,
+at offsets 0, 8, 12, 16, 17, 18, 20, 22, which leaves no tail padding at all;
+a test asserts `unsafe.Sizeof(Entry{}) == 24`, so the next field added to this
+struct cannot silently spend the resident memory Sizing is written against.
+Sizing itself needs no amendment, because nothing in it changes.
+
+`Scan` owns request-id interning and the sinks copy `Entry.ReqID` verbatim.
+Ids are comparable only within one `Interner`, and `ReportedBuilder` already
+holds a `Comps *logfmt.Interner` that would invite it to intern the id itself
+into a second space where it matches nothing. So the interner is passed in:
+`Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink)`. That is a public
+signature change across **33 call sites** — two in production
+(`cmd/tfli/main.go` and `model.Load`) and 31 in tests.
 
 Two properties of `logfmt.Interner` decide the shape here, and both cut
 against the obvious reading:
@@ -1091,31 +1141,199 @@ against the obvious reading:
   id and scoping to it would show a large set of unrelated calls that looks
   exactly like a working scope. **A span whose `ReqID` is `OverflowID` is
   therefore treated as carrying no request id at all**, and takes the
-  unscoped fallback below. Dan's capture interned 2174 ids, so this is a
-  guard against a workspace an order of magnitude larger, not a common path
-  — but it is the failure this tool can least afford, a plausible wrong
+  unscoped fallback below. The standardised capture interns 2174 ids, so this
+  is a guard against a workspace an order of magnitude larger, not a common
+  path — but it is the failure this tool can least afford, a plausible wrong
   answer rather than a visible absence.
 
-**Behaviour.**
+**Continuation-borne ids: a cost with a stated price and an unmeasured
+benefit.** `Scan` parses fields from header lines only — `--diagnose` prints
+`continuation lines not parsed for fields 8024` with exactly that caveat — so
+an id written on a continuation line is not seen. This is not quite the same
+limit every other field has: `tf_req_duration_ms` and `tf_rpc` are written on
+the short protocol header lines that never wrap, whereas `tf_req_id` also
+rides the provider's own wrapped output. `testdata/multiline-body.log` is
+that shape. Its `HTTP Response Received` entry carries `tf_req_id` on
+continuation line 5, alongside `http.duration=10705`, a 400 status and the
+error body; only lines 6 and 7 of that file are headers. A header-only scope
+omits that entry.
 
-- `⏎` on a call scopes the raw log to that call's `ReqID` and positions at the
-  TOP of the scope. Scoped, the call's first line exists: it is the request
-  entry. That is what makes `⏎` mean what it says.
-- `\` drops the scope and keeps the position, so the call's lines stay on
-  screen with the log around them.
-- `Esc` returns to the view `⏎` came from and drops the scope together. The
-  scope belongs to the jump that made it, so it is not a third meaning for
+**The entry's own bytes are not available at flush.** `Scan` streams an
+`io.Reader` through a `bufio.Reader`, and its continuation branch keeps only
+`cur.Len += raw` — the text is counted and discarded. That is what its
+"memory use is independent of input size" contract requires, and retaining an
+entry's bytes in order to search them once at flush would break the contract
+on precisely the entries this is about: a body dump is the largest entry in
+the log. Two mechanisms that do not break it:
+
+- **Inside `Scan`, per continuation line.** The continuation branch already
+  holds the line's text and `HasANSI` has already walked it, so one
+  `strings.Index(text, "tf_req_id=")` there — attempted only until the open
+  entry has an id — costs a second linear pass over the continuation bytes,
+  which the standardised capture measures at 3.9% of the file and 8024 of its
+  46,403 physical lines. It sees the id at scan time, which is what both the
+  entry index and `Span.ReqID` want. An id split across a physical line
+  boundary would still be missed; the scan is line-oriented throughout.
+- **After `Scan`, in `model.Load`.** `Log.Data` holds the whole file and
+  `Log.Bytes(e)` already returns an entry's full byte range, so a second pass
+  over the entries could search each one's continuations with no change to
+  `Scan` at all. The same bytes are read, but it runs after `ReportedBuilder`
+  has built its spans, so it needs a fix-up pass over those as well — and
+  `--diagnose`, which never builds a `Log`, gets nothing from it.
+
+**Neither is a precondition for the feature.** The scope is 11.21 entries per
+call from header lines alone. What continuation parsing buys is the entries
+whose id sits only on a continuation, and **how many those are is not
+measured**: `continuation lines not parsed for fields` counts the lines, not
+the ids on them.
+
+**Open question, unresolved: parse continuation lines for `tf_req_id`?** The
+recommendation is to measure before choosing — add a `--diagnose` counter for
+continuation lines carrying `tf_req_id=`, in the same change that adds
+`ResponseReqIDFields` below, ship the scope header-only, and take the
+in-`Scan` mechanism if that counter comes back non-trivial. It is the cheaper
+of the two and the only one that also improves `--diagnose`'s own tier
+reporting. What must not happen is the omission going unstated: a scope that
+silently drops a call's largest entry is the plausible-wrong-answer failure
+this tool is least able to afford, so until the counter exists the new
+fixture below carries a continuation-borne id and the tests say which
+behaviour is expected.
+
+**Behaviour: the scope is a sequence, not a predicate.**
+
+- `⏎` on a call MATERIALISES the scope — the indices of the entries whose
+  `ReqID` matches the call's, ascending, built by one walk over
+  `m.log.Entries` — and render, scroll and search iterate that rather than
+  the whole log. This is not an optimisation to defer. `renderRawLog`'s only
+  early exit is a full pane, so a scope that never fills the pane (eleven
+  entries against a pane of a dozen lines is the normal case for this
+  feature) would run `entryVisible` over every remaining entry on every
+  keystroke: 38,379 of them on the standardised capture, about 8 million at
+  the 1GB target Sizing is written against.
+- The facet filter still applies, per member. `entryVisible` is asked about
+  each entry the sequence yields, so the scope and the filter STACK rather
+  than one silently replacing the other. The filter is the reader's own.
+- `⏎` positions at the scope's first member with `topLine` 0, and does NOT
+  apply `jumpContextLines`. The scope already supplies what led to the call —
+  that is what it is for — and backing up three lines from the first member
+  would open the pane on lines outside the scope.
+- That first member is the earliest entry in the FILE carrying the id, which
+  is where the call's own traffic begins. It is not asserted to be the
+  request entry: the measurement establishes that an entry carrying the id
+  precedes the response, not that the request line is the first of them.
+- **The jump's refusal survives, asked of the SCOPE rather than of one
+  entry.** `jumpToSpan` refuses and sets `blockedJump` without switching view
+  when the filter hides its target, because the pane renders downward through
+  the filter and would otherwise show a different call's lines looking
+  exactly as though the jump had worked. Scoped, the equivalent question is
+  whether the filter admits any member at all: if it admits none the refusal
+  stands, reported in the footer over the view the reader pressed `⏎` in. If
+  it admits some, the jump proceeds to the first member it admits — the
+  response entry being hidden is no longer decisive, because it is no longer
+  the entry the pane opens on.
+- `\` drops the scope and leaves `top` and `topLine` where they are, so the
+  entry on the pane's first line stays on the pane's first line and the rest
+  of the log resumes beneath it. What PRECEDED it does not appear:
+  `renderRawLog` draws downward only, so unscoping reveals what follows the
+  position and never what comes before it, which is one scroll up away.
+- `\` is inert with no scope live, and inert outside the raw log, where there
+  is no scope to drop. It is added to `helpGroups`' THE LIST group.
+  `TestHelpDocumentsEveryKeyTheFooterAdvertises` cannot catch its omission:
+  that sweep reaches each view through its number key and never performs a
+  jump, so it never renders a footer with a scope live.
+- `Esc` returns to the view `⏎` came from and drops the scope with it. The
+  scope belongs to the jump that made it, so this is not a third meaning for
   `Esc` — it is part of the first.
-- The scope **stacks** with the facet filter rather than replacing it. The
-  filter is the reader's own and must not be silently ignored; a scope whose
-  lines the filter hides renders the existing "nothing matches the filter"
-  note.
-- Three cases carry no usable id and **fall back to the unscoped jump** `⏎`
-  does today: a UI-tier span, since `UIHookBuilder` reads Terraform's
-  structured stream rather than a provider's hclog output; an RPC span whose
-  response line carried no `tf_req_id` (`--diagnose` reports `req id fields`
-  against `spans built`, so a capture can say how many); and a span whose id
-  interned to `OverflowID`.
+- **`setView` drops the scope, exactly as it drops the return.** `setView`
+  clears `hasReturn` unconditionally, on the principle that reaching a view
+  by its own key is the reader saying where they want to be. The scope is
+  part of that same jump and must go the same way. Otherwise `⏎` then `1`
+  then `6` leaves a scoped raw log with no return behind it: `Esc` takes the
+  `clearFilters` branch and does not drop the scope, and only `\` gets the
+  reader out — a key they may never have pressed.
+
+**Saying so on screen.** Two places, because neither is enough alone.
+
+- The centre pane's title reads `RAW LOG (one call)` while a scope is live.
+  `centreTitle` already overrides the static title at render time so the
+  timeline can name its tier (`timelineTitle`), which makes the pane title
+  the established place for a pane to state what it is showing. `titledRule`
+  draws a name whole or not at all, so below 22 columns the pane goes unnamed
+  and the footer hint is what carries it.
+- The action line carries a `\` hint while a scope is live. The footer alone
+  would not do: `footer()` replaces the whole hint block in four states —
+  the help, a blocked jump, a search being typed, and a search that missed —
+  so the hint vanishes in some of the states a reader is most likely to be
+  stuck in.
+
+**Three empty-pane answers, not two.** `renderRawLog` chooses between
+`noMatchNote` ("nothing matches the filter -- Esc clears it") and
+`noEntriesNote` ("this log has no entries") on `filterActive()`, which reads
+only `excludedFacets`. Scoped, that is wrong twice over.
+
+- A scope drawing nothing gets a note of its own, naming the key that widens:
+  *nothing in this call matches the filter -- `\` shows the whole log*. A
+  scope is never empty of members — it is built from a span's own id and
+  holds at least that span's entry — so an empty scoped pane is always the
+  filter's doing, and `\` is a key the reader has and one that acts.
+- `noMatchNote`'s "Esc clears it" is false whenever a return is standing,
+  which is every raw log reached by `⏎`, scoped or on one of the fallback
+  jumps below — where it is false on main today. `Esc` returns first and
+  clears second, and the footer already says so (`escBackHint`). The note
+  asks the same `hasReturn` the footer asks, or the frame advertises a key
+  against what the rest of the same frame says about it.
+
+**This filter shape is one `entryVisible` argues against, and the argument
+has to be met.** Its doc comment says RPC and resource type are deliberately
+NOT applied to raw entries: they are properties "of one call, not of a log
+line", most lines around a call carry neither field, and "hiding every line
+outside the exact RPC boundary would hide precisely the context -- the
+provider's own surrounding output -- that jumping to a slow call exists to
+show". A `tf_req_id` scope is that shape by another field, and the first half
+of the rule holds against it unchanged: a request id is a property of a call.
+
+The rule turns on the second half, and there the two fields part. `tf_rpc`
+names a CATEGORY: unticking every RPC but `ReadDataSource` narrows every call
+in the log at once, standing filter state a reader set once and may never
+connect to what the pane is no longer showing. A request id names ONE call,
+is created by one keystroke on that call, is dropped by another, is spent by
+`Esc` and by `setView`, and is stated on the frame the whole time it is live.
+And where the doc comment's premise is that most lines carry no such field,
+`tf_req_id` is on 24370 of 34363 provider entries — 70.9%, measured.
+
+**The concession the rule earns.** 34363 − 24370 = 9993 provider entries
+carry no `tf_req_id` on their header line. A call that emitted any of them —
+a retry, a bare DEBUG line, an id that rides a continuation — has that output
+outside its scope, and that output is exactly the "provider's own surrounding
+output" the rule protects. The cost is real and is not designed away. It is
+why `\` exists, why the pane title says a scope is live, and why `⏎` is the
+only thing that ever creates one.
+
+**Three cases carry no usable id and fall back to the unscoped jump `⏎` does
+today**: a UI-tier span, since `UIHookBuilder` reads Terraform's structured
+stream rather than a provider's hclog output; an RPC span whose response
+entry carried no `tf_req_id`; and a span whose id interned to `OverflowID`.
+
+**`req id fields` cannot size the middle one.** `Caps.ReqIDFields` increments
+for EVERY entry carrying the field, with no `isResponse` gate — unlike
+`DurationFields` directly above it, which is gated and whose comment says
+why. Ungated is right for what it is used for above, the mean scope size, and
+useless for counting responses that carried no id. `--diagnose` gains a gated
+`ResponseReqIDFields` beside it. `response entries − correlated req ids` is
+not a substitute: it also counts responses whose id was never seen on a
+request.
+
+**`correlated req ids` has a ceiling this design must not read through.**
+`Sniffer` tracks request-side ids in a set capped at `maxTrackedReqIDs =
+4096`; past the cap further ids are not tracked and `CorrelatedReqIDs`
+under-reports. On a workspace carrying more than 4096 distinct request ids —
+the order-of-magnitude-larger case the `OverflowID` guard above is written
+for — the figure saturates and reads as though correlation had collapsed
+while scoping is in fact working. The standardised capture's 2174 sits well
+under the cap, so every figure quoted here is untainted. `--diagnose` marks
+the figure when the set hit the cap. The cap does not touch the scope itself:
+the scope reads `Entry.ReqID` out of the interner, whose ceiling is 65534,
+not out of the sniffer's set.
 
 **Consequences for what shipped on 2026-09-07.** `jumpContextLines` STAYS,
 and this is worth stating because the first draft of this section had it
@@ -1128,28 +1346,53 @@ Line scrolling stays load-bearing either way: a single HTTP response entry
 runs to dozens of lines, and scoping makes that entry the thing being read
 rather than something scrolled past.
 
-**Fixtures.** No fixture in `testdata/` carries a request and a response
-sharing a `tf_req_id`: each has one id per span, so every one of them would
-scope to a single entry and could not tell a working scope from a broken one.
-This needs a new synthesised fixture with the usual provenance header,
-carrying at least one call whose request line, intervening traffic and
-response line share an id, alongside another call's lines interleaved — the
-interleaving is the point, since a scope that merely took a contiguous run
-would pass against a fixture where calls do not overlap.
+**Fixtures.** `testdata/severity-levels.log` is the only fixture with a
+repeated `tf_req_id`: lines 10 and 18 share
+`1a2b3c4d-0000-4000-8000-000000000001` across a `Called downstream` and a
+`Received downstream response` seven lines apart, with the entries between
+them carrying no id at all. It is a two-entry scope. Every other fixture's
+ids are one per entry, so **no fixture puts an id on more than two entries,
+and none interleaves two calls**. `testdata/multiline-body.log` looks like a
+third id-bearing case and is not: its three `tf_req_id` values
+(`3544216***966`, `3544***7966`, `35442***66`) are three different redaction
+masks the reporter applied to one id, so they are three distinct strings that
+correlate to nothing.
 
-**Risks.** The `\` binding is free today. The scoped action line measures 66
-display columns against the 70 budget, with the facets hint kept. Neither is
-slack to spend twice.
+A new synthesised fixture is needed, with the usual provenance header, going
+beyond severity-levels.log in three ways. Intervening traffic that CARRIES
+the id, so a scope is more than its two bookends and a test can tell a
+working scope from one that found only the pair. A second call's lines
+INTERLEAVED with the first's, since a scope that merely took a contiguous run
+would pass against a fixture whose calls do not overlap. And one entry whose
+id sits on a CONTINUATION line, so the header-only limit above is visible in
+a test whichever way the open question is decided.
+
+**Budgets.** The `\` binding is free: `Update`'s key switch binds no
+backslash. The raw log's action line is `⇥ pane`, `␣ facet`, `f facets`,
+`/ search`, `Esc back`, `q quit` — no open hint, since the raw log has no
+rows, and no sort hint, since it has no table — which is 53 columns at
+`hintSep`'s two spaces. Adding `\ whole log` makes it **66**, against the 70
+columns `detailInlineWidth` gives it and
+`TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth` enforces. That test
+cannot see the scoped line today: it reaches each view by pressing its number
+key, which goes through `setView` and spends both the return and the scope,
+so what it measures is the unscoped line carrying `Esc clear`. A scoped case
+has to be added to it, or those four columns of slack are unguarded.
 
 ### Keys
 
-`⇥` cycle pane focus · `↑↓`/`jk` move · `space` toggle facet · `⏎` open selected
-span in the raw log at its byte offset · `s` cycle sort · `/` search · `Esc`
-clear filters · `?` help · `q` quit.
+`⇥` cycle pane focus · `↑↓`/`jk` move · `space` toggle facet · `⏎` open the
+selected call in the raw log · `s` cycle sort · `/` search · `Esc` leave an
+opened call, then clear filters · `?` help · `q` quit.
+
+**Shipped 2026-09-07:** `Esc` returns from an opened call before it clears
+the filters, and the footer names whichever of the two is live. `⏎` opens the
+raw log at the entry that CLOSED the call, with a few lines of what preceded
+it above (`jumpContextLines`), and refuses with a footer report rather than
+jumping when the active filter hides that entry.
 
 **Designed 2026-09-07, not yet built:** `\` drops a raw-log scope back to the
-whole log, and `Esc` returns from an opened call before it clears filters
-(see *Scoping the raw log to one call*).
+whole log (see *Scoping the raw log to one call*).
 
 **Added 2026-09-07, with `s`:** the sorted column is marked in the table
 header, in the direction its kind implies. That states the DEFAULT ranking
