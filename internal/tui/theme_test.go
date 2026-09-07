@@ -14,13 +14,17 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
-// themeUnderTest is the theme these tests exercise, built fresh rather than
-// read from the package-level `styles`: Run may have rebuilt that one for a
-// NO_COLOR terminal, and an invariant that held only when colour happened to
-// be on would be no invariant at all. Both settings get their own theme here
-// for the same reason.
-func themeUnderTest(colour bool) theme {
-	return newTheme(colour)
+// noForegroundSet fails t for any style still naming a colour. It is how
+// both vocabularies withhold one: not by changing the renderer's profile,
+// which would drop every attribute with it, but by leaving the foreground
+// unset.
+func noForegroundSet(t *testing.T, styles map[string]lipgloss.Style) {
+	t.Helper()
+	for name, style := range styles {
+		if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
+			t.Errorf("with colour off, style %s still sets foreground %#v", name, fg)
+		}
+	}
 }
 
 // A themed style may set colour and attributes. It may NOT set width,
@@ -35,13 +39,17 @@ func themeUnderTest(colour bool) theme {
 // depends on: it fails for a border, a padding, a Width() and for any later
 // lipgloss addition that happens to make text wider, without this test
 // having to enumerate them.
+// Every theme these tests exercise is built fresh rather than read from the
+// package-level `styles`: applyColourPreference may have rebuilt that one
+// for a NO_COLOR terminal, and an invariant that held only when colour
+// happened to be wanted would be no invariant at all.
 func TestEveryThemedStyleLeavesTheTextWidthUnchanged(t *testing.T) {
 	// An ASCII identifier, a double-width run, and the empty string: the
 	// last is what a blank scaffolding line hands the chrome style, and a
 	// style that padded it would fill blank space with colour.
 	samples := []string{"PROVIDERS", "duration▾", "日本語テスト", ""}
 	for _, colour := range []bool{true, false} {
-		for name, style := range themeUnderTest(colour).all() {
+		for name, style := range newTheme(colour).all() {
 			for _, s := range samples {
 				got, want := lipgloss.Width(style.Render(s)), lipgloss.Width(s)
 				if got != want {
@@ -62,7 +70,7 @@ func TestEveryThemedStyleLeavesTheTextWidthUnchanged(t *testing.T) {
 // than naming one, which is what lets those styles read correctly against a
 // theme this package never sees.
 func TestTheThemeUsesOneAccentColourAndNoOther(t *testing.T) {
-	for name, style := range themeUnderTest(true).all() {
+	for name, style := range newTheme(true).all() {
 		switch fg := style.GetForeground(); fg {
 		case lipgloss.NoColor{}, lipgloss.TerminalColor(accent):
 		default:
@@ -83,10 +91,7 @@ func TestTheThemeUsesOneAccentColourAndNoOther(t *testing.T) {
 // renderer's output, and styleRenderer's output is io.Discard. It would
 // silently return the dark variant on every terminal.
 func TestTheAccentIsAnANSIColourTheTerminalCanRemap(t *testing.T) {
-	switch accent {
-	case "0", "1", "2", "3", "4", "5", "6", "7",
-		"8", "9", "10", "11", "12", "13", "14", "15":
-	default:
+	if !ansiSlot(accent) {
 		t.Errorf("accent is %q, want one of the sixteen ANSI colours \"0\"-\"15\"", accent)
 	}
 }
@@ -102,12 +107,8 @@ func TestTheAccentIsAnANSIColourTheTerminalCanRemap(t *testing.T) {
 // reverse video and both weights along with the colour. Colour is withheld
 // here by not setting a foreground, which leaves every attribute intact.
 func TestColourOffKeepsTheAttributesThatCarryMeaning(t *testing.T) {
-	plain := themeUnderTest(false)
-	for name, style := range plain.all() {
-		if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
-			t.Errorf("with colour off, style %s still sets foreground %#v", name, fg)
-		}
-	}
+	plain := newTheme(false)
+	noForegroundSet(t, plain.all())
 
 	// The three attributes the interface's meaning rests on, each checked on
 	// the style that carries it.
@@ -314,11 +315,7 @@ func TestNoTwoAdjacentLaneColoursAreTheSameHue(t *testing.T) {
 // by the one property that does not depend on colour being wanted.
 func TestErrorStaysMarkedWithColourWithheld(t *testing.T) {
 	plain := newSemantics(false)
-	for name, style := range plain.colours() {
-		if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
-			t.Errorf("with colour off, style %s still sets foreground %#v", name, fg)
-		}
-	}
+	noForegroundSet(t, plain.colours())
 	if got := plain.levelError.Render("x"); !strings.Contains(got, "\x1b[1m") {
 		t.Errorf("with colour off, an ERROR line is drawn exactly like every other: %q", got)
 	}
