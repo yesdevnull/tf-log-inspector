@@ -364,10 +364,13 @@ func (m *Model) jumpTarget() (spans []span.Span, idx int, ok bool) {
 // reading the same sequence twice rather than matching label to label. It
 // then adds the two facts the table has no column for: how many distinct
 // resource types and RPC methods the provider's calls span, which are the
-// reason to look at the pane over a providers row at all. Every label is the
-// table header's own spelling, which is what the correspondence rests on: a
-// pane reading "Total" beside a column headed "total" invites the reader to
-// check whether they are the same figure.
+// reason to look at the pane over a providers row at all. Every label that
+// names a COLUMN is that column header's own spelling, which is what the
+// correspondence rests on: a pane reading "Total" beside a column headed
+// "total" invites the reader to check whether they are the same figure. The
+// two extra facts head no column, so they have no spelling to match --
+// TestEveryRollupPaneLabelThatNamesAColumnUsesItsHeader compares exactly
+// the ones that do.
 func providerRows(rpcSpans []span.Span) []row {
 	buckets := model.RollupBy(rpcSpans, func(s span.Span) string { return s.Provider })
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.Provider })

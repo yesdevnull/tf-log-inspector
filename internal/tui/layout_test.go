@@ -1635,13 +1635,11 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 				t.Errorf("height %d does not mark the cut on its last line:\n%s", h, strings.Join(lines, "\n"))
 			}
 		}
-		// Whatever the height, no label may survive without the value it
-		// heads. A field is two lines now, so the way that goes wrong is a
-		// pane ENDING on a label: a value line is indented, the cut mark
-		// says content was removed, and a bare label at the foot says
-		// neither -- it reads as a field the pane failed to fill in. It is
-		// how the group pane came to draw its slowest-call heading over a
-		// blank when slowestLines was taken by index.
+		// No label may survive without the value it heads. A field is two
+		// lines, so the way that goes wrong is a pane ENDING on a label: a
+		// value line is indented and moreBelowMark says content is below
+		// the fold, while a bare label at the foot says neither -- it reads
+		// as a field the pane failed to fill in.
 		for _, ln := range lines {
 			if strings.HasSuffix(ln, " ") {
 				t.Errorf("height %d left the padded line %q:\n%s", h, ln, strings.Join(lines, "\n"))
@@ -1975,7 +1973,8 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 // A clamped start is the one thing about a span that the timeline draws
 // WRONG -- anchored at column 0, with a length shorter than its own
 // duration -- so the pane describing the selected span has to say so.
-// Without it the pane reads "duration" over "45.0s" beside a three-second bar with
+// Without it the pane reads "duration" over "45.0s" beside a
+// three-second bar with
 // nothing accounting for the difference.
 func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 	s := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 0, EndMs: 2000, DurationMs: 45000, StartClamped: true, Fidelity: span.FidelityReported}
@@ -2011,7 +2010,8 @@ func detailValueFor(t *testing.T, lines []string, label string) string {
 // TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress covers a pane that
 // was never sized against the only per-resource identifier the UI tier has.
 // detailNaturalWidth measured spanDetailLines over l.RPCSpans alone, which
-// was complete while the address field was unreachable; the timeline now selects
+// was complete while the address field was unreachable; the timeline now
+// selects
 // UI-tier spans and renders it. On structured-ui.log the pane measured 25
 // columns and front-clipped every module path to its tail, so two distinct
 // modules' resources rendered as identical text -- with 135 columns of

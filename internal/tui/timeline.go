@@ -733,7 +733,7 @@ func laneCutMark(hidden int) string {
 // 160-column terminal gives it, where wrapping to the pane costs two.
 //
 // It is also kept SHORT for the same reason. The cause is stated once here
-// and in full by --profile and the detail pane's own Start field
+// and in full by --profile and the detail pane's own start field
 // (clampedStartValue); what this note owes the reader is that the bars they
 // are looking at are drawn somewhere the spans did not run.
 const clampedStartNote = "Note: a clamped start -- duration exceeding the offset from the log's start -- draws from 0, shorter than its duration."

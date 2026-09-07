@@ -11,7 +11,8 @@ import (
 
 // accent is the one colour this interface uses. Everything the eye should
 // find first -- a pane's title, the key in a footer hint, the header of the
-// sorted column -- wears it, and nothing else does. A second colour would
+// sorted column, the label heading a value in a detail pane -- wears it,
+// and nothing outside that list does. A second colour would
 // have to mean something, and there is no second thing to mean: the
 // interface's other distinctions are already carried by position and by
 // weight.
@@ -62,9 +63,10 @@ type theme struct {
 	// the two together.
 	sortedColumn lipgloss.Style
 	// chrome marks what is scaffolding for content rather than content
-	// itself -- the pane separators, and the facet pane's scrolled-header
-	// stand-in. Dimming is what turns a structural character into something
-	// the eye can skip rather than read.
+	// itself. The pane separators are its one use: dimming is what turns a
+	// structural character into something the eye can skip rather than
+	// read, and a separator is the only thing on the frame that is purely
+	// structural.
 	//
 	// Nothing a cursor bar can wrap is chrome, however much it looks like
 	// scaffolding. A facet's checkbox is the tempting case and the
@@ -73,17 +75,22 @@ type theme struct {
 	chrome lipgloss.Style
 	// fieldLabel marks the label heading a value in a detail pane, where the
 	// label sits on its own line above what it names (detailFieldLines).
-	// Accent over the dim weight, and it needs BOTH: the indent alone does
-	// not say which of two lines is the label, and colour is withheld by not
-	// setting a foreground (see newTheme), so an accent-only label would
-	// render byte-identical to its own value under NO_COLOR -- leaving the
-	// pane an undifferentiated column of lines for exactly the readers who
-	// cannot have the tint. Dimmed, it degrades to what the label column
-	// looked like when the label shared a line with its value.
+	// Accent over the dim weight, and it needs BOTH. Colour is withheld by
+	// not setting a foreground (see newTheme), so an accent-only label
+	// carries no treatment of its own under NO_COLOR -- exactly as its
+	// value does -- leaving those readers a column of lines distinguished
+	// by two columns of indentation alone. The dim weight is the signal
+	// that survives.
 	//
-	// It is quieter than title on purpose: a pane holds one title and eight
-	// or more labels, and labels that shouted as loudly as the heading above
-	// them would leave the pane with no hierarchy at all.
+	// It is quieter than title on purpose: a pane holds one title and as
+	// many as eight labels, and labels that shouted as loudly as the
+	// heading above them would leave the pane with no hierarchy at all.
+	//
+	// With colour withheld it renders identically to chrome. That is
+	// accepted rather than overlooked: the two never appear where a reader
+	// must tell them apart, a separator being a column of one character
+	// between panes, and there is no third attribute to spend -- bold is
+	// what title and columnHeader are told apart by.
 	fieldLabel lipgloss.Style
 	// key marks a keystroke where one is offered -- in a footer hint and in
 	// the help screen's key column -- leaving the words describing it plain.

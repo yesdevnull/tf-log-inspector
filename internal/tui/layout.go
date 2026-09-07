@@ -78,14 +78,15 @@ func facetNaturalWidth(facets []model.Facet) int {
 // or the view changes.
 //
 // It measures the rollup views' detail as well as each span's, because a
-// rollup line is routinely the widest the pane ever shows: a resource type
-// under the types view's ten-column label ("RPC calls") outruns a provider
-// address under the span detail's six ("Prov").
+// rollup can name something no span detail does. A resource type reported
+// by the UI tier alone reaches the pane through typeRows and through
+// nothing else: in a log carrying both tiers, the span loop below measures
+// the RPC spans, and no RPC span carries that type.
 //
 // The span tier it measures is the tier a selection can actually reach,
 // which timelineTierFor decides -- the same rule timelineSpans draws by, so
 // the two cannot disagree about which spans this pane will ever be asked to
-// describe. A UI-hook span's detail carries an Addr line (see
+// describe. A UI-hook span's detail carries an address field (see
 // spanDetailLines) that no RPC span has, and it is the widest line this
 // pane draws for a log whose only tier is that one: the timeline's cursor
 // selects such spans directly (selectedTimelineSpanValue), so measured off
@@ -551,6 +552,16 @@ const sortHint = "s sort"
 // there, leaving a frame with no timeline and no detail pane while the
 // terminal is still wide enough for both. In that state the keys are inert
 // as well, focus having moved to the facet pane.
+//
+// One working key is deliberately absent: o, which narrows a facet
+// dimension to the value under the cursor (soloFacetValue). This line is 70
+// columns in the calls and timeline views already, against a budget of 70
+// -- the narrowest terminal that draws three panes -- so a hint of its own
+// costs eight columns it does not have, and folding it into "␣ facet" costs
+// the one column that cuts "q quit" short. The rule the span hint sets is
+// that a key earns footer space when it is the ONLY route to something, and
+// o is not: space reaches the same state, slower. It is named in the help's
+// key table (see helpGroups), which is where a shortcut belongs.
 //
 // Each hint asks a predicate built on the same state its key handler reads
 // -- selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
@@ -1064,31 +1075,32 @@ func fitPaneSections(title string, sections []paneSection, w, h int) []string {
 // direct unit coverage of the formatting regardless of which caller reaches
 // it.
 //
-// Start appears only for a span whose start was forced to zero because its
-// reported duration exceeded its offset from the log's first entry
-// (span.Span.StartClamped). It sits directly under Dur because Dur is what
-// it qualifies: the timeline draws such a span from column 0 with a length
-// of EndMs, so the pane would otherwise read "Dur 45.0s" beside a
-// three-second bar with nothing accounting for the difference. It is prose
-// rather than an identifier and is told apart by its head, so it end-clips
-// (see columnKind).
+// The start field appears only for a span whose start was forced to zero
+// because its reported duration exceeded its offset from the log's first
+// entry (span.Span.StartClamped). It sits directly under duration because
+// duration is what it qualifies: the timeline draws such a span from column
+// 0 with a length of EndMs, so the pane would otherwise read "duration"
+// over "45.0s" beside a three-second bar with nothing accounting for the
+// difference. It is prose rather than an identifier and is told apart by
+// its head, so it end-clips (see columnKind).
 //
-// RPC, Type, Prov and Addr are all identifier values, and all four go
-// through clipIdentifierField, each clipped from the end its kind allows
-// (see columnKind): the same value clipped here, in the facet pane and in
-// the calls table is then clipped the same way and carries the same marker.
-// Type, Prov and Addr front-clip, so two resource types, providers or
-// addresses sharing a long prefix -- ".../hashicorp/azuread" and
-// ".../azurerm" -- do not both clip down to their identical shared head.
-// RPC end-clips, since it names one of a short, closed set of
-// plugin-protocol methods that share long suffixes and diverge within their
-// first few characters -- the same reasoning
+// RPC, resource type, provider and address are all identifier values, and
+// all four go through clipIdentifierField, each clipped from the end its
+// kind allows (see columnKind): the same value clipped here, in the facet
+// pane and in the calls table is then clipped the same way and carries the
+// same marker. Resource type, provider and address front-clip, so two
+// resource types, providers or addresses sharing a long prefix --
+// ".../hashicorp/azuread" and ".../azurerm" -- do not both clip down to
+// their identical shared head. RPC end-clips, since it names one of a
+// short, closed set of plugin-protocol methods that share long suffixes and
+// diverge within their first few characters -- the same reasoning
 // internal/profile.actionColWidth uses for its own closed-vocabulary action
-// column. Dur is a formatted number and is never long enough to need either
-// treatment.
+// column. Duration is a formatted number and is never long enough to need
+// either treatment.
 //
-// Type closes a standing gap between this pane and callColumns, which has
-// carried a resource-type column since the calls table existed: without it
+// The resource type field closes a standing gap between this pane and
+// callColumns, which has carried a resource-type column since the calls
+// table existed: without it
 // the pane showed less about the selected call than the row describing it.
 func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) []string {
 	fields := []detailField{
@@ -1138,7 +1150,7 @@ func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 	if a.IsData {
 		// Terraform's own address syntax puts "data." before the type, not
 		// the name -- but the resource type has its own field elsewhere in
-		// the pane (spanDetailLines' Type), and this Res field is the only
+		// the pane (spanDetailLines), and this resource field is the only
 		// place the name itself appears, so the prefix goes here instead.
 		// a.IsData rather than a prefix check on a.Address is what keeps
 		// this correct under a module: "data." sits after the module
@@ -1170,8 +1182,8 @@ const (
 	unattributedValue     = "not matched"
 )
 
-// clampedStartValue is what the detail pane puts under Start for a span
-// whose start was clamped. It states the clamp and the value it was clamped
+// clampedStartValue is what the detail pane puts under its start field for
+// a span whose start was clamped. It states the clamp and the value it was clamped
 // to, in --profile's own words ("has its start clamped to zero"), so a
 // reader who has seen the note --profile prints for the same spans
 // recognises this as the same finding rather than a second one.
@@ -1224,15 +1236,15 @@ func rollupDetailSections(d *rollupDetail, w int) []paneSection {
 }
 
 // slowestLines names the group's longest RPC-tier call, or states that the
-// group has none. It is a field like any other, so it is the same two lines
-// -- the heading, then the call beneath it -- and it is returned whole
-// rather than by index: taking one line of a two-line field is how the
-// heading came to stand over a blank.
+// group has none. It is a field like any other -- the heading, then the
+// call beneath it -- and both lines are returned together, so a caller
+// cannot draw the heading without what it heads.
 //
 // It names the call and stops there. The call's DURATION is by construction
-// the same number as the aggregate's Max ("RPC max" in the types view) two
-// lines above it -- model.RollupBy's MaxMs and groupRPCSpans' slowest run
-// over the same spans under the same key, so they cannot differ -- and one
+// the same number as the aggregate's max ("RPC max" in the types view),
+// which the same pane already carries a few lines up -- model.RollupBy's
+// MaxMs and groupRPCSpans' slowest run over the same spans under the same
+// key, so they cannot differ -- and one
 // figure shown twice under two labels invites the reader to treat them as
 // two independent measurements. Which RPC method it was is the fact this
 // line adds; the group's own identity is already the aggregate's first line.
@@ -1253,8 +1265,7 @@ func slowestLines(slowest *span.Span, w int) []string {
 // the label naming it. Two columns: enough that the pair reads as one unit
 // without colour -- which is the case that has to work, since NO_COLOR
 // leaves the label's accent off (see theme.fieldLabel) -- and cheap enough
-// that the value still gains four columns over the six-column label column
-// this replaced.
+// that a value keeps nearly the whole pane.
 const detailIndent = "  "
 
 // detailFieldLines lays fields out as a definition list: each label on its
@@ -1262,16 +1273,16 @@ const detailIndent = "  "
 // terminal columns.
 //
 // Two lines rather than one because the pane is capped at
-// maxDetailPaneWidth, and a label column spent six of those columns on every
-// line -- the columns a provider address needs for its registry host and a
-// resource type for its prefix. The value now has the pane less the indent,
-// so what used to clip at 34 columns clips at 38.
+// maxDetailPaneWidth, and a label column took columns from every line of
+// every block -- the columns a provider address needs for its registry host
+// and a resource type for its prefix. The value now has the pane less the
+// two-column indent, whatever its label, where before it had the pane less
+// a column as wide as the longest label its block carried.
 //
-// It costs height: a span with attribution runs to twelve lines or more
-// where it ran to six. A pane too short for that clips by line and marks the
-// cut (fitPaneSections), which is the trade -- a value cut in half says less
-// than a field the reader has to scroll for, and the fields most often cut
-// are the last ones, which are the inferred ones.
+// It costs height: a span with attribution runs to twelve lines or more. A
+// pane too short for that clips by line and says there is more below
+// (fitPaneSections), which is the trade -- a value cut in half says less
+// than a field the reader is told exists.
 //
 // Which end of an over-long value gives way is the field's KIND, routed
 // through the same clipIdentifierField and clipValueForKind the tables and
@@ -1295,9 +1306,15 @@ func detailFieldLines(fields []detailField, w int) []string {
 			f.value = model.FacetKey("")
 			f.kind = headIdentifierColumn
 		}
-		// The label is clipped and styled whole, the way a table's header
-		// cell is: a style wrapped around part of it would put escapes
-		// inside a value the frame is read for.
+		// The label is styled whole, the way a table's header cell is: a
+		// style wrapped around part of it would put escapes inside a value
+		// the frame is read for. It is held to width by clipWidth, which
+		// cuts without a marker -- unlike a value, which clips by its kind
+		// and is marked. That is sound only because labels are literals
+		// shorter than the pane's own floor: the longest is "resource
+		// types" at 14 columns against minDetailPaneWidth of 19, so no
+		// label can reach the cut. A label longer than that would shorten
+		// silently into something that still reads as a label.
 		lines = append(lines,
 			styles.fieldLabel.Render(clipWidth(f.label, w)),
 			clipIdentifierField(detailIndent, f.value, "", w, f.kind),

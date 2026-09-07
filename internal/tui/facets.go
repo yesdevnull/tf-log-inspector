@@ -270,18 +270,23 @@ func (m *Model) toggleFacetValue() {
 //
 // It exists because every value starts ticked (see Model.excludedFacets),
 // which makes narrowing to ONE value of a dimension cost a press of space
-// for every other value it offers -- nineteen of them on a real capture's
-// provider list. Space is still the way to hide one value; this is the way
-// to keep one.
+// for every OTHER value that dimension offers -- a count that grows with
+// the capture. Space is still the way to hide one value; this is the way to
+// keep one.
 //
 // Pressed again on a value that is already its dimension's only ticked one,
-// it puts the whole dimension back. The alternative undo is Esc, which
-// clears every dimension at once, so without this the price of soloing a
-// provider is whatever else the reader had narrowed. "Already soloed" is
-// compared against the exclusions this would write, not against a flag, so
-// a dimension the reader narrowed to one value with space alone is restored
-// by o just the same -- the two routes reach one state and o reads the
-// state, not how it was reached.
+// it puts the whole dimension back -- every value of it, including any the
+// reader had unticked with space before soloing. What it spares is the
+// OTHER dimensions, which Esc, the alternative undo, clears along with this
+// one.
+//
+// "Already soloed" is compared against the exclusions this would write, not
+// against a flag, so a dimension the reader narrowed to one value with
+// space alone is restored by o just the same -- the two routes reach one
+// state and o reads the state, not how it was reached.
+//
+// The write is a replacement, not an addition: soloing a value the reader
+// had unticked re-ticks it, which is what "show only this" has to mean.
 //
 // A dimension offering a single value has no others to untick, so soloing
 // it leaves the dimension unconstrained rather than holding an empty

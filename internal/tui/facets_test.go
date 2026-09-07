@@ -737,8 +737,8 @@ func TestSoloNarrowsADimensionToTheValueUnderTheCursor(t *testing.T) {
 
 // What the reader sees of it: one keystroke leaves the views showing the
 // cursor's value and nothing else. This is the whole point of the key --
-// every value starts ticked, so reaching one provider out of twenty
-// otherwise costs nineteen presses of space.
+// every value starts ticked, so reaching one provider otherwise costs a
+// press of space for every other provider the dimension offers.
 func TestSoloNarrowsTheViewsToTheCursorValue(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}) // the providers view: one row per provider

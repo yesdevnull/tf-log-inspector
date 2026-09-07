@@ -12,8 +12,8 @@ import (
 // It exists because the footer cannot be the answer. The footer's action
 // line reaches 70 columns and each hint is pared down to fit -- "␣ facet",
 // "↔ span" -- so it can say WHICH keys act on what is on screen but not
-// what any of them mean. And the keys it never names at all -- n and N, the
-// page keys, the arrows -- are only here.
+// what any of them mean. And the keys it never names at all -- o, n and N,
+// the page keys, the arrows -- are only here.
 
 // helpEntry is one binding: the keys that trigger it, and what it does.
 type helpEntry struct {
