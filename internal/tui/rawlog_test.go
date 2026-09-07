@@ -1048,3 +1048,57 @@ func TestScrollingUpIntoATallEntryArrivesAtItsEnd(t *testing.T) {
 		t.Errorf("scrolling up into the tall entry opens on %q, want its last line %q", strings.TrimSpace(body[0]), want)
 	}
 }
+
+// A search opens the matched entry at its OWN first line. The raw log's
+// position is a pair -- the entry at the top of the pane, and how many of
+// that entry's lines are scrolled off above it -- so a search that moved
+// only the entry left the line offset standing at wherever the reader had
+// scrolled to before they searched.
+//
+// Both ways that goes wrong are pinned here, because they look nothing
+// alike on screen. Against an entry TALLER than the stale offset the pane
+// opens partway down it, with the matched text above the top of the pane:
+// a result that is on screen but not where the reader is looking. Against a
+// SHORTER one -- most entries are a single line -- the offset is past the
+// entry's end, renderRawLog skips it, and the pane draws whatever comes
+// after it instead. Either way the footer reports a search that found
+// something over a pane that does not contain the pattern.
+//
+// It takes a fixture of mixed heights to see: where every entry is one
+// line the offset is always 0, and a search that fails to reset it cannot
+// be told from one that does.
+func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
+	const tall = 40
+	// Down one line of "first", then 24 into "tall" -- far enough in to be
+	// past the whole of the one-line entries the searches below match.
+	const into = 25
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"an entry taller than the offset", "tall head"},
+		{"an entry shorter than the offset", "last head"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := update(t, New(mixedHeightLog(tall), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+			for range into {
+				m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+			}
+			if got, want := rawLogBody(m, 80, 12), fmt.Sprintf("tall body line %03d", into-1); !strings.Contains(got[0], want) {
+				t.Fatalf("the scroll did not land inside the tall entry, so nothing here is scrolled off: pane opens on %q, want %q", strings.TrimSpace(got[0]), want)
+			}
+
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+			m = typeQuery(t, m, tc.query)
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			if got := footerOf(m.View()); strings.Contains(got, "not found") {
+				t.Fatalf("the fixture does not contain %q at all, so this test compares nothing", tc.query)
+			}
+			body := rawLogBody(m, 80, 12)
+			if !strings.Contains(body[0], tc.query) {
+				t.Errorf("a search reported as found for %q opens the pane on %q:\n%s", tc.query, strings.TrimSpace(body[0]), strings.Join(body, "\n"))
+			}
+		})
+	}
+}

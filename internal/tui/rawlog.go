@@ -469,7 +469,12 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 		var plain string
 		plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
 		if strings.Contains(plain, m.raw.lastQuery) {
-			m.raw.top = i
+			// The whole pair, since a position is a LINE: left at the
+			// offset the reader had scrolled to, a match on a shorter entry
+			// is skipped by renderRawLog altogether and one on a taller
+			// entry opens above the matched text -- a search reported as
+			// found over a pane that does not hold the pattern.
+			m.raw.top, m.raw.topLine = i, 0
 			return true
 		}
 	}
