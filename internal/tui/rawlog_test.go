@@ -1261,3 +1261,22 @@ func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
 		})
 	}
 }
+
+// A scope drawing nothing says so in its own words, naming the key that
+// widens. A scope is never empty of MEMBERS -- it is built from a span's own
+// id and holds at least that span's entry -- so an empty scoped pane is
+// always the filter's doing, and backslash is a key the reader has and one
+// that acts. "this log has no entries" would be false, and "Esc clears it"
+// names a key that returns before it clears.
+func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	// Exclude every level, so the scope's members are all hidden.
+	m.setFacetExclusions(dimLevel, map[string]bool{"TRACE": true, "DEBUG": true, "UNKNOWN": true})
+	m.invalidateRows()
+
+	got := unstyled(m.renderRawLog(200, 10))
+	if !strings.Contains(got, scopedEmptyNote) {
+		t.Errorf("an empty scoped pane says %q, want %q", got, scopedEmptyNote)
+	}
+}

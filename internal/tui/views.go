@@ -623,6 +623,23 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 // centre pane any supported width produces.
 const noMatchNote = "nothing matches the filter -- Esc clears it"
 
+// noMatchTail names whichever thing Esc will actually do, so a note and the
+// footer above it cannot advertise one key two ways.
+func (m Model) noMatchTail() string {
+	if m.hasReturn {
+		return "nothing matches the filter -- Esc goes back"
+	}
+	return noMatchNote
+}
+
+// scopedEmptyNote is what a scoped pane says when the filter hides every one
+// of the call's entries. A scope always HAS members -- it is built from a
+// span's own id and holds at least that span's entry -- so an empty scoped
+// pane is the filter's doing, never an empty log. It names backslash rather
+// than Esc because Esc returns before it clears, so the frame would
+// otherwise advertise a key against what its own footer says about it.
+const scopedEmptyNote = "nothing in this call matches the filter -- \\ shows the whole log"
+
 // noRowsNote is the same honesty for a view that has no rows to show with no
 // filter to blame: the providers and calls views of a log carrying UI-hook
 // spans only, say, where the answer really does live in another view.

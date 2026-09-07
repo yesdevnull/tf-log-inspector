@@ -3017,3 +3017,45 @@ func TestNeitherCaveatPromisesTheRankingsHold(t *testing.T) {
 		}
 	}
 }
+
+// The pane title carries the scope's SIZE, not merely that there is one. The
+// measured spread is min 4, median 7, max 1934 entries, so "one call" would
+// be the same words over a pane the reader can read in full and over one
+// holding eight per cent of the log's id-bearing lines.
+func TestAScopedRawLogNamesItsSize(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got, want := m.centreTitle(), "RAW LOG (4 entries)"; got != want {
+		t.Errorf("centreTitle = %q, want %q", got, want)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if got, want := m.centreTitle(), "RAW LOG"; got != want {
+		t.Errorf("centreTitle = %q after unscoping, want %q", got, want)
+	}
+}
+
+// The action line offers the key that widens, and only while there is
+// something to widen.
+func TestTheFooterOffersTheWideningKeyOnlyWhileScoped(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	if got := unstyled(m.footer(200)); strings.Contains(got, scopeHint) {
+		t.Errorf("the calls view offers %q:\n%s", scopeHint, got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := unstyled(m.footer(200)); !strings.Contains(got, scopeHint) {
+		t.Errorf("a scoped raw log does not offer %q:\n%s", scopeHint, got)
+	}
+}
+
+// The scoped action line fits its budget. The existing sweep reaches each
+// view by pressing its number key, which goes through setView and spends the
+// scope, so it measures the unscoped line and cannot see this one.
+func TestTheScopedActionLineFitsTheNarrowestThreePaneWidth(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	line := strings.Split(unstyled(m.footer(200)), "\n")
+	action := line[len(line)-1]
+	if got := lipgloss.Width(action); got > detailInlineWidth {
+		t.Errorf("the scoped action line is %d columns, over the %d budget: %q", got, detailInlineWidth, action)
+	}
+}

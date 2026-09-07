@@ -623,6 +623,9 @@ func (m *Model) actionKeys(w int) string {
 	if _, sortable := tables[m.view]; sortable && len(m.rows()) > 0 {
 		keys = append(keys, sortHint)
 	}
+	if m.raw.scope != nil {
+		keys = append(keys, scopeHint)
+	}
 	esc := escClearHint
 	if m.hasReturn {
 		esc = escBackHint
@@ -644,6 +647,11 @@ const (
 	escClearHint = "Esc clear"
 	escBackHint  = "Esc back"
 )
+
+// scopeHint offers the key that drops a raw-log scope. It is shown only
+// while a scope is live: a key advertised with nothing to act on is the
+// defect this package removes wherever it finds it.
+const scopeHint = "\\ whole log"
 
 // viewKeyHints is the hint group naming the number keys that switch views,
 // and the view each one switches to. It carries the help hint at its end as
@@ -958,10 +966,30 @@ func (m *Model) renderCentre(w, h int) string {
 // say. The detail pane's name is marked precisely because it has no cursor
 // (see pane.focused).
 func (m *Model) centreTitle() string {
+	if m.view == ViewRawLog && m.raw.scope != nil {
+		// The COUNT, not merely the fact. The measured spread is 4 to 1934
+		// entries, so a word like "one call" would read the same over a
+		// pane the reader can take in whole and over one holding a
+		// twentieth of the log. It is free: the scope is a slice.
+		return fmt.Sprintf("%s (%d %s)", viewTitle(ViewRawLog), len(m.raw.scope),
+			plural(uint64(len(m.raw.scope)), "entry", "entries"))
+	}
 	if m.view == ViewTimeline {
 		return m.timelineTitle()
 	}
 	return viewTitle(m.view)
+}
+
+// plural picks a suffix for n, so a count of one does not read as a count of
+// several. internal/diagnose carries the same function, but the two packages
+// share no utility layer -- one shared function is not a layer worth
+// building for -- so this is a deliberate duplicate rather than an import
+// across packages.
+func plural(n uint64, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // pane is one column of a composed pane row: its name, its rendered body,

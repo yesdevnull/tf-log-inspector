@@ -13,6 +13,7 @@
   [36mPgUp PgDn[0m  page through the raw log                                                               
   [36m⏎ Enter[0m    open the selected call in the raw log                                                  
   [36ms[0m          sort by the next column, in the table views                                            
+  [36m\[0m          show the whole log again, after opening a call                                         
                                                                                                     
 [1;36mFILTERING[0m                                                                                           
   [36m␣ Space[0m    untick the value under the cursor to hide it                                           
@@ -26,7 +27,6 @@
   [36m⇥ Tab[0m      move focus between panes                                                               
   [36m?[0m          open or close this help (Esc closes it too)                                            
   [36mq[0m          quit                                                                                   
-                                                                                                    
                                                                                                     
                                                                                                     
                                                                                                     

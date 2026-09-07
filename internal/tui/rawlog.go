@@ -420,8 +420,11 @@ func (m Model) renderRawLog(w, h int) string {
 		// would produce, so it says which it is. The raw log's top entry is
 		// clamped inside the log (scrollRawLog), so with no filter active
 		// the only way to render nothing is a log with no entries at all.
+		if m.raw.scope != nil {
+			return styles.note.Render(clipWidth(scopedEmptyNote, w))
+		}
 		if m.filterActive() {
-			return styles.note.Render(clipWidth(noMatchNote, w))
+			return styles.note.Render(clipWidth(m.noMatchTail(), w))
 		}
 		return styles.note.Render(clipWidth(noEntriesNote, w))
 	}

@@ -64,6 +64,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "PgUp PgDn", what: "page through the raw log"},
 			{keys: "⏎ Enter", what: "open the selected call in the raw log"},
 			{keys: "s", what: "sort by the next column, in the table views"},
+			{keys: "\\", what: "show the whole log again, after opening a call"},
 		}},
 		{title: "FILTERING", entries: []helpEntry{
 			{keys: "␣ Space", what: "untick the value under the cursor to hide it"},
