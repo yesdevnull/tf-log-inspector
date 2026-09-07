@@ -1,0 +1,22 @@
+# SYNTHESISED. Two provider calls whose log lines interleave, in the shape a
+# real capture takes when Terraform walks the graph concurrently. Written for
+# this repository; no line is copied from any capture.
+#
+# Call A: request id aaaaaaaa-0001-4a1b-8c2d-000000000001, five entries.
+# Call B: request id bbbbbbbb-0002-4a1b-8c2d-000000000002, three entries.
+# The two are INTERLEAVED, so a scope built by taking a contiguous run of
+# entries cannot pass. One entry of call A carries its id on a CONTINUATION
+# line only, so the header-only limit is visible in a test.
+#
+# The header carries no "key=value" text: fields are read by splitting on
+# whitespace, so a request id written as a field here would be read as one.
+2026-09-04T09:15:00.000+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Sending request downstream: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=aaaaaaaa-0001-4a1b-8c2d-000000000001 tf_resource_type=aws_subnet tf_rpc=ReadResource
+2026-09-04T09:15:00.100+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Sending request downstream: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=bbbbbbbb-0002-4a1b-8c2d-000000000002 tf_resource_type=aws_vpc tf_rpc=ReadResource
+2026-09-04T09:15:00.200+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Calling provider defined validator.String: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=aaaaaaaa-0001-4a1b-8c2d-000000000001 tf_resource_type=aws_subnet tf_rpc=ReadResource
+2026-09-04T09:15:00.300+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Calling provider defined validator.String: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=bbbbbbbb-0002-4a1b-8c2d-000000000002 tf_resource_type=aws_vpc tf_rpc=ReadResource
+2026-09-04T09:15:00.400+1000 [DEBUG] provider.terraform-provider-aws_v4.46.0_x5: HTTP Response Received: @module=aws aws.operation=DescribeSubnets
+  http.response.body= {"subnets":[]}
+  http.duration=140 tf_req_id=aaaaaaaa-0001-4a1b-8c2d-000000000001
+2026-09-04T09:15:00.500+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Found resource type: tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_id=aaaaaaaa-0001-4a1b-8c2d-000000000001 tf_resource_type=aws_subnet tf_rpc=ReadResource
+2026-09-04T09:15:00.600+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=600 tf_req_id=aaaaaaaa-0001-4a1b-8c2d-000000000001 tf_resource_type=aws_subnet tf_rpc=ReadResource
+2026-09-04T09:15:00.700+1000 [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=600 tf_req_id=bbbbbbbb-0002-4a1b-8c2d-000000000002 tf_resource_type=aws_vpc tf_rpc=ReadResource

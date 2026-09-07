@@ -1,8 +1,11 @@
 package logfmt
 
 import (
+	"bytes"
 	"math"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -619,5 +622,44 @@ func TestScanInternsRequestIds(t *testing.T) {
 	// were shared.
 	if got := comps.Lookup(c.entries[0].ReqID); got == "abc123" {
 		t.Errorf("the request id was interned into the component interner")
+	}
+}
+
+// The interleaved fixture is what makes a scope testable, and this pins the
+// three properties later tasks rely on: two calls, their entries
+// interleaved, and one id readable only from a continuation.
+//
+// A fixture whose calls did not overlap would let a scope that took a
+// contiguous RUN of entries pass, which is the defect most likely to be
+// written by accident.
+func TestInterleavedFixtureHasTwoOverlappingCalls(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "interleaved-calls.log"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var comps, reqIDs Interner
+	var c collector
+	st, err := Scan(bytes.NewReader(data), &comps, &reqIDs, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	const a = "aaaaaaaa-0001-4a1b-8c2d-000000000001"
+	const b = "bbbbbbbb-0002-4a1b-8c2d-000000000002"
+	var seq []string
+	for _, e := range c.entries {
+		seq = append(seq, reqIDs.Lookup(e.ReqID))
+	}
+	// Nine entries, not eight: the header comment block is untimestamped, and
+	// Scan indexes interleaved non-hclog content rather than discarding it,
+	// so it is entry 0 and carries no request id. The HTTP entry's id is on a
+	// continuation and so also reads as "" -- the header-only limit the scope
+	// ships with.
+	want := []string{"", a, b, a, b, "", a, a, b}
+	if !slices.Equal(seq, want) {
+		t.Errorf("entry request ids = %v,\nwant                  %v", seq, want)
+	}
+	if got := st.ContinuationOnlyReqIDEntries; got != 1 {
+		t.Errorf("ContinuationOnlyReqIDEntries = %d, want 1 -- the fixture must carry one id on a continuation", got)
 	}
 }
