@@ -1039,3 +1039,26 @@ func TestTheFacetCountColumnIsMeasuredAcrossEveryDimension(t *testing.T) {
 		t.Errorf("a four-digit count elsewhere in the pane costs the clipped value %d columns, want %d:\n%q against %q", got, want, wide, narrow)
 	}
 }
+
+// The pane's natural width has to hold the widest value AND the widest
+// count, the two now sitting in columns of their own. Measured without the
+// count column it comes out narrower than the lines it exists to fit, and
+// every value is clipped by however many digits the widest count has beyond
+// one -- with terminal width to spare, and nothing on screen saying why.
+func TestTheFacetPaneNaturalWidthHoldsTheWidestCountToo(t *testing.T) {
+	m := Model{facets: []model.Facet{{Name: dimType, Values: []model.FacetValue{
+		{Value: "aws_instance", Count: 2326},
+		{Value: "aws_subnet", Count: 4},
+	}}}}
+	w := facetNaturalWidth(m.facets)
+	// Line 0 is the dimension heading; the rest are values.
+	lines := unstyledLines(strings.Split(m.renderFacets(w, 20), "\n")[1:])
+	for _, ln := range lines {
+		if strings.Contains(ln, "…") {
+			t.Errorf("a value is clipped at the pane's own natural width of %d:\n%s", w, strings.Join(lines, "\n"))
+		}
+	}
+	if !strings.HasSuffix(lines[0], "2326") {
+		t.Errorf("the widest count did not survive at the natural width: %q", lines[0])
+	}
+}
