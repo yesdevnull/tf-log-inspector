@@ -748,6 +748,14 @@ func centrePaneOf(view string) string {
 	return strings.Join(centre, "\n")
 }
 
+// footerText is m.footer with the theme's escapes stripped. The footer's
+// tests are about what it SAYS -- which hints are offered, which are left
+// out, how wide the line runs -- and every one of those questions is asked
+// of the text. The styling has its own tests, over the frame.
+func (m *Model) footerText(w int) string {
+	return unstyled(m.footer(w))
+}
+
 // unstyled strips the theme's escape sequences from a rendered frame, so
 // the helpers that take a frame apart can find the structural strings they
 // split on.
@@ -762,14 +770,6 @@ func centrePaneOf(view string) string {
 // Tests about the styling itself must not go through these helpers: they
 // assert on what renderFacets, renderList and renderDetail return directly,
 // which is where the escapes still are.
-// footerText is m.footer with the theme's escapes stripped. The footer's
-// tests are about what it SAYS -- which hints are offered, which are left
-// out, how wide the line runs -- and every one of those questions is asked
-// of the text. The styling has its own tests, over the frame.
-func (m *Model) footerText(w int) string {
-	return unstyled(m.footer(w))
-}
-
 func unstyled(s string) string {
 	plain, _ := logfmt.StripANSI(s, nil)
 	return plain

@@ -1123,3 +1123,33 @@ func TestTheSortIsRememberedPerViewAcrossASwitch(t *testing.T) {
 		t.Errorf("the types view came back without its marker %q:\n%s", marker, header)
 	}
 }
+
+// The sorted column's header is styled as ONE cell, name and marker
+// together, and this is what says so. Styled as two runs -- weight on the
+// name, accent on the glyph -- escape sequences land between "duration" and
+// its "▾", and nothing reading the frame can find the two together.
+//
+// It matters because the marker is how a reader learns which column the
+// sort is on, and every other assertion about it runs through a helper that
+// strips the styling first, so none of them can see the split. The goldens
+// would catch it, but a golden is regenerated with -update, and this is not.
+//
+// Asserted on renderTable's own output rather than on a frame, because a
+// frame is what the stripping helpers take apart.
+func TestTheSortedHeaderKeepsItsNameAndItsMarkerTogether(t *testing.T) {
+	cols := []column{
+		{header: "resource type", kind: tailIdentifierColumn},
+		{header: "n", kind: numericColumn},
+	}
+	data := []row{rollupRow([]string{"registry.terraform.io/hashicorp/aws", "1"}, []uint64{0, 1}, nil)}
+
+	// Wide enough that nothing is clipped: a clipped header would break the
+	// two apart for a reason this test is not about.
+	header := strings.Split(renderTable(nil, cols, 0, data, "", -1, true, 60, 10), "\n")[0]
+	if !strings.Contains(unstyled(header), sortAscMark) {
+		t.Fatalf("the header carries no sort marker, so there is nothing here to keep together: %q", header)
+	}
+	if want := cols[0].header + sortAscMark; !strings.Contains(header, want) {
+		t.Errorf("the rendered header does not carry %q as one run -- the name and its marker have been styled apart: %q", want, header)
+	}
+}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 // themeUnderTest is the theme these tests exercise, built fresh rather than
-// read from the package-level `theme`: Run may have rebuilt that one for a
+// read from the package-level `styles`: Run may have rebuilt that one for a
 // NO_COLOR terminal, and an invariant that held only when colour happened to
 // be on would be no invariant at all. Both settings get their own theme here
 // for the same reason.
@@ -202,13 +203,10 @@ func countUnbrokenBars(t *testing.T, line, name string, w int) int {
 			}
 			at += i + len(open)
 			found++
-			// The unfocused opener contains the focused one as a prefix, so
-			// a run found under "\x1b[7m" may really be "\x1b[7;2m" -- the
-			// rest of ITS opener is not a nested style.
+			// The two openers cannot be confused for one another: they end
+			// on different bytes, so "\x1b[7m" does not occur inside
+			// "\x1b[7;2m" and each match is a bar of its own kind.
 			rest := line[at:]
-			if strings.HasPrefix(rest, ";2m") {
-				continue
-			}
 			if next := strings.Index(rest, "\x1b["); next >= 0 && !strings.HasPrefix(rest[next:], "\x1b[0m") {
 				t.Errorf("%s at %d columns: a cursor bar is interrupted by a nested style before its own reset, so it stops being reversed partway along the row: %q",
 					name, w, line)
@@ -216,4 +214,20 @@ func countUnbrokenBars(t *testing.T, line, name string, w int) int {
 		}
 	}
 	return found
+}
+
+// A style the theme holds but all() does not name escapes every invariant
+// the tests above hold -- it can resize its argument, or bring a second
+// colour into a vocabulary that has exactly one, and no test here would
+// see it. all() says to keep the two in step; this is what makes that
+// more than a request.
+//
+// Counting fields is enough and needs no unsafe access to their values:
+// the map is keyed by name, so a field added without a matching entry
+// changes the count whatever the entry is called.
+func TestEveryStyleTheThemeHoldsIsNamedInAll(t *testing.T) {
+	got, want := len(newTheme(true).all()), reflect.TypeOf(theme{}).NumField()
+	if got != want {
+		t.Errorf("all() names %d styles but theme has %d fields -- a style missing from all() is checked by nothing above", got, want)
+	}
 }
