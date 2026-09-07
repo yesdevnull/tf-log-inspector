@@ -554,7 +554,15 @@ func facetValueLine(check, value string, count, countWidth, w int, kind columnKi
 		}
 		return padRight(clipWidth(prefix+clipValueForKind(value, head-facetCheckboxWidth, kind), head), head) + digits
 	}
-	cell := padRight(clipValueForKind(value, avail, kind), avail)
+	// The cell is held to EXACTLY avail columns from both directions --
+	// clipped down, padded up -- rather than trusting the kind to have
+	// clipped it. What rests on that is the count: the closing clipWidth
+	// below cuts from the END, so a cell even one column over its share
+	// takes the cut out of the count, which is the one thing this function
+	// promises never to drop. clipValueForKind returns a numericColumn
+	// value untouched, so the guarantee has to be made here and not assumed
+	// from the kinds facetValueKind happens to return today.
+	cell := padRight(clipWidth(clipValueForKind(value, avail, kind), avail), avail)
 	return clipWidth(prefix+cell+facetCountGap+padLeft(strconv.Itoa(count), countWidth), w)
 }
 

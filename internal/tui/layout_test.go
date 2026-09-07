@@ -2744,7 +2744,14 @@ func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 	// By position, not by a search of the whole rule: three names present in
 	// any order satisfies a Contains sweep, and two panes wearing each
 	// other's name is a worse frame than one pane wearing none.
-	if got, want := paneTitlesOf(t, m.View()), []string{facetPaneTitle, "CALLS", spanDetailTitle}; !slices.Equal(got, want) {
+	//
+	// Spelled out rather than read back from facetPaneTitle and
+	// spanDetailTitle. Compared against the constants, this asserts that the
+	// rule carries whatever they happen to say -- emptying one leaves "" on
+	// both sides and the test passes, which leaves the names themselves held
+	// by the goldens alone, and a golden's failure is answered by
+	// regenerating it.
+	if got, want := paneTitlesOf(t, m.View()), []string{"FILTERS", "CALLS", "SPAN DETAIL"}; !slices.Equal(got, want) {
 		t.Errorf("top rule names %q, want %q", got, want)
 	}
 }
