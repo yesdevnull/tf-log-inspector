@@ -142,11 +142,7 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 // Without a visible cursor, space's "toggle whatever the cursor points at"
 // is unusable -- the user cannot tell what they are about to untick.
 // two-providers.log's provider values are sorted alphabetically (aws, then
-// google), so the cursor starts on the aws value and one j moves it onto
-// google. Unticking there must remove GOOGLE's row and leave aws's: a space
-// that acted on the cursor's value and a space that acted on the dimension's
-// first value both leave one row, and only the row's identity tells them
-// apart.
+// google), so the cursor starts on the aws value.
 func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
 	m := focusFacets(t, New(testLog(t, "two-providers.log"), "x.log"))
 	out := m.renderFacets(50, 20)
@@ -166,9 +162,11 @@ func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
 
 // The facet cursor must actually move, and space must act on whatever it
 // currently points at -- not always the first value of the first dimension.
-// two-providers.log's provider dimension has two values sorted alphabetically
-// (aws, then google), so moving down once and toggling must select google,
-// not aws.
+// two-providers.log's provider dimension has two values sorted
+// alphabetically (aws, then google), so moving down once and unticking must
+// hide GOOGLE and leave aws. The surviving row's identity is what carries
+// this: a space that acted on the cursor's value and a space that acted on
+// the dimension's first value both leave exactly one row.
 func TestFacetCursorMovesAndSpaceTogglesValueUnderCursor(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	// The providers view is what makes one row per provider, which is what
@@ -628,6 +626,29 @@ func TestUntickingAFacetValueHidesExactlyItsAdvertisedCount(t *testing.T) {
 	}
 	if !sawNone {
 		t.Fatalf("fixture assumption changed: no %q value in any dimension, so the case that broke is not covered", model.FacetKey(""))
+	}
+}
+
+// Unticking the LEVEL dimension's every value must empty the raw log, the
+// one pane that dimension reaches (see levelFacet). The level allow-list
+// travels through allowedLevels, which rebuilds it as logfmt.Level keys, and
+// a rebuild that reports "no opinion" whenever it is handed nothing to
+// rebuild would answer the reader's last untick by putting the whole log
+// back on screen -- the very failure the ticked-by-default pane is arranged
+// to avoid, reappearing at the one tier that translates its own keys.
+//
+// provider-rpc.log is narrowed rather than the raw log scrolled, because at
+// the top of the log its UNKNOWN comment header is itself an entry: the
+// dimension has to be emptied for nothing to be left.
+func TestUntickingEveryLevelEmptiesTheRawLog(t *testing.T) {
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	if before := m.renderRawLog(200, 40); strings.Contains(before, noMatchNote) {
+		t.Fatalf("the unfiltered raw log already reports an empty filter, so this asserts nothing:\n%s", before)
+	}
+	showOnly(t, &m, dimLevel)
+
+	if got := m.renderRawLog(200, 40); !strings.Contains(got, noMatchNote) {
+		t.Errorf("every level unticked still draws log entries:\n%s", got)
 	}
 }
 
