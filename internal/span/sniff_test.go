@@ -235,27 +235,33 @@ func TestSnifferCorrelationCapBounded(t *testing.T) {
 func TestSnifferReportsTheSpreadOfEntriesPerRequestID(t *testing.T) {
 	var comps logfmt.Interner
 	s := NewSniffer(&comps)
-	// Three calls: one entry, three entries, five entries.
-	for id, n := range map[string]int{"one": 1, "three": 3, "five": 5} {
-		for range n {
-			s.Entry(0, logfmt.Entry{}, "anything at all", logfmt.ParseFields("tf_req_id="+id, nil))
+	// Thirteen calls carrying 1..13 entries each. The width is the point:
+	// the figures are read off a SORTED copy of the counts, and Go
+	// randomises map iteration, so a handful of ids would let an unsorted
+	// read agree by luck often enough to make this test flaky rather than
+	// wrong. Across thirteen it cannot.
+	const calls = 13
+	for id := 1; id <= calls; id++ {
+		for range id {
+			s.Entry(0, logfmt.Entry{}, "anything at all", logfmt.ParseFields(fmt.Sprintf("tf_req_id=id%d", id), nil))
 		}
 	}
 	c := s.Report()
-	if got, want := c.DistinctReqIDs, uint64(3); got != want {
+	if got, want := c.DistinctReqIDs, uint64(calls); got != want {
 		t.Errorf("DistinctReqIDs = %d, want %d", got, want)
 	}
 	if got, want := c.MinEntriesPerReqID, uint64(1); got != want {
 		t.Errorf("MinEntriesPerReqID = %d, want %d", got, want)
 	}
-	if got, want := c.MedianEntriesPerReqID, uint64(3); got != want {
+	// Thirteen counts, so the middle one is the seventh.
+	if got, want := c.MedianEntriesPerReqID, uint64(7); got != want {
 		t.Errorf("MedianEntriesPerReqID = %d, want %d", got, want)
 	}
-	if got, want := c.MaxEntriesPerReqID, uint64(5); got != want {
+	if got, want := c.MaxEntriesPerReqID, uint64(calls); got != want {
 		t.Errorf("MaxEntriesPerReqID = %d, want %d", got, want)
 	}
 	if c.ReqIDTrackingFull {
-		t.Errorf("ReqIDTrackingFull on a log of three ids")
+		t.Errorf("ReqIDTrackingFull on a log of %d ids", calls)
 	}
 }
 
