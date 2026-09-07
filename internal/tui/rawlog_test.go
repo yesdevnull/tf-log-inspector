@@ -1280,3 +1280,34 @@ func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
 		t.Errorf("an empty scoped pane says %q, want %q", got, scopedEmptyNote)
 	}
 }
+
+// A UI-hook span's ReqID is always 0 (span.uihook.go), and ScopeFor answers
+// id 0 with nil (see its own doc comment), so jumping in from a UI-tier
+// timeline span leaves hasReturn standing with no scope to name. That empty
+// pane still owes its "Esc" claim the truth: Esc there goes back to the
+// timeline rather than clearing the filter, so the pane must say "goes
+// back" and not the ordinary noMatchNote's "clears it", which would be
+// false over exactly this pane.
+func TestAnEmptyUnscopedPaneReachedFromTheTimelineNamesEscsReturn(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("view = %v after Enter from the timeline, want ViewRawLog", m.view)
+	}
+	if m.raw.scope != nil {
+		t.Fatalf("the jumped-to span carries a scope, so this test does not reach the branch it names")
+	}
+	if !m.hasReturn {
+		t.Fatalf("the jump left no return, so this test does not reach the branch it names")
+	}
+	showOnly(t, &m, dimLevel)
+
+	got := unstyled(m.renderRawLog(200, 10))
+	if !strings.Contains(got, "Esc goes back") {
+		t.Errorf("an empty pane reached from the timeline says %q, want it to name %q", got, "Esc goes back")
+	}
+	if strings.Contains(got, noMatchNote) {
+		t.Errorf("an empty pane reached from the timeline says %q, which falsely claims %q", got, "Esc clears it")
+	}
+}

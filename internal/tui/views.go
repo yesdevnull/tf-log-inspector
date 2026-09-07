@@ -638,6 +638,12 @@ func (m Model) noMatchTail() string {
 // pane is the filter's doing, never an empty log. It names backslash rather
 // than Esc because Esc returns before it clears, so the frame would
 // otherwise advertise a key against what its own footer says about it.
+//
+// At 64 columns it does not survive the narrowest supported pane the way
+// noMatchNote's 43 does: clipWidth cuts it from the end, so a 60-column
+// pane loses the trailing " log" and reads "...shows the whole". The key
+// itself sits at column 44, well inside the cut, so the one thing this note
+// exists to name is never the part that goes missing.
 const scopedEmptyNote = "nothing in this call matches the filter -- \\ shows the whole log"
 
 // noRowsNote is the same honesty for a view that has no rows to show with no
