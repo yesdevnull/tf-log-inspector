@@ -674,14 +674,25 @@ const minPaneRowHeight = 2
 // something rather than an empty pane, and View then trims the surplus out
 // from ABOVE its footer.
 func paneHeight(h, caveatLines, footerLines int) int {
-	block := 0
-	if caveatLines > 0 {
-		block = caveatLines + 1
-	}
-	if paneH := h - frameFixedLines - footerLines - block; paneH > 0 {
+	if paneH := h - frameFixedLines - footerLines - caveatBlockLines(caveatLines); paneH > 0 {
 		return paneH
 	}
 	return 1
+}
+
+// caveatBlockLines is what n lines of caveat cost a frame: the lines
+// themselves plus the blank separating them from the pane row, and nothing
+// at all when there is no caveat to separate.
+//
+// It is named because two callers need it and they must not disagree --
+// paneHeight, budgeting the pane row against it, and loggingCaveat, deciding
+// which caveat there is room for. Spelled out at the second of those it
+// reads "+1+1", two ones that are different things.
+func caveatBlockLines(n int) int {
+	if n == 0 {
+		return 0
+	}
+	return n + 1
 }
 
 // fullLoggingCaveat states that every duration this interface renders was
@@ -720,13 +731,12 @@ const shortLoggingCaveat = "Durations measured under logging: only rankings tran
 // must survive a short terminal.
 func loggingCaveat(h, footerLines int) []string {
 	// Each bound is frameFixedLines and the footer, plus the least a pane
-	// row can be worth drawing at, plus the caveat block: the caveat's own
-	// lines and the blank above them.
+	// row can be worth drawing at, plus what that caveat's own block costs.
 	fixed := frameFixedLines + footerLines + minPaneRowHeight
 	switch {
-	case h >= fixed+len(fullLoggingCaveat)+1:
+	case h >= fixed+caveatBlockLines(len(fullLoggingCaveat)):
 		return fullLoggingCaveat
-	case h >= fixed+1+1:
+	case h >= fixed+caveatBlockLines(1):
 		return []string{shortLoggingCaveat}
 	default:
 		return nil
@@ -922,6 +932,12 @@ func (m *Model) centreTitle() string {
 // body a line. A pane renderer therefore returns its body ALONE, and the
 // title travels beside it.
 //
+// title must arrive UNSTYLED, the same contract cursorBar carries and for
+// the same reason: titledRule draws it in reverse video where the pane has
+// the keyboard, and reverse video ends at the first reset inside what it
+// wraps -- so a title carrying styling of its own would light up as far as
+// its first escape and no further.
+//
 // focused is read only by the detail pane, the one pane with no cursor row
 // of its own to mark. The other panes answer Tab with their cursor bars.
 type pane struct {
@@ -944,20 +960,25 @@ type pane struct {
 // rule, which is pure scaffolding and is the first thing dropped. A two-line
 // row is therefore a named rule and one line of content, not two rules and
 // nothing between them.
+//
+// How many lines that leaves the body is paneBodyHeight's to say, and this
+// asks it rather than working it out again: the same number is handed to
+// every pane's renderer (see renderPanes), and a rule stated in two places
+// is a rule that holds by test rather than by construction.
 func framePanes(h int, panes ...pane) string {
 	if h <= 0 {
 		return ""
 	}
-	rows := []string{topRule(panes)}
+	top := topRule(panes)
+	// A one-line row is the top rule alone, and it returns HERE rather than
+	// falling through with a body of zero lines: joinPanes(0) is the empty
+	// string, which strings.Split turns into one empty line, and the row
+	// would come back a line taller than it was asked for.
 	if h == 1 {
-		return rows[0]
+		return top
 	}
-	bodyH, bottom := h-1, false
+	rows := append([]string{top}, strings.Split(joinPanes(paneBodyHeight(h), panes...), "\n")...)
 	if h >= 3 {
-		bodyH, bottom = h-2, true
-	}
-	rows = append(rows, strings.Split(joinPanes(bodyH, panes...), "\n")...)
-	if bottom {
 		rows = append(rows, bottomRule(panes))
 	}
 	return strings.Join(rows, "\n")

@@ -475,8 +475,12 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 		lines = append(lines, styles.title.Render(clipWidth(facetSectionHeader(f.Name), w)))
 		kind := facetValueKind(f.Name)
 		for valIdx, v := range f.Values {
+			// One lookup, named: the checkbox and the dimming are two
+			// renderings of this one fact, and reading it twice leaves
+			// nothing saying they are the same fact.
+			excluded := m.excludedFacets[f.Name][v.Value]
 			check := "x"
-			if m.excludedFacets[f.Name][v.Value] {
+			if excluded {
 				check = " "
 			}
 			// Every line is built at the full pane width, cursor or not:
@@ -490,7 +494,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			case dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val:
 				cursor = len(lines)
 				line = cursorBar(line, w, focused)
-			case m.excludedFacets[f.Name][v.Value]:
+			case excluded:
 				// An unticked value recedes, so what the filter still
 				// admits reads at a glance rather than by inspecting the
 				// character inside each bracket. The cursor's own line is

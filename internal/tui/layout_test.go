@@ -2847,12 +2847,19 @@ func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
 	}
 }
 
-// paneBodyHeight is what a pane's renderer is given, and framePanes is what
-// the row actually has room for. They are two statements of one rule --
-// content before chrome, on a row too short for both rules -- and nothing
-// but this holds them together. Out of step, a pane renders to a height the
-// row cannot show (content composed and then dropped, unmarked) or to fewer
-// lines than it has (a blank line where content should be).
+// paneBodyHeight is what a pane's renderer is given, and framePanes asks it
+// for the same number when composing the row -- so what this checks is not
+// that two copies agree (there is one), but that the row RENDERS as many
+// body lines as the number promises. That runs through joinPanes' padding
+// and truncation and through each rule taking exactly one line, any of which
+// could put the row out of step with what its panes were rendered for:
+// content composed and then dropped unmarked, or a blank where content
+// should be.
+//
+// The rule the number encodes -- content before chrome, on a row too short
+// for both rules -- is pinned separately and independently by
+// TestAShortPaneRowKeepsContentOverChrome, which spells the expected body
+// out rather than reading it back from paneBodyHeight.
 func TestPaneBodyHeightAgreesWithWhatTheRowShows(t *testing.T) {
 	// More body lines than any height under test, each one identifiable, so
 	// what the row shows is counted rather than inferred from blanks.
