@@ -229,6 +229,12 @@ type Model struct {
 	// real capture is thousands of lines built and thrown away for every
 	// keystroke. Only the terminal-relative clamp (capPaneWidth) depends on
 	// the current width, and that is O(1).
+	// laneOrder is each provider's position in the timeline's lane palette,
+	// keyed by the short name the lane labels use. The POSITION is stored
+	// rather than the style, so a palette rebuilt for a NO_COLOR terminal
+	// reaches lanes drawn from a model that was built before it.
+	laneOrder map[string]int
+
 	facetPaneNatural  int
 	detailPaneNatural int
 
@@ -299,6 +305,10 @@ func New(l *model.Log, path string) Model {
 		m.sortCol[v] = t.defaultCol
 	}
 	m.facetCursor = firstFacetCursor(facets)
+	// Settled at load for the reason the pane widths beside it are: the
+	// timeline is redrawn on every keystroke and this walks every span in
+	// the tier, which is thousands of them on a real capture.
+	m.laneOrder = laneOrderFor(l)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
 	m.detailPaneNatural = detailNaturalWidth(l)
 	return m

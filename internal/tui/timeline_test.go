@@ -1113,7 +1113,7 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	label := cursorBar(padRight(labels[0], labelW)+" ", labelW+1, true)
-	want := label + hueOf(m, spans, lanes, 0).Render(laneBar(spans, lanes[0], timelineWallClockMs(spans), barW))
+	want := label + hueOf(t, m, spans, lanes, 0).Render(laneBar(spans, lanes[0], timelineWallClockMs(spans), barW))
 	if lines[0] != want {
 		t.Errorf("first line = %q, want lane 0's bar %q: the annotation must not consume the last lane row", lines[0], want)
 	}
@@ -1580,7 +1580,7 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	rowContent := func(i int) string {
-		return padRight(labels[i], labelW) + " " + hueOf(m, spans, lanes, i).Render(laneBar(spans, lanes[i], wallClock, barW))
+		return padRight(labels[i], labelW) + " " + hueOf(t, m, spans, lanes, i).Render(laneBar(spans, lanes[i], wallClock, barW))
 	}
 
 	wantVisible := []int{3, 4}
@@ -1590,7 +1590,7 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 		if laneIdx == m.timeline.lane {
 			// Only the label column carries the cursor; see
 			// TestTheCursorDoesNotRedrawTheSelectedLanesBar.
-			want = cursorBar(padRight(labels[laneIdx], labelW)+" ", labelW+1, true) + hueOf(m, spans, lanes, laneIdx).Render(laneBar(spans, lanes[laneIdx], wallClock, barW))
+			want = cursorBar(padRight(labels[laneIdx], labelW)+" ", labelW+1, true) + hueOf(t, m, spans, lanes, laneIdx).Render(laneBar(spans, lanes[laneIdx], wallClock, barW))
 		}
 		if lines[row] != want {
 			t.Errorf("row %d = %q, want lane %d's row %q", row, lines[row], laneIdx, want)
@@ -1610,22 +1610,59 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	}
 }
 
+// hueOf is the style lane idx's bar is drawn in, looked up the way
+// renderTimeline looks it up. The expected-row builders above compose from
+// the production functions rather than from literals, and the hue is one of
+// those: leaving it out would make them assert the bar is UNCOLOURED.
+//
+// A lane whose provider has no position is fatal rather than silently
+// unstyled. The zero lipgloss.Style renders its argument unchanged, so a
+// builder that fell through would compose an uncoloured expectation and
+// match an uncoloured frame -- passing while asserting nothing about the
+// colour it was added to carry.
+func hueOf(t *testing.T, m Model, spans []span.Span, lanes []model.Lane, idx int) lipgloss.Style {
+	t.Helper()
+	p := laneProvider(spans, lanes[idx])
+	at, ok := m.laneOrder[p]
+	if !ok {
+		t.Fatalf("lane %d's provider %q has no place in the lane palette (%v)", idx, p, m.laneOrder)
+	}
+	return semantic.lane(at)
+}
+
+// barHueOf is the escape sequence a rendered lane row opens its BAR with, or
+// "" if the bar carries none. The label column is skipped: on the selected
+// lane it is the cursor bar, whose own reverse video would otherwise be
+// mistaken for the hue.
+func barHueOf(t *testing.T, row string) string {
+	t.Helper()
+	area := row
+	for _, open := range reverseOpen {
+		if !strings.HasPrefix(row, open) {
+			continue
+		}
+		_, rest, ok := strings.Cut(row, "\x1b[0m")
+		if !ok {
+			t.Fatalf("row %q opens a cursor bar and never closes it", row)
+		}
+		area = rest
+		break
+	}
+	at := strings.Index(area, "\x1b[")
+	if at < 0 {
+		return ""
+	}
+	end := strings.IndexByte(area[at:], 'm')
+	if end < 0 {
+		t.Fatalf("row %q carries an unterminated escape sequence", row)
+	}
+	return area[at : at+end+1]
+}
+
 // laneBarOf strips the styling and the label column off one rendered lane
 // row, leaving the bar: the block-and-space pattern that is what this view
 // actually says. Labels are ASCII and are padded to a fixed column count, so
 // dropping labelW+1 runes drops exactly labelW+1 display columns.
-// hueOf is the style lane idx's bar is drawn in, looked up the same way
-// renderTimeline looks it up. The expected-row builders below compose from
-// the production functions rather than from literals, and the hue is one of
-// those: leaving it out would make them assert the bar is UNCOLOURED.
-//
-// A provider the map does not carry yields the zero Style, which renders its
-// argument unchanged -- the same thing the render site does when the lookup
-// misses.
-func hueOf(m Model, spans []span.Span, lanes []model.Lane, idx int) lipgloss.Style {
-	return m.laneHues()[laneLabelProvider(spans[lanes[idx].Spans[0]].Provider)]
-}
-
 func laneBarOf(t *testing.T, row string, labelW int) string {
 	t.Helper()
 	plain, _ := logfmt.StripANSI(row, nil)
@@ -2205,58 +2242,145 @@ func TestALaneChangeThatGoesNowhereLeavesTheSpanCursorAlone(t *testing.T) {
 // Two full provider addresses can shorten to one lane label -- the same
 // provider type served from two registries -- and the lanes they name are
 // then already indistinguishable to a reader. What must not happen is the
-// second address taking the hue and leaving the first sharing a colour with
-// somebody else: the assignment counts entries already made, so a later
-// address overwriting an earlier one hands its neighbour's colour out twice.
+// second address taking the position and leaving the first sharing a colour
+// with somebody else: positions are handed out by counting the entries
+// already made, so an overwrite gives the next provider one already in use.
 //
-// Built from facets directly rather than from a fixture, because a log with
-// two registries serving one provider type is a shape no fixture here has
-// and none is needed to state the rule.
-func TestLaneHuesGiveOneColourPerShortProviderName(t *testing.T) {
-	m := Model{facets: []model.Facet{{Name: dimProvider, Values: []model.FacetValue{
-		{Value: "registry.terraform.io/hashicorp/aws", Count: 2},
-		{Value: "registry.example.com/acme/aws", Count: 1},
-		{Value: "registry.terraform.io/hashicorp/google", Count: 1},
-	}}}}
+// Built from a log rather than a fixture, because two registries serving one
+// provider type is a shape no fixture here has and none is needed to state
+// the rule.
+func TestLaneOrderGivesOnePlaceToEachShortProviderName(t *testing.T) {
+	l := &model.Log{RPCSpans: []span.Span{
+		{Provider: "registry.terraform.io/hashicorp/aws"},
+		{Provider: "registry.example.com/acme/aws"},
+		{Provider: "registry.terraform.io/hashicorp/google"},
+	}}
 
-	hues := m.laneHues()
-	if len(hues) != 2 {
-		t.Fatalf("laneHues assigned %d colours over two short names (%v)", len(hues), hues)
+	order := laneOrderFor(l)
+	if len(order) != 2 {
+		t.Fatalf("laneOrderFor placed %d providers over two short names (%v)", len(order), order)
 	}
-	if got, want := hues["aws"].GetForeground(), semantic.lane(0).GetForeground(); got != want {
-		t.Errorf("aws took colour %v, want the first (%v) -- the address seen first names the hue", got, want)
+	if order["aws"] == order["google"] {
+		t.Errorf("aws and google share place %d, so their lanes are drawn alike", order["aws"])
 	}
-	if hues["aws"].GetForeground() == hues["google"].GetForeground() {
-		t.Errorf("aws and google share colour %v, so the timeline cannot tell their lanes apart", hues["aws"].GetForeground())
+	if order["aws"] != 0 {
+		t.Errorf("aws is at place %d, want 0 -- the places are handed out in sorted order", order["aws"])
 	}
 }
 
-// A hue is a property of the LOG, not of what is on screen. Assigned from
-// the lanes a filter left behind, every surviving lane would be recoloured
-// the moment a facet was toggled -- which reads as the lanes themselves
-// having changed, on the one view whose whole subject is which work ran when.
+// The UI tier is drawn whenever the log has no RPC spans, which is what a
+// capture taken without TF_LOG_PROVIDER=TRACE gives -- the most likely
+// first-run result. Its lanes are per-provider exactly as the RPC tier's
+// are, so they take hues on the same terms.
 //
-// google is the provider filtered TO, and it is not the first: assigning
-// from the visible lanes would hand it the first colour, so the two
-// arrangements disagree here and the test can tell them apart.
-func TestLaneHuesDoNotChangeWhenAFilterHidesAProvider(t *testing.T) {
-	m := timelineModel(t)
-	before := m.laneHues()
-	if len(before) < 2 {
-		t.Fatalf("the fixture has %d providers, want at least two so one can be filtered away", len(before))
+// This is what the provider FACET could not do: the facets are built from
+// RPCSpans, so on this tier the palette was empty and every lane came out
+// uncoloured.
+func TestTheUITierDrawsItsLanesInProviderHues(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if tier, _ := m.timelineSpans(); tier != tierUI {
+		t.Fatalf("the fixture draws tier %v, not the UI tier this is about", tier)
 	}
-	if before["google"].GetForeground() == semantic.lane(0).GetForeground() {
-		t.Fatal("google already holds the first colour, so filtering to it could not show the difference")
+
+	lanes := m.timelineLanes()
+	if len(lanes) < 2 {
+		t.Fatalf("the fixture packs into %d lanes, want two providers' worth", len(lanes))
+	}
+	rows := timelineLaneRows(t, m, lanes)
+	var hues []string
+	for i := range lanes {
+		hue := barHueOf(t, rows[i])
+		if hue == "" {
+			t.Errorf("lane %d's bar carries no colour: %q", i, rows[i])
+		}
+		hues = append(hues, hue)
+	}
+	if len(hues) > 1 && hues[0] == hues[1] {
+		t.Errorf("two providers' lanes are drawn in the same colour %q", hues[0])
+	}
+}
+
+// Every lane is drawn in ITS OWN provider's hue. The expected-row builders
+// elsewhere derive the hue the same way the render site does, so a render
+// site that looked up the wrong lane would agree with them and be caught
+// only by a golden -- which go test -update rewrites.
+//
+// Asserted as agreement and difference rather than against named colours, so
+// a deliberate recolour does not have to come here to be re-stated.
+func TestEachLanesBarIsDrawnInItsOwnProvidersHue(t *testing.T) {
+	m := timelineModel(t)
+	lanes := m.timelineLanes()
+	_, spans := m.timelineSpans()
+	rows := timelineLaneRows(t, m, lanes)
+
+	byProvider := map[string]string{}
+	for i := range lanes {
+		p, hue := laneProvider(spans, lanes[i]), barHueOf(t, rows[i])
+		if hue == "" {
+			t.Fatalf("lane %d (%s) carries no colour, so this compares nothing: %q", i, p, rows[i])
+		}
+		if seen, ok := byProvider[p]; ok && seen != hue {
+			t.Errorf("provider %s has lanes in %q and %q", p, seen, hue)
+		}
+		for q, seen := range byProvider {
+			if q != p && seen == hue {
+				t.Errorf("providers %s and %s are both drawn in %q", p, q, hue)
+			}
+		}
+		byProvider[p] = hue
+	}
+	if len(byProvider) < 2 {
+		t.Fatalf("the fixture draws %d providers, want at least two so the colours can differ", len(byProvider))
+	}
+}
+
+// A hue belongs to the LOG, not to what a filter has left on screen.
+// Recoloured on every toggle, the lanes would read as having changed when
+// only the selection did -- on the one view whose whole subject is which
+// work ran when.
+//
+// google is the provider filtered TO and it is not the first, so assigning
+// from the visible lanes would hand it the first colour and the two
+// arrangements disagree here. Filtering to the first provider would pass
+// either way.
+func TestALanesHueSurvivesAFilterHidingAnotherProvider(t *testing.T) {
+	m := timelineModel(t)
+	lanes := m.timelineLanes()
+	_, spans := m.timelineSpans()
+	row := -1
+	for i := range lanes {
+		if laneProvider(spans, lanes[i]) == "google" {
+			row = i
+		}
+	}
+	if row < 0 {
+		t.Fatal("the fixture draws no google lane")
+	}
+	rows := timelineLaneRows(t, m, lanes)
+	before := barHueOf(t, rows[row])
+	if before == "" || before == barHueOf(t, rows[0]) {
+		t.Fatalf("google's lane is drawn in %q, the first lane's own colour, so a recolour could not show", before)
 	}
 
 	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/google": true}}
 	m.invalidateRows()
 
-	after := m.laneHues()
-	if got, want := after["google"].GetForeground(), before["google"].GetForeground(); got != want {
-		t.Errorf("google's lanes changed from %v to %v when a filter hid the other provider", want, got)
+	if got := barHueOf(t, timelineLaneRows(t, m, m.timelineLanes())[0]); got != before {
+		t.Errorf("google's lane went from %q to %q when a filter hid the other provider", before, got)
 	}
-	if len(after) != len(before) {
-		t.Errorf("the filter changed the palette from %d colours to %d", len(before), len(after))
+}
+
+// timelineLaneRows renders the timeline into a pane tall enough for every
+// lane to get a row, and returns just those rows. The axis and the notes sit
+// beneath the lanes, so a pane too short drops lanes rather than notes and
+// the row at index i stops being lane i.
+func timelineLaneRows(t *testing.T, m Model, lanes []model.Lane) []string {
+	t.Helper()
+	const roomForAxisAndNotes = 8
+	rows := strings.Split(m.renderTimeline(100, len(lanes)+roomForAxisAndNotes), "\n")
+	if len(rows) < len(lanes) {
+		t.Fatalf("the pane drew %d rows for %d lanes:\n%s", len(rows), len(lanes), strings.Join(rows, "\n"))
 	}
+	return rows[:len(lanes)]
 }

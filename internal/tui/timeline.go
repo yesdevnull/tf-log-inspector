@@ -424,7 +424,7 @@ func laneLabels(spans []span.Span, lanes []model.Lane) []string {
 	labels := make([]string, len(lanes))
 	counts := make(map[string]int, len(lanes))
 	for i, lane := range lanes {
-		provider := laneLabelProvider(spans[lane.Spans[0]].Provider)
+		provider := laneProvider(spans, lane)
 		counts[provider]++
 		labels[i] = fmt.Sprintf("%s/%d", provider, counts[provider])
 	}
@@ -651,7 +651,6 @@ func (m *Model) renderTimeline(w, h int) string {
 		}
 	}
 
-	hues := m.laneHues()
 	dataH := h - axisH - len(notes)
 	top, visible := scrollWindow(m.timeline.lane, len(lanes), dataH)
 	lines := make([]string, 0, visible+axisH+len(notes))
@@ -670,8 +669,8 @@ func (m *Model) renderTimeline(w, h int) string {
 		// each says its own thing -- which lane the keyboard is on, and
 		// whose work the bar is.
 		bar := laneBar(spans, lanes[i], wallClock, barW)
-		if hue, ok := hues[laneLabelProvider(spans[lanes[i].Spans[0]].Provider)]; ok {
-			bar = hue.Render(bar)
+		if at, ok := m.laneOrder[laneProvider(spans, lanes[i])]; ok {
+			bar = semantic.lane(at).Render(bar)
 		}
 		lines = append(lines, clipWidth(label+bar, w))
 	}
@@ -1442,36 +1441,56 @@ func (m *Model) stallAnnotation(w int) string {
 	return strings.Join(lines, "\n")
 }
 
-// laneHues assigns each provider in the log the colour its lanes are drawn
-// in, keyed by the short name the lane labels already use.
+// laneOrderFor assigns each provider a position in the lane palette, keyed
+// by the short name the lane labels use.
 //
-// The assignment is made from the PROVIDER FACET, not from the lanes on
-// screen. The facets are built once at New over the whole log (see the
-// pane-width measurements beside them), so a provider's hue is a property of
-// the log rather than of the current filter -- toggle a facet off and the
-// lanes that remain keep the colours they had. Assigning from the visible
-// lanes instead would recolour the timeline on every filter change, which
-// would read as the lanes themselves having changed.
+// It reads the spans of the tier the timeline DRAWS -- RPC when the log has
+// RPC spans, UI otherwise, the same choice timelineTierFor makes. Reading
+// the provider facet instead would have covered only the RPC tier: the
+// facets are built from RPCSpans (see New), and the timeline falls to the UI
+// tier exactly when there are none, so every UI-tier lane came out
+// uncoloured. That tier is not an edge case -- it is what a capture taken
+// without TF_LOG_PROVIDER=TRACE produces, which this package elsewhere calls
+// the most likely first-run result.
 //
-// A log whose facets are missing gets an empty map and uncoloured bars,
-// which is the same thing an unknown provider gets: the bars still say when
-// the work happened, and the labels still say whose it was.
-func (m *Model) laneHues() map[string]lipgloss.Style {
-	hues := map[string]lipgloss.Style{}
-	for _, f := range m.facets {
-		if f.Name != dimProvider {
-			continue
-		}
-		for _, v := range f.Values {
-			// Several full provider addresses can share one short name, and
-			// the lanes they label are then indistinguishable already; the
-			// first one seen takes the colour rather than the last
-			// overwriting it, so the hue is stable in facet order.
-			p := laneLabelProvider(v.Value)
-			if _, taken := hues[p]; !taken {
-				hues[p] = semantic.lane(len(hues))
-			}
+// The source is the log's own spans, never the filtered ones, so a hue is a
+// property of the log rather than of the current selection: toggle a facet
+// off and the lanes that remain keep the colours they had. Assigning from
+// what survives a filter would recolour the timeline on every toggle, which
+// reads as the lanes themselves having changed.
+//
+// Sorted, so the assignment depends on which providers the log holds and not
+// on the order their spans happen to appear in. Two full addresses can
+// shorten to one lane label -- the same provider type from two registries --
+// and the first then names the position: counting entries already made,
+// letting the second overwrite the first would hand the next provider a
+// position already in use and draw two providers' lanes alike.
+func laneOrderFor(l *model.Log) map[string]int {
+	src := l.RPCSpans
+	if timelineTierFor(l) == tierUI {
+		src = l.UISpans
+	}
+	seen := map[string]bool{}
+	names := make([]string, 0, len(src))
+	for _, s := range src {
+		if p := laneLabelProvider(s.Provider); !seen[p] {
+			seen[p] = true
+			names = append(names, p)
 		}
 	}
-	return hues
+	sort.Strings(names)
+
+	order := make(map[string]int, len(names))
+	for i, p := range names {
+		order[p] = i
+	}
+	return order
+}
+
+// laneProvider is the provider a lane belongs to, under the short name the
+// labels and the palette are both keyed by. Any one of the lane's spans
+// answers it: packLanesByProvider gives a lane only one provider's spans,
+// and model.PackLanes never emits a lane holding none.
+func laneProvider(spans []span.Span, lane model.Lane) string {
+	return laneLabelProvider(spans[lane.Spans[0]].Provider)
 }
