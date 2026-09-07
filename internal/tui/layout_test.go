@@ -2949,3 +2949,27 @@ func TestTheDetailTitleIsTheSameAtEveryHeight(t *testing.T) {
 		}
 	}
 }
+
+// The footer says which of Esc's two meanings is live. They cannot both be
+// advertised at once and the reader cannot be asked to guess: "back" where a
+// jump is waiting to be undone, "clear" everywhere else.
+func TestTheFooterNamesWhicheverEscMeaningIsLive(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if got := unstyled(m.footer(160)); !strings.Contains(got, escClearHint) {
+		t.Errorf("the calls view's footer does not offer %q:\n%s", escClearHint, got)
+	}
+
+	jumped := update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	got := unstyled(jumped.footer(160))
+	if !strings.Contains(got, escBackHint) {
+		t.Errorf("the footer does not offer %q after a jump:\n%s", escBackHint, got)
+	}
+	if strings.Contains(got, escClearHint) {
+		t.Errorf("the footer offers both of Esc's meanings at once:\n%s", got)
+	}
+
+	returned := update(t, jumped, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := unstyled(returned.footer(160)); strings.Contains(got, escBackHint) {
+		t.Errorf("the footer still offers %q once the return has been spent:\n%s", escBackHint, got)
+	}
+}

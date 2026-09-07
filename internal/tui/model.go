@@ -251,6 +251,30 @@ type Model struct {
 	// timelineState in timeline.go.
 	timeline timelineState
 
+	// viewSelected is each view's own cursor row, so a reader coming back to
+	// a view finds it as they left it. The cursor does not TRAVEL between
+	// views -- row 40 of one means nothing in another, which is why setView
+	// does not simply carry m.selected across -- but a view being re-entered
+	// is not a new view, and resetting it there loses a place the reader
+	// chose. The filter already survives a view switch; this is the cursor
+	// keeping the same promise.
+	//
+	// Indexed by View, so a view added to the enum grows the array with it
+	// (see viewCount). ViewRawLog and ViewTimeline keep their own cursors
+	// elsewhere -- m.raw.top and m.timeline -- and their entry here is
+	// unused rather than special-cased: an unused int costs nothing, where a
+	// gap in the indexing would have to be remembered at every access.
+	viewSelected [viewCount]int
+	// returnTo is the view Enter jumped OUT of, and hasReturn whether there
+	// is one. Together they are what Esc spends to put the reader back.
+	//
+	// It is set after the jump's own setView and cleared by every other one,
+	// so it names a jump the reader actually made rather than the last view
+	// they happened to be in: gone to the timeline and back to the raw log
+	// by hand, there is nothing to return FROM, and Esc keeps the meaning
+	// the footer has always given it.
+	returnTo  View
+	hasReturn bool
 	// blockedJump records that the last Enter refused to jump because the
 	// active filter hides the target entry (see jumpToSpan). It is a
 	// derivation of one keypress and the filter it was pressed under, so
@@ -442,9 +466,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.soloFacetValue()
 			}
 		case "esc":
-			// Esc clears every active filter regardless of which pane has
-			// focus -- the spec binds it globally, not to the facet pane.
-			m.clearFilters()
+			// Esc first puts the reader back where Enter took them from,
+			// and only then clears the filters -- unwinding what is
+			// innermost, the way an Esc nested in anything does.
+			//
+			// The two never have to be told apart by guesswork: the footer
+			// names whichever is live (see actionKeys), and the return is
+			// spent by using it, so the next Esc is the ordinary one. A
+			// reader who wants their filter cleared from inside a jump
+			// presses Esc twice.
+			//
+			// Clearing is otherwise global, regardless of which pane has
+			// focus -- the spec binds it that way, not to the facet pane.
+			if !m.returnFromJump() {
+				m.clearFilters()
+			}
 		case "enter":
 			// Enter jumps to the log entry that closed the selected span: a
 			// call row's own span in the table views -- a rollup row stands
@@ -610,13 +646,35 @@ func (m *Model) toggleFacetFocus() {
 // then serves to the table and the detail pane. Held together here, the
 // order cannot be stated wrongly by a caller.
 //
-// The selection resets because row 40 of one view is meaningless in
-// another; the clamp inside invalidateRows is for a list that SHRANK under
-// a filter, which is a different question.
+// The selection does not travel across, because row 40 of one view is
+// meaningless in another. It is remembered PER VIEW instead (viewSelected),
+// so a view re-entered opens where the reader left it while a view entered
+// for the first time opens at its top. The clamp inside invalidateRows then
+// holds whatever is restored against the rows that are actually there,
+// which is what makes a remembered row safe across a filter narrowed in the
+// meantime -- the same clamp, for the same reason, as a list that shrank
+// under the reader's feet.
+//
+// Any pending return is spent here. Reaching a view by its own key is the
+// reader saying where they want to be, so the jump that put them somewhere
+// else is no longer something to undo.
 func (m *Model) setView(v View) {
+	m.viewSelected[m.view] = m.selected
 	m.view = v
-	m.selected = 0
+	m.selected = m.viewSelected[v]
+	m.hasReturn = false
 	m.invalidateRows()
+}
+
+// returnFromJump puts the reader back where Enter took them from, and
+// reports whether there was anywhere to go. The row comes back with the
+// view, setView restoring that view's own cursor.
+func (m *Model) returnFromJump() bool {
+	if !m.hasReturn {
+		return false
+	}
+	m.setView(m.returnTo)
+	return true
 }
 
 // invalidateRows drops any cached rows so they are rebuilt from the current

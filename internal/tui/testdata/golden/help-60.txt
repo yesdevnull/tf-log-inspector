@@ -18,7 +18,7 @@
   [36m␣ Space[0m    untick the value under the cursor to hide it   
   [36mo[0m          show only that value -- again undoes it        
   [36mf[0m          show the facets and give them the keyboard     
-  [36mEsc[0m        clear every active filter -- or close this help
+  [36mEsc[0m        leave an opened call, then clear the filters   
   [36m/[0m          search the raw log for a pattern               
   [36mn N[0m        step to the next or previous match             
                                                             

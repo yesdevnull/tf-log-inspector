@@ -78,7 +78,12 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 		m.blockedJump = true
 		return
 	}
+	// Recorded AFTER setView, which spends any mark already standing: this
+	// jump is the one Esc should undo, not whatever earlier jump the reader
+	// has since navigated away from.
+	from := m.view
 	m.setView(ViewRawLog)
+	m.returnTo, m.hasReturn = from, true
 	m.raw.top = entry
 }
 

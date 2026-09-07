@@ -508,3 +508,160 @@ func TestUpdateDrivesTheModelItWasCalledOn(t *testing.T) {
 		t.Errorf("ActiveView = %v on the model Update was called on, want ViewProviders", m.ActiveView())
 	}
 }
+
+// callsWithRows opens the calls view on a fixture with several call rows, so
+// a cursor moved off row 0 is a cursor that can be lost.
+func callsWithRows(t *testing.T) Model {
+	t.Helper()
+	// two-tier.log rather than the smaller fixtures: it carries three call
+	// rows and three resource types, so a cursor can be moved off row 0 in
+	// two different views and each can be told from the other's.
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if n := len(m.rows()); n < 3 {
+		t.Fatalf("fixture assumption changed: the calls view has %d rows, too few to move a cursor within", n)
+	}
+	return m
+}
+
+// Enter opens a call in the raw log, and Esc puts the reader back where they
+// were -- the same view, on the same row.
+//
+// Without the return there is no way back at all: the number key that
+// reaches the view again resets its cursor, so a reader who opened row 40 of
+// a filtered list to read its lines came back to row 0 and had to find their
+// place by hand.
+func TestEscReturnsFromAJumpToTheRowItLeft(t *testing.T) {
+	m := callsWithRows(t)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	want := m.Selected()
+	if want == 0 {
+		t.Fatal("the cursor did not move off row 0, so this cannot tell a restored cursor from a reset one")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v, want the raw log", m.view)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewCalls {
+		t.Errorf("Esc left the view at %v, want the calls view it jumped from", m.view)
+	}
+	if got := m.Selected(); got != want {
+		t.Errorf("Esc came back to row %d, want the row it left, %d", got, want)
+	}
+}
+
+// The return is spent once. A second Esc is the ordinary one, so the reader
+// who wants their filter cleared presses Esc again rather than finding the
+// key has changed meaning permanently.
+func TestASecondEscClearsTheFilter(t *testing.T) {
+	// Jump FIRST and narrow afterwards. A filter applied before the jump
+	// can hide the entry Enter was aiming at, which Enter refuses rather
+	// than landing somewhere misleading (see jumpToSpan) -- leaving no jump
+	// to return from and nothing here to measure.
+	m := update(t, callsWithRows(t), tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v, want the raw log", m.view)
+	}
+	m = update(t, focusFacets(t, m), tea.KeyMsg{Type: tea.KeySpace}) // untick a value
+	if !m.filterActive() {
+		t.Fatal("space did not narrow the filter, so this cannot show Esc clearing one")
+	}
+	m.pane = PaneList
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.filterActive() {
+		t.Errorf("the first Esc cleared the filter as well as returning; it should only return")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.filterActive() {
+		t.Errorf("the second Esc did not clear the filter")
+	}
+}
+
+// Esc only returns from a jump the reader actually made. Reached by its own
+// number key, the raw log has nowhere to go back to, and Esc keeps the one
+// meaning the footer has always advertised there.
+func TestEscDoesNotReturnFromAViewReachedByItsOwnKey(t *testing.T) {
+	m := update(t, callsWithRows(t), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewRawLog {
+		t.Errorf("Esc moved the view to %v from a raw log nobody jumped into", m.view)
+	}
+}
+
+// A view change between the jump and the Esc spends the return: the reader
+// is no longer where the jump put them, so there is nothing to put back.
+func TestAViewChangeAfterAJumpSpendsTheReturn(t *testing.T) {
+	m := update(t, callsWithRows(t), tea.KeyMsg{Type: tea.KeyDown})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}) // providers
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewProviders {
+		t.Errorf("Esc returned to %v from a view the reader had moved to themselves", m.view)
+	}
+}
+
+// Every view keeps its own cursor across a switch. Row 40 of one view means
+// nothing in another, which is why the cursor does not TRAVEL between them --
+// but coming back to a view the reader was just in should find it as they
+// left it, the way the filter already does.
+func TestEachViewKeepsItsOwnCursorAcrossASwitch(t *testing.T) {
+	m := callsWithRows(t)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	calls := m.Selected()
+	if calls == 0 {
+		t.Fatal("the calls cursor did not move off row 0")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}) // types
+	if got := m.Selected(); got != 0 {
+		t.Errorf("a view reached for the first time opens on row %d, want 0", got)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	types := m.Selected()
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if got := m.Selected(); got != calls {
+		t.Errorf("the calls view came back on row %d, want the row it was left on, %d", got, calls)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if got := m.Selected(); got != types {
+		t.Errorf("the types view came back on row %d, want %d", got, types)
+	}
+}
+
+// A remembered cursor is clamped like any other. A filter narrowed while the
+// reader is elsewhere can leave the row they left past the end of what is
+// left, and a table whose cursor is off its own end highlights nothing.
+func TestARememberedCursorIsClampedToTheRowsThatRemain(t *testing.T) {
+	m := callsWithRows(t)
+	last := len(m.rows()) - 1
+	for range last {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.Selected() != last {
+		t.Fatalf("the cursor is on row %d, want the last row %d", m.Selected(), last)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}) // leave the calls view
+
+	// Exclude ONE resource type, so the calls list shortens without
+	// emptying: a list with no rows left has no row to clamp to and would
+	// pass this for the wrong reason.
+	types := m.facetValues(dimType)
+	if len(types) < 2 {
+		t.Fatalf("fixture assumption changed: %d resource types, too few to shorten the list without emptying it", len(types))
+	}
+	m.setFacetExclusions(dimType, map[string]bool{types[0].Value: true})
+	m.invalidateRows()
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	n := len(m.rows())
+	if n == 0 || n > last {
+		t.Fatalf("the filter left %d of %d rows, so this measures no clamp", n, last+1)
+	}
+	if m.Selected() >= n {
+		t.Errorf("the calls view came back on row %d of %d rows", m.Selected(), n)
+	}
+}

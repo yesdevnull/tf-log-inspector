@@ -623,8 +623,27 @@ func (m *Model) actionKeys(w int) string {
 	if _, sortable := tables[m.view]; sortable && len(m.rows()) > 0 {
 		keys = append(keys, sortHint)
 	}
-	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", quitHint), hintSep)
+	esc := escClearHint
+	if m.hasReturn {
+		esc = escBackHint
+	}
+	return strings.Join(append(keys, "f facets", "/ search", esc, quitHint), hintSep)
 }
+
+// escClearHint and escBackHint are Esc's two meanings, and exactly one is
+// ever on the frame. Esc unwinds the innermost thing first: a jump waiting
+// to be undone, then the filters. Advertising the wrong one is worse than
+// advertising neither -- a reader pressing Esc to clear a filter and landing
+// in another view has been told something false about the key -- so the hint
+// asks the same hasReturn the handler does.
+//
+// "back" is a column shorter than "clear", so the switch cannot push the
+// action line over its budget: the widest line carrying it is the calls
+// view's at exactly 70 columns, and it is 69 with the return standing.
+const (
+	escClearHint = "Esc clear"
+	escBackHint  = "Esc back"
+)
 
 // viewKeyHints is the hint group naming the number keys that switch views,
 // and the view each one switches to. It carries the help hint at its end as
