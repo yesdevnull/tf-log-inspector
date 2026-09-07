@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,17 @@ type rawLogState struct {
 	// own looks exactly like a match on the entry already shown, so the
 	// footer says which it was; see Model.footer.
 	notFound bool
+
+	// scope, when non-nil, is the ascending entry indices of ONE call's
+	// lines (model.Log.ScopeFor). Render, scroll and search walk it instead
+	// of the whole log, so the pane shows the call rather than the log
+	// around it.
+	//
+	// nil is "no scope", which is not the same as an empty one: a scope is
+	// built from a span's own id and always holds at least that span's
+	// entry, so an empty scoped pane is the facet filter's doing and says so
+	// (see renderRawLog).
+	scope []int
 }
 
 // TopEntry reports the index into m.log.Entries currently at the top of the
@@ -95,6 +107,42 @@ func (m Model) rawLogVisible() func(int) bool {
 	return func(i int) bool {
 		return entryVisible(f, compProviders, m.log.Entries[i])
 	}
+}
+
+// nextRawEntry returns the entry index at or after i that the pane may draw,
+// and whether there is one: the next member of the scope when one is live,
+// and i itself otherwise. prevRawEntry is its mirror.
+//
+// The pair is what lets render, scroll and search share one notion of "the
+// entries this pane is showing", so a scope cannot apply to one of them and
+// not the others -- which would leave the position pointing at an entry the
+// pane skips.
+func (m Model) nextRawEntry(i int) (int, bool) {
+	if m.raw.scope == nil {
+		if i < 0 {
+			i = 0
+		}
+		return i, i < len(m.log.Entries)
+	}
+	p, _ := slices.BinarySearch(m.raw.scope, i)
+	if p >= len(m.raw.scope) {
+		return 0, false
+	}
+	return m.raw.scope[p], true
+}
+
+func (m Model) prevRawEntry(i int) (int, bool) {
+	if m.raw.scope == nil {
+		return i, i >= 0
+	}
+	p, found := slices.BinarySearch(m.raw.scope, i)
+	if !found {
+		p--
+	}
+	if p < 0 || p >= len(m.raw.scope) {
+		return 0, false
+	}
+	return m.raw.scope[p], true
 }
 
 // jumpToSpan switches to the raw log view positioned at the entry that
@@ -137,6 +185,18 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	from := m.view
 	m.setView(ViewRawLog)
 	m.returnTo, m.hasReturn = from, true
+	// The scope is what makes this "open the call" rather than "park the
+	// whole log on one of its lines". Its first member is the earliest entry
+	// in the FILE carrying the id, which is where the call's own traffic
+	// begins -- so jumpContextLines is NOT applied here: the scope already
+	// supplies what led to the call, and backing up three lines would open
+	// the pane on lines outside it.
+	if scope := m.log.ScopeFor(spans[idx].ReqID); len(scope) > 0 {
+		m.raw.scope = scope
+		m.raw.top, m.raw.topLine = scope[0], 0
+		return
+	}
+	m.raw.scope = nil
 	m.raw.top, m.raw.topLine = entry, 0
 	// Back up a few lines, so the call's own line arrives with what led to
 	// it above rather than pinned to the top of the pane with none of it in
@@ -193,7 +253,7 @@ func (m *Model) stepRawLogDown(visible func(int) bool) bool {
 		m.raw.topLine++
 		return true
 	}
-	for i := m.raw.top + 1; i < len(m.log.Entries); i++ {
+	for i, ok := m.nextRawEntry(m.raw.top + 1); ok; i, ok = m.nextRawEntry(i + 1) {
 		if visible(i) {
 			m.raw.top, m.raw.topLine = i, 0
 			return true
@@ -210,7 +270,7 @@ func (m *Model) stepRawLogUp(visible func(int) bool) bool {
 		m.raw.topLine--
 		return true
 	}
-	for i := m.raw.top - 1; i >= 0; i-- {
+	for i, ok := m.prevRawEntry(m.raw.top - 1); ok; i, ok = m.prevRawEntry(i - 1) {
 		if visible(i) {
 			m.raw.top, m.raw.topLine = i, len(m.entryLines(m.log.Entries[i]))-1
 			return true
@@ -317,7 +377,7 @@ func (m Model) renderRawLog(w, h int) string {
 
 	var lines []string
 	var scratch []byte
-	for i := m.TopEntry(); i < len(m.log.Entries) && len(lines) < h; i++ {
+	for i, ok := m.nextRawEntry(m.TopEntry()); ok && len(lines) < h; i, ok = m.nextRawEntry(i + 1) {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue
@@ -445,6 +505,12 @@ func (m *Model) searchAgain(direction int) {
 // screen never displays. searchFrom scans the whole log, so the scratch
 // buffer is reused across entries the way renderRawLog reuses its own,
 // rather than allocating one stripped copy per entry.
+//
+// A search and a scope are both "narrow what I am reading" gestures, and
+// the scope is the narrower: it walks nextRawEntry/prevRawEntry rather than
+// the whole log, so a live scope confines the search to it. Searching
+// outside it would report a match the pane cannot show, leaving top on an
+// entry renderRawLog skips.
 func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 	if m.raw.lastQuery == "" {
 		return false
@@ -452,16 +518,36 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 
-	step := 1
-	if !forward {
-		step = -1
-	}
-	first := start
 	if !includeStart {
-		first += step
+		if forward {
+			start++
+		} else {
+			start--
+		}
 	}
 	var scratch []byte
-	for i := first; i >= 0 && i < len(m.log.Entries); i += step {
+	if forward {
+		for i, ok := m.nextRawEntry(start); ok; i, ok = m.nextRawEntry(i + 1) {
+			e := m.log.Entries[i]
+			if !entryVisible(f, compProviders, e) {
+				continue
+			}
+			var plain string
+			plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
+			if strings.Contains(plain, m.raw.lastQuery) {
+				// The whole pair, since a position is a LINE: left at the
+				// offset the reader had scrolled to, a match on a shorter
+				// entry is skipped by renderRawLog altogether and one on a
+				// taller entry opens above the matched text -- a search
+				// reported as found over a pane that does not hold the
+				// pattern.
+				m.raw.top, m.raw.topLine = i, 0
+				return true
+			}
+		}
+		return false
+	}
+	for i, ok := m.prevRawEntry(start); ok; i, ok = m.prevRawEntry(i - 1) {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue
@@ -469,11 +555,11 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 		var plain string
 		plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
 		if strings.Contains(plain, m.raw.lastQuery) {
-			// The whole pair, since a position is a LINE: left at the
-			// offset the reader had scrolled to, a match on a shorter entry
-			// is skipped by renderRawLog altogether and one on a taller
-			// entry opens above the matched text -- a search reported as
-			// found over a pane that does not hold the pattern.
+			// The whole pair, since a position is a LINE: left at the offset
+			// the reader had scrolled to, a match on a shorter entry is
+			// skipped by renderRawLog altogether and one on a taller entry
+			// opens above the matched text -- a search reported as found
+			// over a pane that does not hold the pattern.
 			m.raw.top, m.raw.topLine = i, 0
 			return true
 		}

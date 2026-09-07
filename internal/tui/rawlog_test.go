@@ -1002,22 +1002,65 @@ func TestScrollingUpUndoesScrollingDown(t *testing.T) {
 	}
 }
 
-// Opening a call leaves its line visible with what came before it. The span
-// is the entry that CLOSED the call (see span.Span), so the provider's own
-// traffic is above -- and pinned to the very top of the pane, the call's
-// line is drawn with none of it in sight.
+// Opening a call opens on the SCOPE's first entry, not jumpContextLines
+// above the call's own closing one -- the scope already supplies whatever
+// of the call's own traffic came before it (see jumpToSpan). Whether
+// anything is visible above the closing entry now depends on the scope
+// rather than a fixed backup: multiline-body.log's closing entry is
+// redacted differently from the entry before it, so the two carry
+// different request ids and the scope holds only the closing entry itself.
+// The pane opens exactly on it, with nothing above -- correctly, since the
+// scope has nothing earlier to show.
 func TestOpeningACallShowsWhatCameBeforeIt(t *testing.T) {
 	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	target := m.log.RPCSpans[0].Entry
-	if target == 0 {
-		t.Skip("the fixture's first span closes on the first entry, so there is nothing above it")
-	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.view != ViewRawLog {
 		t.Fatalf("Enter left the view at %v", m.view)
 	}
-	if got := m.TopEntry(); got >= int(target) {
-		t.Errorf("the pane opens at entry %d, at or below the call's own entry %d -- nothing above it is shown", got, target)
+	if got := m.TopEntry(); got != int(target) {
+		t.Errorf("the pane opens at entry %d, want the call's own entry %d -- its scope holds nothing earlier", got, target)
+	}
+}
+
+// Opening a call draws that call's lines and nothing else. The fixture's two
+// calls interleave, so a pane showing a contiguous run of entries fails here.
+//
+// The lines are identified by TIMESTAMP rather than by request id: on the
+// call's closing entry the id sits at column 209 of a 302-byte line, which a
+// 200-column pane clips away, whereas a timestamp opens the line and survives
+// any width. Call A's entries are .000, .200, .500 and .600. Every other
+// timestamp in the fixture is a line this pane must NOT draw -- call B's
+// .100, .300 and .700, and the HTTP entry's .400, which carries its id only
+// on a continuation line and so belongs to no scope.
+//
+// Both calls report tf_req_duration_ms=600, and the table sorts with
+// sort.SliceStable, so the file's order decides the tie and call A is row 0.
+func TestOpeningACallDrawsOnlyThatCallsEntries(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v", m.view)
+	}
+	want := []string{"09:15:00.000", "09:15:00.200", "09:15:00.500", "09:15:00.600"}
+	drawn := 0
+	for _, line := range rawLogBody(m, 200, 20) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		drawn++
+		inScope := false
+		for _, ts := range want {
+			if strings.Contains(line, ts) {
+				inScope = true
+			}
+		}
+		if !inScope {
+			t.Errorf("the pane draws a line outside the call's scope: %q", line)
+		}
+	}
+	if drawn != len(want) {
+		t.Errorf("the pane drew %d entries, want the call's %d", drawn, len(want))
 	}
 }
 
