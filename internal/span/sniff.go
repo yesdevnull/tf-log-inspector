@@ -21,16 +21,21 @@ const maxTrackedReqIDs = 4096
 // It answers "what could this log support", which is a different question from
 // "what spans were built", and is the core of the diagnostic report.
 type Capabilities struct {
-	ResponseEntries   uint64 // "Received downstream response" entries
-	RequestEntries    uint64 // "Sending request downstream" entries
-	DurationFields    uint64 // response entries carrying tf_req_duration_ms
-	ReqIDFields       uint64 // entries carrying tf_req_id
-	ResponseReqIDFields uint64 // response entries carrying tf_req_id, gated the way DurationFields is. ReqIDFields counts every entry with the field, which sizes a scope and cannot answer how many spans would have no id to scope BY: that question is about responses, since a span is built from one.
-	CorrelatedReqIDs  uint64 // response entries whose tf_req_id was also seen on a request entry
-	ProviderEntries   uint64 // entries whose component starts with "provider."
-	CoreVertexLines   uint64 // core graph-walk lines naming a resource address
-	CoreGRPCLines     uint64 // core "GRPCProvider: <RPC>" lines
-	UIHookCompletions uint64 // structured-output completion-bearing hook lines, UIHookBuilder's precondition
+	ResponseEntries uint64 // "Received downstream response" entries
+	RequestEntries  uint64 // "Sending request downstream" entries
+	DurationFields  uint64 // response entries carrying tf_req_duration_ms
+	ReqIDFields     uint64 // entries carrying tf_req_id
+	// ResponseReqIDFields is response entries carrying tf_req_id, gated the
+	// way DurationFields is. ReqIDFields counts every entry with the field,
+	// which sizes a scope and cannot answer how many spans would have no id
+	// to scope BY: that question is about responses, since a span is built
+	// from one.
+	ResponseReqIDFields uint64
+	CorrelatedReqIDs    uint64 // response entries whose tf_req_id was also seen on a request entry
+	ProviderEntries     uint64 // entries whose component starts with "provider."
+	CoreVertexLines     uint64 // core graph-walk lines naming a resource address
+	CoreGRPCLines       uint64 // core "GRPCProvider: <RPC>" lines
+	UIHookCompletions   uint64 // structured-output completion-bearing hook lines, UIHookBuilder's precondition
 
 	// DistinctReqIDs is how many different tf_req_id values the log carries,
 	// and Min/Median/MaxEntriesPerReqID the spread of how many entries each
