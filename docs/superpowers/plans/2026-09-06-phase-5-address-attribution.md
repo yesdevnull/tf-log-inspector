@@ -1,5 +1,24 @@
 # Phase 5: Address Attribution Implementation Plan
 
+> **STATUS 2026-09-07 — this plan is closed. Nothing here is outstanding work.**
+>
+> Tasks 1–6 shipped: `internal/attrib` (context collection, correlation, the
+> coverage statistic), the wiring in `internal/model`, the `--diagnose` report,
+> and the Calls detail pane naming a call's resource. The phase's acceptance
+> criterion is met.
+>
+> **Task 7 (view 3) is CUT.** Its human gate was cleared against a real capture
+> and failed: nameable share **15.9%** against a threshold of 50%, and 20.7% on
+> the more generous denominator. Key `3` stays unbound. The measurement, its
+> cause and what it vindicates are recorded in the spec's `### Address
+> attribution` section (commit `7225f6c`) — read that rather than re-measuring,
+> and do not ask for another capture to re-clear a gate that has already been
+> cleared.
+>
+> The checkboxes below were never ticked as the work proceeded. They are a
+> record of what was planned, not of what is left; take the status above as
+> authoritative and `git log` as the evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Name the Terraform resource a provider RPC call belongs to, by correlating RPC spans against address context taken from the `terraform.ui` structured-output stream, and surface it in the Calls detail pane.
@@ -1815,12 +1834,25 @@ This step has caught user-visible defects in this project that no automated test
 
 **The gate.** View 3 ships as a view only if at least half of attributable RPC span time resolves to `Contained` or `Likely`. That number comes from Task 5's `nameable share` line, measured against a **real capture**, not a fixture. Fixtures are synthesised and their coverage number means nothing about a real plan.
 
-- [ ] **Step 1: Clear the gate**
+- [x] **Step 1: Clear the gate** — CLEARED 2026-09-07, and it FAILED.
 
-Ask Dan to run `tfli --diagnose <his real capture>` and report the `ADDRESS ATTRIBUTION` block, in particular `nameable share`.
+Measured against a real 30 MB capture: nameable share **15.9%**, against the
+50% threshold. `Ambiguous` alone took 57.7% of span time. The cause is
+Terraform's parallelism against many resources of one type, not a defect in the
+correlator — 146 spans saw exactly one candidate and all 146 resolved, while
+92.5% of multi-candidate spans could not be narrowed. Excluding the
+structurally unattributable provider-level RPCs from the denominator gives
+20.7%, so the gate fails either way and the threshold was left at half rather
+than respecified.
 
-- **If `nameable share` >= 50%:** proceed to step 2.
-- **If below 50%:** STOP. Do not build the view. Report the measured distribution, note that the spec's threshold was recorded as a judgement and may be worth revising against the real number, and let Dan decide. Record the outcome in the spec with a date, as the spec's phasing entry instructs.
+**The remaining steps of this task are not to be built.** The full distribution,
+the denominator check and the consequences for mechanism A are in the spec's
+`### Address attribution` section.
+
+The original instruction, kept for the record: ask Dan to run `tfli --diagnose
+<his real capture>` and report the `ADDRESS ATTRIBUTION` block, in particular
+`nameable share`. Below 50%, stop and record the outcome in the spec with a
+date. That is what happened.
 
 Either outcome completes this task. A stop here is a result, not a failure — the phase's acceptance criterion shipped in Task 6.
 
