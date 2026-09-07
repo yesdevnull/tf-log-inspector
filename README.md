@@ -95,8 +95,8 @@ work, shaded by how busy each column of it was, with the idle time between
 calls left as the blank space it is. Beneath it sit how much of the run had
 anything running at all, and the longest waits. `↑`/`↓` move between lanes,
 and `←`/`→` (or `h`/`l`) step along the selected one call by call — the
-detail pane follows the step, and `⏎` opens that call's own line in the raw
-log.
+detail pane follows the step, and `⏎` opens that call's own log lines,
+scoped to it by its `tf_req_id`; `\` returns to the whole log.
 
 `-o` writes a report, so it applies to `--diagnose` and `--profile` only;
 passing it without a mode flag is an error rather than a file that never
