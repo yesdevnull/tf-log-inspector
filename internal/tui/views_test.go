@@ -279,7 +279,7 @@ func TestCallsViewRanksByDurationAndCarriesSpanIndex(t *testing.T) {
 }
 
 // "Which call was slowest" is answered twice on one screen -- by the calls
-// table's top row, and by the Slowest line of every rollup pane -- and the
+// table's top row, and by the slowest-call field of every rollup pane -- and the
 // two must answer it the same way. The calls table breaks a duration tie by
 // RPC name ascending, so a rollup that kept whichever equal call the log
 // recorded FIRST would name one call while the table ranked another above

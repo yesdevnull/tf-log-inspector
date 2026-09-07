@@ -445,7 +445,7 @@ func TestTheListTakesTheWholeRowOnceTheDetailPaneCollapses(t *testing.T) {
 // The detail pane shows the selected call's RPC, provider and duration.
 //
 // A call row IS a single span, so its pane describes that span and nothing
-// else: no group aggregate and no "Slowest" section, both of which would be
+// else: no group aggregate and no slowest-call section, both of which would be
 // the same call reported twice. It is the control for the rollup panes,
 // which show both: the RPC, provider and duration lines here, and nothing
 // under them.
@@ -1216,11 +1216,12 @@ func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 // whatever the cursor is on -- and it renders plausible figures while doing
 // it.
 //
-// Each row's pane is asserted WHOLE, against literals. Checking only Prov
-// and Total leaves Types, RPCs and the Slowest line free to come from some
-// other row, or from the log at large, with every checked line still
-// correct -- and the group lookup behind those three is a different lookup
-// from the one behind the aggregate.
+// Each row's pane is asserted WHOLE, against literals. Checking only the
+// provider and the total leaves the resource-type count, the RPC-method
+// count and the slowest call free to come from some other row, or from the
+// log at large, with every checked line still correct -- and the group
+// lookup behind those three is a different lookup from the one behind the
+// aggregate.
 //
 // two-providers.log is the fixture because its two rows differ in every
 // figure (google 8ms on google_compute_instance, aws 5ms on aws_subnet): in
@@ -1444,7 +1445,7 @@ func TestTypesDetailPaneShowsBothTiers(t *testing.T) {
 // found, renders every other row correctly and only this one wrong.
 //
 // The pane's own figures cannot show that on their own -- both groups'
-// slowest call is an ApplyResourceChange, so the folded Slowest line reads
+// slowest call is an ApplyResourceChange, so the slowest-call field reads
 // the same either way -- which is why the group lookup is also asserted
 // directly, against the row's RPC max, by
 // TestARollupRowsSlowestCallBelongsToItsOwnGroup.
@@ -1921,7 +1922,7 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 // A clamped start is the one thing about a span that the timeline draws
 // WRONG -- anchored at column 0, with a length shorter than its own
 // duration -- so the pane describing the selected span has to say so.
-// Without it the pane reads "Dur 45.0s" beside a three-second bar with
+// Without it the pane reads "duration" over "45.0s" beside a three-second bar with
 // nothing accounting for the difference.
 func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 	s := span.Span{RPC: "GetProviderSchema", Provider: "aws", StartMs: 0, EndMs: 2000, DurationMs: 45000, StartClamped: true, Fidelity: span.FidelityReported}
@@ -1957,7 +1958,7 @@ func detailValueFor(t *testing.T, lines []string, label string) string {
 // TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress covers a pane that
 // was never sized against the only per-resource identifier the UI tier has.
 // detailNaturalWidth measured spanDetailLines over l.RPCSpans alone, which
-// was complete while the Addr line was unreachable; the timeline now selects
+// was complete while the address field was unreachable; the timeline now selects
 // UI-tier spans and renders it. On structured-ui.log the pane measured 25
 // columns and front-clipped every module path to its tail, so two distinct
 // modules' resources rendered as identical text -- with 135 columns of
@@ -1989,15 +1990,15 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 // A log carrying BOTH tiers reaches the detail pane through its RPC spans
 // alone. timelineSpans draws the UI tier only where the log has no RPC span
 // at all, and row.spanIdx only ever indexes RPCSpans, so every UI-hook
-// span's Addr line is a line no keypress in such a log can put on screen --
+// span's address field is one no keypress in such a log can put on screen --
 // and every column it claims comes out of the centre pane, which in the
 // timeline is the bar area this view exists for.
 //
 // The case is built here rather than taken from a fixture because no
 // fixture shows it. testdata/two-tier.log carries both tiers, but its
-// widest RPC line -- a registry provider address at 41 columns -- already
-// outruns its longest Addr line at 23, so the pane measures the same width
-// either way and the defect is invisible in it.
+// widest RPC line -- a registry provider address at 37 columns -- already
+// outruns its longest address line at 19, so the pane measures the same
+// width either way and the defect is invisible in it.
 func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 	ui := span.Span{
 		RPC: "create", Provider: "aws", ResourceType: "aws_subnet",
@@ -2017,7 +2018,7 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 	got := detailNaturalWidth(l)
 	for _, line := range reachableDetailLines(l) {
 		if w := lipgloss.Width(line); w >= lipgloss.Width(addr) {
-			t.Fatalf("the pane can draw %q at %d columns, as wide as the Addr line %q -- this case no longer isolates the unreachable tier", line, w, addr)
+			t.Fatalf("the pane can draw %q at %d columns, as wide as the address line %q -- this case no longer isolates the unreachable tier", line, w, addr)
 		} else if w > got {
 			t.Errorf("detailNaturalWidth = %d, too narrow for %q at %d columns", got, line, w)
 		}
