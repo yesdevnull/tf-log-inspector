@@ -1268,6 +1268,12 @@ func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
 // always the filter's doing, and backslash is a key the reader has and one
 // that acts. "this log has no entries" would be false, and "Esc clears it"
 // names a key that returns before it clears.
+//
+// Asserted against the literal backslash and the ABSENCE of noMatchNote,
+// rather than against scopedEmptyNote itself: a test that compares the
+// rendered pane to the very constant it is meant to pin proves nothing about
+// the constant's wording, only that renderRawLog returns whatever the
+// constant currently says.
 func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
 	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -1276,8 +1282,11 @@ func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
 	m.invalidateRows()
 
 	got := unstyled(m.renderRawLog(200, 10))
-	if !strings.Contains(got, scopedEmptyNote) {
-		t.Errorf("an empty scoped pane says %q, want %q", got, scopedEmptyNote)
+	if !strings.Contains(got, "\\") {
+		t.Errorf("an empty scoped pane does not name the backslash key: %q", got)
+	}
+	if strings.Contains(got, noMatchNote) {
+		t.Errorf("an empty scoped pane says %q, which falsely claims %q", got, "Esc clears it")
 	}
 }
 
@@ -1345,6 +1354,46 @@ func TestAJumpOpensOnTheFirstAdmittedMemberEvenWhenAnEarlierOneIsHidden(t *testi
 	}
 	if got, want := m.raw.top, 1; got != want {
 		t.Errorf("top = %d, want %d -- the first scope member the filter admits, not the hidden opening one", got, want)
+	}
+}
+
+// jumpToSpan sets top and topLine TOGETHER at a scoped jump (top, 0), not top
+// alone: a stale topLine left over from an earlier visit to the raw log
+// would otherwise survive, opening the scope's first member partway down
+// its own text rather than at its own first line -- the entry index would
+// be right and the line within it wrong, which looks like a working jump
+// until the pane is read closely.
+//
+// Reached the way a reader reaches it: 6 opens the raw log directly, five
+// downs scroll into the tall entry's body, 4 leaves it for the calls view
+// without resetting m.raw, and Enter jumps into the scope that entry's call
+// belongs to.
+func TestAScopedJumpResetsTheLineOffset(t *testing.T) {
+	const tall = 10
+	l := mixedHeightLog(tall)
+	// All three of mixedHeightLog's entries belong to one call, so Enter's
+	// scope holds all three and opens on the first, entry 0.
+	for i := range l.Entries {
+		l.Entries[i].ReqID = 1
+	}
+	l.RPCSpans = []span.Span{{Entry: 2, ReqID: 1}}
+
+	m := update(t, New(l, "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	for range 5 {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.TopLine() == 0 {
+		t.Fatalf("scrolling did not leave a nonzero line offset, so this does not exercise the branch it means to")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.raw.scope == nil {
+		t.Fatalf("Enter built no scope, so this does not reach the branch it means to pin")
+	}
+	if got := m.TopLine(); got != 0 {
+		t.Errorf("TopLine = %d after a scoped jump, want 0 -- a line offset left over from scrolling before the jump", got)
 	}
 }
 

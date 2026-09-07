@@ -3034,6 +3034,25 @@ func TestAScopedRawLogNamesItsSize(t *testing.T) {
 	}
 }
 
+// plural's singular branch is exercised by no fixture: the spec's own
+// measured minimum scope on a real capture is 4 entries, and no fixture in
+// testdata puts a request id on exactly one entry. A log built directly is
+// what it takes to reach a scope of one.
+func TestAScopedRawLogNamesASingleEntrySingular(t *testing.T) {
+	l := manyEntryLog(1)
+	l.Entries[0].ReqID = 1
+	l.RPCSpans = []span.Span{{Entry: 0, ReqID: 1}}
+
+	m := New(l, "x.log")
+	m.jumpToSpan(l.RPCSpans, 0)
+	if got, want := len(m.raw.scope), 1; got != want {
+		t.Fatalf("scope has %d entries, want %d -- this does not reach the branch it means to pin", got, want)
+	}
+	if got, want := m.centreTitle(), "RAW LOG (1 entry)"; got != want {
+		t.Errorf("centreTitle = %q, want %q", got, want)
+	}
+}
+
 // The action line offers the key that widens, and only while there is
 // something to widen.
 func TestTheFooterOffersTheWideningKeyOnlyWhileScoped(t *testing.T) {
@@ -3057,5 +3076,45 @@ func TestTheScopedActionLineFitsTheNarrowestThreePaneWidth(t *testing.T) {
 	action := line[len(line)-1]
 	if got := lipgloss.Width(action); got > detailInlineWidth {
 		t.Errorf("the scoped action line is %d columns, over the %d budget: %q", got, detailInlineWidth, action)
+	}
+}
+
+// scopeHint's key must be the one Update's "\\" case actually dispatches on,
+// not merely whatever word follows it: TestHelpDocumentsEveryKeyTheFooterAdvertises
+// and both help goldens all passed unchanged when scopeHint's text was
+// replaced with "| whole log", because none of them reach a view through a
+// jump and so never render a footer with a scope live.
+func TestScopeHintNamesTheKeyThatDropsTheScope(t *testing.T) {
+	key, _, ok := strings.Cut(scopeHint, " ")
+	if !ok {
+		t.Fatalf("scopeHint has no key field: %q", scopeHint)
+	}
+	if key != "\\" {
+		t.Errorf("scopeHint names key %q, want %q, the key Update's case dispatches a dropped scope on", key, "\\")
+	}
+}
+
+// TestTheFooterNeverLosesQuitAtWidthsTheActionLineFits reaches every view
+// through setView, which spends the scope (see setView), so it renders only
+// the UNSCOPED raw log's footer and cannot see a scoped one at all. This is
+// its sibling for a raw log actually reached by a jump.
+//
+// The sweep starts at 30, not at the scoped line's own natural width, because
+// the defect this covers was a natural width big enough to lose "q quit"
+// at 60 columns -- a width with two committed goldens (help-60.txt,
+// timeline-60.txt) -- while still being under detailInlineWidth and so
+// invisible to TestTheScopedActionLineFitsTheNarrowestThreePaneWidth.
+func TestTheFooterNeverLosesQuitAtWidthsTheScopedActionLineFits(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.raw.scope == nil {
+		t.Fatal("Enter built no scope, so this does not exercise the scoped footer")
+	}
+	for w := 60; w <= 200; w++ {
+		lines := strings.Split(m.footerText(w), "\n")
+		action := lines[len(lines)-1]
+		if !strings.Contains(action, "q quit") {
+			t.Errorf("scoped raw log at %d columns: action line %q has lost the quit hint", w, action)
+		}
 	}
 }

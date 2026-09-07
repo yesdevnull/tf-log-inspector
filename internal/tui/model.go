@@ -537,8 +537,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the log resumes beneath it. Bound in the raw log only:
 			// nowhere else has a scope to drop, and a key that acts
 			// invisibly elsewhere is worse than one that does nothing.
+			//
+			// notFound is dropped with it, for the reason invalidateRows
+			// drops it on a filter change: a miss is cached against the
+			// filter it searched under, and dropping the scope widens the
+			// search domain exactly as a filter change does, so a miss
+			// reported against one call would keep standing over a pane
+			// that is now the whole log.
 			if m.view == ViewRawLog {
 				m.raw.scope = nil
+				m.raw.notFound = false
 			}
 		case "?":
 			m.showHelp = true

@@ -651,7 +651,16 @@ const (
 // scopeHint offers the key that drops a raw-log scope. It is shown only
 // while a scope is live: a key advertised with nothing to act on is the
 // defect this package removes wherever it finds it.
-const scopeHint = "\\ whole log"
+//
+// "all" rather than "whole log": every other hint on this line is one terse
+// word ("pane", "facet", "facets", "search", "back", "quit"), and at 11
+// columns "whole log" was the outlier as well as the cost -- it took the
+// scoped action line to 66 columns against 53 unscoped, dropping "q quit" at
+// every width from 30 to 65, including 60, a width with two committed
+// goldens (help-60.txt, timeline-60.txt). At 5 columns the scoped line is 60
+// exactly, and "q quit" survives from there up (see
+// TestTheFooterNeverLosesQuitAtWidthsTheScopedActionLineFits).
+const scopeHint = "\\ all"
 
 // viewKeyHints is the hint group naming the number keys that switch views,
 // and the view each one switches to. It carries the help hint at its end as
@@ -972,7 +981,7 @@ func (m *Model) centreTitle() string {
 		// pane the reader can take in whole and over one holding a
 		// twentieth of the log. It is free: the scope is a slice.
 		return fmt.Sprintf("%s (%d %s)", viewTitle(ViewRawLog), len(m.raw.scope),
-			plural(uint64(len(m.raw.scope)), "entry", "entries"))
+			plural(len(m.raw.scope), "entry", "entries"))
 	}
 	if m.view == ViewTimeline {
 		return m.timelineTitle()
@@ -985,7 +994,7 @@ func (m *Model) centreTitle() string {
 // share no utility layer -- one shared function is not a layer worth
 // building for -- so this is a deliberate duplicate rather than an import
 // across packages.
-func plural(n uint64, one, many string) string {
+func plural(n int, one, many string) string {
 	if n == 1 {
 		return one
 	}

@@ -639,12 +639,17 @@ func (m Model) noMatchTail() string {
 // than Esc because Esc returns before it clears, so the frame would
 // otherwise advertise a key against what its own footer says about it.
 //
-// At 64 columns it does not survive the narrowest supported pane the way
-// noMatchNote's 43 does: clipWidth cuts it from the end, so a 60-column
-// pane loses the trailing " log" and reads "...shows the whole". The key
-// itself sits at column 44, well inside the cut, so the one thing this note
-// exists to name is never the part that goes missing.
-const scopedEmptyNote = "nothing in this call matches the filter -- \\ shows the whole log"
+// The bound to fit is a PANE, not a terminal, and the two disagree: the
+// centre pane measures 44 columns at a 100-column terminal (facetInlineWidth,
+// the narrowest three-pane layout), narrower than the 48 it measures at a
+// 70-column one (detailInlineWidth, the narrowest two-pane layout) -- both
+// figures forced by capPaneWidth's quarter-of-terminal rule rather than by
+// any one log's content, so they hold for any log whose facet or detail pane
+// has enough natural width to reach that quarter. A terminal made WIDER can
+// therefore make this pane NARROWER, once it is wide enough to draw a third
+// pane. At 43 columns this note fits the 44-column pane whole, with the key
+// at column 33 -- comfortable margin rather than the boundary.
+const scopedEmptyNote = "no filter match in this call -- \\ shows all"
 
 // noRowsNote is the same honesty for a view that has no rows to show with no
 // filter to blame: the providers and calls views of a log carrying UI-hook

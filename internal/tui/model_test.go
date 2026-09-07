@@ -688,6 +688,31 @@ func TestBackslashDropsTheScopeAndKeepsThePosition(t *testing.T) {
 	}
 }
 
+// Backslash clears a standing "pattern not found" along with the scope, for
+// the reason invalidateRows clears it on a filter change: a miss is cached
+// against the filter it searched under (see invalidateRows), and dropping
+// the scope widens the search domain exactly as a filter change does -- so a
+// miss reported against one call must not keep standing over a pane that is
+// now the whole log.
+func TestBackslashClearsAStandingSearchMiss(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.raw.scope == nil {
+		t.Fatal("Enter built no scope")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "no-such-text-anywhere")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.raw.notFound {
+		t.Fatal("the search did not leave a standing miss, so this does not exercise the branch it means to")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if m.raw.notFound {
+		t.Errorf("backslash left notFound standing over a pane that is now the whole log")
+	}
+}
+
 // Backslash is inert with no scope live, and inert outside the raw log.
 // Advertising a key that does nothing is the defect this package removes
 // wherever it finds it; doing something invisible is worse.
