@@ -1,11 +1,11 @@
 [1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
 [1;36mPROVIDERS[0m                               [2m │ [0m[1;36mCALLS[0m                                                                     [2m │ [0m[1;36mSPAN DETAIL[0m                             
-[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC                [0m  [1mresource type       [0m  [1mprovider            [0m[2m │ [0mRPC   ApplyResourceChange               
-[ ] …ry.terraform.io/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyResourceChange  …le_compute_instance  …io/hashicorp/google[0m[2m │ [0mType  google_compute_instance           
-[1;36mRPCS[0m                                    [2m │ [0m      5ms  ApplyResourceChange  aws_subnet            …rm.io/hashicorp/aws[2m │ [0mProv  …try.terraform.io/hashicorp/google
-[ ] ApplyResourceChange  2              [2m │ [0m                                                                          [2m │ [0mDur   8ms                               
-[1;36mRESOURCE TYPES[0m                          [2m │ [0m                                                                          [2m │ [0mRes   no address context in log         
+[7;2m[ ] …istry.terraform.io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC                [0m  [1mresource type       [0m  [1mprovider            [0m[2m │ [0m[2mRPC   [0mApplyResourceChange               
+[ ] …ry.terraform.io/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyResourceChange  …le_compute_instance  …io/hashicorp/google[0m[2m │ [0m[2mType  [0mgoogle_compute_instance           
+[1;36mRPCS[0m                                    [2m │ [0m      5ms  ApplyResourceChange  aws_subnet            …rm.io/hashicorp/aws[2m │ [0m[2mProv  [0m…try.terraform.io/hashicorp/google
+[ ] ApplyResourceChange  2              [2m │ [0m                                                                          [2m │ [0m[2mDur   [0m8ms                               
+[1;36mRESOURCE TYPES[0m                          [2m │ [0m                                                                          [2m │ [0m[2mRes   [0mno address context in log         
 [ ] aws_subnet  1                       [2m │ [0m                                                                          [2m │ [0m                                        
 [ ] google_compute_instance  1          [2m │ [0m                                                                          [2m │ [0m                                        
 [1;36mLEVELS[0m                                  [2m │ [0m                                                                          [2m │ [0m                                        

@@ -1,0 +1,18 @@
+# SYNTHESISED to exercise the raw log's per-level marking: every other
+# fixture in this repo is TRACE and DEBUG throughout, which is what a real
+# TF_LOG capture looks like, so none of them can show the two levels the raw
+# log marks. This file carries one line of each level the scanner
+# recognises, plus a multi-line ERROR entry -- the case that decides whether
+# a marking follows the entry or only its first line. The RPC span is
+# modelled on testdata/provider-rpc.log's "Received downstream response"
+# shape so the file still parses as a log with spans in it. Values are
+# invented; no line here is from a real run.
+2023-04-02T09:14:01.100Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Called downstream: tf_req_id=1a2b3c4d-0000-4000-8000-000000000001 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_provider_addr=registry.terraform.io/hashicorp/aws @module=sdk.proto
+2023-04-02T09:14:01.200Z [DEBUG] provider.terraform-provider-aws_v4.46.0_x5: retrying request after backoff: attempt=2 @module=aws
+2023-04-02T09:14:01.300Z [INFO]  backend/local: plan operation completed
+2023-04-02T09:14:01.400Z [WARN]  provider.terraform-provider-aws_v4.46.0_x5: deprecated attribute set on aws_subnet: attribute=assign_ipv6_address_on_creation @module=aws
+2023-04-02T09:14:01.500Z [ERROR] provider.terraform-provider-aws_v4.46.0_x5: request failed after 3 attempts: @module=aws
+  error.detail=
+  | Caller is not authorised to perform this action on the target resource.
+   error.code=AccessDenied
+2023-04-02T09:14:01.600Z [TRACE] provider.terraform-provider-aws_v4.46.0_x5: Received downstream response: tf_req_id=1a2b3c4d-0000-4000-8000-000000000001 tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=12 @module=sdk.proto

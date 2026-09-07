@@ -651,6 +651,7 @@ func (m *Model) renderTimeline(w, h int) string {
 		}
 	}
 
+	hues := m.laneHues()
 	dataH := h - axisH - len(notes)
 	top, visible := scrollWindow(m.timeline.lane, len(lanes), dataH)
 	lines := make([]string, 0, visible+axisH+len(notes))
@@ -662,7 +663,17 @@ func (m *Model) renderTimeline(w, h int) string {
 		if i == m.timeline.lane {
 			label = cursorBar(label, labelW+1, m.pane == PaneList)
 		}
-		lines = append(lines, clipWidth(label+laneBar(spans, lanes[i], wallClock, barW), w))
+		// The bar is hued by its provider and the label is not, because the
+		// label may be the cursor bar: reverse video ends at the first reset
+		// inside what it wraps, so a hued label would stop the highlight at
+		// the provider's name. Composed side by side they do not nest, and
+		// each says its own thing -- which lane the keyboard is on, and
+		// whose work the bar is.
+		bar := laneBar(spans, lanes[i], wallClock, barW)
+		if hue, ok := hues[laneLabelProvider(spans[lanes[i].Spans[0]].Provider)]; ok {
+			bar = hue.Render(bar)
+		}
+		lines = append(lines, clipWidth(label+bar, w))
 	}
 	if axisH > 0 {
 		gutter := padRight(clipValueEnd(laneCutMark(len(lanes)-visible), labelW), labelW) + " "
@@ -1429,4 +1440,44 @@ func (m *Model) stallAnnotation(w int) string {
 		lines = append(lines, clipWidth(detailCutMark, w))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// laneHues assigns each provider in the log the colour its lanes are drawn
+// in, keyed by the short name the lane labels already use.
+//
+// The assignment is made from the PROVIDER FACET, not from the lanes on
+// screen. The facets are built once at New over the whole log (see the
+// pane-width measurements beside them), so a provider's hue is a property of
+// the log rather than of the current filter -- toggle a facet off and the
+// lanes that remain keep the colours they had. Assigning from the visible
+// lanes instead would recolour the timeline on every filter change, which
+// would read as the lanes themselves having changed.
+//
+// A log whose facets are missing gets an empty map and uncoloured bars,
+// which is the same thing an unknown provider gets: the bars still say when
+// the work happened, and the labels still say whose it was.
+func (m *Model) laneHues() map[string]lipgloss.Style {
+	hues := map[string]lipgloss.Style{}
+	for _, f := range m.facets {
+		if f.Name != dimProvider {
+			continue
+		}
+		for _, v := range f.Values {
+			// Several full provider addresses can share one short name, and
+			// the lanes they label are then indistinguishable already; the
+			// first one seen takes the colour rather than the last
+			// overwriting it, so the hue is stable in facet order.
+			if p := laneLabelProvider(v.Value); !hasHue(hues, p) {
+				hues[p] = semantic.lane(len(hues))
+			}
+		}
+	}
+	return hues
+}
+
+// hasHue reports whether p has already been assigned, kept separate so the
+// assignment above reads as the one rule it is.
+func hasHue(hues map[string]lipgloss.Style, p string) bool {
+	_, ok := hues[p]
+	return ok
 }

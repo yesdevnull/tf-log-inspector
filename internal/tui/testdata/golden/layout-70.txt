@@ -1,11 +1,11 @@
 [1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
 [1;36mCALLS[0m                                           [2m │ [0m[1;36mSPAN DETAIL[0m        
-[1;36mduration▾[0m  [1mRPC        [0m  [1mresource t…[0m  [1mprovider   [0m[2m │ [0mRPC   ApplyResourc…
-[7m      8ms  ApplyResou…  …e_instance  …orp/google[0m[2m │ [0mType  …ute_instance
-      5ms  ApplyResou…  aws_subnet   …hicorp/aws[2m │ [0mProv  …icorp/google
-                                                [2m │ [0mDur   8ms          
-                                                [2m │ [0mRes   no address c…
+[1;36mduration▾[0m  [1mRPC        [0m  [1mresource t…[0m  [1mprovider   [0m[2m │ [0m[2mRPC   [0mApplyResourc…
+[7m      8ms  ApplyResou…  …e_instance  …orp/google[0m[2m │ [0m[2mType  [0m…ute_instance
+      5ms  ApplyResou…  aws_subnet   …hicorp/aws[2m │ [0m[2mProv  [0m…icorp/google
+                                                [2m │ [0m[2mDur   [0m8ms          
+                                                [2m │ [0m[2mRes   [0mno address c…
                                                 [2m │ [0m                   
                                                 [2m │ [0m                   
                                                 [2m │ [0m                   

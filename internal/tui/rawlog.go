@@ -207,10 +207,19 @@ func (m Model) renderRawLog(w, h int) string {
 		if len(lines) > 0 && len(lines)+len(entryLines) > h {
 			break
 		}
+		// The level is the ENTRY's, so every line of a multi-line entry is
+		// marked alike: a stack trace or a body dump under an ERROR header
+		// belongs to that error, and marking only the header would leave the
+		// rest reading as unrelated traffic.
+		style, marked := semantic.forLevel(e.Level)
 		for _, ln := range entryLines {
 			var plain string
 			plain, scratch = logfmt.StripANSI(ln, scratch)
-			lines = append(lines, clipWidth(plain, w))
+			line := clipWidth(plain, w)
+			if marked {
+				line = style.Render(line)
+			}
+			lines = append(lines, line)
 		}
 		if len(lines) >= h {
 			break

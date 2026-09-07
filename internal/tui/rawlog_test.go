@@ -762,3 +762,80 @@ func TestTheRawLogRendersTheHeadOfAnEntryTallerThanThePane(t *testing.T) {
 		t.Errorf("an entry taller than the pane rendered nothing at all: %q", out)
 	}
 }
+
+// The raw log marks ERROR and WARN and leaves every other level exactly as
+// the log wrote it.
+//
+// The multi-line ERROR entry is the case worth pinning: a level is a
+// property of the ENTRY, and an error's detail block belongs to that error,
+// so a marking that stopped at the header line would leave the explanation
+// reading as unrelated traffic two lines below the thing it explains.
+//
+// TRACE and DEBUG are asserted UNMARKED deliberately. These captures are
+// taken at TRACE with provider TRACE, so a scheme that also marked the
+// quiet levels would mark nearly every line in the pane and distinguish
+// nothing; see semanticStyles.forLevel.
+func TestTheRawLogMarksOnlyTheRareLevels(t *testing.T) {
+	m := update(t, New(testLog(t, "severity-levels.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	pane := m.renderRawLog(160, 40)
+
+	lines := strings.Split(pane, "\n")
+	marked := map[string]string{}
+	for _, ln := range lines {
+		plain := unstyled(ln)
+		switch {
+		case strings.Contains(plain, "[ERROR]"):
+			marked["ERROR"] = ln
+		case strings.Contains(plain, "[WARN]"):
+			marked["WARN"] = ln
+		case strings.Contains(plain, "[INFO]"):
+			marked["INFO"] = ln
+		case strings.Contains(plain, "[DEBUG]"):
+			marked["DEBUG"] = ln
+		case strings.Contains(plain, "[TRACE]"):
+			marked["TRACE"] = ln
+		case strings.Contains(plain, "Caller is not authorised"):
+			marked["error detail"] = ln
+		}
+	}
+	for _, want := range []string{"ERROR", "WARN", "INFO", "DEBUG", "TRACE", "error detail"} {
+		if marked[want] == "" {
+			t.Fatalf("the pane does not draw a %s line, so this asserts nothing about it:\n%s", want, pane)
+		}
+	}
+
+	// The two rare levels carry their colour; the error's continuation
+	// carries the SAME styling as its header, because it is the same entry.
+	for _, name := range []string{"ERROR", "error detail"} {
+		if got := marked[name]; !strings.HasPrefix(got, "\x1b[") {
+			t.Errorf("the %s line is drawn unmarked: %q", name, got)
+		}
+	}
+	if head, detail := marked["ERROR"], marked["error detail"]; sgrPrefix(head) != sgrPrefix(detail) {
+		t.Errorf("an ERROR entry's continuation is drawn as %q and its header as %q -- the two are one entry", sgrPrefix(detail), sgrPrefix(head))
+	}
+	if got := marked["WARN"]; !strings.HasPrefix(got, "\x1b[") {
+		t.Errorf("the WARN line is drawn unmarked: %q", got)
+	}
+	if sgrPrefix(marked["WARN"]) == sgrPrefix(marked["ERROR"]) {
+		t.Errorf("WARN and ERROR are drawn alike (%q), so the pane cannot tell a caution from a failure", sgrPrefix(marked["WARN"]))
+	}
+	for _, name := range []string{"INFO", "DEBUG", "TRACE"} {
+		if got := marked[name]; strings.Contains(got, "\x1b[") {
+			t.Errorf("the %s line is marked (%q) -- these captures are almost entirely TRACE, so marking them distinguishes nothing", name, got)
+		}
+	}
+}
+
+// sgrPrefix is the escape sequence a line opens with, or "" if it opens with
+// text. It is what says whether two lines are drawn the same way.
+func sgrPrefix(line string) string {
+	if !strings.HasPrefix(line, "\x1b[") {
+		return ""
+	}
+	if end := strings.IndexByte(line, 'm'); end >= 0 {
+		return line[:end+1]
+	}
+	return ""
+}

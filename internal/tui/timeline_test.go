@@ -1113,7 +1113,7 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	label := cursorBar(padRight(labels[0], labelW)+" ", labelW+1, true)
-	want := label + laneBar(spans, lanes[0], timelineWallClockMs(spans), barW)
+	want := label + hueOf(m, spans, lanes, 0).Render(laneBar(spans, lanes[0], timelineWallClockMs(spans), barW))
 	if lines[0] != want {
 		t.Errorf("first line = %q, want lane 0's bar %q: the annotation must not consume the last lane row", lines[0], want)
 	}
@@ -1580,7 +1580,7 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	labelW := laneLabelWidth(labels)
 	barW := 40 - labelW - 1
 	rowContent := func(i int) string {
-		return padRight(labels[i], labelW) + " " + laneBar(spans, lanes[i], wallClock, barW)
+		return padRight(labels[i], labelW) + " " + hueOf(m, spans, lanes, i).Render(laneBar(spans, lanes[i], wallClock, barW))
 	}
 
 	wantVisible := []int{3, 4}
@@ -1590,7 +1590,7 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 		if laneIdx == m.timeline.lane {
 			// Only the label column carries the cursor; see
 			// TestTheCursorDoesNotRedrawTheSelectedLanesBar.
-			want = cursorBar(padRight(labels[laneIdx], labelW)+" ", labelW+1, true) + laneBar(spans, lanes[laneIdx], wallClock, barW)
+			want = cursorBar(padRight(labels[laneIdx], labelW)+" ", labelW+1, true) + hueOf(m, spans, lanes, laneIdx).Render(laneBar(spans, lanes[laneIdx], wallClock, barW))
 		}
 		if lines[row] != want {
 			t.Errorf("row %d = %q, want lane %d's row %q", row, lines[row], laneIdx, want)
@@ -1614,6 +1614,18 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 // row, leaving the bar: the block-and-space pattern that is what this view
 // actually says. Labels are ASCII and are padded to a fixed column count, so
 // dropping labelW+1 runes drops exactly labelW+1 display columns.
+// hueOf is the style lane idx's bar is drawn in, looked up the same way
+// renderTimeline looks it up. The expected-row builders below compose from
+// the production functions rather than from literals, and the hue is one of
+// those: leaving it out would make them assert the bar is UNCOLOURED.
+//
+// A provider the map does not carry yields the zero Style, which renders its
+// argument unchanged -- the same thing the render site does when the lookup
+// misses.
+func hueOf(m Model, spans []span.Span, lanes []model.Lane, idx int) lipgloss.Style {
+	return m.laneHues()[laneLabelProvider(spans[lanes[idx].Spans[0]].Provider)]
+}
+
 func laneBarOf(t *testing.T, row string, labelW int) string {
 	t.Helper()
 	plain, _ := logfmt.StripANSI(row, nil)
@@ -1660,14 +1672,28 @@ func TestTheCursorDoesNotRedrawTheSelectedLanesBar(t *testing.T) {
 		}
 	}
 
-	if bar := laneBarOf(t, onFirst[0], labelW); !strings.HasSuffix(onFirst[0], bar) {
-		t.Errorf("the selected lane's row %q carries styling inside its bar area", onFirst[0])
+	// Asserted against REVERSE VIDEO rather than against styling in general:
+	// the bar carries its provider's hue, which is a style of its own and
+	// not the cursor's. What must not reach the bar is the highlight.
+	labelRun, barArea, closed := strings.Cut(onFirst[0], "\x1b[0m")
+	if !closed {
+		t.Fatalf("the selected lane's row %q never closes the cursor bar", onFirst[0])
 	}
-	if !strings.Contains(onFirst[0], "\x1b[") {
-		t.Errorf("the selected lane's row %q carries no cursor styling at all", onFirst[0])
+	if !strings.HasPrefix(labelRun, "\x1b[7m") {
+		t.Errorf("the selected lane's row %q does not open with the cursor bar", onFirst[0])
 	}
-	if strings.Contains(onFirst[1], "\x1b[") {
-		t.Errorf("an unselected lane's row %q carries cursor styling", onFirst[1])
+	for _, open := range reverseOpen {
+		if strings.Contains(barArea, open) {
+			t.Errorf("the cursor's reverse video reaches into the bar area of %q", onFirst[0])
+		}
+	}
+	if got, want := unstyled(barArea), laneBarOf(t, onFirst[0], labelW); got != want {
+		t.Errorf("the selected lane's bar area reads %q, want its bar %q", got, want)
+	}
+	for _, open := range reverseOpen {
+		if strings.Contains(onFirst[1], open) {
+			t.Errorf("an unselected lane's row %q carries cursor styling", onFirst[1])
+		}
 	}
 }
 

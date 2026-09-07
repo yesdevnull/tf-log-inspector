@@ -473,7 +473,7 @@ func TestDetailPaneShowsTheSelectedSpan(t *testing.T) {
 	if spanIdx < len(m.log.Attribs) {
 		a = m.log.Attribs[spanIdx]
 	}
-	if expect := strings.Join(spanDetailLines(want, a, m.log.HasAddressContext(), 80), "\n"); got != expect {
+	if expect := unstyled(strings.Join(spanDetailLines(want, a, m.log.HasAddressContext(), 80), "\n")); got != expect {
 		t.Errorf("calls view detail pane =\n%s\nwant\n%s", got, expect)
 	}
 }
@@ -775,6 +775,16 @@ func unstyled(s string) string {
 	return plain
 }
 
+// unstyledLines is unstyled over a block of lines, for the render functions
+// that return one line per field.
+func unstyledLines(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = unstyled(ln)
+	}
+	return out
+}
+
 // layoutCentreWidth returns the centre (list) pane's width for a terminal
 // w columns wide, replicating renderPanes' own arithmetic for the
 // w >= facetInlineWidth case this test renders at. Kept here rather than
@@ -866,7 +876,7 @@ func paneSepColumns(t *testing.T, view string) []int {
 // reads as a complete name.
 func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	s := span.Span{RPC: "ValidateResourceTypeConfig", Provider: "aws", DurationMs: 5}
-	line := spanDetailLines(s, attrib.Attribution{}, false, 20)[0]
+	line := unstyled(spanDetailLines(s, attrib.Attribution{}, false, 20)[0])
 	if strings.Contains(line, s.RPC) {
 		t.Fatalf("the RPC name fits whole at width 20, so this no longer exercises clipping: %q", line)
 	}
@@ -892,7 +902,7 @@ func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
 		{label: "Total", value: "742.4s", kind: numericColumn},
 		{label: "Prov", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
 	}
-	got := detailFieldLines(fields, 10)
+	got := unstyledLines(detailFieldLines(fields, 10))
 	if want := "Total 742."; got[0] != want {
 		t.Errorf("numeric line at 10 columns = %q, want %q -- a number keeps its head", got[0], want)
 	}
@@ -1477,7 +1487,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	// A rollup row, since only a rollup pane has a slowest-call section
 	// beneath an aggregate for a short pane to choose between.
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	full := strings.Split(m.renderDetail(50, 40), "\n")
+	full := strings.Split(unstyled(m.renderDetail(50, 40)), "\n")
 	const slowestSectionLines = 2 // the blank separator and the Slowest line
 	if n := len(full); n < 1+slowestSectionLines+1 {
 		t.Fatalf("fixture assumption changed: the whole pane is %d lines, too few to have a section to drop:\n%s", n, strings.Join(full, "\n"))
@@ -1489,7 +1499,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	}
 
 	for h := 1; h <= len(full)+2; h++ {
-		lines := strings.Split(m.renderDetail(50, h), "\n")
+		lines := strings.Split(unstyled(m.renderDetail(50, h)), "\n")
 		if n := len(lines); n > h {
 			t.Errorf("height %d: the pane is %d lines:\n%s", h, n, strings.Join(lines, "\n"))
 		}
@@ -1802,7 +1812,7 @@ func TestTheOpeningScreenDescribesTheTopCall(t *testing.T) {
 	if spanIdx < len(m.log.Attribs) {
 		a = m.log.Attribs[spanIdx]
 	}
-	want := strings.Join(spanDetailLines(m.log.RPCSpans[spanIdx], a, m.log.HasAddressContext(), 50), "\n")
+	want := unstyled(strings.Join(spanDetailLines(m.log.RPCSpans[spanIdx], a, m.log.HasAddressContext(), 50), "\n"))
 	if got := detailBody(t, m, spanDetailTitle, 50, 20); got != want {
 		t.Errorf("opening detail pane =\n%s\n\nwant the selected call's span detail\n%s", got, want)
 	}
@@ -1840,7 +1850,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 	}
 	var widest string
 	for _, s := range l.UISpans {
-		for _, line := range spanDetailLines(s, attrib.Attribution{}, false, hugeWidth) {
+		for _, line := range unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, hugeWidth)) {
 			if lipgloss.Width(line) > lipgloss.Width(widest) {
 				widest = line
 			}
@@ -1881,7 +1891,7 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 	}
 
 	var addr string
-	for _, line := range spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth) {
+	for _, line := range unstyledLines(spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth)) {
 		if strings.HasPrefix(line, "Addr") {
 			addr = line
 		}

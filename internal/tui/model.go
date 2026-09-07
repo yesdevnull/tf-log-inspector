@@ -720,7 +720,8 @@ var _ tea.Model = (*Model)(nil)
 func Run(l *model.Log, path string) error {
 	// Settled once, here, rather than consulted per frame: the answer cannot
 	// change while the program runs, and every render site reads the theme.
-	styles = newTheme(colourWanted())
+	wantColour := colourWanted()
+	styles, semantic = newTheme(wantColour), newSemantics(wantColour)
 	m := New(l, path)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	_, err := p.Run()

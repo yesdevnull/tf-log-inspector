@@ -3,11 +3,14 @@ package tui
 import (
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
 // themeUnderTest is the theme these tests exercise, built fresh rather than
@@ -229,5 +232,145 @@ func TestEveryStyleTheThemeHoldsIsNamedInAll(t *testing.T) {
 	got, want := len(newTheme(true).all()), reflect.TypeOf(theme{}).NumField()
 	if got != want {
 		t.Errorf("all() names %d styles but theme has %d fields -- a style missing from all() is checked by nothing above", got, want)
+	}
+}
+
+// ansiSlot reports whether c is one of the sixteen colours a terminal theme
+// remaps. Naming an absolute colour instead -- a 256-colour index, a hex
+// value -- would fix a hue this package chose on a terminal it has never
+// seen, legible there and possibly invisible on the reader's.
+func ansiSlot(c lipgloss.Color) bool {
+	switch c {
+	case "0", "1", "2", "3", "4", "5", "6", "7",
+		"8", "9", "10", "11", "12", "13", "14", "15":
+		return true
+	}
+	return false
+}
+
+// The semantic palette obeys the theme's width rule for the same reason the
+// theme does: its styles wrap text that has already been clipped and padded
+// to the space it must fill, so one that resized its argument would put a
+// raw-log line or a timeline bar out of step with the pane holding it.
+func TestEverySemanticStyleLeavesTheTextWidthUnchanged(t *testing.T) {
+	samples := []string{"[ERROR] provider crashed", "████░░░░", ""}
+	for _, colour := range []bool{true, false} {
+		for name, style := range newSemantics(colour).colours() {
+			for _, s := range samples {
+				if got, want := lipgloss.Width(style.Render(s)), lipgloss.Width(s); got != want {
+					t.Errorf("colour=%v style %s rendered %q at width %d, want the unstyled width %d",
+						colour, name, s, got, want)
+				}
+			}
+		}
+	}
+}
+
+// Every semantic colour is remappable, and none of them is the accent.
+//
+// The accent means "look here" everywhere the theme uses it. A lane drawn in
+// it would be making a claim about importance that a provider's identity
+// does not carry, and nothing on the frame would tell the two uses apart.
+func TestSemanticColoursAreRemappableAndNoneIsTheAccent(t *testing.T) {
+	for name, style := range newSemantics(true).colours() {
+		fg, ok := style.GetForeground().(lipgloss.Color)
+		if !ok {
+			t.Errorf("style %s has foreground %#v, want one of the sixteen ANSI colours", name, style.GetForeground())
+			continue
+		}
+		if !ansiSlot(fg) {
+			t.Errorf("style %s uses colour %q, which no terminal theme remaps", name, fg)
+		}
+		if fg == accent {
+			t.Errorf("style %s uses the accent %q, which already means \"look here\" rather than naming a thing", name, fg)
+		}
+	}
+}
+
+// A hue stands for a provider's identity, so two hues a terminal may render
+// close together must not sit next to each other in the list: adjacent
+// entries are what a plan with two providers actually gets.
+func TestNoTwoAdjacentLaneColoursAreTheSameHue(t *testing.T) {
+	slot := func(c lipgloss.Color) int {
+		n, err := strconv.Atoi(string(c))
+		if err != nil {
+			t.Fatalf("lane colour %q is not an ANSI slot number: %v", c, err)
+		}
+		return n
+	}
+	for i := 1; i < len(laneColours); i++ {
+		// The bright form of ANSI colour n is n+8.
+		if prev, cur := slot(laneColours[i-1]), slot(laneColours[i]); cur == prev+8 || prev == cur+8 {
+			t.Errorf("lane colours %d (%d) and %d (%d) are the normal and bright forms of one hue, which a terminal may draw alike",
+				i-1, prev, i, cur)
+		}
+	}
+}
+
+// With colour withheld, ERROR keeps its weight. It is the one line in the
+// pane a reader must not scroll past, and NO_COLOR asks for no colour rather
+// than for no interface -- so the distinction that matters most is carried
+// by the one property that does not depend on colour being wanted.
+func TestErrorStaysMarkedWithColourWithheld(t *testing.T) {
+	plain := newSemantics(false)
+	for name, style := range plain.colours() {
+		if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
+			t.Errorf("with colour off, style %s still sets foreground %#v", name, fg)
+		}
+	}
+	if got := plain.levelError.Render("x"); !strings.Contains(got, "\x1b[1m") {
+		t.Errorf("with colour off, an ERROR line is drawn exactly like every other: %q", got)
+	}
+}
+
+// Only the two rare levels are marked. These captures are taken at TRACE
+// with provider TRACE -- that is what the tool is for -- so a scheme that
+// dimmed the quieter levels would dim nearly every line in the pane, leaving
+// nothing standing out against anything and the log harder to read than
+// before. TRACE and DEBUG are asserted plain for that reason, not by
+// oversight.
+func TestOnlyTheRareLevelsAreMarked(t *testing.T) {
+	s := newSemantics(true)
+	for _, tc := range []struct {
+		level  logfmt.Level
+		marked bool
+	}{
+		{logfmt.LevelError, true},
+		{logfmt.LevelWarn, true},
+		{logfmt.LevelInfo, false},
+		{logfmt.LevelDebug, false},
+		{logfmt.LevelTrace, false},
+		{logfmt.LevelUnknown, false},
+	} {
+		if _, got := s.forLevel(tc.level); got != tc.marked {
+			t.Errorf("level %v marked = %v, want %v", tc.level, got, tc.marked)
+		}
+	}
+}
+
+// More providers than colours is an ordinary log, not an edge case, so the
+// list cycles rather than running out. Two providers then share a hue, which
+// costs the reader a shortcut and not the answer: the lane's label names it
+// either way.
+func TestLaneHuesCycleOnceTheColoursRunOut(t *testing.T) {
+	s := newSemantics(true)
+	for i := range len(laneColours) * 2 {
+		if got, want := s.lane(i), s.lanes[i%len(laneColours)]; got.GetForeground() != want.GetForeground() {
+			t.Errorf("lane(%d) = %v, want the colour at %d", i, got.GetForeground(), i%len(laneColours))
+		}
+	}
+	if a, b := s.lane(0), s.lane(1); a.GetForeground() == b.GetForeground() {
+		t.Fatal("the first two lanes share a colour, so the cycling above compares a palette of one")
+	}
+}
+
+// The same completeness rule the theme has: a style the palette holds but
+// colours() does not name is checked by none of the invariants above.
+func TestEveryStyleThePaletteHoldsIsNamedInColours(t *testing.T) {
+	s := newSemantics(true)
+	// One entry per lane, plus one per remaining field.
+	want := reflect.TypeOf(semanticStyles{}).NumField() - 1 + len(s.lanes)
+	if got := len(s.colours()); got != want {
+		t.Errorf("colours() names %d styles but the palette holds %d -- one missing is checked by nothing above", got, want)
 	}
 }

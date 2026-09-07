@@ -1,14 +1,14 @@
 [1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
 [1;36mPROVIDERS[0m                [2m │ [0m[1;36mBY PROVIDER[0m                                 [2m │ [0m[1;36mGROUP DETAIL[0m             
-[7;2m[ ] ….io/hashicorp/aws  1[0m[2m │ [0m[1mprovider                [0m  [1;36mtotal▾[0m  [1mcalls[0m  [1mmax[0m[2m │ [0mProv  …o/hashicorp/google
-[ ] …/hashicorp/google  1[2m │ [0m[7m…orm.io/hashicorp/google     8ms      1  8ms[0m[2m │ [0mTotal 8ms                
-[1;36mRPCS[0m                     [2m │ [0m…raform.io/hashicorp/aws     5ms      1  5ms[2m │ [0mCalls 1                  
-[ ] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0mMax   8ms                
-[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0mTypes 1                  
-[ ] aws_subnet  1        [2m │ [0m                                            [2m │ [0mRPCs  1                  
+[7;2m[ ] ….io/hashicorp/aws  1[0m[2m │ [0m[1mprovider                [0m  [1;36mtotal▾[0m  [1mcalls[0m  [1mmax[0m[2m │ [0m[2mProv  [0m…o/hashicorp/google
+[ ] …/hashicorp/google  1[2m │ [0m[7m…orm.io/hashicorp/google     8ms      1  8ms[0m[2m │ [0m[2mTotal [0m8ms                
+[1;36mRPCS[0m                     [2m │ [0m…raform.io/hashicorp/aws     5ms      1  5ms[2m │ [0m[2mCalls [0m1                  
+[ ] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m[2mMax   [0m8ms                
+[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m[2mTypes [0m1                  
+[ ] aws_subnet  1        [2m │ [0m                                            [2m │ [0m[2mRPCs  [0m1                  
 [ ] …_compute_instance  1[2m │ [0m                                            [2m │ [0m                         
-[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0mSlowest ApplyResourceCha…
+[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m[2mSlowest [0mApplyResourceCha…
 [ ] TRACE  2             [2m │ [0m                                            [2m │ [0m                         
 [ ] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         

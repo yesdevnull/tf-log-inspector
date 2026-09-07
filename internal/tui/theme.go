@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
 // accent is the one colour this interface uses. Everything the eye should
@@ -153,3 +156,126 @@ func colourWanted() bool {
 // every render site reads this value, so replacing it mid-run would change
 // the frame under the reader.
 var styles = newTheme(true)
+
+// The semantic colours. These are the interface's SECOND vocabulary, and it
+// is kept apart from the theme deliberately.
+//
+// A theme style says how important something is on the frame -- this is a
+// title, this is chrome -- and there is exactly one accent for it, because
+// there is only one thing "look here" can mean. A semantic colour says what
+// something IS: red is an error and nothing else, and a lane's hue is that
+// provider's and no other's. Held on one struct, the two rules would have to
+// be enforced as one, and the single-accent invariant would have to be
+// dropped to admit any of these -- which is what makes the split worth its
+// second type rather than a longer theme.
+//
+// None of them is the accent. A lane drawn in the colour that elsewhere
+// means "this is a title" would be making a claim about importance it does
+// not have, and the reader has no way to tell the two uses apart.
+const (
+	// errorColour and warnColour are the two the terminal's own conventions
+	// already settle: red is a failure and amber is a caution, in this
+	// interface as everywhere else the reader has been.
+	errorColour = lipgloss.Color("1")
+	warnColour  = lipgloss.Color("3")
+)
+
+// laneColours are the hues a timeline lane is drawn in, one per provider.
+// They stand for identity rather than for degree, so they are chosen to be
+// told APART rather than ordered: no two adjacent entries are the normal and
+// bright forms of one hue, since a terminal theme is free to render those
+// close together.
+//
+// Red and amber are absent: they mean error and warning three lines up in
+// the raw log, and a provider is not a failure. Cyan is absent because it is
+// the accent. What is left is enough for the handful of providers a plan
+// runs -- and when there are more, the list cycles and two providers share a
+// hue. The lane's own label still names them, so that costs the reader a
+// shortcut, not the answer.
+var laneColours = []lipgloss.Color{
+	lipgloss.Color("2"),  // green
+	lipgloss.Color("4"),  // blue
+	lipgloss.Color("5"),  // magenta
+	lipgloss.Color("10"), // bright green
+	lipgloss.Color("12"), // bright blue
+	lipgloss.Color("13"), // bright magenta
+}
+
+// semanticStyles is the rendered form of those colours.
+type semanticStyles struct {
+	// levelError marks a raw-log line the reader must not scroll past. It
+	// carries WEIGHT as well as colour, and it is the only semantic style
+	// that does: weight survives NO_COLOR, so the one distinction that
+	// matters most is the one that does not depend on colour being wanted.
+	levelError lipgloss.Style
+	// levelWarn marks a raw-log line worth stopping on.
+	levelWarn lipgloss.Style
+	// lanes are the per-provider timeline hues, in laneColours' order.
+	lanes []lipgloss.Style
+}
+
+// colours names every style in the palette, the same way theme.all() does
+// and for the same reason: the invariants below are checked against what the
+// palette holds rather than against a list written once.
+func (s semanticStyles) colours() map[string]lipgloss.Style {
+	m := map[string]lipgloss.Style{
+		"levelError": s.levelError,
+		"levelWarn":  s.levelWarn,
+	}
+	for i, style := range s.lanes {
+		m[fmt.Sprintf("lane%d", i)] = style
+	}
+	return m
+}
+
+// newSemantics builds the palette, with the colours applied only if colour
+// is wanted -- withheld the same way the theme withholds the accent, by not
+// setting a foreground, so levelError keeps its weight either way.
+func newSemantics(colour bool) semanticStyles {
+	base := styleRenderer.NewStyle()
+	fg := func(c lipgloss.Color) lipgloss.Style {
+		if !colour {
+			return base
+		}
+		return base.Foreground(c)
+	}
+	lanes := make([]lipgloss.Style, len(laneColours))
+	for i, c := range laneColours {
+		lanes[i] = fg(c)
+	}
+	return semanticStyles{
+		levelError: fg(errorColour).Bold(true),
+		levelWarn:  fg(warnColour),
+		lanes:      lanes,
+	}
+}
+
+// forLevel reports how a raw-log line of level l should be drawn, and
+// whether it should be drawn differently at all.
+//
+// Only ERROR and WARN answer yes. Everything else is left exactly as the log
+// wrote it, because these captures are taken at TRACE with provider TRACE --
+// that is what the tool is for -- so TRACE is not the exception in this pane,
+// it is nearly the whole of it. Dimming it, the obvious reading of "quieter
+// levels recede", would dim almost every line on screen: no line would stand
+// out against another and the pane would only be harder to read. Marking the
+// two levels that ARE rare is the same judgement from the other end.
+func (s semanticStyles) forLevel(l logfmt.Level) (lipgloss.Style, bool) {
+	switch l {
+	case logfmt.LevelError:
+		return s.levelError, true
+	case logfmt.LevelWarn:
+		return s.levelWarn, true
+	}
+	return lipgloss.Style{}, false
+}
+
+// lane returns the hue for the provider at index i of the log's provider
+// ordering, cycling when there are more providers than colours.
+func (s semanticStyles) lane(i int) lipgloss.Style {
+	return s.lanes[i%len(s.lanes)]
+}
+
+// semantic is the palette every render site draws from, rebuilt by Run
+// alongside the theme when colour is not wanted.
+var semantic = newSemantics(true)

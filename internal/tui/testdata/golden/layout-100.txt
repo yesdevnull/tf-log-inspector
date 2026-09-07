@@ -1,11 +1,11 @@
 [1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
 [1;36mPROVIDERS[0m                [2m │ [0m[1;36mCALLS[0m                                       [2m │ [0m[1;36mSPAN DETAIL[0m              
-[7;2m[ ] ….io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m[2m │ [0mRPC   ApplyResourceChange
-[ ] …/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyReso…  …_instance  …p/google[0m[2m │ [0mType  …e_compute_instance
-[1;36mRPCS[0m                     [2m │ [0m      5ms  ApplyReso…  aws_subnet  …corp/aws[2m │ [0mProv  …o/hashicorp/google
-[ ] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0mDur   8ms                
-[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0mRes   no address context…
+[7;2m[ ] ….io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m[2m │ [0m[2mRPC   [0mApplyResourceChange
+[ ] …/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyReso…  …_instance  …p/google[0m[2m │ [0m[2mType  [0m…e_compute_instance
+[1;36mRPCS[0m                     [2m │ [0m      5ms  ApplyReso…  aws_subnet  …corp/aws[2m │ [0m[2mProv  [0m…o/hashicorp/google
+[ ] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m[2mDur   [0m8ms                
+[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m[2mRes   [0mno address context…
 [ ] aws_subnet  1        [2m │ [0m                                            [2m │ [0m                         
 [ ] …_compute_instance  1[2m │ [0m                                            [2m │ [0m                         
 [1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m                         

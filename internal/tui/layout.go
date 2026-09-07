@@ -1259,7 +1259,12 @@ func detailFieldLines(fields []detailField, w int) []string {
 	}
 	lines := make([]string, len(fields))
 	for i, f := range fields {
-		lines[i] = clipIdentifierField(padRight(f.label, labelW), f.value, "", w, f.kind)
+		// Dimmed, and padded BEFORE it is dimmed: the label column is
+		// scaffolding for the value beside it, the same as a pane separator
+		// is for the panes either side, and clipIdentifierField budgets the
+		// value's width from the prefix it is handed -- which it measures in
+		// display columns, so the escapes cost the value nothing.
+		lines[i] = clipIdentifierField(styles.chrome.Render(padRight(f.label, labelW)), f.value, "", w, f.kind)
 	}
 	return lines
 }
