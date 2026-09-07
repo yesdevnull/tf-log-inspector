@@ -158,6 +158,29 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 	}
 }
 
+// Unticking a provider dimension's EVERY value must empty both tiers. The
+// UI tier is reached through a translation (uiProviderTypes), and a
+// translation that reports "no opinion" whenever it is handed nothing to
+// translate turns the reader's last untick into an unfiltered UI tier: the
+// RPC columns go to zero while the UI columns beside them stay whole, which
+// reads as "these resources did no RPC work" rather than as a filter that
+// admits nothing.
+func TestUntickingEveryProviderEmptiesBothTiers(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	if len(m.rows()) == 0 {
+		t.Fatal("fixture assumption changed: the types view is already empty, so emptying it asserts nothing")
+	}
+	showOnly(t, &m, dimProvider)
+
+	if got := m.rows(); len(got) != 0 {
+		t.Errorf("every provider unticked still lists %d types: %v", len(got), got)
+	}
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "0 of 2 UI spans") {
+		t.Errorf("header = %q, want no UI span shown -- the UI tier is filtered through a translation of the same checkboxes", header)
+	}
+}
+
 // An RPC facet is the same defect in the other dimension: "create" is what
 // a UI-hook span calls its action and "ApplyResourceChange" is what the RPC
 // tier calls its method, so neither checkbox can ever match the other tier.
