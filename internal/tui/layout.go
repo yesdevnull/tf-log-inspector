@@ -311,7 +311,7 @@ func (m *Model) View() string {
 // active it reads as the plain count it always did: there is nothing to
 // compare against, and "3184 of 3184" would be noise on every frame.
 //
-// A level-only selection narrows the raw log rather than the spans (see
+// Unticking only levels narrows the raw log rather than the spans (see
 // levelFacet), so its counts read "3184 of 3184" -- which is the honest
 // answer to "what is this filter doing to the rankings", not a rounding of
 // it.

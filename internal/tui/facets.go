@@ -357,7 +357,7 @@ func (m Model) renderFacets(w, h int) string {
 	// Keep the cursor's own dimension labelled once the window has scrolled
 	// past that dimension's header: the first visible line stands in for it,
 	// which costs one value line rather than leaving a column of checkboxes
-	// with nothing to say what they select. The cursor is never the line
+	// with nothing to say what they filter. The cursor is never the line
 	// given up -- scrollWindow only pins it to the window's top edge when
 	// there is a single line to show, and a single line has no room for a
 	// header anyway.

@@ -147,9 +147,10 @@ func componentProviders(spans []span.Span, entries []logfmt.Entry) map[uint16]st
 // they are properties of one call, not of a log line, and most lines
 // (request/response chatter, DEBUG output, HTTP body dumps) surrounding a
 // call never carry a tf_rpc or tf_resource_type field of their own. Hiding
-// every line outside the exact RPC boundary because, say, ReadDataSource is
-// selected would hide precisely the context -- the provider's own
-// surrounding output -- that jumping to a slow call exists to show.
+// every line outside the exact RPC boundary because, say, every RPC but
+// ReadDataSource has been unticked would hide precisely the context -- the
+// provider's own surrounding output -- that jumping to a slow call exists
+// to show.
 //
 // With every provider still ticked the dimension is nil -- "no opinion" --
 // and every entry passes regardless of component. Once one is unticked, an
