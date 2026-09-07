@@ -248,8 +248,10 @@ func TestEnterFromTheTimelineOpensTheSelectedSpanInTheRawLog(t *testing.T) {
 	if m.view != ViewRawLog {
 		t.Fatalf("view = %v after Enter, want ViewRawLog", m.view)
 	}
-	if m.TopEntry() != want {
-		t.Errorf("top entry = %d, want %d (the entry that closed the selected span)", m.TopEntry(), want)
+	// At or before the entry that closed the span: the jump leaves a few
+	// lines of context above it (see jumpContextLines).
+	if m.TopEntry() > want {
+		t.Errorf("top entry = %d, past the entry that closed the selected span, %d", m.TopEntry(), want)
 	}
 }
 

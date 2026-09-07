@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,9 +24,27 @@ func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {
 	if m.ActiveView() != ViewRawLog {
 		t.Fatalf("enter did not switch to the raw log, view = %v", m.ActiveView())
 	}
+	// The jump leaves a few lines of what preceded the call above it (see
+	// jumpContextLines), so the pane opens at or before the call's own
+	// entry rather than exactly on it -- and the call's line must be among
+	// the lines actually drawn, which is the part that matters.
 	want := int(m.log.RPCSpans[rows[1].spanIdx].Entry)
-	if m.TopEntry() != want {
-		t.Errorf("TopEntry = %d, want %d -- the jump must target the selected row's span", m.TopEntry(), want)
+	if m.TopEntry() > want {
+		t.Errorf("TopEntry = %d, past the selected row's span at %d", m.TopEntry(), want)
+	}
+	// Matched on a PREFIX of the entry's first line. The drawn line is
+	// clipped to the pane's width and has had its trailing carriage return
+	// taken off, so it is not the entry's bytes and comparing whole would
+	// be comparing the render against something the pane never draws.
+	head := strings.SplitN(strings.TrimRight(string(m.log.Bytes(m.log.Entries[want])), "\n"), "\n", 2)[0]
+	const prefix = 60
+	if len(head) < prefix {
+		t.Fatalf("fixture assumption changed: the call's line is only %d characters", len(head))
+	}
+	head = head[:prefix]
+	drawn := rawLogBody(m, 200, 40)
+	if !slices.ContainsFunc(drawn, func(ln string) bool { return strings.HasPrefix(ln, head) }) {
+		t.Errorf("the pane does not draw the call's own line, which opens %q:\n%s", head, strings.Join(drawn, "\n"))
 	}
 }
 
@@ -866,5 +885,138 @@ func TestTheRawLogMarksAStructuredCapturesErrors(t *testing.T) {
 	}
 	if strings.Contains(infoLine, "\x1b[") {
 		t.Errorf("a structured capture's info line is marked (%q) -- these logs are almost entirely info", infoLine)
+	}
+}
+
+// mixedHeightLog builds a log whose entries differ wildly in height: a
+// one-line entry, then a tall body dump, then another one-line entry.
+//
+// That shape is what a real capture looks like around a provider's HTTP
+// traffic -- one measured response accounted for 49% of a 30MB log -- and it
+// is the shape every fixture in testdata lacks, each of them being a handful
+// of one-line entries. Scrolling that moves by ENTRY looks correct on those
+// and cannot be told from scrolling that moves by line.
+func mixedHeightLog(tall int) *model.Log {
+	var b strings.Builder
+	var entries []logfmt.Entry
+	add := func(n int, tag string) {
+		start := b.Len()
+		fmt.Fprintf(&b, "2026-09-04T10:00:00.000+1000 [TRACE] provider: %s head\n", tag)
+		for i := 1; i < n; i++ {
+			fmt.Fprintf(&b, "  %s body line %03d\n", tag, i)
+		}
+		entries = append(entries, logfmt.Entry{
+			Off: uint64(start), Len: uint32(b.Len() - start), Lines: uint16(n), Timestamped: true,
+		})
+	}
+	add(1, "first")
+	add(tall, "tall")
+	add(1, "last")
+	return &model.Log{Data: []byte(b.String()), Entries: entries}
+}
+
+// rawLogBody is what the raw log pane actually SHOWS: its rendered lines,
+// unstyled, truncated to the height it was given.
+//
+// The truncation is the pane row's (framePanes, via joinPanes), and it is
+// applied here rather than trusted to renderRawLog's return, so a test
+// asking what the reader can see is not answered with lines the frame
+// discards. Reading the untruncated return instead makes an unreachable
+// line look reachable -- which is one of the two defects here wearing the
+// other as a disguise.
+func rawLogBody(m Model, w, h int) []string {
+	lines := unstyledLines(strings.Split(m.renderRawLog(w, h), "\n"))
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	return lines
+}
+
+// The pane fills. An entry too tall to fit whole used to be dropped rather
+// than begun, so a one-line entry above a forty-line one rendered ONE line
+// into a twelve-line pane and left eleven blank -- with the content that
+// would have filled them sitting immediately below, and nothing on screen
+// saying why it was not shown.
+func TestTheRawLogFillsThePaneAcrossATallEntry(t *testing.T) {
+	m := update(t, New(mixedHeightLog(40), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	const h = 12
+	if got := rawLogBody(m, 80, h); len(got) != h {
+		t.Errorf("the pane drew %d of its %d lines from the top of the log:\n%s", len(got), h, strings.Join(got, "\n"))
+	}
+}
+
+// renderRawLog honours the height it is given. It used to append its first
+// entry whole whatever the budget -- forty lines for a pane of twelve -- and
+// leave the pane row to truncate what would not fit, which cuts without a
+// mark and hides the overrun from every caller.
+func TestRenderRawLogHonoursItsHeight(t *testing.T) {
+	m := update(t, New(mixedHeightLog(40), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	// Onto the tall entry: from the top of the log the first entry is one
+	// line, and a budget is only overrun by an entry that exceeds it.
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	for _, h := range []int{1, 5, 12, 40, 100} {
+		if got := strings.Split(m.renderRawLog(80, h), "\n"); len(got) > h {
+			t.Errorf("asked for %d lines, rendered %d", h, len(got))
+		}
+	}
+}
+
+// Every line of a tall entry can be reached. Scrolling by ENTRY meant a
+// forty-line body dump showed only its first paneful and the rest could not
+// be reached by any key: the next press moved to the next ENTRY, taking the
+// remaining lines with it. On a capture whose largest entry is half the log,
+// that is half the log unreadable.
+func TestEveryLineOfATallEntryCanBeReached(t *testing.T) {
+	const tall = 40
+	m := update(t, New(mixedHeightLog(tall), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	seen := map[string]bool{}
+	// Enough presses to walk the whole log a line at a time, and then some.
+	for range tall + 10 {
+		for _, ln := range rawLogBody(m, 80, 12) {
+			seen[strings.TrimSpace(ln)] = true
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	for i := 1; i < tall; i++ {
+		want := fmt.Sprintf("tall body line %03d", i)
+		if !seen[want] {
+			t.Errorf("no scroll position shows %q", want)
+		}
+	}
+}
+
+// Scrolling up is scrolling down's inverse, line for line. Moving by entry,
+// a press up from inside a tall entry jumped to the head of the one before
+// it -- a different place from where the press down had come.
+func TestScrollingUpUndoesScrollingDown(t *testing.T) {
+	m := update(t, New(mixedHeightLog(40), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	for range 25 { // down into the middle of the tall entry
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	middle := strings.Join(rawLogBody(m, 80, 12), "\n")
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := strings.Join(rawLogBody(m, 80, 12), "\n"); got != middle {
+		t.Errorf("down then up did not return to the same lines:\n--- want ---\n%s\n--- got ---\n%s", middle, got)
+	}
+}
+
+// Opening a call leaves its line visible with what came before it. The span
+// is the entry that CLOSED the call (see span.Span), so the provider's own
+// traffic is above -- and pinned to the very top of the pane, the call's
+// line is drawn with none of it in sight.
+func TestOpeningACallShowsWhatCameBeforeIt(t *testing.T) {
+	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	target := m.log.RPCSpans[0].Entry
+	if target == 0 {
+		t.Skip("the fixture's first span closes on the first entry, so there is nothing above it")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v", m.view)
+	}
+	if got := m.TopEntry(); got >= int(target) {
+		t.Errorf("the pane opens at entry %d, at or below the call's own entry %d -- nothing above it is shown", got, target)
 	}
 }

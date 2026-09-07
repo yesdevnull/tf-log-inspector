@@ -17,12 +17,38 @@ import (
 // see.
 const rawLogPageSize = 20
 
+// jumpContextLines is how many lines of what came BEFORE a call are left
+// above it when Enter opens one.
+//
+// A few rather than a paneful: the call's own line is what the reader asked
+// for and it has to be somewhere obvious, which the top of the pane is and
+// the middle is not. The pane's height is not known here -- Model's height
+// is the terminal's, and pane heights are worked out while composing a frame
+// -- so this is a small fixed number rather than a fraction of a height a
+// key handler cannot see.
+const jumpContextLines = 3
+
 // rawLogState holds the raw log view's own state: which entry sits at the
 // top of the pane, and any free-text search in progress or most recently
 // run. It is kept as its own struct, rather than loose fields on Model, so
 // the raw log's concerns stay grouped with the file that owns them.
 type rawLogState struct {
-	top int
+	// top is the entry at the top of the pane and topLine how many of that
+	// entry's own lines are scrolled off above it. Together they are a LINE
+	// position, not an entry one.
+	//
+	// The pair is what makes a tall entry readable. Scrolling an entry at a
+	// time, a provider's body dump showed its first paneful and no more --
+	// the next press moved to the next ENTRY, taking the rest with it -- and
+	// on a capture whose largest entry is half the log, that is half the log
+	// unreachable. It is also what lets the pane FILL: an entry too tall to
+	// fit whole is begun rather than dropped, where before a one-line entry
+	// above a forty-line one drew one line into a twelve-line pane.
+	//
+	// topLine is an offset into the lines of the entry at top, so it is
+	// meaningful only alongside it; every move sets the two together.
+	top     int
+	topLine int
 
 	// searching is true while '/' is capturing a query one key at a time;
 	// query accumulates what has been typed so far. lastQuery is what n/N
@@ -39,9 +65,36 @@ type rawLogState struct {
 }
 
 // TopEntry reports the index into m.log.Entries currently at the top of the
-// raw log pane.
+// raw log pane, and TopLine how many of that entry's lines are scrolled off
+// above it.
 func (m Model) TopEntry() int {
 	return m.raw.top
+}
+
+func (m Model) TopLine() int {
+	return m.raw.topLine
+}
+
+// entryLines splits one entry into the physical lines the pane draws for it.
+//
+// It is measured off the entry's BYTES rather than read from Entry.Lines,
+// which saturates at a uint16 and so understates the tallest entries there
+// are -- exactly the ones scrolling has to walk a line at a time. A count
+// that disagreed with what renderRawLog draws would put the scroll position
+// and the pane out of step.
+func (m Model) entryLines(e logfmt.Entry) []string {
+	return strings.Split(strings.TrimRight(string(m.log.Bytes(e)), "\n"), "\n")
+}
+
+// rawLogVisible reports which entries the active filter admits, built once
+// for a walk rather than per entry: componentProviders is O(spans), and a
+// scroll can step over many entries.
+func (m Model) rawLogVisible() func(int) bool {
+	f := m.filter()
+	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
+	return func(i int) bool {
+		return entryVisible(f, compProviders, m.log.Entries[i])
+	}
 }
 
 // jumpToSpan switches to the raw log view positioned at the entry that
@@ -84,31 +137,86 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	from := m.view
 	m.setView(ViewRawLog)
 	m.returnTo, m.hasReturn = from, true
-	m.raw.top = entry
+	m.raw.top, m.raw.topLine = entry, 0
+	// Back up a few lines, so the call's own line arrives with what led to
+	// it above rather than pinned to the top of the pane with none of it in
+	// sight. Span.Entry is the entry that CLOSED the call, so the
+	// provider's traffic for it is behind, not ahead.
+	m.scrollRawLog(-jumpContextLines)
 }
 
-// pageRawLog moves the raw log's top entry by delta screenfuls.
+// pageRawLog moves the raw log by delta screenfuls of LINES.
 func (m *Model) pageRawLog(delta int) {
 	m.scrollRawLog(delta * rawLogPageSize)
 }
 
-// scrollRawLog moves the raw log's top entry by delta entries, clamped to
-// [0, len(Entries)-1] (or 0 for a log with no entries at all) so neither
-// paging nor an arrow key can walk off either end of the index.
+// scrollRawLog moves the raw log by delta LINES -- forward for positive,
+// back for negative -- clamped so neither paging nor an arrow key can walk
+// off either end.
+//
+// Lines rather than entries, because entries are not a unit the reader can
+// see: they run from one line to thousands, so an entry-sized step moves the
+// pane by an amount that depends on what happens to be under it, and the
+// inside of a tall entry cannot be reached at all.
+//
+// It steps through the FILTER, skipping entries the pane would not draw, so
+// a press moves the pane by a line rather than by however many hidden
+// entries happen to sit between two visible ones.
 //
 // It also drops any "pattern not found": the miss was reported about the
 // position the search started from, and scrolling has moved it.
 func (m *Model) scrollRawLog(delta int) {
 	m.raw.notFound = false
-	m.raw.top += delta
-	if m.raw.top < 0 {
-		m.raw.top = 0
+	if len(m.log.Entries) == 0 {
+		m.raw.top, m.raw.topLine = 0, 0
+		return
 	}
-	if last := len(m.log.Entries) - 1; last < 0 {
-		m.raw.top = 0
-	} else if m.raw.top > last {
-		m.raw.top = last
+	visible := m.rawLogVisible()
+	for ; delta > 0; delta-- {
+		if !m.stepRawLogDown(visible) {
+			break
+		}
 	}
+	for ; delta < 0; delta++ {
+		if !m.stepRawLogUp(visible) {
+			break
+		}
+	}
+}
+
+// stepRawLogDown moves one line further into the log, reporting whether
+// there was anywhere to go. The last line of the last visible entry is the
+// end: stopping there keeps a line of content on screen, where running past
+// it would leave the pane blank with the log still under it.
+func (m *Model) stepRawLogDown(visible func(int) bool) bool {
+	if visible(m.raw.top) && m.raw.topLine+1 < len(m.entryLines(m.log.Entries[m.raw.top])) {
+		m.raw.topLine++
+		return true
+	}
+	for i := m.raw.top + 1; i < len(m.log.Entries); i++ {
+		if visible(i) {
+			m.raw.top, m.raw.topLine = i, 0
+			return true
+		}
+	}
+	return false
+}
+
+// stepRawLogUp moves one line back, onto the LAST line of the entry before
+// it when it leaves the current one -- which is what makes a press up undo a
+// press down rather than landing on that entry's head.
+func (m *Model) stepRawLogUp(visible func(int) bool) bool {
+	if m.raw.topLine > 0 {
+		m.raw.topLine--
+		return true
+	}
+	for i := m.raw.top - 1; i >= 0; i-- {
+		if visible(i) {
+			m.raw.top, m.raw.topLine = i, len(m.entryLines(m.log.Entries[i]))-1
+			return true
+		}
+	}
+	return false
 }
 
 // componentProviders maps a log line's component (Entry.Comp) to the
@@ -209,14 +317,20 @@ func (m Model) renderRawLog(w, h int) string {
 
 	var lines []string
 	var scratch []byte
-	for i := m.TopEntry(); i < len(m.log.Entries); i++ {
+	for i := m.TopEntry(); i < len(m.log.Entries) && len(lines) < h; i++ {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue
 		}
-		entryLines := strings.Split(strings.TrimRight(string(m.log.Bytes(e)), "\n"), "\n")
-		if len(lines) > 0 && len(lines)+len(entryLines) > h {
-			break
+		entryLines := m.entryLines(e)
+		// The top entry starts partway down where the reader has scrolled
+		// into it. Only that one: every entry after it is drawn from its
+		// own first line.
+		if i == m.TopEntry() && m.TopLine() > 0 {
+			if m.TopLine() >= len(entryLines) {
+				continue
+			}
+			entryLines = entryLines[m.TopLine():]
 		}
 		// The level is the ENTRY's, so every line of a multi-line entry is
 		// marked alike: a stack trace or a body dump under an ERROR header
@@ -224,6 +338,14 @@ func (m Model) renderRawLog(w, h int) string {
 		// rest reading as unrelated traffic.
 		style, marked := semantic.forLevel(e.Level)
 		for _, ln := range entryLines {
+			// The budget is checked per LINE, so an entry taller than the
+			// pane is BEGUN rather than dropped and the pane always fills.
+			// Dropped whole, a forty-line entry below a one-line one left
+			// eleven rows blank with the content that would have filled
+			// them immediately beneath, and nothing saying why.
+			if len(lines) >= h {
+				break
+			}
 			var plain string
 			plain, scratch = logfmt.StripANSI(ln, scratch)
 			line := clipWidth(plain, w)
@@ -231,9 +353,6 @@ func (m Model) renderRawLog(w, h int) string {
 				line = style.Render(line)
 			}
 			lines = append(lines, line)
-		}
-		if len(lines) >= h {
-			break
 		}
 	}
 	if len(lines) == 0 {
