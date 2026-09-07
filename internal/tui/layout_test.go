@@ -2569,9 +2569,19 @@ func TestTheHelpNamesTheKeysThatHaveNoFooterHint(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	open := update(t, m, helpKey)
 	rendered := unstyled(open.View())
+	// Matched against the KEY COLUMN of a line, not against the screen: "o"
+	// is a letter that appears in almost every description, so a substring
+	// search over the whole help can never fail.
 	for _, key := range []string{"o", "n N", "PgUp PgDn"} {
-		if !strings.Contains(rendered, key) {
-			t.Errorf("the help does not name %q, which no footer hint advertises either:\n%s", key, rendered)
+		named := false
+		for _, line := range strings.Split(rendered, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), key+" ") {
+				named = true
+				break
+			}
+		}
+		if !named {
+			t.Errorf("the help's key column does not name %q, which no footer hint advertises either:\n%s", key, rendered)
 		}
 	}
 }
