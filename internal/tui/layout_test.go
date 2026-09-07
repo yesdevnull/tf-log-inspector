@@ -200,8 +200,8 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	// line: "q quit" is the hint this file's own comments call
 	// non-negotiable, and the view-key line has always been the one given
 	// up first when there is not room for both.
-	if lines[1] != m.actionKeys(m.paneWidth()) {
-		t.Errorf("second line at height 2 is %q, want the action keys %q", lines[1], m.actionKeys(m.paneWidth()))
+	if unstyled(lines[1]) != m.actionKeys(m.paneWidth()) {
+		t.Errorf("second line at height 2 is %q, want the action keys %q", unstyled(lines[1]), m.actionKeys(m.paneWidth()))
 	}
 }
 
@@ -221,7 +221,7 @@ func TestTheSpanHintIsHiddenWhileTheFacetOverlayReplacesTheDetailPane(t *testing
 	if !m.selectedLaneStepsThroughSpans() {
 		t.Fatal("the selected lane holds one span, so the hint would be hidden for a reason this test is not about")
 	}
-	if !strings.Contains(m.View(), spanCursorHint) {
+	if !strings.Contains(unstyled(m.View()), spanCursorHint) {
 		t.Fatal("the hint is already absent with the overlay shut, so opening it cannot be what removes it")
 	}
 
@@ -229,7 +229,7 @@ func TestTheSpanHintIsHiddenWhileTheFacetOverlayReplacesTheDetailPane(t *testing
 	if !m.showFacetOverlay {
 		t.Fatal("f did not open the facet overlay at 80 columns")
 	}
-	out := m.View()
+	out := unstyled(m.View())
 	if strings.Contains(out, spanDetailTitle) {
 		t.Fatalf("the overlay frame still draws the detail pane, so the hint has somewhere to point:\n%s", out)
 	}
@@ -297,7 +297,7 @@ func TestGoldenTimelineLayouts(t *testing.T) {
 func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	for _, w := range []int{60, 70, 100, 160} {
-		got := m.footer(w)
+		got := m.footerText(w)
 		lines := strings.Split(got, "\n")
 		if len(lines) != 2 {
 			t.Fatalf("footer(%d) = %d lines, want 2:\n%s", w, len(lines), got)
@@ -762,6 +762,14 @@ func centrePaneOf(view string) string {
 // Tests about the styling itself must not go through these helpers: they
 // assert on what renderFacets, renderList and renderDetail return directly,
 // which is where the escapes still are.
+// footerText is m.footer with the theme's escapes stripped. The footer's
+// tests are about what it SAYS -- which hints are offered, which are left
+// out, how wide the line runs -- and every one of those questions is asked
+// of the text. The styling has its own tests, over the frame.
+func (m *Model) footerText(w int) string {
+	return unstyled(m.footer(w))
+}
+
 func unstyled(s string) string {
 	plain, _ := logfmt.StripANSI(s, nil)
 	return plain
@@ -967,7 +975,7 @@ func TestTheCaveatShortensBeforeItCostsTheFooter(t *testing.T) {
 		{7, false, false},
 	} {
 		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: c.h})
-		view := m.View()
+		view := unstyled(m.View())
 		if got := strings.Contains(view, "one workspace planned in 24.1s"); got != c.wantFull {
 			t.Errorf("height %d: full caveat present = %v, want %v:\n%s", c.h, got, c.wantFull, view)
 		}
@@ -1009,7 +1017,7 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	m := update(t, New(tallEntryLog(60), "x.log"), tea.WindowSizeMsg{Width: detailInlineWidth - 1, Height: h})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 
-	view := m.View()
+	view := unstyled(m.View())
 	// The pane separator, rather than any one pane's title: the titles vary
 	// with the row the cursor is on, and this has to fail when a second
 	// pane is drawn whatever that pane says about itself.
@@ -1755,7 +1763,7 @@ func TestTheFooterNeverLosesQuitAtWidthsTheActionLineFits(t *testing.T) {
 		// function of the selected row.
 		m.setView(b.view)
 		for w := lipgloss.Width(m.actionKeys(200)); w <= 200; w++ {
-			lines := strings.Split(m.footer(w), "\n")
+			lines := strings.Split(m.footerText(w), "\n")
 			action := lines[len(lines)-1]
 			if !strings.Contains(action, "q quit") {
 				t.Fatalf("%s at %d columns: action line %q has lost the quit hint", b.title, w, action)

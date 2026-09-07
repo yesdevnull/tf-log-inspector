@@ -28,5 +28,5 @@ EVERYWHERE
   ?          open or close this help (Esc closes it too)
   q          quit
 
-? close
-q quit
+[36m?[0m close
+[36mq[0m quit

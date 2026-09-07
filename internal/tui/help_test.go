@@ -220,7 +220,7 @@ func TestHelpReplacesThePaneRowAndKeepsTheHeaderAndFooter(t *testing.T) {
 	paneRow := []string{"PROVIDERS", "duration" + sortDescMark, "RPC   ApplyResourceChange"}
 
 	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
-	behind := shut.View()
+	behind := unstyled(shut.View())
 	for _, anchor := range paneRow {
 		if !strings.Contains(behind, anchor) {
 			t.Fatalf("the frame does not draw %q with the help shut, so its absence with the help open would prove nothing:\n%s", anchor, behind)
@@ -228,7 +228,7 @@ func TestHelpReplacesThePaneRowAndKeepsTheHeaderAndFooter(t *testing.T) {
 	}
 
 	open := update(t, shut, helpKey)
-	out := open.View()
+	out := unstyled(open.View())
 	if !strings.Contains(out, "x.log") {
 		t.Errorf("the help hid the header:\n%s", out)
 	}
@@ -362,7 +362,7 @@ func TestTheFooterStillNamesAWorkingKeyOverAFailedSearch(t *testing.T) {
 	m = update(t, m, helpKey)
 	for _, h := range []int{40, 12} {
 		sized := update(t, m, tea.WindowSizeMsg{Width: 100, Height: h})
-		frame := sized.View()
+		frame := unstyled(sized.View())
 		for _, want := range []string{helpCloseHint, quitHint} {
 			if !strings.Contains(frame, want) {
 				t.Errorf("at height %d the help frame does not name %q, so nothing on it names a working key:\n%s", h, want, frame)

@@ -235,7 +235,10 @@ func TestSlashSearchHonoursActiveFilter(t *testing.T) {
 // instead. That assumes the view-key line itself is never clipped down to
 // nothing, which holds at every width these tests render at.
 func footerOf(view string) string {
-	lines := strings.Split(view, "\n")
+	// Stripped, because every caller asks what the footer SAYS. The keys in
+	// a rendered hint line carry the accent, so a hint's key and its words
+	// are not adjacent in the frame and a search for "q quit" finds nothing.
+	lines := strings.Split(unstyled(view), "\n")
 	last := lines[len(lines)-1]
 	if n := len(lines); n >= 2 && lines[n-2] != "" {
 		return lines[n-2] + "\n" + last
@@ -733,16 +736,16 @@ func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
 	if m.ActiveView() != ViewCalls {
 		t.Errorf("Enter jumped into a raw log the filter has emptied, view = %v", m.ActiveView())
 	}
-	if !strings.Contains(m.footer(m.paneWidth()), "hidden by the active filter") {
-		t.Errorf("footer = %q, want it to report the refused jump", m.footer(m.paneWidth()))
+	if !strings.Contains(m.footerText(m.paneWidth()), "hidden by the active filter") {
+		t.Errorf("footer = %q, want it to report the refused jump", m.footerText(m.paneWidth()))
 	}
 
 	// The report describes that one keypress under that one filter, so the
 	// next key must clear it rather than leave it standing over a table the
 	// user has since moved through.
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if strings.Contains(m.footer(m.paneWidth()), "hidden by the active filter") {
-		t.Errorf("footer = %q, want the key hints back once the selection has moved", m.footer(m.paneWidth()))
+	if strings.Contains(m.footerText(m.paneWidth()), "hidden by the active filter") {
+		t.Errorf("footer = %q, want the key hints back once the selection has moved", m.footerText(m.paneWidth()))
 	}
 }
 

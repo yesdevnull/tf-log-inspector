@@ -30,11 +30,11 @@
                                                 [2m │ [0m                   
                                                 [2m │ [0m                   
 
-Durations here are measured under logging, which is not
-free: one workspace planned in 24.1s unlogged and 522.2s
-with debug plus provider TRACE. Rankings hold, since every
-span paid the same cost, but absolute times do not transfer
-to an unlogged run.
+[2mDurations here are measured under logging, which is not[0m
+[2mfree: one workspace planned in 24.1s unlogged and 522.2s[0m
+[2mwith debug plus provider TRACE. Rankings hold, since every[0m
+[2mspan paid the same cost, but absolute times do not transfer[0m
+[2mto an unlogged run.[0m
 
-1 providers  2 types  5 timeline  6 raw log  ? help
-⇥ pane  ␣ facet  ⏎ open  s sort  f facets  / search  Esc clear  q quit
+[36m1[0m providers  [36m2[0m types  [36m5[0m timeline  [36m6[0m raw log  [36m?[0m help
+[36m⇥[0m pane  [36m␣[0m facet  [36m⏎[0m open  [36ms[0m sort  [36mf[0m facets  [36m/[0m search  [36mEsc[0m clear  [36mq[0m quit

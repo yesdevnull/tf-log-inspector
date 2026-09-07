@@ -284,7 +284,7 @@ func (m *Model) View() string {
 	if len(caveat) > 0 {
 		lines = append(lines, "")
 		for _, line := range caveat {
-			lines = append(lines, clipWidth(line, w))
+			lines = append(lines, styles.note.Render(clipWidth(line, w)))
 		}
 	}
 	lines = append(lines, "")
@@ -364,21 +364,63 @@ func (m *Model) footer(w int) string {
 	// View's own comment says the footer exists to prevent, and the reason
 	// renderHelp is allowed to cut without a mark.
 	if m.showHelp {
-		return m.keyHints(w)
+		return styleHintKeys(m.keyHints(w))
 	}
 	if m.blockedJump {
-		return jumpBlockedNote
+		return styles.alert.Render(jumpBlockedNote)
 	}
 	if m.view == ViewRawLog {
 		switch {
+		// The query is left unstyled. It is what the reader is typing, and
+		// the one line on the frame whose content they chose: giving it a
+		// treatment of this interface's own would make their own text look
+		// like part of the furniture.
 		case m.raw.searching:
 			return "/" + m.raw.query
 		case m.raw.notFound:
-			return "/" + m.raw.lastQuery + "  pattern not found"
+			return styles.alert.Render("/" + m.raw.lastQuery + "  pattern not found")
 		}
 	}
-	return m.keyHints(w)
+	return styleHintKeys(m.keyHints(w))
 }
+
+// styleHintKeys accents the KEY at the head of every hint on a composed hint
+// line, leaving the words that describe it plain. A reader scanning the
+// footer is looking for which key to press, and accenting the whole hint
+// would accent the entire line -- which marks nothing at all.
+//
+// It works on the composed line rather than on the hints before they are
+// joined, so that viewKeyHints and actionKeys keep returning plain text.
+// Those two are what the footer's width budget is measured against, at
+// several widths and in every view, and a measurement taken over escape
+// sequences is a measurement of something other than what reaches the
+// screen.
+//
+// Every hint in this footer is one key, a space, and the words for what it
+// does -- including the two whose words contain a space of their own ("6 raw
+// log", "Esc clear"), which is why the split is at the FIRST space and the
+// remainder is left whole. A hint carrying no space is left alone rather
+// than accented entire.
+func styleHintKeys(line string) string {
+	lines := strings.Split(line, "\n")
+	for i, ln := range lines {
+		hints := strings.Split(ln, hintSep)
+		for j, h := range hints {
+			key, rest, ok := strings.Cut(h, " ")
+			if !ok {
+				continue
+			}
+			hints[j] = styles.key.Render(key) + " " + rest
+		}
+		lines[i] = strings.Join(hints, hintSep)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// hintSep separates adjacent hints on a footer line. Two spaces, so that the
+// single space inside a hint reads as binding its key to its words rather
+// than as separating one hint from the next.
+const hintSep = "  "
 
 // jumpBlockedNote is what the footer says when Enter refused to jump to a
 // call's log entry because the active filter hides it. Landing on a blank
@@ -529,7 +571,7 @@ func (m *Model) actionKeys(w int) string {
 	if _, sortable := tables[m.view]; sortable && len(m.rows()) > 0 {
 		keys = append(keys, sortHint)
 	}
-	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", quitHint), "  ")
+	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", quitHint), hintSep)
 }
 
 // viewKeyHints is the hint group naming the number keys that switch views,
@@ -550,7 +592,7 @@ func viewKeyHints(v View) string {
 			hints = append(hints, b.key+" "+b.name)
 		}
 	}
-	return strings.Join(append(hints, helpHint), "  ")
+	return strings.Join(append(hints, helpHint), hintSep)
 }
 
 // frameFixedLines is what a frame spends on everything but the pane row and
