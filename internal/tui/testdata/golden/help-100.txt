@@ -17,7 +17,7 @@
   [36ms[0m          sort by the next column, in the table views
 
 [1;36mFILTERING[0m
-  [36m␣ Space[0m    toggle the facet value under the cursor
+  [36m␣ Space[0m    untick the value under the cursor to hide it
   [36mf[0m          show the facets and give them the keyboard
   [36mEsc[0m        clear every active filter -- or close this help
   [36m/[0m          search the raw log for a pattern

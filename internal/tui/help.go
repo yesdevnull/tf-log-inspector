@@ -64,7 +64,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "s", what: "sort by the next column, in the table views"},
 		}},
 		{title: "FILTERING", entries: []helpEntry{
-			{keys: "␣ Space", what: "toggle the facet value under the cursor"},
+			{keys: "␣ Space", what: "untick the value under the cursor to hide it"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
 			{keys: "Esc", what: "clear every active filter -- or close this help"},
 			{keys: "/", what: "search the raw log for a pattern"},
