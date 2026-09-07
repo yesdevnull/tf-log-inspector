@@ -1020,3 +1020,31 @@ func TestOpeningACallShowsWhatCameBeforeIt(t *testing.T) {
 		t.Errorf("the pane opens at entry %d, at or below the call's own entry %d -- nothing above it is shown", got, target)
 	}
 }
+
+// Scrolling up INTO a tall entry arrives at its end, not its head. Landing
+// on the head instead skips everything between -- the same unreachable
+// middle that scrolling by entry produced, reintroduced one boundary at a
+// time -- and it is not the inverse of the press down that left it, so the
+// pane does not come back to where it was.
+//
+// The boundary has to be crossed upward into an entry TALLER than one line:
+// the last line of a one-line entry is also its first, so a fixture of
+// short entries cannot tell the two apart.
+func TestScrollingUpIntoATallEntryArrivesAtItsEnd(t *testing.T) {
+	const tall = 40
+	m := update(t, New(mixedHeightLog(tall), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	// Down to the one-line entry after the tall one: 1 line of "first",
+	// then all of "tall".
+	for range 1 + tall {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if got := rawLogBody(m, 80, 12); len(got) != 1 || !strings.Contains(got[0], "last head") {
+		t.Fatalf("expected to be on the last entry, showing one line; got %d:\n%s", len(got), strings.Join(got, "\n"))
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	body := rawLogBody(m, 80, 12)
+	if want := fmt.Sprintf("tall body line %03d", tall-1); !strings.Contains(body[0], want) {
+		t.Errorf("scrolling up into the tall entry opens on %q, want its last line %q", strings.TrimSpace(body[0]), want)
+	}
+}
