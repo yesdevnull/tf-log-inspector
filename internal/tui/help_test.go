@@ -492,3 +492,21 @@ func TestTheHelpTakesThePaneRowFromAnOpenFacetOverlay(t *testing.T) {
 		t.Errorf("closing the help did not restore the facet overlay it displaced:\n%s", back)
 	}
 }
+
+// The key table opens on its first heading, not on a blank. The blank above
+// every group is there to set the groups off from each other; above the
+// FIRST it separates nothing, the pane row's own top rule being immediately
+// above it.
+//
+// What that costs is the shortest pane. Below a handful of lines the body
+// is one or two, so a leading blank is the whole of what the reader gets --
+// a blank and a cut mark, where the VIEWS group and its number keys fit.
+func TestTheKeyTableOpensOnAHeadingRatherThanABlank(t *testing.T) {
+	for _, h := range []int{40, 12, 4, 2, 1} {
+		lines := strings.Split(unstyled(renderHelp(60, h)), "\n")
+		if got := strings.TrimSpace(lines[0]); got != helpGroups[0].title {
+			t.Errorf("at height %d the key table opens on %q, want %q:\n%s",
+				h, got, helpGroups[0].title, strings.Join(lines, "\n"))
+		}
+	}
+}
