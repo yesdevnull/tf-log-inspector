@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // accent is the one colour this interface uses. Everything the eye should
 // find first -- a pane's title, the key in a footer hint, the marker on the
@@ -40,10 +44,17 @@ type theme struct {
 	// table has several headers at once and they are scaffolding for the
 	// figures beneath, not the thing to look at.
 	columnHeader lipgloss.Style
-	// sortMark marks the glyph naming the sorted column. It is accented
-	// where the header it sits on is not, because it is the one part of a
-	// header row that answers a question the reader just asked by pressing s.
-	sortMark lipgloss.Style
+	// sortedColumn marks the header of the column the table is ordered by --
+	// the whole cell, name and marker together, rather than the marker
+	// alone. It is accented where its sibling headers are not, because it
+	// answers a question the reader just asked by pressing s.
+	//
+	// Styling the cell whole rather than the glyph inside it is what keeps
+	// the name and its marker contiguous in the rendered frame: a style
+	// wrapped around the glyph alone would put escape sequences between
+	// "duration" and its "▾", so nothing reading the frame could still find
+	// the two together.
+	sortedColumn lipgloss.Style
 	// chrome marks what separates content from content -- pane separators,
 	// facet checkboxes. Dimming is what turns a structural character into
 	// something the eye can skip rather than read.
@@ -84,7 +95,7 @@ func (t theme) all() map[string]lipgloss.Style {
 	return map[string]lipgloss.Style{
 		"title":           t.title,
 		"columnHeader":    t.columnHeader,
-		"sortMark":        t.sortMark,
+		"sortedColumn":    t.sortedColumn,
 		"chrome":          t.chrome,
 		"key":             t.key,
 		"note":            t.note,
@@ -114,7 +125,7 @@ func newTheme(colour bool) theme {
 	return theme{
 		title:           accented(base.Bold(true)),
 		columnHeader:    base.Bold(true),
-		sortMark:        accented(base),
+		sortedColumn:    accented(base.Bold(true)),
 		chrome:          base.Faint(true),
 		key:             accented(base),
 		note:            base.Faint(true),
@@ -124,9 +135,21 @@ func newTheme(colour bool) theme {
 	}
 }
 
+// colourWanted reports whether the reader will accept colour, per the
+// NO_COLOR convention (no-color.org): colour is withheld when the variable
+// is present and non-empty.
+//
+// The emptiness clause is the part worth spelling out. `NO_COLOR=` is what a
+// shell leaves behind when the variable is cleared rather than unset, and
+// reading that as a request would strip colour from readers who never made
+// one.
+func colourWanted() bool {
+	v, ok := os.LookupEnv("NO_COLOR")
+	return !ok || v == ""
+}
+
 // styles is the theme every render site draws from. It carries colour until
-// Run finds a reason to withhold it, which it must do before the program
-// starts drawing: lipgloss reads a style's properties at Render time, but
-// this value is read at every render site, so replacing it mid-run would
-// change the frame under the reader.
+// Run withholds it, which Run must do before the program starts drawing:
+// every render site reads this value, so replacing it mid-run would change
+// the frame under the reader.
 var styles = newTheme(true)

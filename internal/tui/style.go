@@ -23,31 +23,22 @@ var styleRenderer = func() *lipgloss.Renderer {
 	return r
 }()
 
-// selectedStyle marks the row or facet value the cursor is on in the pane
-// that HAS keyboard focus. Reverse video, rather than an explicit colour,
-// reads correctly against both light and dark terminal themes without this
-// package having to guess either.
-var selectedStyle = styleRenderer.NewStyle().Reverse(true)
-
-// unfocusedCursorStyle marks the cursor of a pane that does not have focus.
-// Both panes carry a cursor at all times -- Tab moves the keyboard between
-// them without moving either cursor -- so drawing both the same way leaves
-// the user no way to see what Tab did. It stays a reverse-video bar, dimmed
-// rather than dropped: a terminal that ignores faint then shows a cursor
-// that merely looks focused, where a marker-only treatment would show no
-// cursor at all.
-var unfocusedCursorStyle = styleRenderer.NewStyle().Reverse(true).Faint(true)
-
 // cursorBar re-renders s as the cursor's full-width bar, right-padded to
 // fill w terminal columns, in the style that says whether its pane has
 // focus. The escape sequences the styles add occupy no columns of their
 // own, so the content gets the whole of w: a styled row is exactly as wide
 // on screen as the unstyled rows above and below it, and the pane
 // separators to its right stay in the same column.
+//
+// s must arrive UNSTYLED. Reverse video is turned off again by the first
+// reset inside the string it wraps, so a bar drawn over content carrying
+// its own styling stops being reversed partway along -- highlighting a
+// fragment of the selected row and leaving the rest looking unselected.
+// TestTheCursorBarIsReversedFromEndToEnd holds that line across the views.
 func cursorBar(s string, w int, focused bool) string {
-	style := unfocusedCursorStyle
+	style := styles.unfocusedCursor
 	if focused {
-		style = selectedStyle
+		style = styles.selected
 	}
 	return style.Render(padRight(clipWidth(s, w), w))
 }
@@ -60,6 +51,20 @@ func cursorBar(s string, w int, focused bool) string {
 func padRight(s string, w int) string {
 	if n := lipgloss.Width(s); n < w {
 		return s + strings.Repeat(" ", w-n)
+	}
+	return s
+}
+
+// padLeft left-pads s with spaces to exactly w terminal columns, so s ends
+// flush against the right edge of its space. It is padRight's mirror and
+// carries the same contract: callers clip first, this never truncates.
+//
+// Right alignment is what a numeric column wants -- digits line up by place
+// value, so a column of durations can be compared down its length rather
+// than read one figure at a time.
+func padLeft(s string, w int) string {
+	if n := lipgloss.Width(s); n < w {
+		return strings.Repeat(" ", w-n) + s
 	}
 	return s
 }

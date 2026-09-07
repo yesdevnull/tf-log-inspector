@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -117,4 +119,101 @@ func TestColourOffKeepsTheAttributesThatCarryMeaning(t *testing.T) {
 			t.Errorf("with colour off, %s is gone: rendered %q, want it to contain %q", tc.what, got, tc.seq)
 		}
 	}
+}
+
+// NO_COLOR is honoured per no-color.org: the variable disables colour when
+// it is present AND non-empty. An empty NO_COLOR is not a request for
+// anything -- it is what a shell leaves behind after `NO_COLOR=` -- and
+// treating it as one would silently strip colour from readers who never
+// asked.
+func TestNoColourIsHonouredOnlyWhenItIsActuallySet(t *testing.T) {
+	for _, tc := range []struct {
+		what   string
+		set    bool
+		value  string
+		colour bool
+	}{
+		{"unset", false, "", true},
+		{"set to 1", true, "1", false},
+		{"set to anything at all", true, "please", false},
+		{"present but empty", true, "", true},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			if tc.set {
+				t.Setenv("NO_COLOR", tc.value)
+			} else {
+				t.Setenv("NO_COLOR", "")
+				os.Unsetenv("NO_COLOR")
+			}
+			if got := colourWanted(); got != tc.colour {
+				t.Errorf("colourWanted() = %v with NO_COLOR %s, want %v", got, tc.what, tc.colour)
+			}
+		})
+	}
+}
+
+// reverseOpen is how the two cursor styles begin: focused sets reverse
+// alone, unfocused sets reverse and faint together.
+var reverseOpen = []string{"\x1b[7m", "\x1b[7;2m"}
+
+// A cursor bar must be reversed across its whole width. Reverse video is
+// turned off by the first reset inside the string cursorBar wraps, so
+// content that arrives carrying its own styling ends the highlight partway
+// along the row -- marking a fragment of the selected line and leaving the
+// rest looking unselected, which is precisely the "which row am I on"
+// question the bar exists to answer.
+//
+// The check is that the first escape sequence after a bar opens is its own
+// closing reset. That is what fails the moment any render site styles
+// something that can also be drawn as a cursor -- a facet's checkbox, a
+// table cell, a timeline lane label -- and it fails without the test having
+// to know which sites those are.
+func TestTheCursorBarIsReversedFromEndToEnd(t *testing.T) {
+	bars := 0
+	for _, c := range wholeFrameCases(t) {
+		for _, w := range []int{70, 100, 160} {
+			m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: 40})
+			// Both panes carry a cursor at once, and Tab decides which is
+			// drawn focused, so each frame is inspected under both.
+			for _, focused := range []Model{m, focusFacets(t, m)} {
+				for _, line := range strings.Split(focused.View(), "\n") {
+					bars += countUnbrokenBars(t, line, c.name, w)
+				}
+			}
+		}
+	}
+	// Without this the whole test passes over a frame that draws no cursor
+	// at all -- which is the state it exists to rule out.
+	if bars == 0 {
+		t.Fatal("no cursor bar found in any frame, so nothing above was actually checked")
+	}
+}
+
+// countUnbrokenBars reports how many cursor bars line opens, failing t for
+// any whose reverse video is broken by a nested style before its own reset.
+func countUnbrokenBars(t *testing.T, line, name string, w int) int {
+	t.Helper()
+	found := 0
+	for _, open := range reverseOpen {
+		for at := 0; ; {
+			i := strings.Index(line[at:], open)
+			if i < 0 {
+				break
+			}
+			at += i + len(open)
+			found++
+			// The unfocused opener contains the focused one as a prefix, so
+			// a run found under "\x1b[7m" may really be "\x1b[7;2m" -- the
+			// rest of ITS opener is not a nested style.
+			rest := line[at:]
+			if strings.HasPrefix(rest, ";2m") {
+				continue
+			}
+			if next := strings.Index(rest, "\x1b["); next >= 0 && !strings.HasPrefix(rest[next:], "\x1b[0m") {
+				t.Errorf("%s at %d columns: a cursor bar is interrupted by a nested style before its own reset, so it stops being reversed partway along the row: %q",
+					name, w, line)
+			}
+		}
+	}
+	return found
 }

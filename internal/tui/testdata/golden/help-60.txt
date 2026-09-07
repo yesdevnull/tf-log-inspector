@@ -1,4 +1,4 @@
-tfli -- x.log -- 3 RPC spans, 3 UI spans
+[1;36mtfli -- x.log -- 3 RPC spans, 3 UI spans[0m
 
 KEYS
 

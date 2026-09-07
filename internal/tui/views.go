@@ -851,7 +851,7 @@ func renderTable(preamble []string, cols []column, sortCol int, data []row, empt
 	for _, p := range preamble {
 		lines = append(lines, clipWidth(p, w))
 	}
-	lines = append(lines, clipWidth(formatRow(headers, headerKinds(cols), widths), w))
+	lines = append(lines, clipWidth(formatHeaderRow(headers, headerKinds(cols), widths, sortCol), w))
 
 	if len(data) == 0 {
 		lines = append(lines, clipWidth(emptyNote, w))
@@ -1067,17 +1067,49 @@ func columnWidths(headers []string, data []row) []int {
 func formatRow(cells []string, kinds []columnKind, widths []int) string {
 	parts := make([]string, len(cells))
 	for i, c := range cells {
-		w, kind := widths[i], kinds[i]
-		if kind == numericColumn {
-			// A numeric cell is formatMs or strconv output: ASCII, where a
-			// rune is a column, so fmt's own rune-counted width is the same
-			// measure padRight applies to the text cells beside it.
-			parts[i] = fmt.Sprintf("%*s", w, c)
-			continue
-		}
-		parts[i] = padRight(clipValueForKind(c, w, kind), w)
+		parts[i] = formatCell(c, kinds[i], widths[i])
 	}
 	return strings.Join(parts, "  ")
+}
+
+// formatHeaderRow formats a table's header row, marking the column the
+// table is sorted by. It exists beside formatRow rather than as a flag on it
+// because only a header carries styling: a data row may be redrawn as the
+// cursor bar, and cursorBar's reverse video is turned off again by the first
+// reset inside whatever it is given (see the theme), so a styled data cell
+// would end the highlight partway along the selected row.
+//
+// Each cell is styled AFTER formatCell has clipped and padded it, so the
+// escape sequences arrive on a string already the right width and the
+// column arithmetic never sees them. The style wraps the whole cell, which
+// is what keeps a header's name and its sort marker contiguous in the
+// output.
+func formatHeaderRow(headers []string, kinds []columnKind, widths []int, sortCol int) string {
+	parts := make([]string, len(headers))
+	for i, h := range headers {
+		style := styles.columnHeader
+		if i == sortCol {
+			style = styles.sortedColumn
+		}
+		parts[i] = style.Render(formatCell(h, kinds[i], widths[i]))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// formatCell clips and pads one cell to exactly w display columns, by the
+// rule its kind names: a numeric cell is right-aligned against its numbers,
+// anything else is left-aligned and gives way at whichever end
+// clipValueForKind says.
+//
+// Both branches measure display columns rather than runes, which is what
+// lets formatHeaderRow style the result: a cell padded by rune count would
+// be mis-padded the moment it carried an escape sequence, and padding
+// before styling is only safe if the two measures agree.
+func formatCell(c string, kind columnKind, w int) string {
+	if kind == numericColumn {
+		return padLeft(c, w)
+	}
+	return padRight(clipValueForKind(c, w, kind), w)
 }
 
 // clipWidth truncates s to at most w terminal columns, without marking the

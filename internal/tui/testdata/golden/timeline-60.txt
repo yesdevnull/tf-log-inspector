@@ -1,6 +1,6 @@
-tfli -- plan.log -- 3 RPC spans, 0 UI spans
+[1;36mtfli -- plan.log -- 3 RPC spans, 0 UI spans[0m
 
-TIMELINE (rpc)
+[1;36mTIMELINE (rpc)[0m
 [7maws/1    [0m     ░███████████     ░████████████████████████████
 google/1         ▒██████████▓                               
          0s                                             9.0s

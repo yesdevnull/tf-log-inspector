@@ -1,34 +1,34 @@
-tfli -- plan.log -- 2 RPC spans, 0 UI spans
+[1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
-PROVIDERS                 │ BY PROVIDER                                  │ GROUP DETAIL             
-[7;2m[ ] ….io/hashicorp/aws  1[0m │ provider                  total▾  calls  max │ Prov  …o/hashicorp/google
-[ ] …/hashicorp/google  1 │ [7m…orm.io/hashicorp/google     8ms      1  8ms[0m │ Total 8ms                
-RPCS                      │ …raform.io/hashicorp/aws     5ms      1  5ms │ Calls 1                  
-[ ] ApplyResourceChan…  2 │                                              │ Max   8ms                
-RESOURCE TYPES            │                                              │ Types 1                  
-[ ] aws_subnet  1         │                                              │ RPCs  1                  
-[ ] …_compute_instance  1 │                                              │                          
-LEVELS                    │                                              │ Slowest ApplyResourceCha…
-[ ] TRACE  2              │                                              │                          
-[ ] UNKNOWN  1            │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
-                          │                                              │                          
+[1;36mPROVIDERS[0m                [2m │ [0m[1;36mBY PROVIDER[0m                                 [2m │ [0m[1;36mGROUP DETAIL[0m             
+[7;2m[ ] ….io/hashicorp/aws  1[0m[2m │ [0m[1mprovider                [0m  [1;36mtotal▾[0m  [1mcalls[0m  [1mmax[0m[2m │ [0mProv  …o/hashicorp/google
+[ ] …/hashicorp/google  1[2m │ [0m[7m…orm.io/hashicorp/google     8ms      1  8ms[0m[2m │ [0mTotal 8ms                
+[1;36mRPCS[0m                     [2m │ [0m…raform.io/hashicorp/aws     5ms      1  5ms[2m │ [0mCalls 1                  
+[ ] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0mMax   8ms                
+[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0mTypes 1                  
+[ ] aws_subnet  1        [2m │ [0m                                            [2m │ [0mRPCs  1                  
+[ ] …_compute_instance  1[2m │ [0m                                            [2m │ [0m                         
+[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0mSlowest ApplyResourceCha…
+[ ] TRACE  2             [2m │ [0m                                            [2m │ [0m                         
+[ ] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
+                         [2m │ [0m                                            [2m │ [0m                         
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s

@@ -507,7 +507,7 @@ func TestRenderTableEndClipsTheHeaderAndFrontClipsItsValues(t *testing.T) {
 	// reserved a column wider than the bare "n" -- which is exactly the
 	// column the identifier beside it loses. Measuring the marked header is
 	// what keeps the two in step; see columnWidths.
-	lines := strings.Split(renderTable(nil, cols, 1, data, "", -1, true, 12, 10), "\n")
+	lines := strings.Split(unstyled(renderTable(nil, cols, 1, data, "", -1, true, 12, 10)), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want a header and one data row:\n%s", len(lines), strings.Join(lines, "\n"))
 	}

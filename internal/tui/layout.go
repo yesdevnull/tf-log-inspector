@@ -260,7 +260,7 @@ func (m *Model) View() string {
 	if h <= 0 {
 		h = defaultHeight
 	}
-	head := clipWidth(header(m), w)
+	head := styles.title.Render(clipWidth(header(m), w))
 	// One line of terminal is the header's: it names the file the reader is
 	// looking at, and a frame that showed only key hints could belong to any
 	// file at all.
@@ -779,6 +779,7 @@ func (m *Model) renderCentre(w, h int) string {
 	if m.view == ViewTimeline {
 		title = clipWidth(m.timelineTitle(), w)
 	}
+	title = styles.title.Render(title)
 	if h == 1 {
 		return title
 	}
@@ -823,13 +824,17 @@ func joinPanes(h int, panes ...pane) string {
 		columns[i] = lines
 	}
 
+	// The separator is styled here rather than held as a package-level
+	// value because Run may rebuild the theme without colour, and it does so
+	// after this package's variables are initialised.
+	sep := styles.chrome.Render(paneSep)
 	rows := make([]string, h)
 	for r := 0; r < h; r++ {
 		cells := make([]string, len(panes))
 		for i := range panes {
 			cells[i] = columns[i][r]
 		}
-		rows[r] = strings.Join(cells, paneSep)
+		rows[r] = strings.Join(cells, sep)
 	}
 	return strings.Join(rows, "\n")
 }
@@ -867,9 +872,15 @@ func (m *Model) renderDetail(w, h int) string {
 	// carries the focus instead: Tab's third stop would otherwise be
 	// invisible, leaving the user no way to tell that the keyboard had
 	// moved off the list.
+	// Focused, the title becomes the cursor bar and takes reverse video
+	// instead of the title style: the two cannot both apply, because the
+	// bar's reverse video ends at the first reset inside what it wraps
+	// (see cursorBar).
 	line := clipWidth(title, w)
 	if m.pane == PaneDetail {
 		line = cursorBar(line, w, true)
+	} else {
+		line = styles.title.Render(line)
 	}
 	return strings.Join(fitPaneSections(line, sections, w, h), "\n")
 }

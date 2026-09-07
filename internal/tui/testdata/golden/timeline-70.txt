@@ -1,34 +1,34 @@
-tfli -- plan.log -- 3 RPC spans, 0 UI spans
+[1;36mtfli -- plan.log -- 3 RPC spans, 0 UI spans[0m
 
-TIMELINE (rpc)                                   │ SPAN DETAIL        
-[7maws/1    [0m    ▒████████    ▒█████████████████████ │ RPC   ApplyResourc…
-google/1       ▒████████░                        │ Type  aws_instance 
-         0s                                 9.0s │ Prov  …ashicorp/aws
-busy 7.5s of 9.0s (83%)                          │ Dur   2.0s         
-waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2 │ Res   no address c…
-nothing running, 0s–1.0s — before any call       │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
+[1;36mTIMELINE (rpc)[0m                                  [2m │ [0m[1;36mSPAN DETAIL[0m        
+[7maws/1    [0m    ▒████████    ▒█████████████████████[2m │ [0mRPC   ApplyResourc…
+google/1       ▒████████░                       [2m │ [0mType  aws_instance 
+         0s                                 9.0s[2m │ [0mProv  …ashicorp/aws
+busy 7.5s of 9.0s (83%)                         [2m │ [0mDur   2.0s         
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2[2m │ [0mRes   no address c…
+nothing running, 0s–1.0s — before any call      [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s

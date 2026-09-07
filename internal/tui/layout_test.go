@@ -171,7 +171,7 @@ func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
 				if n := len(strings.Split(view, "\n")); n > h {
 					t.Errorf("%s at %dx%d: View() is %d lines, which loses its top %d:\n%s", c.name, w, h, n, n-h, view)
 				}
-				if !strings.HasPrefix(view, "tfli -- ") {
+				if !strings.HasPrefix(unstyled(view), "tfli -- ") {
 					t.Errorf("%s at %dx%d: View() does not start with the header line:\n%s", c.name, w, h, view)
 				}
 			}
@@ -193,7 +193,7 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("View() at height 2 is %d lines, want 2:\n%s", len(lines), view)
 	}
-	if !strings.HasPrefix(lines[0], "tfli -- x.log") {
+	if !strings.HasPrefix(unstyled(lines[0]), "tfli -- x.log") {
 		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
 	}
 	// The surviving footer line must be the ACTION line, not the view-key
@@ -740,12 +740,31 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 // key line) contributes nothing.
 func centrePaneOf(view string) string {
 	var centre []string
-	for _, line := range strings.Split(view, "\n") {
+	for _, line := range strings.Split(unstyled(view), "\n") {
 		if fields := strings.Split(line, paneSep); len(fields) == 3 {
 			centre = append(centre, fields[1])
 		}
 	}
 	return strings.Join(centre, "\n")
+}
+
+// unstyled strips the theme's escape sequences from a rendered frame, so
+// the helpers that take a frame apart can find the structural strings they
+// split on.
+//
+// It is needed because the pane separator is itself styled: a splitter
+// looking for the bare paneSep in a styled frame still finds it, but takes
+// the surrounding escapes into the panes on either side, and a helper
+// counting DISPLAY columns by walking runes counts each byte of an escape
+// as a column of its own. Both failures are quiet -- the wrong answer, not
+// an error -- so the stripping happens here rather than at each call site.
+//
+// Tests about the styling itself must not go through these helpers: they
+// assert on what renderFacets, renderList and renderDetail return directly,
+// which is where the escapes still are.
+func unstyled(s string) string {
+	plain, _ := logfmt.StripANSI(s, nil)
+	return plain
 }
 
 // layoutCentreWidth returns the centre (list) pane's width for a terminal
@@ -814,7 +833,7 @@ func TestSidePaneWidthsAreMeasuredAtLoad(t *testing.T) {
 // columns (TestEveryPaneRowIsTheSameDisplayWidth).
 func paneSepColumns(t *testing.T, view string) []int {
 	t.Helper()
-	for _, line := range strings.Split(view, "\n") {
+	for _, line := range strings.Split(unstyled(view), "\n") {
 		if !strings.Contains(line, paneSep) {
 			continue
 		}
@@ -1025,7 +1044,7 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 // wrong row goes unnoticed.
 func detailBody(t *testing.T, m Model, wantTitle string, w, h int) string {
 	t.Helper()
-	lines := strings.Split(m.renderDetail(w, h), "\n")
+	lines := strings.Split(unstyled(m.renderDetail(w, h)), "\n")
 	if len(lines) == 0 || !strings.HasPrefix(lines[0], wantTitle) {
 		t.Fatalf("detail pane is not headed %q:\n%s", wantTitle, strings.Join(lines, "\n"))
 	}
@@ -1587,7 +1606,7 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 // made against that one.
 func detailPaneOf(view string) string {
 	var detail []string
-	for _, line := range strings.Split(view, "\n") {
+	for _, line := range strings.Split(unstyled(view), "\n") {
 		if fields := strings.Split(line, paneSep); len(fields) == 3 {
 			detail = append(detail, fields[2])
 		}

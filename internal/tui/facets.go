@@ -337,7 +337,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 		if dimIdx == m.facetCursor.dim {
 			headerIdx = len(lines)
 		}
-		lines = append(lines, clipWidth(facetSectionHeader(f.Name), w))
+		lines = append(lines, styles.title.Render(clipWidth(facetSectionHeader(f.Name), w)))
 		kind := facetValueKind(f.Name)
 		for valIdx, v := range f.Values {
 			check := " "

@@ -1,34 +1,34 @@
-tfli -- plan.log -- 2 RPC spans, 0 UI spans
+[1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
-CALLS                                            │ SPAN DETAIL        
-duration▾  RPC          resource t…  provider    │ RPC   ApplyResourc…
-[7m      8ms  ApplyResou…  …e_instance  …orp/google[0m │ Type  …ute_instance
-      5ms  ApplyResou…  aws_subnet   …hicorp/aws │ Prov  …icorp/google
-                                                 │ Dur   8ms          
-                                                 │ Res   no address c…
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
-                                                 │                    
+[1;36mCALLS[0m                                           [2m │ [0m[1;36mSPAN DETAIL[0m        
+[1;36mduration▾[0m  [1mRPC        [0m  [1mresource t…[0m  [1mprovider   [0m[2m │ [0mRPC   ApplyResourc…
+[7m      8ms  ApplyResou…  …e_instance  …orp/google[0m[2m │ [0mType  …ute_instance
+      5ms  ApplyResou…  aws_subnet   …hicorp/aws[2m │ [0mProv  …icorp/google
+                                                [2m │ [0mDur   8ms          
+                                                [2m │ [0mRes   no address c…
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
+                                                [2m │ [0m                   
 
 Durations here are measured under logging, which is not
 free: one workspace planned in 24.1s unlogged and 522.2s
