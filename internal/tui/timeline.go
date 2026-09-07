@@ -1475,4 +1475,3 @@ func (m *Model) laneHues() map[string]lipgloss.Style {
 	}
 	return hues
 }
-

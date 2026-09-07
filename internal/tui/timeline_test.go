@@ -2201,3 +2201,62 @@ func TestALaneChangeThatGoesNowhereLeavesTheSpanCursorAlone(t *testing.T) {
 		t.Errorf("span = %d after ↓ on the last lane, want it left at 3", m.timeline.span)
 	}
 }
+
+// Two full provider addresses can shorten to one lane label -- the same
+// provider type served from two registries -- and the lanes they name are
+// then already indistinguishable to a reader. What must not happen is the
+// second address taking the hue and leaving the first sharing a colour with
+// somebody else: the assignment counts entries already made, so a later
+// address overwriting an earlier one hands its neighbour's colour out twice.
+//
+// Built from facets directly rather than from a fixture, because a log with
+// two registries serving one provider type is a shape no fixture here has
+// and none is needed to state the rule.
+func TestLaneHuesGiveOneColourPerShortProviderName(t *testing.T) {
+	m := Model{facets: []model.Facet{{Name: dimProvider, Values: []model.FacetValue{
+		{Value: "registry.terraform.io/hashicorp/aws", Count: 2},
+		{Value: "registry.example.com/acme/aws", Count: 1},
+		{Value: "registry.terraform.io/hashicorp/google", Count: 1},
+	}}}}
+
+	hues := m.laneHues()
+	if len(hues) != 2 {
+		t.Fatalf("laneHues assigned %d colours over two short names (%v)", len(hues), hues)
+	}
+	if got, want := hues["aws"].GetForeground(), semantic.lane(0).GetForeground(); got != want {
+		t.Errorf("aws took colour %v, want the first (%v) -- the address seen first names the hue", got, want)
+	}
+	if hues["aws"].GetForeground() == hues["google"].GetForeground() {
+		t.Errorf("aws and google share colour %v, so the timeline cannot tell their lanes apart", hues["aws"].GetForeground())
+	}
+}
+
+// A hue is a property of the LOG, not of what is on screen. Assigned from
+// the lanes a filter left behind, every surviving lane would be recoloured
+// the moment a facet was toggled -- which reads as the lanes themselves
+// having changed, on the one view whose whole subject is which work ran when.
+//
+// google is the provider filtered TO, and it is not the first: assigning
+// from the visible lanes would hand it the first colour, so the two
+// arrangements disagree here and the test can tell them apart.
+func TestLaneHuesDoNotChangeWhenAFilterHidesAProvider(t *testing.T) {
+	m := timelineModel(t)
+	before := m.laneHues()
+	if len(before) < 2 {
+		t.Fatalf("the fixture has %d providers, want at least two so one can be filtered away", len(before))
+	}
+	if before["google"].GetForeground() == semantic.lane(0).GetForeground() {
+		t.Fatal("google already holds the first colour, so filtering to it could not show the difference")
+	}
+
+	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/google": true}}
+	m.invalidateRows()
+
+	after := m.laneHues()
+	if got, want := after["google"].GetForeground(), before["google"].GetForeground(); got != want {
+		t.Errorf("google's lanes changed from %v to %v when a filter hid the other provider", want, got)
+	}
+	if len(after) != len(before) {
+		t.Errorf("the filter changed the palette from %d colours to %d", len(before), len(after))
+	}
+}
