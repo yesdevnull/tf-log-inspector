@@ -28,8 +28,18 @@ type StructuredSink interface {
 }
 
 // Scan reads r in a single pass, assembling logical entries and pushing each
-// to every sink. Memory use is independent of input size: only the header
-// line's message is retained, and only until the entry is flushed.
+// to every sink. Memory use beyond the two interners is independent of
+// input size: only the header line's message is retained, and only until
+// the entry is flushed.
+//
+// The interners are bounded rather than free: comps and reqIDs each retain
+// one clone of every DISTINCT string they intern, up to Interner's own
+// 65534-id cap, so their cost tracks cardinality rather than input size --
+// but that cost is paid whether or not a caller reads what it interned.
+// cmd/tfli's --diagnose passes a reqIDs Interner solely because this
+// signature requires one and never reads an id back out of it, so it still
+// pays one map operation per id-bearing entry and, in the worst case, up to
+// 65534 cloned UUID strings, on the order of 10MB.
 //
 // comps and reqIDs are separate Interners because ids compare only within
 // one interner: a component id and a request id are different vocabularies
