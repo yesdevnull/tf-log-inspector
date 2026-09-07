@@ -65,31 +65,67 @@ func TestHelpLeavesQuitWorking(t *testing.T) {
 	}
 }
 
+// modalState is everything a key could move that the help is supposed to
+// hold still: which view is on, how each table is sorted, where the cursors
+// are, which pane has focus, and what is filtered.
+//
+// It is one fingerprint rather than a list of comparisons because the set
+// has to grow with the bindings. Observing only the view, the sort and the
+// selection let 'f' and Space through this test silently -- 'f' moves the
+// focus and Space the facet selection, and neither was being looked at.
+func modalState(m Model) string {
+	return fmt.Sprintf("view=%v sort=%v selected=%d pane=%v facets=%v rawtop=%d",
+		m.ActiveView(), m.sortCol, m.Selected(), m.pane, m.selectedFacets, m.raw.top)
+}
+
 // Every other key is inert while the help is open -- the same modal
 // treatment a search in progress already gets, where each key is text for
 // the query rather than a command. A number key that switched the view
 // behind the help would leave the reader looking at a key list over a view
 // they cannot see they have moved to.
+//
+// Each key is first pressed with the help SHUT and required to move
+// modalState. Without that guard a key that had stopped doing anything --
+// or a fingerprint that had stopped watching what it does -- would pass
+// this test by being inert in both states, which is the failure it exists
+// to catch. It is the guard, not the assertion, that makes the row worth
+// having.
 func TestHelpSwallowsTheKeysThatWouldChangeWhatIsBehindIt(t *testing.T) {
-	m := helpModel(t, 100, 40)
-	view, sort, selected := m.ActiveView(), m.sortCol, m.Selected()
-
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'1'}},
-		{Type: tea.KeyRunes, Runes: []rune{'5'}},
-		{Type: tea.KeyRunes, Runes: []rune{'s'}},
-		{Type: tea.KeyRunes, Runes: []rune{'j'}},
-		{Type: tea.KeyRunes, Runes: []rune{'f'}},
-		{Type: tea.KeySpace},
+	focusFacets := func(t *testing.T, m Model) Model {
+		t.Helper()
+		return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	}
+	for _, tc := range []struct {
+		what string
+		prep func(*testing.T, Model) Model
+		key  tea.KeyMsg
+	}{
+		{what: "switch to a rollup view", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}},
+		{what: "switch to the timeline", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}}},
+		{what: "cycle the sort", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+		{what: "move the cursor", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}},
+		{what: "focus the facets", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}},
+		{what: "toggle a facet value", prep: focusFacets, key: tea.KeyMsg{Type: tea.KeySpace}},
 	} {
-		next := update(t, m, key)
-		if !next.showHelp {
-			t.Errorf("%q closed the help", key.String())
-		}
-		if next.ActiveView() != view || next.sortCol != sort || next.Selected() != selected {
-			t.Errorf("%q changed the state behind the help: view %v->%v, sort %v->%v, selection %d->%d",
-				key.String(), view, next.ActiveView(), sort, next.sortCol, selected, next.Selected())
-		}
+		t.Run(tc.what, func(t *testing.T) {
+			base := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+			if tc.prep != nil {
+				base = tc.prep(t, base)
+			}
+			before := modalState(base)
+			if got := modalState(update(t, base, tc.key)); got == before {
+				t.Fatalf("%q does not %s with the help shut, so this cannot tell the modal block from a key that does nothing: %s", tc.key.String(), tc.what, before)
+			}
+
+			open := update(t, base, helpKey)
+			next := update(t, open, tc.key)
+			if !next.showHelp {
+				t.Errorf("%q closed the help", tc.key.String())
+			}
+			if got := modalState(next); got != before {
+				t.Errorf("%q reached through the help and changed what is behind it:\n before %s\n after  %s", tc.key.String(), before, got)
+			}
+		})
 	}
 }
 
@@ -166,20 +202,43 @@ func TestHelpDocumentsEveryKeyTheFooterAdvertises(t *testing.T) {
 	}
 }
 
-// The help replaces the PANE ROW and nothing else. The header names the file
-// being read and the footer carries q, and a reader who opened the help by
-// accident should still be able to see both.
+// The help replaces the PANE ROW and nothing else: the header still names
+// the file being read, the footer still carries a way out, and every pane
+// between them is gone.
+//
+// The pane-row anchors are asserted PRESENT with the help shut before they
+// are asserted absent with it open. Written the other way round the test
+// passes on any string the frame never contained -- an earlier version of
+// it looked for a column header the calls view renders clipped and one that
+// belongs to a different view, so it could not fail whatever renderPanes
+// did.
 func TestHelpReplacesThePaneRowAndKeepsTheHeaderAndFooter(t *testing.T) {
-	m := helpModel(t, 100, 40)
-	out := m.View()
+	// One anchor from each side pane and one from the centre, so a help
+	// that covered only part of the row would still be caught. Each is a
+	// string the 100-column calls frame renders whole; see
+	// testdata/golden/layout-100.txt.
+	paneRow := []string{"PROVIDERS", "duration" + sortDescMark, "RPC   ApplyResourceChange"}
+
+	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	behind := shut.View()
+	for _, anchor := range paneRow {
+		if !strings.Contains(behind, anchor) {
+			t.Fatalf("the frame does not draw %q with the help shut, so its absence with the help open would prove nothing:\n%s", anchor, behind)
+		}
+	}
+
+	open := update(t, shut, helpKey)
+	out := open.View()
 	if !strings.Contains(out, "x.log") {
 		t.Errorf("the help hid the header:\n%s", out)
 	}
-	if !strings.Contains(out, "q quit") {
+	if !strings.Contains(out, quitHint) {
 		t.Errorf("the help hid the footer's quit hint:\n%s", out)
 	}
-	if strings.Contains(out, "resource type") && strings.Contains(out, "RPC total") {
-		t.Errorf("the table behind the help is still drawn:\n%s", out)
+	for _, anchor := range paneRow {
+		if strings.Contains(out, anchor) {
+			t.Errorf("the pane row behind the help is still drawn -- %q survived:\n%s", anchor, out)
+		}
 	}
 }
 

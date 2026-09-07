@@ -460,10 +460,14 @@ func rankedBefore(a, b span.Span) bool {
 // list of names. The direction is therefore not a second thing the user
 // chooses, and there is no key to reverse it.
 //
-// Ties break on column 0 ascending -- the identifier column in every table
-// but the calls view -- and rows that column cannot separate hold the order
-// they arrived in: the sort is STABLE, so two rows a tie-break genuinely
-// cannot tell apart do not swap places from one keystroke to the next.
+// Ties break on column 0, in the direction THAT column's kind implies by the
+// same rule: ascending in the three tables whose first column is an
+// identifier, and descending in the calls view, whose first column is
+// duration -- so sorting calls by RPC name puts the slowest call of each
+// name first. Sorting BY column 0 has no tie-break to fall to, and rows no
+// tie-break can separate hold the order they arrived in: the sort is STABLE,
+// so two rows it genuinely cannot tell apart do not swap places from one
+// keystroke to the next.
 func sortRows(cols []column, data []row, col int) {
 	sort.SliceStable(data, func(i, j int) bool {
 		if less, decided := compareCell(cols[col].kind, data[i], data[j], col); decided {
