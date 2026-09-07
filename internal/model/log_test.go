@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,6 +191,47 @@ func TestAttributionForEntryLooksUpByClosingEntryNotPosition(t *testing.T) {
 	}
 	if got := l.AttributionForEntry(123); got != (attrib.Attribution{}) {
 		t.Errorf("AttributionForEntry(123) = %+v, want the zero Attribution for an entry no span closed", got)
+	}
+}
+
+// A scope is the ascending indices of every entry carrying one call's request
+// id, which is what lets the raw log show a call rather than the log around
+// it. The fixture's two calls INTERLEAVE, so a scope built by taking a
+// contiguous run of entries fails here -- which is the defect most likely to
+// be written by accident.
+func TestScopeForCollectsOneCallsEntriesAcrossAnInterleavedLog(t *testing.T) {
+	l, err := Load(fixture(t, "interleaved-calls.log"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var a uint16
+	for _, s := range l.RPCSpans {
+		if s.ResourceType == "aws_subnet" {
+			a = s.ReqID
+		}
+	}
+	if a == 0 {
+		t.Fatal("the aws_subnet span carries no request id")
+	}
+	got := l.ScopeFor(a)
+	// The fixture opens with a multi-line "#" header comment, which Scan
+	// indexes as untimestamped entry 0 rather than discarding -- so the
+	// eight log lines are entries 1 through 8, and the first index below is
+	// 1, not 0.
+	if want := []int{1, 3, 6, 7}; !slices.Equal(got, want) {
+		t.Errorf("ScopeFor = %v, want %v -- the call's entries, not a contiguous run", got, want)
+	}
+}
+
+// Id 0 is "no request id", not a call whose id happens to be zero, so it
+// scopes to nothing rather than to every entry that carries no id.
+func TestScopeForReturnsNothingForTheAbsentId(t *testing.T) {
+	l, err := Load(fixture(t, "interleaved-calls.log"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := l.ScopeFor(0); got != nil {
+		t.Errorf("ScopeFor(0) = %v, want nil", got)
 	}
 }
 

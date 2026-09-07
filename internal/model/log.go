@@ -133,6 +133,33 @@ func (l *Log) Bytes(e logfmt.Entry) []byte {
 // of how many RPC spans exist to attribute, or how many contexts finished.
 func (l *Log) HasAddressContext() bool { return len(l.Contexts) > 0 }
 
+// ScopeFor returns the indices of every entry carrying request id reqID, in
+// ascending order -- one call's own log lines, which is what the raw log
+// shows when a call is opened.
+//
+// It MATERIALISES rather than returning a predicate. A scope is small (a
+// measured min of 4, median 7 and max 1934 entries on the standardised
+// capture) and the pane iterating it must not walk the log to find its
+// members: renderRawLog's only early exit is a full pane, so a scope that
+// never fills one would scan every remaining entry on every keystroke --
+// 38,379 of them on that capture, and about 8 million at the 1GB target.
+//
+// Id 0 means "no request id" rather than a call whose id is zero, so it
+// scopes to nothing. Returning every entry that carries no id instead would
+// answer a jump with a pane full of unrelated traffic.
+func (l *Log) ScopeFor(reqID uint16) []int {
+	if reqID == 0 {
+		return nil
+	}
+	var scope []int
+	for i, e := range l.Entries {
+		if e.ReqID == reqID {
+			scope = append(scope, i)
+		}
+	}
+	return scope
+}
+
 // AttributionForEntry finds the attribution recorded for the RPC span that
 // closed log entry `entry`, the same identifier jumpToSpan already trusts to
 // name a span uniquely. It is the one supported way to look up a span's
