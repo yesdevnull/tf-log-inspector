@@ -1068,6 +1068,32 @@ question 8 recommends, and where its 2174-span figures are recorded — reports
 `provider entries` carry the field: 70.9% of everything the providers wrote
 is attributable to a named call.
 
+The spread matters more than the mean, and the same report gives it:
+`distinct req ids 2174`, `entries per req id min 4, median 7, max 1934`.
+Three things follow.
+
+**A scope is never trivial.** The MINIMUM is four entries, so the two-line
+scope that would have made this feature pointless does not occur at all —
+not as an average, not as a worst case. The median is 7 and the mean 11.21,
+so the distribution is right-skewed rather than uniform.
+
+**Exactly one request id per span.** `distinct req ids 2174` equals `spans
+built 2174`, so no id is shared between calls and no call goes unnamed. On
+this capture the "RPC span whose response carried no `tf_req_id`" fallback
+below is measured at zero. The tracking cap did not bite either (2174 against
+`maxTrackedReqIDs` 4096), so these figures are exact rather than saturated,
+and the interner's 65534 ceiling sits 30× above the observed cardinality.
+
+**One call carries 1934 entries** — 7.9% of every id-bearing line in the log,
+under a single id. That is the feature working rather than a fault: the
+templates show `Calling provider defined validator.String` at 791 and
+`planmodifier.String` at 900, which are per-attribute, so a resource with
+many attributes concentrates its work under one call. It has two consequences
+for the design, both below: materialising the scope is right at that size and
+cheap, and the frame must say how large a scope is, because a reader cannot
+tell four entries from nineteen hundred by looking at a pane of a dozen
+lines.
+
 **Those eleven entries are the answer to "what did this call do".** The same
 report's MESSAGE TEMPLATES section names the recurring shapes, and every one
 of these carries `tf_req_id`:
@@ -1187,17 +1213,26 @@ whose id sits only on a continuation, and **how many those are is not
 measured**: `continuation lines not parsed for fields` counts the lines, not
 the ids on them.
 
-**Open question, unresolved: parse continuation lines for `tf_req_id`?** The
-recommendation is to measure before choosing — add a `--diagnose` counter for
-continuation lines carrying `tf_req_id=`, in the same change that adds
-`ResponseReqIDFields` below, ship the scope header-only, and take the
-in-`Scan` mechanism if that counter comes back non-trivial. It is the cheaper
-of the two and the only one that also improves `--diagnose`'s own tier
-reporting. What must not happen is the omission going unstated: a scope that
-silently drops a call's largest entry is the plausible-wrong-answer failure
-this tool is least able to afford, so until the counter exists the new
-fixture below carries a continuation-borne id and the tests say which
-behaviour is expected.
+**RESOLVED 2026-09-07: do not parse continuation lines. Ship header-only.**
+The counter was built and run over the standardised capture:
+
+    continuation lines not parsed for fields 8024
+      of those, carrying an id 0 line(s), costing 0 entries their only id
+
+Zero, and the figure is an UPPER BOUND — `ParseFields` splits on whitespace,
+so it counts the key spelled inside a body value as a field and still found
+none. So on this capture a header-only scope omits nothing whatever, and both
+mechanisms priced above buy exactly nothing. Neither is worth its cost.
+
+This is one capture and it does not generalise on its own. Its providers are
+azurerm, tfe, azuread, github and azuredevops; `testdata/multiline-body.log`
+shows the aws provider writing `tf_req_id` onto a continuation beside
+`http.duration` and an error body, which is the shape that would make the
+count non-zero. The counter is therefore kept rather than removed: it is how
+a capture from a provider that dumps HTTP bodies would say so, and the
+decision above is re-taken if one ever does. The new fixture below still
+carries a continuation-borne id, so the header-only behaviour is pinned
+rather than merely current.
 
 **Behaviour: the scope is a sequence, not a predicate.**
 
@@ -1254,12 +1289,17 @@ behaviour is expected.
 
 **Saying so on screen.** Two places, because neither is enough alone.
 
-- The centre pane's title reads `RAW LOG (one call)` while a scope is live.
+- The centre pane's title reads `RAW LOG (1934 entries)` while a scope is
+  live — the COUNT, not merely the fact. The measured spread is min 4, median
+  7, max 1934, so "one call" would be the same words over a pane the reader
+  can read in full and over one holding eight per cent of the log's
+  id-bearing lines. The count is what says which they are in, and it is free:
+  the scope is materialised as a slice, so its length is already known.
   `centreTitle` already overrides the static title at render time so the
   timeline can name its tier (`timelineTitle`), which makes the pane title
   the established place for a pane to state what it is showing. `titledRule`
-  draws a name whole or not at all, so below 22 columns the pane goes unnamed
-  and the footer hint is what carries it.
+  draws a name whole or not at all, so a title this long goes unnamed below
+  26 columns and the footer hint is what carries it there.
 - The action line carries a `\` hint while a scope is live. The footer alone
   would not do: `footer()` replaces the whole hint block in four states —
   the help, a blocked jump, a search being typed, and a search that missed —
