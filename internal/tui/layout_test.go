@@ -1171,28 +1171,42 @@ func TestARollupWithNoDetailProducesNoSections(t *testing.T) {
 // pinning a guess at it. Every row of the view is asserted, since the point
 // is that the rows differ.
 //
-// Only the providers view is exercised. two-tier.log's resource types used
-// to clip here too, but the definition-list layout gave the value the six
-// columns the label column had been taking, and "aws_instance" now fits the
-// pane whole -- so that case would assert a clip that no longer happens.
-// The guard below fails rather than passing quietly if the same becomes
-// true of a provider address.
+// Each case is rendered at a width where its own identifier still clips.
+// The providers case takes the width the pane's policy gives it at
+// detailInlineWidth; the types case names a narrower one, because the
+// definition-list layout handed the value the columns the label column had
+// been taking and "aws_instance" now fits the pane's own width whole. The
+// case is kept rather than dropped: without it, flipping the types
+// aggregate to a head-clip fails no test and no golden, and three resource
+// types sharing a prefix render as identical rows.
+//
+// The guard below counts RENDERED ellipses, not expected ones, so a case
+// whose values all start fitting fails here saying so rather than through
+// the ordinary comparison's "an identifier keeps its tail". A case needs
+// one clipped row to be doing its job; the rows that fit whole are still
+// asserted, since the point is also that the rows differ.
 func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 	for _, c := range []struct {
 		fixture string
 		key     rune
+		narrow  int // 0 takes the width the pane's own policy gives it
 		want    []string
 	}{
-		{"two-providers.log", '1', []string{"  …hashicorp/google", "  …io/hashicorp/aws"}},
+		{"two-providers.log", '1', 0, []string{"  …hashicorp/google", "  …io/hashicorp/aws"}},
+		{"two-tier.log", '2', 12, []string{"  …_instance", "  local_file", "  aws_subnet"}},
 	} {
 		m := update(t, New(testLog(t, c.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
-		w := detailPaneWidth(m.detailPaneNatural, detailInlineWidth)
-		if w >= m.detailPaneNatural {
-			t.Fatalf("%s: the pane renders at %d columns against a natural width of %d, so nothing clips and this measures nothing", c.fixture, w, m.detailPaneNatural)
+		w := c.narrow
+		if w == 0 {
+			w = detailPaneWidth(m.detailPaneNatural, detailInlineWidth)
+			if w >= m.detailPaneNatural {
+				t.Fatalf("%s: the pane renders at %d columns against a natural width of %d, so nothing clips and this measures nothing", c.fixture, w, m.detailPaneNatural)
+			}
 		}
 		if got := len(m.rows()); got != len(c.want) {
 			t.Fatalf("fixture assumption changed: %s view %c has %d rows, want %d", c.fixture, c.key, got, len(c.want))
 		}
+		clipped := 0
 		for i, want := range c.want {
 			m.selected = i
 			// The identifier is the FIRST field's value, so it is the
@@ -1201,12 +1215,15 @@ func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 			if len(lines) < 2 {
 				t.Fatalf("%s view %c row %d: the pane rendered %q, too few lines to hold a labelled value", c.fixture, c.key, i, lines)
 			}
-			if !strings.Contains(want, "…") {
-				t.Fatalf("%s view %c row %d: the expected line %q carries no ellipsis, so this case no longer exercises clipping", c.fixture, c.key, i, want)
+			if strings.Contains(lines[1], "…") {
+				clipped++
 			}
 			if lines[1] != want {
 				t.Errorf("%s view %c row %d: pane's identifier at %d columns = %q, want %q -- an identifier keeps its tail", c.fixture, c.key, i, w, lines[1], want)
 			}
+		}
+		if clipped == 0 {
+			t.Fatalf("%s view %c: no row's identifier clipped at %d columns, so this case no longer exercises the direction", c.fixture, c.key, w)
 		}
 	}
 }
@@ -1642,26 +1659,62 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 // pane measured only against span detail is then too narrow for it and
 // clips content it had room for.
 //
-// structured-ui.log is the case where that bites: it carries UI-hook spans
-// only, so there is no span detail to measure at all and the measurement
-// falls to minDetailPaneWidth -- 19 columns, narrower than the resource
-// type line the types view puts in the pane.
+// The case where that bites is a log carrying BOTH tiers whose longest
+// resource type is reported by the UI tier ALONE. detailNaturalWidth
+// measures span detail over the RPC spans of such a log -- it falls to the
+// UI tier only where there are no RPC spans at all -- so a UI-only type
+// reaches the pane through typeRows and through nothing else.
+//
+// It is constructed here rather than taken from a fixture because no
+// fixture shows it, and a UI-hook-ONLY log does not: there the span loop
+// measures the UI spans itself, so the rollup loop raises the width by
+// nothing and the test passes whether the loop runs or not.
 func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
-	l := testLog(t, "structured-ui.log")
-	if len(l.RPCSpans) != 0 {
-		t.Fatalf("fixture assumption changed: %d RPC spans, want a UI-hook-only log whose span detail measures nothing", len(l.RPCSpans))
+	// Long enough to outrun every line the span loop measures (the widest is
+	// the no-address-context note at 27 columns), and short enough that the
+	// pane can still show it whole under maxDetailPaneWidth.
+	const uiOnlyType = "azurerm_lb_backend_address_pool"
+	l := &model.Log{
+		RPCSpans: []span.Span{{
+			RPC: "PlanResourceChange", Provider: "aws", ResourceType: "aws_subnet",
+			StartMs: 0, EndMs: 10, DurationMs: 10, Fidelity: span.FidelityReported,
+		}},
+		UISpans: []span.Span{{
+			RPC: "create", Provider: "azurerm", ResourceType: uiOnlyType,
+			Address: "azurerm_lb_backend_address_pool.this",
+			StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityUIReported,
+		}},
 	}
+	// The SPAN loop alone, which is what detailNaturalWidth measures for a
+	// log with RPC spans. If it already carried this type the rollup loop
+	// would be measuring nothing new and the test would pass either way.
+	for _, sp := range l.RPCSpans {
+		for _, line := range spanDetailLines(sp, attrib.Attribution{}, l.HasAddressContext(), hugeWidth) {
+			if strings.Contains(line, uiOnlyType) {
+				t.Fatalf("span detail already carries %q in %q, so the rollup measurement is not what this tests", uiOnlyType, line)
+			}
+		}
+	}
+
+	wantLine := detailIndent + uiOnlyType
+	if got := detailNaturalWidth(l); got < lipgloss.Width(wantLine) {
+		t.Errorf("detailNaturalWidth = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
+	}
+
 	m := update(t, New(l, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-
-	wantLine := detailIndent + m.rows()[m.Selected()].cells[0]
-	if got := m.detailPaneNatural; got < lipgloss.Width(wantLine) {
-		t.Errorf("detailPaneNatural = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
+	for i, r := range m.rows() {
+		if r.cells[0] != uiOnlyType {
+			continue
+		}
+		m.selected = i
+		body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural, 160), 20)
+		if !strings.Contains(body, wantLine) {
+			t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
+		}
+		return
 	}
-	body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural, 160), 20)
-	if !strings.Contains(body, wantLine) {
-		t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
-	}
+	t.Fatalf("no types row for %q, so the pane never shows it", uiOnlyType)
 }
 
 // The placeholder means exactly what it says: there is no selection to
