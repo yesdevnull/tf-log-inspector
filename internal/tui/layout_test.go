@@ -2052,11 +2052,10 @@ func TestActionKeysOfferSortOnlyWhereThereIsATableToSort(t *testing.T) {
 // exceed it: the reader of a 70-column terminal must still be able to see
 // how to leave.
 //
-// This sweeps every view rather than naming one, because the widest line has
-// moved twice already -- to the timeline when the span hint was added, and
-// to the calls view when the sort hint was -- and a test naming the view
-// that was widest at the time it was written stops covering the question the
-// moment a hint lands somewhere else.
+// This sweeps every view rather than naming one. Which view is widest is a
+// function of which conditional hints that view happens to carry, so a test
+// naming today's widest stops covering the question the moment a hint lands
+// somewhere else.
 func TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth(t *testing.T) {
 	for _, b := range views {
 		t.Run(b.name, func(t *testing.T) {

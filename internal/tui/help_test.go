@@ -258,10 +258,12 @@ func TestTheFooterOffersHelpAndSaysWhichWayItGoes(t *testing.T) {
 	}
 }
 
-// While the help is open every binding but ? and q is inert, so the footer
-// must name those two and nothing else. Hints for ⏎, s, f, Esc and the
-// number keys left standing there would advertise keys that do nothing --
-// over the very screen that says what each key does.
+// While the help is open only ?, Esc and q do anything, and the footer names
+// two of them. Esc is left out deliberately: it works, but the meaning it is
+// advertised under -- "Esc clear" -- describes clearing filters, which is
+// not what it does here, and the key table above says what it does instead.
+// Hints for ⏎, s, f and the number keys left standing would advertise keys
+// that do nothing, over the very screen that says what each key does.
 func TestTheFooterDropsEveryInertHintWhileTheHelpIsOpen(t *testing.T) {
 	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	open := update(t, shut, helpKey)
@@ -301,9 +303,9 @@ func TestTheViewKeyLineFitsTheNarrowestThreePaneWidth(t *testing.T) {
 }
 
 // Golden files lock the help screen at two widths, the same way the layouts
-// are locked. 100 columns is the width this tool is run at; 60 is the
-// narrowest the spec names, below detailInlineWidth, where the pane row is
-// the whole frame.
+// are locked. 100 columns is one of the three widths the spec names; 60 is
+// below detailInlineWidth, the lower bound of the narrowest of those three,
+// and is where the pane row is the whole frame.
 //
 // What 60 pins is that the table fits there WHOLE. clipWidth truncates
 // prose without marking it (the footer's own "q qu" is the precedent), so a
@@ -320,11 +322,12 @@ func TestGoldenHelp(t *testing.T) {
 	}
 }
 
-// Nothing in the key table may be wider than the narrowest terminal the
-// spec names. A description clipped there loses its tail silently, and the
-// tail is where the qualifier lives -- "in the table views", "in the
-// timeline" -- so what survives the cut reads as a broader claim than the
-// binding makes.
+// Nothing in the key table may be wider than 60 columns, which is below
+// every width the spec names. A cut IS marked now (see
+// TestAClippedHelpDescriptionIsMarked), so this is no longer the only thing
+// standing between a reader and a silently broadened claim -- but the tail
+// is where each qualifier lives, "in the table views" and "in a timeline
+// lane", and a table that fits without cutting states them all.
 func TestEveryHelpLineFitsTheNarrowestSupportedWidth(t *testing.T) {
 	const narrowest = 60
 	for _, line := range strings.Split(renderHelp(hugeWidth, 200), "\n") {

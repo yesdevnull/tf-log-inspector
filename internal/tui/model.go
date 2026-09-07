@@ -135,8 +135,8 @@ type Model struct {
 	// "resource type" among calls -- so a single index carried across a view
 	// switch would sort by whatever column happened to sit at that index
 	// there. New sets each to the column that view's row builder already
-	// ranks by, so the interface opens on the order it has always opened on;
-	// see tables and rows().
+	// ranks by, so the interface opens on each builder's own ranking; see
+	// tables and rows().
 	sortCol [viewCount]int
 
 	// facets is built once from the whole log -- its RPC spans for the
@@ -292,8 +292,8 @@ func New(l *model.Log, path string) Model {
 	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
 	m := Model{log: l, name: filepath.Base(path), view: ViewCalls, pane: PaneList, facets: facets}
 	// Every table view starts on the column its own builder already ranks
-	// by, which is what makes the opening frame identical to the one this
-	// interface drew before a sort could be cycled at all. A view with no
+	// by, so the table is served in that builder's own order -- tie-break
+	// included -- until the reader moves the sort off it. A view with no
 	// table has no entry here and keeps the zero value, which nothing reads.
 	for v, t := range tables {
 		m.sortCol[v] = t.defaultCol

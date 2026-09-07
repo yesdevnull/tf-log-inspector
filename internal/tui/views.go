@@ -209,8 +209,9 @@ var callColumns = []column{
 // three fields. defaultCol is not a preference -- it is a statement about
 // what providerRows, typeRows and callRows produce, and stating it beside
 // the columns it indexes is what stops it drifting into naming a column the
-// builder does not rank by. TestTheDefaultSortServesTheBuildersOrderRather
-// ThanReSortingIt is what holds that claim true.
+// builder does not rank by. Two tests hold that claim true:
+// TestTheDefaultSortServesTheBuildersOrderRatherThanReSortingIt and
+// TestEveryDefaultSortColumnNamesTheOrderItsBuilderProduces.
 type tableBinding struct {
 	cols       []column
 	defaultCol int
@@ -227,7 +228,8 @@ type tableBinding struct {
 // absence is what makes 's' inert there, rather than a condition spelled out
 // at the key handler.
 var tables = map[View]tableBinding{
-	// RollupBy ranks buckets by TotalMs descending.
+	// RollupBy ranks buckets by TotalMs descending, breaking ties by
+	// provider name.
 	ViewProviders: {cols: providerColumns, defaultCol: 1},
 	// model.JoinByResourceType ranks by UITotalMs descending, breaking ties
 	// by RPCTotalMs and then by name.
@@ -466,7 +468,7 @@ func rankedBefore(a, b span.Span) bool {
 // chooses, and there is no key to reverse it.
 //
 // Ties break on column 0, in the direction THAT column's kind implies by the
-// same rule: ascending in the three tables whose first column is an
+// same rule: ascending in the two rollup tables, whose first column is an
 // identifier, and descending in the calls view, whose first column is
 // duration -- so sorting calls by RPC name puts the slowest call of each
 // name first. Sorting BY column 0 has no tie-break to fall to, and rows no
@@ -611,7 +613,7 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 // by a parse failure or by opening the wrong file, and a reader who cannot
 // tell those apart draws a wrong conclusion from a tool whose whole job is
 // reporting numbers accurately. It names Esc because Esc is what clears the
-// filter, and it is short enough (42 columns) to survive the narrowest
+// filter, and it is short enough (43 columns) to survive the narrowest
 // centre pane any supported width produces.
 const noMatchNote = "nothing matches the filter -- Esc clears it"
 
@@ -988,8 +990,7 @@ func sortMark(k columnKind) string {
 
 // The sort markers. A sort nothing on screen accounts for is a keystroke
 // that silently reorders the table, so the marker is drawn from the first
-// frame: a view's default ranking is a sort too, and went unstated before
-// these existed.
+// frame: a view's default ranking is a sort too.
 //
 // The glyph is appended with no separating space, so a sorted column costs
 // one display column rather than two -- fitColumnWidths reserves a numeric

@@ -391,22 +391,25 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // then which keys act on what is on screen.
 //
 // They are two lines rather than one because a single composed line runs to
-// 112 display columns at its widest, and the line is clipped from its END --
+// 123 display columns at its widest, and the line is clipped from its END --
 // so the tail it loses is "q quit", the one key a user must never lose sight
-// of. The widest is the TIMELINE view, which drops its own key from the
-// view-key group and carries both the open hint and the span hint on the
-// action line; no other view's composed line exceeds 107. Splitting them
+// of. The widest is the CALLS view, which drops only its own key from the
+// view-key group and carries both the sort hint and the open hint on the
+// action line; no other view's composed line exceeds 120. Splitting them
 // lets both groups keep their full names at every width this interface
 // renders at, and costs one line of pane height. Each line is still clipped
 // independently, because a 60-column terminal cannot show 62 columns of
 // action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
-	// While the help is open every binding but these two is inert (see
-	// Update), so these two are all the footer names. Leaving the ordinary
-	// hints up would advertise ⏎, s, f, Esc and the number keys over a
-	// screen where none of them do anything -- the defect this group removes
-	// wherever it finds it, at its most obvious: the key table saying what
-	// each key does is on screen at the time.
+	// While the help is open only three keys do anything: ? and Esc close
+	// it, q quits (see Update). The footer names two of them. Esc is left
+	// out because the meaning it is advertised under here -- "Esc clear" --
+	// describes clearing filters, which is not what it does in this state;
+	// the key table above says what it does instead. Leaving the ordinary
+	// hints up would offer ⏎, s, f and the number keys over a screen where
+	// none of them act -- the defect this group removes wherever it finds
+	// it, at its most obvious: the key table saying what each key does is on
+	// screen at the time.
 	//
 	// It is not a loss of guidance either. Everything the footer would have
 	// abbreviated is spelled out in the pane above it, so what is left to
@@ -420,11 +423,11 @@ func (m *Model) keyHints(w int) string {
 // The help and quit hints, named because the footer composes them two ways:
 // into the ordinary hint groups, and alone while the help is open.
 //
-// helpHint rides the VIEW-KEY line rather than the action line, which was
-// already at 70 columns -- the narrowest width that draws every pane --
-// before ? was bound. The view-key group is 45 columns at its widest, so it
-// has the room, and it is the group ? belongs to besides: help is a screen
-// the key takes you to, like the number keys beside it.
+// helpHint rides the VIEW-KEY line rather than the action line: the action
+// line reaches 70 columns, the narrowest width that draws every pane, while
+// the view-key group is 51 at its widest, so the room is here. It is the
+// group ? belongs to besides: help is a screen the key takes you to, like
+// the number keys beside it.
 const (
 	helpHint      = "? help"
 	helpCloseHint = "? close"
@@ -530,7 +533,9 @@ func (m *Model) actionKeys(w int) string {
 }
 
 // viewKeyHints is the hint group naming the number keys that switch views,
-// and the view each one switches to.
+// and the view each one switches to. It carries the help hint at its end as
+// well: ? takes the reader to a screen the way the number keys do, and this
+// is the line with room for it (see helpHint).
 //
 // The view the user is ALREADY in is left out. Its key is a no-op -- Update
 // only acts on a number key that names a different view -- and advertising a
@@ -925,8 +930,9 @@ func (m *Model) selectedDetail(w int) (string, []paneSection) {
 	return noSelectionTitle, nothing
 }
 
-// detailCutMark is the last line of a detail pane that had more to show
-// than h lines to show it in. The pane marks a value clipped for WIDTH with
+// detailCutMark is the last line of a pane that had more to show than h
+// lines to show it in -- the detail pane, the help, the timeline's notes
+// and stall list. The pane marks a value clipped for WIDTH with
 // an ellipsis (see clipValueFront); a pane clipped for HEIGHT that marked
 // nothing would leave the two cuts telling the reader different amounts
 // about themselves, and the height cut is the one that can remove a whole
