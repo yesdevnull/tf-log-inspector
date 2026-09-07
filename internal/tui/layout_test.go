@@ -2426,6 +2426,30 @@ func TestADetailValueIsClippedAgainstThePaneLessTheIndent(t *testing.T) {
 	}
 }
 
+// The label is drawn in the label style and the value is not, in the frame
+// rather than in the theme. Without this the render site's choice of style
+// is held only by the goldens, whose failure mode is a regenerated file --
+// swap fieldLabel for chrome and every label silently loses its accent,
+// with the diff reading as an intended restyle.
+func TestADetailLabelIsAccentedAndItsValueIsNot(t *testing.T) {
+	lines := detailFieldLines([]detailField{
+		{label: "provider", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
+	}, 40)
+	if len(lines) != 2 {
+		t.Fatalf("detailFieldLines = %q, want two lines", lines)
+	}
+	accented := sgrPrefix(styleRenderer.NewStyle().Foreground(accent).Render("x"))
+	if accented == "" {
+		t.Fatal("the accent renders no escape sequence, so this cannot tell an accented line from a plain one")
+	}
+	if got := sgrPrefix(lines[0]); !strings.Contains(got, strings.TrimSuffix(strings.TrimPrefix(accented, "\x1b["), "m")) {
+		t.Errorf("the label line opens with %q, which does not carry the accent %q", got, accented)
+	}
+	if got := sgrPrefix(lines[1]); got != "" {
+		t.Errorf("the value line opens with %q, want no styling -- the value is the content, not the scaffolding", got)
+	}
+}
+
 // The label is told from the value it heads by an accent, and by the DIM
 // WEIGHT underneath it. Colour is withheld by not setting a foreground (see
 // newTheme), so a label carrying the accent alone would render byte-identical
