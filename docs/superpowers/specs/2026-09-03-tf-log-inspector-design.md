@@ -1049,11 +1049,107 @@ something went wrong.
   1GB is seconds of work that must be abortable. It searches the mapped bytes
   directly, respecting active facets.
 
+### Scoping the raw log to one call
+
+**Designed 2026-09-07, not yet built.**
+
+`⏎` on a call opened the raw log at that call's line, and the reader's report
+of it was that "'opening' a CALL to view its entries is inconsistent": what
+arrives is the whole log parked on one line of itself, not the call. The
+model agreed — `Span.Entry` is *the entry that closed the span*, a span is
+built from that single line, and nothing bounds a call's extent in the log.
+
+**`tf_req_id` is what bounds it, and the capture says so.** The measurement
+above under *Verified log format facts* was taken for a different question
+and answers this one: `request entries 2174`, `correlated req ids 2174`,
+`spans built 2174`. Every response pairs with a request and every span's
+`tf_req_id` was also seen on a request entry, so on a real capture each call
+has at least two entries sharing its id, plus whatever provider traffic
+between them carries it. Scoping the raw log to that id is therefore a real
+set of lines rather than a synonym for the one entry `⏎` already lands on.
+
+**Data model.** `logfmt.Entry` gains `ReqID uint16` and `span.Span` the same,
+interned as `Entry.Comp` already is — empty string interns to 0, which is the
+"no request id" case and needs no separate flag. The scan parses fields on
+every header line already, so this costs one `Fields.Get` and one intern per
+entry, not a second pass. Continuation lines are not parsed for fields (see
+`--diagnose`'s own caveat), so an id appearing only on a continuation is not
+seen — the same limit every other field has.
+
+Two properties of `logfmt.Interner` decide the shape here, and both cut
+against the obvious reading:
+
+- **Its ids are `uint16`, not `uint32`.** Request ids are per-CALL where
+  components are a handful, so the two vocabularies cannot share one
+  interner: one would exhaust the space the other needs, and `Lookup` could
+  not say which vocabulary an id belonged to. Request ids get an interner of
+  their own, held beside the component one.
+- **It saturates rather than aliasing.** Past 65534 distinct strings every
+  further one interns to `OverflowID`, deliberately, so that no two strings
+  are silently made equal. For a component that is a display problem; for a
+  scope it is a correctness one, because every overflowed call would share an
+  id and scoping to it would show a large set of unrelated calls that looks
+  exactly like a working scope. **A span whose `ReqID` is `OverflowID` is
+  therefore treated as carrying no request id at all**, and takes the
+  unscoped fallback below. Dan's capture interned 2174 ids, so this is a
+  guard against a workspace an order of magnitude larger, not a common path
+  — but it is the failure this tool can least afford, a plausible wrong
+  answer rather than a visible absence.
+
+**Behaviour.**
+
+- `⏎` on a call scopes the raw log to that call's `ReqID` and positions at the
+  TOP of the scope. Scoped, the call's first line exists: it is the request
+  entry. That is what makes `⏎` mean what it says.
+- `\` drops the scope and keeps the position, so the call's lines stay on
+  screen with the log around them.
+- `Esc` returns to the view `⏎` came from and drops the scope together. The
+  scope belongs to the jump that made it, so it is not a third meaning for
+  `Esc` — it is part of the first.
+- The scope **stacks** with the facet filter rather than replacing it. The
+  filter is the reader's own and must not be silently ignored; a scope whose
+  lines the filter hides renders the existing "nothing matches the filter"
+  note.
+- Three cases carry no usable id and **fall back to the unscoped jump** `⏎`
+  does today: a UI-tier span, since `UIHookBuilder` reads Terraform's
+  structured stream rather than a provider's hclog output; an RPC span whose
+  response line carried no `tf_req_id` (`--diagnose` reports `req id fields`
+  against `spans built`, so a capture can say how many); and a span whose id
+  interned to `OverflowID`.
+
+**Consequences for what shipped on 2026-09-07.** `jumpContextLines` STAYS,
+and this is worth stating because the first draft of this section had it
+deleted. It leaves a few lines of what preceded a call visible above it,
+which a scope supplies properly by including the request side — but only when
+there is a scope. The three fallback cases above have none, and those jumps
+need the context exactly as they do now.
+
+Line scrolling stays load-bearing either way: a single HTTP response entry
+runs to dozens of lines, and scoping makes that entry the thing being read
+rather than something scrolled past.
+
+**Fixtures.** No fixture in `testdata/` carries a request and a response
+sharing a `tf_req_id`: each has one id per span, so every one of them would
+scope to a single entry and could not tell a working scope from a broken one.
+This needs a new synthesised fixture with the usual provenance header,
+carrying at least one call whose request line, intervening traffic and
+response line share an id, alongside another call's lines interleaved — the
+interleaving is the point, since a scope that merely took a contiguous run
+would pass against a fixture where calls do not overlap.
+
+**Risks.** The `\` binding is free today. The scoped action line measures 66
+display columns against the 70 budget, with the facets hint kept. Neither is
+slack to spend twice.
+
 ### Keys
 
 `⇥` cycle pane focus · `↑↓`/`jk` move · `space` toggle facet · `⏎` open selected
 span in the raw log at its byte offset · `s` cycle sort · `/` search · `Esc`
 clear filters · `?` help · `q` quit.
+
+**Designed 2026-09-07, not yet built:** `\` drops a raw-log scope back to the
+whole log, and `Esc` returns from an opened call before it clears filters
+(see *Scoping the raw log to one call*).
 
 **Added 2026-09-07, with `s`:** the sorted column is marked in the table
 header, in the direction its kind implies. That states the DEFAULT ranking
