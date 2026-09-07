@@ -140,8 +140,9 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 		found := false
 		for _, ln := range lines {
 			// The count is flush against the pane's right edge, so the
-			// value and its count are no longer adjacent: assert on the
-			// two ends of the line rather than on one substring.
+			// value and its count sit at opposite ends of the line with
+			// padding between: assert on the two ends rather than on one
+			// substring spanning both.
 			if strings.HasPrefix(ln, want.value) && strings.HasSuffix(ln, want.count) && lipgloss.Width(ln) == w {
 				found = true
 			}
@@ -239,7 +240,10 @@ func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
 // facetValueCell is a facet line's value column: everything left of the
 // count, with the padding that pushes the count against the pane's right
 // edge taken off. Tests about the VALUE have to look here rather than at the
-// line, the two no longer being adjacent.
+// whole line, which carries the count at its far end.
+//
+// It strips trailing digits, so a fixture whose value ENDS in a digit would
+// have that digit eaten along with the count.
 func facetValueCell(line string) string {
 	return strings.TrimRight(strings.TrimRight(line, "0123456789"), " ")
 }
@@ -1077,7 +1081,7 @@ func TestTheFacetPaneNaturalWidthHoldsTheWidestCountToo(t *testing.T) {
 	}
 }
 
-// The count survives every width. The spec requires a count for every value
+// The count is the last thing given up. The spec requires one for every value
 // ("each with counts"), and a checkbox with no count says nothing about what
 // ticking it would narrow -- so where the pane is too narrow to hold a value
 // column and a count column apart, the count takes the right-hand columns
@@ -1087,20 +1091,27 @@ func TestTheFacetPaneNaturalWidthHoldsTheWidestCountToo(t *testing.T) {
 // These widths are reached through the facet overlay, which renders at the
 // full terminal width; every inline pane has minFacetPaneWidth beneath it.
 func TestTheFacetCountSurvivesEveryWidth(t *testing.T) {
-	for _, count := range []int{7, 42, 2326} {
-		digits := strconv.Itoa(count)
-		for w := 1; w <= 20; w++ {
-			line := facetValueLine("x", "aws_instance", count, len(digits), w, tailIdentifierColumn)
-			if got := lipgloss.Width(line); got > w {
-				t.Errorf("count %d at width %d: line is %d columns: %q", count, w, got, line)
-			}
-			// Below the count's own width there is nowhere for it to go;
-			// from there up it must be there whole.
-			if w < len(digits) {
-				continue
-			}
-			if !strings.HasSuffix(line, digits) {
-				t.Errorf("count %d at width %d was clipped away: %q", count, w, line)
+	// Every kind, not just the two facetValueKind returns today: the wide
+	// path's clip of the value cell is load-bearing ONLY for numericColumn,
+	// which clipValueForKind passes through untouched, and the comment there
+	// says the guarantee must not be assumed from the kinds in use. Driven
+	// by the two clipping kinds alone, that claim is held by nothing.
+	for _, kind := range []columnKind{tailIdentifierColumn, headIdentifierColumn, numericColumn} {
+		for _, count := range []int{7, 42, 2326} {
+			digits := strconv.Itoa(count)
+			for w := 1; w <= 20; w++ {
+				line := facetValueLine("x", "aws_instance", count, len(digits), w, kind)
+				if got := lipgloss.Width(line); got > w {
+					t.Errorf("kind %v, count %d at width %d: line is %d columns: %q", kind, count, w, got, line)
+				}
+				// Below the count's own width there is nowhere for it to
+				// go; from there up it must be there whole.
+				if w < len(digits) {
+					continue
+				}
+				if !strings.HasSuffix(line, digits) {
+					t.Errorf("kind %v, count %d at width %d was clipped away: %q", kind, count, w, line)
+				}
 			}
 		}
 	}

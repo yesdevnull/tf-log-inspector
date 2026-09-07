@@ -529,9 +529,11 @@ func facetValueKind(dim string) columnKind {
 // column of its own, and the count right-aligned against the pane's right
 // edge in a column countWidth wide. Too narrow to hold those two columns
 // apart, it falls back to packing them (see the branch below). The
-// count is never truncated: the spec requires facets to show a count for
-// every value ("each with counts"), so a count dropped by clipping would
-// be a spec miss, not just a squeeze. The value itself is the part that
+// count is the LAST thing given up: the spec requires facets to show a count
+// for every value ("each with counts"), so a count dropped while the value
+// beside it still had columns would be a spec miss, not just a squeeze. Only
+// a pane narrower than the count's own digits takes it, and then there is
+// nowhere for it to go. The value itself is the part that
 // gives way, clipped from whichever end its kind allows rather than dropped
 // from the end regardless -- a facet value is a control, so two values that
 // clip to the same text are two checkboxes the user cannot choose between.

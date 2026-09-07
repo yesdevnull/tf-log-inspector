@@ -167,10 +167,10 @@ func clipValueForKind(s string, w int, kind columnKind) string {
 
 // clipIdentifierField formats prefix + a value, clipped via
 // clipValueForKind to leave room for prefix and suffix, + suffix, at most w
-// terminal columns total. Shared by every render site that shows one labelled
-// value on its own line -- a facet value's checkbox and count, every field
-// of the detail pane -- so the budgeting arithmetic exists in one place
-// rather than being reimplemented at each. Which end of the value gives way,
+// terminal columns total. It is what a render site showing one labelled
+// value on its own line budgets with: every field of the detail pane, and
+// the facet pane where a value and its count have no room for columns of
+// their own (facetValueLine's narrow branch). Which end of the value gives way,
 // or whether it gives way at all, is the caller's kind and not this
 // function's choice: a numeric field passes through untouched and is held to
 // w by the closing clipWidth alone.

@@ -1,4 +1,6 @@
 .superpowers/
 
 # Scratch worktrees created for review subagents; never part of the tree.
-.claude/
+# The directory itself is not ignored: settings under .claude/ are the kind
+# of thing a project does check in, and a blanket ignore would hide one.
+.claude/worktrees/

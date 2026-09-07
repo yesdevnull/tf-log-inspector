@@ -403,7 +403,7 @@ func TestTheHelpKeepsItsTableOnAShortFrame(t *testing.T) {
 		t.Fatalf("the help title is gone at height 12:\n%s", frame)
 	}
 	if !strings.Contains(frame, "VIEWS") {
-		t.Errorf("at height 12 the help is cut to its title, naming no key at all:\n%s", frame)
+		t.Errorf("at height 12 the help is cut down to a heading with no keys under it, naming none at all:\n%s", frame)
 	}
 	if strings.Contains(frame, "measured under logging") {
 		t.Errorf("the durations caveat is drawn over a pane showing no durations:\n%s", frame)
@@ -500,13 +500,18 @@ func TestTheHelpTakesThePaneRowFromAnOpenFacetOverlay(t *testing.T) {
 //
 // What that costs is the shortest pane. Below a handful of lines the body
 // is one or two, so a leading blank is the whole of what the reader gets --
-// a blank and a cut mark, where the VIEWS group and its number keys fit.
+// a blank and a cut mark, where the VIEWS heading would have stood. The
+// number keys under it do not fit at that height either way.
 func TestTheKeyTableOpensOnAHeadingRatherThanABlank(t *testing.T) {
 	for _, h := range []int{40, 12, 4, 2, 1} {
 		lines := strings.Split(unstyled(renderHelp(60, h)), "\n")
-		if got := strings.TrimSpace(lines[0]); got != helpGroups[0].title {
+		// Spelled out rather than read back from helpGroups[0].title:
+		// compared against the constant, emptying it leaves "" on both
+		// sides and this passes over exactly the blank opening line it
+		// exists to forbid.
+		if got := strings.TrimSpace(lines[0]); got != "VIEWS" {
 			t.Errorf("at height %d the key table opens on %q, want %q:\n%s",
-				h, got, helpGroups[0].title, strings.Join(lines, "\n"))
+				h, got, "VIEWS", strings.Join(lines, "\n"))
 		}
 	}
 }

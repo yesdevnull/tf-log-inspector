@@ -270,8 +270,9 @@ const (
 // let the footer push the header off the only line there is, and a
 // two-line footer must not undo that one line later at h == 2. What gives
 // way is the view-key line, not the action line: a footer trimmed to one
-// line keeps its LAST line, which is the one carrying "q quit", so the
-// reminder survives here as well.
+// line keeps its LAST line, which is the one carrying "q quit" -- as far as
+// WIDTH allows, that line being clipped from its end like any other (see
+// actionKeys), so a narrow terminal can still lose the hint off the right.
 func (m *Model) View() string {
 	w, h := m.paneWidth(), m.height
 	if h <= 0 {
@@ -290,9 +291,8 @@ func (m *Model) View() string {
 	// hint lines are the usual answer, but a search prompt, a miss report
 	// and a refused jump each replace the whole footer with ONE line (see
 	// footer). Budgeted at two regardless, those three states leave the
-	// frame a line short of the terminal -- which used to be invisible and
-	// now is not, the pane row's closing rule floating a line above the
-	// bottom of the screen.
+	// frame a line short of the terminal, and the pane row's closing rule
+	// floating a line above the bottom of the screen.
 	footerLines := strings.Split(m.footer(w), "\n")
 	if avail := h - 1; len(footerLines) > avail {
 		footerLines = footerLines[len(footerLines)-avail:]
@@ -560,8 +560,8 @@ const sortHint = "s sort"
 // single span, so in the two rollup views the key returns immediately, and
 // in the raw log there is no row or span to press it over at all.
 // Advertising a key that does nothing is the defect this package removes
-// wherever it finds it, and this hint stood in three of the four views
-// before it was added.
+// wherever it finds it, and this hint would be inert in three of the five
+// views.
 //
 // The span hint is the SAME rule read the other way: a working key
 // advertised nowhere. ←/→ (and h/l) are the only way to reach any span in a
@@ -1022,9 +1022,15 @@ func bottomRule(panes []pane) string {
 // No pane in a two- or three-pane row can reach that: capPaneWidth applies
 // its floor LAST, so the facet pane is never under minFacetPaneWidth's 15
 // against FILTERS' 11, nor the detail pane under minDetailPaneWidth's 19
-// against SPAN DETAIL's 15. What reaches it is a full-width single pane in a
-// terminal of a few columns -- the facet overlay, or the raw log below
-// detailInlineWidth.
+// against GROUP DETAIL's 16 -- the longer of that pane's two names, and so
+// the binding one. The centre pane is never under 44 in a three-pane row nor
+// 48 in a two-pane one, against 32 for the widest name it draws.
+//
+// What reaches it is the full-width single pane: the facet overlay, the
+// help, and whichever view is active below detailInlineWidth. The widest
+// name any of them carries is the timeline's, which states its tier, so
+// "TIMELINE (ui, whole seconds)" goes unnamed below 32 columns where
+// "RAW LOG" survives to 11.
 func titledRule(p pane) string {
 	label := " " + p.title + " "
 	fill := p.width - lipgloss.Width(paneTitleLead) - lipgloss.Width(label)
@@ -1228,7 +1234,7 @@ func fitPaneSections(sections []paneSection, w, h int) []string {
 	if cut {
 		lines = append(lines, clipWidth(moreBelowMark, w))
 	}
-	if h > 0 && len(lines) > h {
+	if h >= 0 && len(lines) > h {
 		lines = lines[:h]
 		if h > 1 {
 			lines[h-1] = clipWidth(moreBelowMark, w)
@@ -1274,9 +1280,10 @@ func fitPaneSections(sections []paneSection, w, h int) []string {
 //
 // RPC, resource type, provider and address are all identifier values, and
 // all four go through clipIdentifierField, each clipped from the end its
-// kind allows (see columnKind): the same value clipped here, in the facet
-// pane and in the calls table is then clipped the same way and carries the
-// same marker. Resource type, provider and address front-clip, so two
+// kind allows (see columnKind). The kind is what travels, not the helper:
+// resolved through clipValueForKind here, in the facet pane and in the calls
+// table alike, the same value is clipped the same way in all three and
+// carries the same marker. Resource type, provider and address front-clip, so two
 // resource types, providers or addresses sharing a long prefix --
 // ".../hashicorp/azuread" and ".../azurerm" -- do not both clip down to
 // their identical shared head. RPC end-clips, since it names one of a
@@ -1474,8 +1481,8 @@ const detailIndent = "  "
 // than a field the reader is told exists.
 //
 // Which end of an over-long value gives way is the field's KIND, routed
-// through the same clipIdentifierField and clipValueForKind the tables and
-// the facet pane use, so a provider address clipped here keeps the tail that
+// through the same clipValueForKind the tables and the facet pane resolve
+// their own kinds with, so a provider address clipped here keeps the tail that
 // tells it from its siblings, an RPC name keeps its head, and a number is
 // not clipped by kind at all -- left whole for clipWidth beneath, so what
 // gives way is its tail rather than the digits carrying its magnitude.

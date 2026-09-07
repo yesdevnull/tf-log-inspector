@@ -166,21 +166,45 @@ func TestNoLineExceedsTerminalWidth(t *testing.T) {
 // that pane's declared width, measured in display columns, so a pane whose
 // content is short or whose line carries ANSI escapes still occupies its
 // full share of the row.
+//
+// It measures the ROW, from renderPanes, rather than the row located inside
+// a rendered frame by looking for a pane separator in each line. A
+// single-pane row has no separator: identified that way, this measured the
+// two- and three-pane layouts and silently exempted every full-width one --
+// the facet overlay, the help, and the raw log below detailInlineWidth -- so
+// a pane declared a column narrower than the row it fills passed here, and
+// passed the whole package.
+//
+// Row heights are swept directly for the same reason. Locating the row in
+// the frame means knowing where it ends, and a short row has no bottom rule
+// to end it: chrome is what a short row gives up first, so the closing rule
+// is simply absent at a pane height of two.
 func TestEveryPaneRowIsTheSameDisplayWidth(t *testing.T) {
-	for _, c := range wholeFrameCases(t) {
+	for _, c := range append(wholeFrameCases(t), singlePaneFrameCases(t)...) {
 		for _, w := range []int{70, 100, 160} {
-			for _, h := range []int{40, 24, 12} {
-				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
-				for _, line := range strings.Split(m.View(), "\n") {
-					if !strings.Contains(line, paneSep) {
-						continue // header, caveat and footer are not pane rows
-					}
+			m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: 40})
+			for _, rowH := range []int{1, 2, 3, 12, 30} {
+				for _, line := range strings.Split(m.renderPanes(w, rowH), "\n") {
 					if n := lipgloss.Width(line); n != w {
-						t.Errorf("%s at %dx%d: pane row is %d columns, want %d: %q", c.name, w, h, n, w, line)
+						t.Errorf("%s at %d columns, row of %d: line is %d columns, want %d: %q",
+							c.name, w, rowH, n, w, line)
 					}
 				}
 			}
 		}
+	}
+}
+
+// singlePaneFrameCases are the layouts renderPanes composes as ONE
+// full-width pane. They are kept out of wholeFrameCases because the sweeps
+// there Tab to the facet pane to inspect both cursors, and neither of these
+// answers Tab: a search has the keyboard, and the help is modal.
+func singlePaneFrameCases(t *testing.T) []wholeFrameCase {
+	t.Helper()
+	help := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	return []wholeFrameCase{
+		{"search/mixed-hcp.log", searchingFrame(t)},
+		{"help/mixed-hcp.log", help},
 	}
 }
 
@@ -1009,25 +1033,46 @@ func TestTheSearchPromptSurvivesAShortTerminal(t *testing.T) {
 func TestTheCaveatShortensBeforeItCostsTheFooter(t *testing.T) {
 	base := New(testLog(t, "provider-rpc.log"), "x.log")
 	for _, c := range []struct {
+		name              string
+		m                 Model
 		h                 int
 		wantFull, wantAny bool
 	}{
-		{40, true, true},
-		{12, true, true},
-		{11, false, true},
-		{8, false, true},
-		{7, false, false},
+		// A two-line footer, the usual case.
+		{"hints", base, 40, true, true},
+		{"hints", base, 12, true, true},
+		{"hints", base, 11, false, true},
+		{"hints", base, 8, false, true},
+		{"hints", base, 7, false, false},
+		// A ONE-line footer -- a search in progress -- where every bound
+		// moves down by the line the footer gave back. Swept only over
+		// two-line footers, a caveat budgeted against a fixed two passes:
+		// the frame still fills exactly, because the pane row absorbs the
+		// freed line, so nothing else can notice. What is lost is the
+		// caveat itself -- absent at 7 where a line of it fits, shortened
+		// at 11 where the whole text does.
+		{"search", searchingFrame(t), 11, true, true},
+		{"search", searchingFrame(t), 10, false, true},
+		{"search", searchingFrame(t), 7, false, true},
+		{"search", searchingFrame(t), 6, false, false},
 	} {
-		m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: c.h})
+		m := update(t, c.m, tea.WindowSizeMsg{Width: 100, Height: c.h})
 		view := unstyled(m.View())
 		if got := strings.Contains(view, "one workspace planned in 24.1s"); got != c.wantFull {
-			t.Errorf("height %d: full caveat present = %v, want %v:\n%s", c.h, got, c.wantFull, view)
+			t.Errorf("%s at height %d: full caveat present = %v, want %v:\n%s", c.name, c.h, got, c.wantFull, view)
 		}
 		if got := strings.Contains(view, "under logging"); got != c.wantAny {
-			t.Errorf("height %d: some caveat present = %v, want %v:\n%s", c.h, got, c.wantAny, view)
+			t.Errorf("%s at height %d: some caveat present = %v, want %v:\n%s", c.name, c.h, got, c.wantAny, view)
 		}
-		if !strings.Contains(view, "q quit") {
-			t.Errorf("height %d: the footer was dropped for the caveat:\n%s", c.h, view)
+		// The footer survives whatever the caveat does: the two hint lines
+		// where there are two, and the search prompt where the search has
+		// the keyboard.
+		want := "q quit"
+		if c.name == "search" {
+			want = "/z"
+		}
+		if !strings.Contains(view, want) {
+			t.Errorf("%s at height %d: the footer was dropped for the caveat:\n%s", c.name, c.h, view)
 		}
 	}
 }
@@ -1634,7 +1679,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	if n := len(full); n < 1+slowestSectionLines+1 {
 		t.Fatalf("fixture assumption changed: the whole pane is %d lines, too few to have a section to drop:\n%s", n, strings.Join(full, "\n"))
 	}
-	aggregate := full[:len(full)-slowestSectionLines] // title and the group's own figures
+	aggregate := full[:len(full)-slowestSectionLines] // the group's own figures
 	if heading := full[len(full)-2]; heading != slowestHeading {
 		t.Fatalf("fixture assumption changed: the pane's second-last line is %q, not the slowest-call heading", heading)
 	}
@@ -1865,10 +1910,16 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 	}
 }
 
-// The view's NAME has to survive every width the interface renders at, not
-// just the ones wide enough for three panes: it is the only thing on screen
-// that says what the rows beneath it are. The types view carries the longest
-// title, so it is the one that runs out of room first.
+// The view's NAME has to survive down to the width where the rule can no
+// longer carry it whole: it is the only thing on screen that says what the
+// rows beneath it are, and below that width it is dropped rather than
+// clipped (see titledRule).
+//
+// The types view is swept because it is the widest STATIC name at 16
+// columns, needing 20. It is not the widest name the centre pane can carry
+// -- the timeline's names its tier, reaching 28 for "TIMELINE (ui, whole
+// seconds)" -- which is why the bound asserted here is the types view's own
+// and not a claim about the interface as a whole.
 func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	// Spelled out rather than read back from viewTitle, so this measures the
@@ -2689,7 +2740,7 @@ func frameRules(t *testing.T, frame string) (top, bottom string) {
 	}
 	top = lines[1]
 	for _, ln := range lines[2:] {
-		if ln != "" && strings.Trim(ln, "─┴") == "" {
+		if ln != "" && strings.Trim(ln, paneRule+"┴") == "" {
 			bottom = ln
 		}
 	}
@@ -2735,9 +2786,10 @@ func TestTheRulesCrossAtEveryPaneSeparator(t *testing.T) {
 }
 
 // Every pane is named in the top rule, the facet pane included. It is the
-// one pane with no title of its own -- its first dimension heading used to
-// stand in for one -- so it is the pane a rule-borne title can silently
-// leave unnamed.
+// one pane holding no name anywhere in its own body -- it windows around its
+// cursor, so which dimension heading sits at its top depends on where the
+// cursor is -- so it is the pane a rule-borne name can silently leave
+// unnamed.
 func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
 	m := update(t, base, tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -2841,8 +2893,7 @@ func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
 // draws. Every one of those is a number that can only be checked by adding
 // it to the others.
 func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
-	cases := append(wholeFrameCases(t), wholeFrameCase{"search/mixed-hcp.log", searchingFrame(t)})
-	for _, c := range cases {
+	for _, c := range append(wholeFrameCases(t), singlePaneFrameCases(t)...) {
 		for _, w := range []int{160, 100, 70, 40} {
 			for h := 1; h <= 40; h++ {
 				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
@@ -2850,40 +2901,6 @@ func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
 					t.Errorf("%s at %dx%d: View() is %d lines\n%s", c.name, w, h, n, unstyled(m.View()))
 				}
 			}
-		}
-	}
-}
-
-// paneBodyHeight is what a pane's renderer is given, and framePanes asks it
-// for the same number when composing the row -- so what this checks is not
-// that two copies agree (there is one), but that the row RENDERS as many
-// body lines as the number promises. That runs through joinPanes' padding
-// and truncation and through each rule taking exactly one line, any of which
-// could put the row out of step with what its panes were rendered for:
-// content composed and then dropped unmarked, or a blank where content
-// should be.
-//
-// The rule the number encodes -- content before chrome, on a row too short
-// for both rules -- is pinned separately and independently by
-// TestAShortPaneRowKeepsContentOverChrome, which spells the expected body
-// out rather than reading it back from paneBodyHeight.
-func TestPaneBodyHeightAgreesWithWhatTheRowShows(t *testing.T) {
-	// More body lines than any height under test, each one identifiable, so
-	// what the row shows is counted rather than inferred from blanks.
-	body := make([]string, 12)
-	for i := range body {
-		body[i] = fmt.Sprintf("line%d", i)
-	}
-	for h := 0; h <= len(body); h++ {
-		p := pane{title: "CALLS", content: strings.Join(body, "\n"), width: 20}
-		shown := 0
-		for _, ln := range strings.Split(unstyled(framePanes(h, p)), "\n") {
-			if strings.HasPrefix(ln, "line") {
-				shown++
-			}
-		}
-		if want := paneBodyHeight(h); shown != want {
-			t.Errorf("row of %d lines shows %d body lines, paneBodyHeight says %d", h, shown, want)
 		}
 	}
 }
@@ -2900,7 +2917,7 @@ func TestATooNarrowPaneGetsAPlainRuleRatherThanAClippedName(t *testing.T) {
 	fits := lipgloss.Width(paneTitleLead) + lipgloss.Width(title) + 2
 	for w := 0; w <= fits+2; w++ {
 		rule := unstyled(titledRule(pane{title: title, width: w}))
-		if got := lipgloss.Width(rule); got != max(w, 0) {
+		if got := lipgloss.Width(rule); got != w {
 			t.Errorf("width %d: rule is %d columns: %q", w, got, rule)
 		}
 		named := strings.Contains(rule, title)

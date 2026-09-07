@@ -112,7 +112,7 @@ func renderHelp(w, h int) string {
 		// from each other. The first needs none: the pane row's top rule is
 		// immediately above it and separates it already, and a blank there
 		// is the whole of what a two-line pane can show -- an opening blank
-		// and a cut mark, where VIEWS and its number keys would have fit.
+		// and a cut mark, where the VIEWS heading would have stood.
 		//
 		// It is carried INSIDE the group rather than appended between them
 		// because fitPaneSections drops a group whole: a separator left

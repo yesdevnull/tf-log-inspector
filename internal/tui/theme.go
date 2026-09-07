@@ -10,10 +10,16 @@ import (
 )
 
 // accent is the one colour this interface uses. Everything the eye should
-// find first -- a pane's name in the top rule, the key in a footer hint, the
-// header of the sorted column, the label heading a value in a detail pane,
-// and the report the footer raises when a keystroke found nothing -- wears
-// it, and nothing outside that list does. A second colour would
+// find first wears it, and nothing else does: a title wherever one appears
+// (the enumeration is theme.title's, which owns that style), the header of
+// the sorted column, the key in a footer hint and in the help screen's key
+// column, the label heading a value in a detail pane, and the report the
+// footer raises when a keystroke found nothing.
+//
+// The list is kept generic on purpose. Spelled out site by site it goes
+// stale the first time a title is drawn somewhere new -- which is how it
+// came to omit the header line, the facet pane's dimension headings and the
+// help screen's group headings, all three of them titles. A second colour would
 // have to mean something, and there is no second thing to mean: the
 // interface's other distinctions are already carried by position and by
 // weight.
