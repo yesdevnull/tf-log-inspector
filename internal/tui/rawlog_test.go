@@ -1319,6 +1319,33 @@ func TestAJumpIsRefusedWhenTheFilterHidesTheWholeCall(t *testing.T) {
 	}
 }
 
+// The pane opens on the first scope member the filter admits, which need
+// not be the scope's own first member: a call whose OPENING line the filter
+// hides, but whose later traffic it shows, still opens -- on the later
+// line, not the hidden one. entryVisible weighs only level and provider
+// (see its own doc comment), and every fixture's scope is level-uniform
+// (testdata/interleaved-calls.log's two calls, testdata/severity-levels.log's
+// pair), so telling "checks the whole scope" apart from "checks the first
+// member" takes a log built directly rather than a fixture file.
+func TestAJumpOpensOnTheFirstAdmittedMemberEvenWhenAnEarlierOneIsHidden(t *testing.T) {
+	l := manyEntryLog(3)
+	l.Entries[0].Level, l.Entries[0].ReqID = logfmt.LevelTrace, 1
+	l.Entries[1].Level, l.Entries[1].ReqID = logfmt.LevelDebug, 1
+	l.Entries[2].Level, l.Entries[2].ReqID = logfmt.LevelTrace, 1
+	l.RPCSpans = []span.Span{{Entry: 2, ReqID: 1}}
+
+	m := New(l, "x.log")
+	m.setFacetExclusions(dimLevel, map[string]bool{"TRACE": true})
+	m.jumpToSpan(l.RPCSpans, 0)
+
+	if m.blockedJump {
+		t.Fatalf("blockedJump set though the scope's DEBUG member is visible")
+	}
+	if got, want := m.raw.top, 1; got != want {
+		t.Errorf("top = %d, want %d -- the first scope member the filter admits, not the hidden opening one", got, want)
+	}
+}
+
 // A UI-hook span's ReqID is always 0 (span.uihook.go), and ScopeFor answers
 // id 0 with nil (see its own doc comment), so jumping in from a UI-tier
 // timeline span leaves hasReturn standing with no scope to name. That empty
