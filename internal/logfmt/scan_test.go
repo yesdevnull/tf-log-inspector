@@ -323,12 +323,42 @@ func TestScanStructuredLinesEachBecomeOwnEntry(t *testing.T) {
 		if e.Timestamped {
 			t.Errorf("entry %d Timestamped = true, want false", i)
 		}
-		if e.Level != LevelUnknown {
-			t.Errorf("entry %d Level = %v, want LevelUnknown", i, e.Level)
+		// The severity is read off the line, so a structured capture's
+		// levels count and filter the way an hclog capture's do. Both
+		// fixtures are "@level":"info".
+		if e.Level != LevelInfo {
+			t.Errorf("entry %d Level = %v, want the level the line carries", i, e.Level)
 		}
 	}
 	if st.StructuredLines != 3 {
 		t.Errorf("StructuredLines = %d, want 3", st.StructuredLines)
+	}
+	if st.ByLevel[LevelInfo] != 3 {
+		t.Errorf("ByLevel[INFO] = %d, want 3 -- a structured capture's severities must reach the report", st.ByLevel[LevelInfo])
+	}
+}
+
+// A structured capture reports its errors. Before its severity was read, an
+// error line was indistinguishable from every other -- so the level facet
+// offered one value, the diagnostic report counted every line as UNKNOWN,
+// and the raw log drew a failure exactly like the traffic around it.
+func TestScanReadsEachStructuredLinesOwnSeverity(t *testing.T) {
+	const structuredErrorLine = `{"@level":"error","@message":"Error: creating resource","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","type":"diagnostic"}`
+	in := structuredVersionLine + "\n" + structuredErrorLine + "\n"
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(c.entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(c.entries))
+	}
+	if c.entries[0].Level != LevelInfo || c.entries[1].Level != LevelError {
+		t.Errorf("levels are %v and %v, want INFO then ERROR", c.entries[0].Level, c.entries[1].Level)
+	}
+	if st.ByLevel[LevelError] != 1 {
+		t.Errorf("ByLevel[ERROR] = %d, want 1", st.ByLevel[LevelError])
 	}
 }
 

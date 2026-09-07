@@ -95,7 +95,12 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 				st.StructuredLines++
 				st.UntimestampedLines++
 				entryOrd := ord
-				cur = Entry{Off: off, Len: raw, Lines: 1}
+				// The severity is read off the line, so a structured
+				// capture's levels count and filter the way an hclog
+				// capture's do. Without it every entry of such a log is
+				// LevelUnknown, which reads as "this log says nothing about
+				// severity" when in fact it says it on every line.
+				cur = Entry{Off: off, Len: raw, Lines: 1, Level: StructuredLevel(text)}
 				curMsg = ""
 				open = true
 				flush()

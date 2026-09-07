@@ -291,7 +291,11 @@ func newSemantics(colour bool) semanticStyles {
 }
 
 // forLevel reports how a raw-log line of level l should be drawn, and
-// whether it should be drawn differently at all.
+// whether it should be drawn differently at all. The unmarked answer is a
+// style from this package's own pinned renderer rather than a zero
+// lipgloss.Style, which would carry lipgloss's global one: both render their
+// argument untouched today, and only one of them would still do so if the
+// unmarked case ever gained an attribute.
 //
 // Only ERROR and WARN answer yes. Everything else is left exactly as the log
 // wrote it, because these captures are taken at TRACE with provider TRACE --
@@ -301,12 +305,11 @@ func newSemantics(colour bool) semanticStyles {
 // out against another and the pane would only be harder to read. Marking the
 // two levels that ARE rare is the same judgement from the other end.
 //
-// This says nothing at all about a STRUCTURED capture. logfmt's scanner does
-// not read @level from a structured line, so every such entry arrives as
-// LevelUnknown and none of them is ever marked -- including the errors. The
-// marking is therefore silent on that format rather than reporting it has
-// nothing to go on, which is worth knowing before reading an unmarked
-// structured log as one without errors in it.
+// It reads the same on a STRUCTURED capture, whose lines spell their levels
+// in lower case: logfmt.StructuredLevel takes each line's severity off it,
+// so an error in Terraform's JSON stream is marked exactly as one in an
+// hclog capture is. What the two formats share is the level, which is the
+// only thing this decides on.
 func (s semanticStyles) forLevel(l logfmt.Level) (lipgloss.Style, bool) {
 	switch l {
 	case logfmt.LevelError:
@@ -314,7 +317,7 @@ func (s semanticStyles) forLevel(l logfmt.Level) (lipgloss.Style, bool) {
 	case logfmt.LevelWarn:
 		return s.levelWarn, true
 	}
-	return lipgloss.Style{}, false
+	return styleRenderer.NewStyle(), false
 }
 
 // lane returns the hue for the provider at index i of the log's provider

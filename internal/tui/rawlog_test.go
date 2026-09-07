@@ -839,3 +839,33 @@ func sgrPrefix(line string) string {
 	}
 	return ""
 }
+
+// A structured capture reports its errors too. Terraform's JSON stream
+// spells its levels in lower case and carries them in a field rather than in
+// brackets, so nothing about the marking is shared with an hclog capture
+// except the level itself -- and before that level was read, every entry of
+// such a log arrived as UNKNOWN and an error was drawn exactly like the
+// traffic around it.
+func TestTheRawLogMarksAStructuredCapturesErrors(t *testing.T) {
+	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 140, Height: 30})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+
+	var errLine, infoLine string
+	for _, ln := range strings.Split(m.renderRawLog(120, 20), "\n") {
+		switch plain := unstyled(ln); {
+		case strings.Contains(plain, `"@level":"error"`):
+			errLine = ln
+		case strings.Contains(plain, `"@level":"info"`) && infoLine == "":
+			infoLine = ln
+		}
+	}
+	if errLine == "" || infoLine == "" {
+		t.Fatalf("the fixture does not draw both an error and an info line, so this compares nothing:\n%s", m.renderRawLog(120, 20))
+	}
+	if !strings.HasPrefix(errLine, "\x1b[") {
+		t.Errorf("a structured capture's error is drawn unmarked: %q", errLine)
+	}
+	if strings.Contains(infoLine, "\x1b[") {
+		t.Errorf("a structured capture's info line is marked (%q) -- these logs are almost entirely info", infoLine)
+	}
+}
