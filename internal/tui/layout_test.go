@@ -879,8 +879,7 @@ func paneSepColumns(t *testing.T, view string) []int {
 // reads as a complete name.
 func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	s := span.Span{RPC: "ValidateResourceTypeConfig", Provider: "aws", DurationMs: 5}
-	// Line 0 is the "RPC" label; line 1 is the value beneath it.
-	line := unstyled(spanDetailLines(s, attrib.Attribution{}, false, 20)[1])
+	line := detailValueFor(t, unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, 20)), "RPC")
 	if strings.Contains(line, s.RPC) {
 		t.Fatalf("the RPC name fits whole at width 20, so this no longer exercises clipping: %q", line)
 	}
@@ -907,8 +906,10 @@ func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
 		{label: "provider", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
 	}
 	// Six columns, so the two-column indent leaves a four-column budget --
-	// the same squeeze the old label column produced at ten. Each field is
-	// two lines, so the values are at 1 and 3.
+	// the same squeeze the old label column produced at ten.
+	// Indexed rather than looked up by label: at six columns the LABELS
+	// clip too ("provider" renders as "provid"), so detailValueFor cannot
+	// find them. Each field is two lines, so the values are at 1 and 3.
 	got := unstyledLines(detailFieldLines(fields, 6))
 	if want := "  742."; got[1] != want {
 		t.Errorf("numeric line at 6 columns = %q, want %q -- a number keeps its head", got[1], want)
@@ -1993,6 +1994,12 @@ func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 // indented under it -- so a test naming a field asks for the label and gets
 // what it heads. The lines must be unstyled first: the label line carries
 // the accent theme.fieldLabel puts on it.
+//
+// The match is exact, so it holds only where labels are unique within the
+// block and wide enough not to clip. Both are true at every width a pane
+// actually renders at -- the longest label is 14 columns against a floor of
+// minDetailPaneWidth -- but a test probing detailFieldLines below that
+// floor must index instead.
 func detailValueFor(t *testing.T, lines []string, label string) string {
 	t.Helper()
 	for i, ln := range lines {
@@ -2445,17 +2452,17 @@ func TestADetailValueIsClippedAgainstThePaneLessTheIndent(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("detailFieldLines = %q, want two lines", got)
 	}
-	if got[1] != "  "+fits {
-		t.Errorf("a value of exactly %d columns was clipped: %q, want %q", w-indent, got[1], "  "+fits)
+	if v := detailValueFor(t, got, "resource"); v != "  "+fits {
+		t.Errorf("a value of exactly %d columns was clipped: %q, want %q", w-indent, v, "  "+fits)
 	}
-	over := unstyledLines(detailFieldLines([]detailField{
+	over := detailValueFor(t, unstyledLines(detailFieldLines([]detailField{
 		{label: "resource", value: fits + "a", kind: headIdentifierColumn},
-	}, w))
-	if !strings.Contains(over[1], "…") {
-		t.Errorf("a value one column over the budget was not marked as clipped: %q", over[1])
+	}, w)), "resource")
+	if !strings.Contains(over, "…") {
+		t.Errorf("a value one column over the budget was not marked as clipped: %q", over)
 	}
-	if n := lipgloss.Width(over[1]); n > w {
-		t.Errorf("a clipped value line is %d columns, more than the %d the pane gives it: %q", n, w, over[1])
+	if n := lipgloss.Width(over); n > w {
+		t.Errorf("a clipped value line is %d columns, more than the %d the pane gives it: %q", n, w, over)
 	}
 }
 
