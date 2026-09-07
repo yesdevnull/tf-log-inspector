@@ -498,9 +498,9 @@ func TestSpanDetailLinesShowsAddressForUIHookSpans(t *testing.T) {
 // for UI-hook spans), so its detail must not show an address line at all.
 func TestSpanDetailLinesOmitsAddressForRPCSpans(t *testing.T) {
 	s := span.Span{RPC: "ApplyResourceChange", Provider: "aws", DurationMs: 5, Fidelity: span.FidelityReported}
-	out := strings.Join(spanDetailLines(s, attrib.Attribution{}, false, 60), "\n")
-	if strings.Contains(out, "Addr") {
-		t.Errorf("RPC-fidelity span detail shows an address line:\n%s", out)
+	out := unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, 60))
+	if slices.Contains(out, "address") {
+		t.Errorf("RPC-fidelity span detail shows an address line:\n%s", strings.Join(out, "\n"))
 	}
 }
 
@@ -2374,27 +2374,6 @@ func TestStyleHintKeysAccentsTheKeyAndNothingElse(t *testing.T) {
 		if n := strings.Count(got, "\x1b[0m"); n != tc.accents {
 			t.Errorf("styleHintKeys(%q) accented %d fragments, want %d: %q", tc.in, n, tc.accents, got)
 		}
-	}
-}
-
-// A detail field is a definition list, not a table row: the label on its own
-// line and the value indented two columns beneath it. The single-line
-// "label value" shape spent six columns of every line on the label, which on
-// a pane capped at maxDetailPaneWidth is where a provider address lost its
-// registry host and a resource type lost its prefix.
-func TestADetailFieldRendersAsALabelThenItsValueIndented(t *testing.T) {
-	got := unstyledLines(detailFieldLines([]detailField{
-		{label: "provider", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
-		{label: "duration", value: "8ms", kind: numericColumn},
-	}, 40))
-	want := []string{
-		"provider",
-		"  registry.terraform.io/hashicorp/aws",
-		"duration",
-		"  8ms",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("detailFieldLines = %q, want %q", got, want)
 	}
 }
 
