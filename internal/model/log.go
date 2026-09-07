@@ -65,6 +65,7 @@ func Load(path string) (*Log, error) {
 	}
 
 	comps := &logfmt.Interner{}
+	reqIDs := &logfmt.Interner{}
 	idx := &entryIndex{}
 	sniffer := span.NewSniffer(comps)
 	var rb span.ReportedBuilder
@@ -76,7 +77,7 @@ func Load(path string) (*Log, error) {
 	var ub span.UIHookBuilder
 	var cc attrib.ContextCollector
 
-	stats, err := logfmt.Scan(bytes.NewReader(data), comps, idx, sniffer, &rb, &ub, &cc)
+	stats, err := logfmt.Scan(bytes.NewReader(data), comps, reqIDs, idx, sniffer, &rb, &ub, &cc)
 	if err != nil {
 		return nil, fmt.Errorf("scanning %s: %w", path, err)
 	}

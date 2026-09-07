@@ -208,9 +208,10 @@ func TestLoadDoesNotRewriteSpanTimelines(t *testing.T) {
 		t.Fatal(err)
 	}
 	comps := &logfmt.Interner{}
+	reqIDs := &logfmt.Interner{}
 	var rb span.ReportedBuilder
 	rb.Comps = comps
-	if _, err := logfmt.Scan(bytes.NewReader(data), comps, &rb); err != nil {
+	if _, err := logfmt.Scan(bytes.NewReader(data), comps, reqIDs, &rb); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	want := rb.Spans()

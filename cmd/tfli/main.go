@@ -131,7 +131,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	}
 	defer f.Close()
 
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	collector := diagnose.NewCollector(&comps)
 	sniffer := span.NewSniffer(&comps)
 	var builder span.ReportedBuilder
@@ -147,7 +147,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	started := time.Now()
 	// Scan wraps r in its own 256KB bufio.Reader (internal/logfmt/scan.go), so
 	// wrapping f again here would only add a second, redundant buffer.
-	stats, err := logfmt.Scan(f, &comps, collector, sniffer, &builder, &uiBuilder, &cc)
+	stats, err := logfmt.Scan(f, &comps, &reqIDs, collector, sniffer, &builder, &uiBuilder, &cc)
 	if err != nil {
 		return fmt.Errorf("scanning %s: %w", path, err)
 	}

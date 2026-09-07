@@ -10,8 +10,8 @@ import (
 
 func scanInto(t *testing.T, in string, b *ReportedBuilder) {
 	t.Helper()
-	var comps logfmt.Interner
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, b); err != nil {
+	var comps, reqIDs logfmt.Interner
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, b); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 }
@@ -231,9 +231,9 @@ func TestReportedBuilderExactBaseStartIsNotClamped(t *testing.T) {
 // a component, which is what the provider-address fallback reads.
 func scanIntoWithComps(t *testing.T, in string, b *ReportedBuilder) {
 	t.Helper()
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	b.Comps = &comps
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, b); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, b); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 }

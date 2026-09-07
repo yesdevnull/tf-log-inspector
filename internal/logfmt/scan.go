@@ -30,7 +30,12 @@ type StructuredSink interface {
 // Scan reads r in a single pass, assembling logical entries and pushing each
 // to every sink. Memory use is independent of input size: only the header
 // line's message is retained, and only until the entry is flushed.
-func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
+//
+// comps and reqIDs are separate Interners because ids compare only within
+// one interner: a component id and a request id are different vocabularies
+// of very different cardinality (see Entry.ReqID), and sharing an interner
+// between them would make an id ambiguous as to which vocabulary it named.
+func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 	var st Stats
 	br := bufio.NewReaderSize(r, 256*1024)
 
@@ -71,6 +76,9 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 			if _, ok := fieldBuf.Get("tf_req_id"); !ok {
 				st.ContinuationOnlyReqIDEntries++
 			}
+		}
+		if id, ok := fieldBuf.Get(reqIDKey); ok {
+			cur.ReqID = reqIDs.Intern(id)
 		}
 		st.Entries++
 		st.ByLevel[cur.Level]++

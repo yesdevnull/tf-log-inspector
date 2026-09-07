@@ -29,9 +29,9 @@ func TestScanGroupsContinuationLines(t *testing.T) {
 		"on linux_amd64\n" +
 		"2026-08-29T10:34:43.220+0200 [TRACE] statemgr.Filesystem: unlocking\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -59,9 +59,9 @@ func TestScanSinkSeesOnlyHeaderLineMessage(t *testing.T) {
 		"Terraform used the selected providers to generate the following\n" +
 		"  + resource \"aws_subnet\" \"example\" {\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if strings.Contains(c.msgs[0], "Terraform used") || strings.Contains(c.msgs[0], "aws_subnet") {
@@ -77,9 +77,9 @@ func TestScanOffsetsCoverWholeEntry(t *testing.T) {
 	cont := "continued\n"
 	in := first + cont + "2026-08-29T10:34:43.220+0200 [TRACE] b: two\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if c.entries[0].Off != 0 {
@@ -96,9 +96,9 @@ func TestScanOffsetsCoverWholeEntry(t *testing.T) {
 func TestScanRelativeTimestamps(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: first\n" +
 		"2022-12-15T00:16:25.900Z [TRACE] a: second\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if c.entries[0].TSms != 0 {
@@ -113,9 +113,9 @@ func TestScanRelativeTimestamps(t *testing.T) {
 func TestScanBackwardsTimestampClamps(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: first\n" +
 		"2022-12-15T00:16:12.800Z [TRACE] a: earlier\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -131,9 +131,9 @@ func TestScanLeadingUnstructuredContent(t *testing.T) {
 	in := "Terraform will perform the following actions:\n" +
 		"  + resource \"aws_subnet\" \"example\" {\n" +
 		"2022-12-15T00:16:20.800Z [TRACE] a: real entry\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -157,9 +157,9 @@ func TestScanCountsUntimestampedLinesThroughoutFile(t *testing.T) {
 		"plan output line 2\n" +
 		"2022-12-15T00:16:20.900Z [TRACE] a: two\n" +
 		"plan output line 3\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -175,9 +175,9 @@ func TestScanCountsLevelsAndDetectsANSI(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
 		"2022-12-15T00:16:20.801Z [DEBUG] a: two\n" +
 		"2022-12-15T00:16:20.802Z [TRACE] a: \x1b[31mthree\x1b[0m\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -195,9 +195,9 @@ func TestScanCountsLevelsAndDetectsANSI(t *testing.T) {
 func TestScanCRLFAndNoTrailingNewline(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\r\n" +
 		"2022-12-15T00:16:20.801Z [TRACE] a: two"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(c.entries) != 2 {
@@ -217,9 +217,9 @@ func TestScanHeaderMsgTruncationPreservesValidUTF8(t *testing.T) {
 	msg := pad + "€" + strings.Repeat("b", 100)
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: " + msg + "\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(c.msgs[0]) > maxHeaderMsg {
@@ -245,9 +245,9 @@ func TestScanEntryLinesSaturates(t *testing.T) {
 	}
 	in := b.String()
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -273,9 +273,9 @@ func TestScanLongContinuationRunsThreshold(t *testing.T) {
 		strings.Repeat("cont\n", longRun) +
 		"2022-12-15T00:16:20.900Z [TRACE] a: next\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(atThreshold), &comps, &c)
+	st, err := Scan(strings.NewReader(atThreshold), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -287,9 +287,9 @@ func TestScanLongContinuationRunsThreshold(t *testing.T) {
 		strings.Repeat("cont\n", longRun+1) +
 		"2022-12-15T00:16:20.900Z [TRACE] a: next\n"
 
-	var comps2 Interner
+	var comps2, reqIDs2 Interner
 	var c2 collector
-	st2, err := Scan(strings.NewReader(overThreshold), &comps2, &c2)
+	st2, err := Scan(strings.NewReader(overThreshold), &comps2, &reqIDs2, &c2)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -310,9 +310,9 @@ const structuredHookLine = `{"@level":"info","@message":"module.module_name[\"ke
 // the way the real bug report did.
 func TestScanStructuredLinesEachBecomeOwnEntry(t *testing.T) {
 	in := structuredVersionLine + "\n" + structuredHookLine + "\n" + structuredVersionLine + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -345,9 +345,9 @@ func TestScanStructuredLinesEachBecomeOwnEntry(t *testing.T) {
 func TestScanReadsEachStructuredLinesOwnSeverity(t *testing.T) {
 	const structuredErrorLine = `{"@level":"error","@message":"Error: creating resource","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.000000+10:00","type":"diagnostic"}`
 	in := structuredVersionLine + "\n" + structuredErrorLine + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -366,9 +366,9 @@ func TestScanReadsEachStructuredLinesOwnSeverity(t *testing.T) {
 // full resource and module addresses -- must never reach a sink.
 func TestScanStructuredLineContentNeverReachesSink(t *testing.T) {
 	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	const addr = `module.module_name["key"].data.local_file.thing`
@@ -387,9 +387,9 @@ func TestScanCountsStructuredLinesInMixedFile(t *testing.T) {
 		structuredVersionLine + "\n" +
 		"2022-12-15T00:16:20.900Z [TRACE] a: two\n" +
 		structuredHookLine + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -408,9 +408,9 @@ func TestScanCountsStructuredLinesInMixedFile(t *testing.T) {
 func TestScanJSONFragmentWithoutSignatureNotCountedStructured(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
 		`{"resource_changes":[]}` + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -442,10 +442,10 @@ func (c *structuredCollector) Structured(ord uint32, e Entry, line string) {
 // on ordinal numbering.
 func TestScanStructuredSinkReceivesRawLine(t *testing.T) {
 	in := structuredVersionLine + "\n" + structuredHookLine + "\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
 	var sc structuredCollector
-	if _, err := Scan(strings.NewReader(in), &comps, &c, &sc); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c, &sc); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(sc.lines) != 2 {
@@ -474,9 +474,9 @@ func TestScanStructuredLinesDoNotAffectOrdinarySinkOrdinals(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] a: one\n" +
 		structuredHookLine + "\n" +
 		"2022-12-15T00:16:20.900Z [TRACE] a: two\n"
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	if _, err := Scan(strings.NewReader(in), &comps, &c); err != nil {
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	want := []uint32{0, 1, 2}
@@ -507,9 +507,9 @@ func TestScanRealFixtures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open %s: %v", c.file, err)
 		}
-		var comps Interner
+		var comps, reqIDs Interner
 		var col collector
-		st, err := Scan(f, &comps, &col)
+		st, err := Scan(f, &comps, &reqIDs, &col)
 		f.Close()
 		if err != nil {
 			t.Fatalf("Scan %s: %v", c.file, err)
@@ -543,9 +543,9 @@ func TestScanCountsRequestIdsOnContinuationLines(t *testing.T) {
 		ts + "no id anywhere on this one\n" +
 		"  nor on its continuation\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -577,13 +577,47 @@ func TestScanCountsARequestIdQuotedInsideABodyAsWell(t *testing.T) {
 	in := ts + "HTTP Response Received: @module=aws\n" +
 		`  http.response.body= {"note":"the string tf_req_id=abc is inside this body"}` + "\n"
 
-	var comps Interner
+	var comps, reqIDs Interner
 	var c collector
-	st, err := Scan(strings.NewReader(in), &comps, &c)
+	st, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if got, want := st.ContinuationOnlyReqIDEntries, uint64(1); got != want {
 		t.Errorf("ContinuationOnlyReqIDEntries = %d, want %d -- the bound is meant to include this case", got, want)
+	}
+}
+
+// An entry's tf_req_id is interned and resolvable, and it is interned in the
+// request-id interner rather than the component one -- the two are separate
+// vocabularies whose ids would otherwise be silently comparable.
+func TestScanInternsRequestIds(t *testing.T) {
+	const ts = "2026-08-29T10:34:43.124+0200 [TRACE] provider.aws: "
+	in := ts + "Sending request downstream: tf_req_id=abc123\n" +
+		ts + "Received downstream response: tf_req_id=abc123\n" +
+		ts + "an entry with no request id at all\n"
+
+	var comps, reqIDs Interner
+	var c collector
+	if _, err := Scan(strings.NewReader(in), &comps, &reqIDs, &c); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(c.entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(c.entries))
+	}
+	if a, b := c.entries[0].ReqID, c.entries[1].ReqID; a != b {
+		t.Errorf("two entries of one call interned to %d and %d", a, b)
+	}
+	if got := reqIDs.Lookup(c.entries[0].ReqID); got != "abc123" {
+		t.Errorf("Lookup(%d) = %q, want %q", c.entries[0].ReqID, got, "abc123")
+	}
+	if got := c.entries[2].ReqID; got != 0 {
+		t.Errorf("an entry with no tf_req_id has ReqID %d, want 0", got)
+	}
+	// The component interner must not have been used for it: "abc123" is
+	// not a component, and an id resolving there would mean the two spaces
+	// were shared.
+	if got := comps.Lookup(c.entries[0].ReqID); got == "abc123" {
+		t.Errorf("the request id was interned into the component interner")
 	}
 }

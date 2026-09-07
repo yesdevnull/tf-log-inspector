@@ -10,9 +10,9 @@ import (
 
 func sniff(t *testing.T, in string) Capabilities {
 	t.Helper()
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	s := NewSniffer(&comps)
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, s); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, s); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	return s.Report()
@@ -146,10 +146,10 @@ func TestSnifferInferredRequiresMultipleProviderEntries(t *testing.T) {
 // UIHookBuilder), returning the Sniffer's report.
 func sniffWith(t *testing.T, in string, extra ...logfmt.Sink) Capabilities {
 	t.Helper()
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	s := NewSniffer(&comps)
 	sinks := append([]logfmt.Sink{s}, extra...)
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, sinks...); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, sinks...); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	return s.Report()

@@ -26,7 +26,7 @@ func collect(t *testing.T, path string) (*ContextCollector, []Context) {
 func collectLines(t *testing.T, content string) (*ContextCollector, []Context) {
 	t.Helper()
 	var c ContextCollector
-	if _, err := logfmt.Scan(strings.NewReader(content), &logfmt.Interner{}, &c); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(content), &logfmt.Interner{}, &logfmt.Interner{}, &c); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	return &c, c.Contexts()

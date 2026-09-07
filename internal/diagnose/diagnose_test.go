@@ -25,13 +25,13 @@ func fixture(t *testing.T, name string) string {
 
 func build(t *testing.T, in string) Report {
 	t.Helper()
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	c := NewCollector(&comps)
 	sn := span.NewSniffer(&comps)
 	var b span.ReportedBuilder
 	var ui span.UIHookBuilder
 	var cc attrib.ContextCollector
-	st, err := logfmt.Scan(strings.NewReader(in), &comps, c, sn, &b, &ui, &cc)
+	st, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, c, sn, &b, &ui, &cc)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -60,13 +60,13 @@ func renderFixture(t *testing.T, path string) string {
 	}
 	defer f.Close()
 
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	c := NewCollector(&comps)
 	sn := span.NewSniffer(&comps)
 	var b span.ReportedBuilder
 	var ui span.UIHookBuilder
 	var cc attrib.ContextCollector
-	st, err := logfmt.Scan(f, &comps, c, sn, &b, &ui, &cc)
+	st, err := logfmt.Scan(f, &comps, &reqIDs, c, sn, &b, &ui, &cc)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -351,10 +351,10 @@ func TestUIHookBuilderPresenceDoesNotLeakIntoCollector(t *testing.T) {
 	const addr = `module.m["key"].data.local_file.thing`
 	in := completionHookLine + "\n"
 
-	var comps logfmt.Interner
+	var comps, reqIDs logfmt.Interner
 	c := NewCollector(&comps)
 	var ui span.UIHookBuilder
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, c, &ui); err != nil {
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, c, &ui); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 

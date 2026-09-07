@@ -21,9 +21,24 @@ type Entry struct {
 	Len         uint32 // bytes covering all lines of the entry
 	TSms        uint32 // milliseconds since the first timestamped entry
 	Level       Level
+	Timestamped bool   // false for interleaved non-hclog content
 	Comp        uint16 // interned component; 0 means none
 	Lines       uint16 // physical line count, saturating
-	Timestamped bool   // false for interleaved non-hclog content
+	// ReqID is the interned tf_req_id of the call this entry belongs to,
+	// 0 meaning none -- the empty string interns to 0, so the absent case
+	// needs no separate flag.
+	//
+	// It is interned in a DIFFERENT Interner from Comp. Ids compare only
+	// within one interner, and the two vocabularies cannot share: request
+	// ids are per-call where components are a handful, so one would exhaust
+	// the 65534-id space the other needs, and Lookup could not say which
+	// vocabulary an id belonged to.
+	//
+	// Its position is load-bearing. Timestamped sits in the byte after
+	// Level, which leaves this the struct's tail padding and keeps Entry at
+	// 24 bytes; appended after Timestamped instead it rounds the struct to
+	// 32. TestEntryStaysTwentyFourBytes holds that.
+	ReqID uint16
 }
 
 // reqIDKey is Terraform's per-call request identifier, the field that ties a

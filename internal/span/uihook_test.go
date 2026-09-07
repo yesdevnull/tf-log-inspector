@@ -13,8 +13,8 @@ import (
 // span.ReportedBuilder's tests scan through a ReportedBuilder.
 func scanUIInto(t *testing.T, in string, b *UIHookBuilder) {
 	t.Helper()
-	var comps logfmt.Interner
-	if _, err := logfmt.Scan(strings.NewReader(in), &comps, b); err != nil {
+	var comps, reqIDs logfmt.Interner
+	if _, err := logfmt.Scan(strings.NewReader(in), &comps, &reqIDs, b); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 }
