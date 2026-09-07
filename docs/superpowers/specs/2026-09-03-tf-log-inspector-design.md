@@ -1333,7 +1333,7 @@ rather than merely current.
 only `excludedFacets`. Scoped, that is wrong twice over.
 
 - A scope drawing nothing gets a note of its own, naming the key that widens:
-  *no filter match in this call -- `\` shows all*. A scope is never empty of
+  *no filter match in this call -- `\` shows log*. A scope is never empty of
   members — it is built from a span's own id and holds at least that span's
   entry — so an empty scoped pane is always the filter's doing, and `\` is a
   key the reader has and one that acts.
@@ -1434,7 +1434,7 @@ for.
 backslash. The raw log's action line is `⇥ pane`, `␣ facet`, `f facets`,
 `/ search`, `Esc back`, `q quit` — no open hint, since the raw log has no
 rows, and no sort hint, since it has no table — which is 53 columns at
-`hintSep`'s two spaces. Adding `\ all` makes it **60**, against the 70
+`hintSep`'s two spaces. Adding `\ log` makes it **60**, against the 70
 columns `detailInlineWidth` gives it and
 `TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth` enforces — ten
 columns of slack. That sweep cannot see the scoped line: it reaches each view

@@ -652,15 +652,17 @@ const (
 // while a scope is live: a key advertised with nothing to act on is the
 // defect this package removes wherever it finds it.
 //
-// "all" rather than "whole log": every other hint on this line is one terse
-// word ("pane", "facet", "facets", "search", "back", "quit"), and the scoped
-// action line has no width to spare for a longer one. At 11 columns "whole
-// log" would run the scoped line to 66 columns against 53 unscoped, clipping
-// "q quit" at every width from 30 to 65, including 60, a width two committed
-// goldens depend on (help-60.txt, timeline-60.txt). At 5 columns the scoped
-// line is 60 exactly, and "q quit" survives from there up (see
+// "log" rather than "whole log": every other hint on this line names a
+// target or an action ("pane", "facet", "facets", "search", "back", "quit"),
+// so this one names the destination the key returns to rather than a bare
+// quantifier, and the scoped action line has no width to spare for the
+// longer phrasing. At 11 columns "whole log" would run the scoped line to 66
+// columns against 53 unscoped, clipping "q quit" at every width from 30 to
+// 65, including 60, a width two committed goldens depend on (help-60.txt,
+// timeline-60.txt). At 5 columns the scoped line is 60 exactly, and "q quit"
+// survives from there up (see
 // TestTheFooterNeverLosesQuitAtWidthsTheScopedActionLineFits).
-const scopeHint = "\\ all"
+const scopeHint = "\\ log"
 
 // viewKeyHints is the hint group naming the number keys that switch views,
 // and the view each one switches to. It carries the help hint at its end as

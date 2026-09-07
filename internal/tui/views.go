@@ -656,7 +656,7 @@ func (m Model) noMatchTail() string {
 // enough to draw a third pane -- but never below 44. At 43 columns this note
 // fits that floor whole, with the key at column 33 -- comfortable margin
 // rather than the boundary.
-const scopedEmptyNote = "no filter match in this call -- \\ shows all"
+const scopedEmptyNote = "no filter match in this call -- \\ shows log"
 
 // noRowsNote is the same honesty for a view that has no rows to show with no
 // filter to blame: the providers and calls views of a log carrying UI-hook
