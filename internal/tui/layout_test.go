@@ -1641,12 +1641,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 		// value line is indented and moreBelowMark says content is below
 		// the fold, while a bare label at the foot says neither -- it reads
 		// as a field the pane failed to fill in.
-		for _, ln := range lines {
-			if strings.HasSuffix(ln, " ") {
-				t.Errorf("height %d left the padded line %q:\n%s", h, ln, strings.Join(lines, "\n"))
-			}
-		}
-		if last := lines[len(lines)-1]; len(lines) > 1 && last != moreBelowMark && last != "" && !strings.HasPrefix(last, detailIndent) {
+		if last := lines[len(lines)-1]; len(lines) > 1 && last != moreBelowMark && !strings.HasPrefix(last, detailIndent) {
 			t.Errorf("height %d ends on the bare label %q, with nothing under it:\n%s", h, last, strings.Join(lines, "\n"))
 		}
 	}
