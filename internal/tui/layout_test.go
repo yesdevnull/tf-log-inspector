@@ -17,7 +17,10 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
-// updateGolden regenerates testdata/golden when set. Never pass -update to
+// updateGolden regenerates testdata/golden when set. The goldens hold what
+// the interface actually renders, escape sequences and all, so read a
+// regenerated one with scripts/read-golden.sh, which strips the styling and
+// leaves the layout. Never pass -update to
 // make a failing test pass without first confirming the new output by eye --
 // a golden that changes because behaviour changed needs a human deciding the
 // new output is correct.
@@ -42,7 +45,7 @@ func compareGolden(t *testing.T, name, got string) {
 		t.Fatalf("ReadFile %s: %v (run go test -update to create it, then read it before committing)", path, err)
 	}
 	if got != string(want) {
-		t.Errorf("golden mismatch for %s (run go test -update to regenerate, then read it before committing):\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
+		t.Errorf("golden mismatch for %s (run go test -update to regenerate, then read it with scripts/read-golden.sh before committing):\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
 	}
 }
 
@@ -2203,6 +2206,20 @@ func TestEveryLineExplainingAnEmptyPaneIsDrawnAsANote(t *testing.T) {
 			}
 		})
 	}
+
+	// The raw log has a second one, for a log the scanner found nothing in
+	// at all. No filter is involved, so it reaches a different branch from
+	// the note above it and needs asserting separately.
+	t.Run("a log with no entries", func(t *testing.T) {
+		m := update(t, New(&model.Log{}, "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+		out := m.renderRawLog(80, 20)
+		if !strings.Contains(unstyled(out), noEntriesNote) {
+			t.Fatalf("the raw log does not explain itself, so there is nothing here to be marked:\n%s", out)
+		}
+		if !strings.Contains(out, "\x1b[") {
+			t.Errorf("an empty log is explained in ordinary text: %q", out)
+		}
+	})
 
 	// The detail pane's placeholder is the fourth, and it needs no filter --
 	// only a selection that stands for nothing.

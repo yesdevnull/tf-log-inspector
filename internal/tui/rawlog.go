@@ -233,7 +233,7 @@ func (m Model) renderRawLog(w, h int) string {
 		if m.filterActive() {
 			return styles.note.Render(clipWidth(noMatchNote, w))
 		}
-		return clipWidth("this log has no entries", w)
+		return styles.note.Render(clipWidth(noEntriesNote, w))
 	}
 	return strings.Join(lines, "\n")
 }

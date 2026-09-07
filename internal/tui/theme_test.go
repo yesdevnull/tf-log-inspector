@@ -366,8 +366,13 @@ func TestLaneHuesCycleOnceTheColoursRunOut(t *testing.T) {
 // colours() does not name is checked by none of the invariants above.
 func TestEveryStyleThePaletteHoldsIsNamedInColours(t *testing.T) {
 	s := newSemantics(true)
-	// One entry per lane, plus one per remaining field.
-	want := reflect.TypeOf(semanticStyles{}).NumField() - 1 + len(s.lanes)
+	// One entry per field, except that the lanes field is a slice and
+	// contributes one entry per colour rather than one for itself -- hence
+	// dropping it from the field count and adding its length instead. A
+	// second slice field would make this fail rather than pass quietly,
+	// which is the direction to be wrong in.
+	const sliceFields = 1
+	want := reflect.TypeOf(semanticStyles{}).NumField() - sliceFields + len(s.lanes)
 	if got := len(s.colours()); got != want {
 		t.Errorf("colours() names %d styles but the palette holds %d -- one missing is checked by nothing above", got, want)
 	}

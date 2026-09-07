@@ -622,6 +622,10 @@ const noMatchNote = "nothing matches the filter -- Esc clears it"
 // spans only, say, where the answer really does live in another view.
 const noRowsNote = "this view has no rows for this log"
 
+// noEntriesNote is the raw log's version of the same answer, for a log the
+// scanner found nothing in at all.
+const noEntriesNote = "this log has no entries"
+
 // renderList renders the current view's rows as a table at most w columns
 // wide and h lines tall, with the row at Selected() highlighted and the
 // window scrolled just far enough to keep it visible.

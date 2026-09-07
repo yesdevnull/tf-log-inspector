@@ -17,8 +17,15 @@
 #   scripts/read-golden.sh internal/tui/testdata/golden/help-60.txt
 #   scripts/read-golden.sh            # lists what there is to read
 set -eu
+# pipefail so a failure inside the listings below is reported rather than
+# masked by the exit status of the last command in the pipeline.
+set -o pipefail 2>/dev/null || true
 
-dir=$(git rev-parse --show-toplevel)/internal/tui/testdata/golden
+root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+	echo "$0: not inside the tf-log-inspector repository -- run it from a checkout" >&2
+	exit 1
+}
+dir=$root/internal/tui/testdata/golden
 
 if [ $# -ne 1 ]; then
 	echo "usage: $0 <golden>" >&2
