@@ -2536,3 +2536,42 @@ func TestAPaneWithMoreToShowSaysSoRatherThanMarkingACut(t *testing.T) {
 		t.Errorf("a pane with content below the fold ends on %q, want %q", last, moreBelowMark)
 	}
 }
+
+// A UI-hook span's address is the only per-resource identifier that tier
+// has, and it is told from its siblings by its TAIL: two resources of one
+// module share every character up to the last segment. Clipped from the
+// wrong end, "module.networking.aws_subnet.a" and "…b" render as identical
+// text in a narrow pane.
+//
+// It is asserted here because nothing else reaches it: no golden fixture
+// carries UI-hook spans, so this direction was held by nothing at all.
+func TestAUIHookAddressKeepsItsTailWhenClipped(t *testing.T) {
+	s := span.Span{
+		RPC: "create", Provider: "aws", ResourceType: "aws_subnet",
+		Address:  "module.networking.module.private_subnets.aws_subnet.this",
+		Fidelity: span.FidelityUIReported,
+	}
+	got := detailValueFor(t, unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, 20)), "address")
+	if !strings.Contains(got, "…") {
+		t.Fatalf("the address renders whole as %q at 20 columns, so this exercises no clipping", got)
+	}
+	if !strings.HasSuffix(got, "aws_subnet.this") {
+		t.Errorf("clipped address = %q, want the tail that tells it from its siblings", got)
+	}
+}
+
+// The help's own key table is the only place o is named -- it carries no
+// footer hint, deliberately, because the action line has no columns to
+// spare. TestHelpDocumentsEveryKeyTheFooterAdvertises sweeps footer into
+// help and so cannot see it, which left the entry held by the help golden
+// alone: a golden's failure is answered by regenerating it.
+func TestTheHelpNamesTheKeysThatHaveNoFooterHint(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	open := update(t, m, helpKey)
+	rendered := unstyled(open.View())
+	for _, key := range []string{"o", "n N", "PgUp PgDn"} {
+		if !strings.Contains(rendered, key) {
+			t.Errorf("the help does not name %q, which no footer hint advertises either:\n%s", key, rendered)
+		}
+	}
+}

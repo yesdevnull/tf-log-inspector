@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -1204,5 +1205,55 @@ func TestTheSortedColumnHeaderIsMarkedApartFromItsSiblings(t *testing.T) {
 	}
 	if sibling == sortedPrefix {
 		t.Errorf("the sorted column's header is drawn exactly like its sibling (%q), so nothing says which column the sort is on: %q", sibling, header)
+	}
+}
+
+// A rollup pane's figures repeat the table's, and the pane says so by using
+// the table's own column headers as its labels -- so a reader moving between
+// the row and the pane beside it reads one sequence twice rather than
+// matching label to label. Nothing but this holds the two together: the
+// labels are string literals in the row builders and the headers are string
+// literals in the column lists, so renaming a header silently produces the
+// mismatch the correspondence exists to prevent.
+//
+// Only the leading labels are compared. Each aggregate then adds facts the
+// table has no column for -- the provider pane's distinct resource-type and
+// RPC-method counts -- and those have no header to agree with.
+func TestEveryRollupPaneLabelThatNamesAColumnUsesItsHeader(t *testing.T) {
+	l := testLog(t, "two-tier.log")
+	for _, c := range []struct {
+		what    string
+		rows    []row
+		columns []column
+	}{
+		{"providers", providerRows(l.RPCSpans), providerColumns},
+		{"types", typeRows(l.RPCSpans, l.UISpans), typeColumns},
+	} {
+		if len(c.rows) == 0 {
+			t.Fatalf("fixture assumption changed: no %s rows, so no aggregate to compare", c.what)
+		}
+		got := c.rows[0].rollup.aggregate
+		if len(got) < len(c.columns) {
+			t.Fatalf("the %s aggregate has %d fields, fewer than the %d columns it repeats", c.what, len(got), len(c.columns))
+		}
+		for i, col := range c.columns {
+			if got[i].label != col.header {
+				t.Errorf("the %s aggregate's field %d is labelled %q, want the column's own header %q", c.what, i, got[i].label, col.header)
+			}
+		}
+	}
+}
+
+// The span detail pane names the same four facts the calls table has
+// columns for, and by the same words, for the reason above. Its remaining
+// fields -- start, address, resource, module, attribution -- describe one
+// span rather than repeating a column, so they have no header to match.
+func TestTheSpanDetailPaneLabelsTheCallsTablesColumnsByTheirHeaders(t *testing.T) {
+	s := span.Span{RPC: "ApplyResourceChange", Provider: "aws", ResourceType: "aws_subnet", DurationMs: 5}
+	lines := unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, hugeWidth))
+	for _, col := range callColumns {
+		if !slices.Contains(lines, col.header) {
+			t.Errorf("no %q field in the span detail pane, though the calls table heads a column with it:\n%s", col.header, strings.Join(lines, "\n"))
+		}
 	}
 }

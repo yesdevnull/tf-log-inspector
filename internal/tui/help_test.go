@@ -90,6 +90,23 @@ func modalState(m Model) string {
 // this test by being inert in both states, which is the failure it exists
 // to catch. It is the guard, not the assertion, that makes the row worth
 // having.
+// soloableFacet gives the facet pane the keyboard and moves its cursor onto
+// a dimension holding MORE than one value. Soloing a dimension that offers
+// one value is a no-op by construction, and a key that changes nothing with
+// the help shut cannot demonstrate that the help blocked it.
+func soloableFacet(t *testing.T, m Model) Model {
+	t.Helper()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	for i := 0; i < 20; i++ {
+		if dim, _, ok := m.cursorFacetValue(); ok && dim == dimRPC {
+			return m
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	t.Fatalf("the facet cursor never reached the %q dimension", dimRPC)
+	return m
+}
+
 func TestHelpSwallowsTheKeysThatWouldChangeWhatIsBehindIt(t *testing.T) {
 	focusFacets := func(t *testing.T, m Model) Model {
 		t.Helper()
@@ -106,6 +123,7 @@ func TestHelpSwallowsTheKeysThatWouldChangeWhatIsBehindIt(t *testing.T) {
 		{what: "move the cursor", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}},
 		{what: "focus the facets", key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}},
 		{what: "toggle a facet value", prep: focusFacets, key: tea.KeyMsg{Type: tea.KeySpace}},
+		{what: "solo a facet value", prep: soloableFacet, key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}}},
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			base := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})

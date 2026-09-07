@@ -865,3 +865,23 @@ func TestSoloOnlyActsFromTheFacetPane(t *testing.T) {
 		}
 	}
 }
+
+// While a search query is being typed every key is text for the query,
+// including keys bound elsewhere. o is one of those, and it is held here
+// explicitly rather than incidentally: the search guard sits above the o
+// case in Update, and the only other test that would notice it moving is
+// one whose query happens to contain the letter.
+func TestOIsQueryTextWhileASearchIsOpen(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = moveFacetCursorTo(t, m, dimRPC, "ApplyResourceChange")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	if len(m.excludedFacets) != 0 {
+		t.Errorf("o typed into a search query narrowed the filter: %v", m.excludedFacets)
+	}
+	if got := footerOf(m.View()); !strings.Contains(got, "o") {
+		t.Errorf("footer = %q, want the query to have taken the o as text", got)
+	}
+}
