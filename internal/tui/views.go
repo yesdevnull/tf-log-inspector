@@ -640,15 +640,22 @@ func (m Model) noMatchTail() string {
 // otherwise advertise a key against what its own footer says about it.
 //
 // The bound to fit is a PANE, not a terminal, and the two disagree: the
-// centre pane measures 44 columns at a 100-column terminal (facetInlineWidth,
-// the narrowest three-pane layout), narrower than the 48 it measures at a
-// 70-column one (detailInlineWidth, the narrowest two-pane layout) -- both
-// figures forced by capPaneWidth's quarter-of-terminal rule rather than by
-// any one log's content, so they hold for any log whose facet or detail pane
-// has enough natural width to reach that quarter. A terminal made WIDER can
-// therefore make this pane NARROWER, once it is wide enough to draw a third
-// pane. At 43 columns this note fits the 44-column pane whole, with the key
-// at column 33 -- comfortable margin rather than the boundary.
+// centre pane's floor is 44 columns at a 100-column terminal
+// (facetInlineWidth, the narrowest three-pane layout) -- reached only when
+// BOTH the facet and detail panes' natural widths reach that terminal's
+// quarter (25 columns); capPaneWidth caps each side pane at that quarter, so
+// 100 − 25 − 25 − 6 (two paneSeps) is the least the centre pane can measure,
+// and a log where only one natural reaches the quarter gets a WIDER centre
+// pane instead, never a narrower one (testdata/structured-ui.log, with
+// facetNatural 15 and detailNatural 49, measures 54 columns there, not 44).
+// At a 70-column terminal (detailInlineWidth, the narrowest two-pane layout)
+// the centre pane measures 48 columns unconditionally: capPaneWidth's own
+// floor (minDetailPaneWidth, 19) exceeds that terminal's quarter (17), so
+// 70 − 19 − 3 is forced regardless of any log's natural widths. A terminal
+// made WIDER can therefore still make this pane NARROWER, once it is wide
+// enough to draw a third pane -- but never below 44. At 43 columns this note
+// fits that floor whole, with the key at column 33 -- comfortable margin
+// rather than the boundary.
 const scopedEmptyNote = "no filter match in this call -- \\ shows all"
 
 // noRowsNote is the same honesty for a view that has no rows to show with no
