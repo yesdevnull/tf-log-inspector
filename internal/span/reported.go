@@ -59,6 +59,11 @@ type ReportedBuilder struct {
 	kept  dedupCache // dedup cache for retained RPC/Provider/ResourceType strings
 }
 
+// NewReportedBuilder creates a ReportedBuilder with the given Comps interner.
+func NewReportedBuilder(comps *logfmt.Interner) *ReportedBuilder {
+	return &ReportedBuilder{Comps: comps}
+}
+
 // bareProviderAddr is what terraform-plugin-sdk reports for tf_provider_addr
 // when a provider is served without a ProviderAddr in its ServeOpts. Measured
 // on terraform-provider-github v6.3.1 across 1,104 lines of a real HCP log;
@@ -122,6 +127,7 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 
 	b.spans = append(b.spans, Span{
 		Entry:        ord,
+		ReqID:        reqIDOrNone(e.ReqID),
 		StartMs:      start,
 		EndMs:        e.TSms,
 		DurationMs:   ms,
@@ -135,3 +141,12 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 
 // Spans returns the spans built so far, in the order they were logged.
 func (b *ReportedBuilder) Spans() []Span { return b.spans }
+
+// reqIDOrNone maps an interner id onto Span.ReqID, turning the overflow id
+// into "none". See Span.ReqID for why an overflowed id must not be kept.
+func reqIDOrNone(id uint16) uint16 {
+	if id == logfmt.OverflowID {
+		return 0
+	}
+	return id
+}

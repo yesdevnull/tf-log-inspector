@@ -278,3 +278,41 @@ func TestReportedBuilderWithoutInternerLeavesBareAddrAlone(t *testing.T) {
 		t.Errorf("Provider = %q, want the raw value when no interner is set", got[0].Provider)
 	}
 }
+
+// A span carries the request id of the entry that closed it, COPIED from
+// Entry.ReqID rather than interned again. ReportedBuilder holds a Comps
+// interner of its own, so re-interning here would produce an id from a
+// second space that matches no entry -- a scope built on it would find
+// nothing, or worse, the wrong entries.
+func TestReportedSpanCopiesTheEntryRequestId(t *testing.T) {
+	var comps, reqIDs logfmt.Interner
+	b := NewReportedBuilder(&comps)
+	e := logfmt.Entry{TSms: 100, ReqID: reqIDs.Intern("abc123")}
+	b.Entry(0, e, "Received downstream response",
+		logfmt.ParseFields("tf_req_duration_ms=5 tf_rpc=ReadResource tf_provider_addr=p tf_resource_type=t", nil))
+
+	spans := b.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	if got, want := spans[0].ReqID, e.ReqID; got != want {
+		t.Errorf("span ReqID = %d, want the entry's %d", got, want)
+	}
+}
+
+// An id that overflowed the interner is treated as no id at all. Past 65534
+// distinct strings every further one interns to OverflowID, deliberately, so
+// no two are silently made equal -- which means every overflowed call would
+// share one id, and a scope built on it would show a large set of unrelated
+// calls looking exactly like a working scope. A visible absence is the safe
+// failure; a plausible wrong answer is not.
+func TestReportedSpanTreatsAnOverflowedIdAsAbsent(t *testing.T) {
+	var comps logfmt.Interner
+	b := NewReportedBuilder(&comps)
+	b.Entry(0, logfmt.Entry{TSms: 100, ReqID: logfmt.OverflowID}, "Received downstream response",
+		logfmt.ParseFields("tf_req_duration_ms=5 tf_rpc=ReadResource tf_provider_addr=p tf_resource_type=t", nil))
+
+	if got := b.Spans()[0].ReqID; got != 0 {
+		t.Errorf("span ReqID = %d for an overflowed id, want 0", got)
+	}
+}

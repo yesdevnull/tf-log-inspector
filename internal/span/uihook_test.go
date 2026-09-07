@@ -386,3 +386,17 @@ func TestUIHookBuilderExactBaseStartIsNotClamped(t *testing.T) {
 		t.Errorf("DurationMs = %d, want 5000", got[0].DurationMs)
 	}
 }
+
+// A UI-tier span carries no request id. UIHookBuilder reads Terraform's
+// structured output stream, which is core's own JSON and carries no
+// tf_req_id at all -- so a scope cannot be built from one, and the jump
+// falls back to its unscoped form.
+func TestUIHookSpansCarryNoRequestId(t *testing.T) {
+	var b UIHookBuilder
+	scanUIInto(t, uiRefreshComplete+"\n", &b)
+	for i, s := range b.Spans() {
+		if s.ReqID != 0 {
+			t.Errorf("UI-hook span %d carries ReqID %d, want 0", i, s.ReqID)
+		}
+	}
+}

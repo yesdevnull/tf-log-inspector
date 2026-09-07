@@ -60,6 +60,18 @@ func (f Fidelity) String() string {
 type Span struct {
 	Entry uint32 // ordinal of the entry that closed this span
 
+	// ReqID is the interned tf_req_id of this call, 0 when the log carried
+	// none for it. It is COPIED from the closing entry's Entry.ReqID and
+	// never interned here: ids compare only within one Interner, and
+	// ReportedBuilder holds a component interner that would produce an id
+	// from the wrong space.
+	//
+	// logfmt.OverflowID is recorded as 0. Past the interner's ceiling every
+	// further string interns to that one id, so every overflowed call would
+	// share it -- and a scope built on it would show a large set of
+	// unrelated calls looking exactly like a working scope.
+	ReqID uint16
+
 	// StartMs and EndMs are milliseconds relative to a zero point that is
 	// per-builder, not per-log. ReportedBuilder anchors to Entry.TSms, the
 	// offset Scan itself computes from the first hclog entry it timestamps

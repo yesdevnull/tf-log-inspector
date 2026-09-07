@@ -154,6 +154,7 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 
 	b.spans = append(b.spans, Span{
 		Entry:        ord,
+		ReqID:        0,
 		StartMs:      start,
 		EndMs:        endMs,
 		DurationMs:   durationMs,
