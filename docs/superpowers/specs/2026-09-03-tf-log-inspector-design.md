@@ -1150,12 +1150,16 @@ interned as `Entry.Comp` already is — the empty string interns to 0, which is
 the "no request id" case and needs no separate flag.
 
 The field's PLACE in the struct is part of the design, not a formatting
-detail. `Entry` is 24 bytes today with one byte of tail padding. `ReqID
-uint16` appended after `Timestamped` makes it 32, which would take the Sizing
+detail. `Entry` had two bytes of padding, not one: an interior byte after
+`Level` (`Comp uint16` needs 2-byte alignment) and a tail byte, with
+`Timestamped` itself occupying the byte in between the two. `ReqID uint16`
+appended after `Timestamped` makes it 32, which would take the Sizing
 paragraph's ~190MB index for a 1GB log to ~254MB — a number that paragraph
-does not say and this feature has no claim on. Moving `Timestamped` up beside
-`Level` puts `ReqID` in the padding and the struct stays 24 bytes. The field
-order is therefore `Off, Len, TSms, Level, Timestamped, Comp, Lines, ReqID`,
+does not say and this feature has no claim on. Moving `Timestamped` into the
+interior byte beside `Level` frees the byte it used to occupy, which
+coalesces with the existing tail byte into the two-byte, 2-aligned slot
+`ReqID` now occupies, so the struct stays 24 bytes. The field order is
+therefore `Off, Len, TSms, Level, Timestamped, Comp, Lines, ReqID`,
 at offsets 0, 8, 12, 16, 17, 18, 20, 22, which leaves no tail padding at all;
 a test asserts `unsafe.Sizeof(Entry{}) == 24`, so the next field added to this
 struct cannot silently spend the resident memory Sizing is written against.
@@ -1329,16 +1333,17 @@ rather than merely current.
 only `excludedFacets`. Scoped, that is wrong twice over.
 
 - A scope drawing nothing gets a note of its own, naming the key that widens:
-  *nothing in this call matches the filter -- `\` shows the whole log*. A
-  scope is never empty of members — it is built from a span's own id and
-  holds at least that span's entry — so an empty scoped pane is always the
-  filter's doing, and `\` is a key the reader has and one that acts.
+  *no filter match in this call -- `\` shows all*. A scope is never empty of
+  members — it is built from a span's own id and holds at least that span's
+  entry — so an empty scoped pane is always the filter's doing, and `\` is a
+  key the reader has and one that acts.
 - `noMatchNote`'s "Esc clears it" is false whenever a return is standing,
   which is every raw log reached by `⏎`, scoped or on one of the fallback
-  jumps below — where it is false on main today. `Esc` returns first and
-  clears second, and the footer already says so (`escBackHint`). The note
-  asks the same `hasReturn` the footer asks, or the frame advertises a key
-  against what the rest of the same frame says about it.
+  jumps below. `Esc` returns first and clears second, and the footer already
+  says so (`escBackHint`), so a note fixed to "Esc clears it" would advertise
+  a key against what the rest of the same frame says about it. `noMatchTail`
+  is the fix: it asks the same `hasReturn` the footer asks, and reads "Esc
+  goes back" wherever a return is standing.
 
 **This filter shape is one `entryVisible` argues against, and the argument
 has to be met.** Its doc comment says RPC and resource type are deliberately
@@ -1406,34 +1411,38 @@ rather than something scrolled past.
 repeated `tf_req_id`: lines 10 and 18 share
 `1a2b3c4d-0000-4000-8000-000000000001` across a `Called downstream` and a
 `Received downstream response` seven lines apart, with the entries between
-them carrying no id at all. It is a two-entry scope. Every other fixture's
-ids are one per entry, so **no fixture puts an id on more than two entries,
-and none interleaves two calls**. `testdata/multiline-body.log` looks like a
-third id-bearing case and is not: its three `tf_req_id` values
+them carrying no id at all. It is a two-entry scope. Every other pre-existing
+fixture's ids are one per entry, so **no fixture but the one added below puts
+an id on more than two entries, or interleaves two calls**.
+`testdata/multiline-body.log` looks like a third id-bearing case and is not:
+its three `tf_req_id` values
 (`3544216***966`, `3544***7966`, `35442***66`) are three different redaction
 masks the reporter applied to one id, so they are three distinct strings that
 correlate to nothing.
 
-A new synthesised fixture is needed, with the usual provenance header, going
-beyond severity-levels.log in three ways. Intervening traffic that CARRIES
-the id, so a scope is more than its two bookends and a test can tell a
-working scope from one that found only the pair. A second call's lines
-INTERLEAVED with the first's, since a scope that merely took a contiguous run
-would pass against a fixture whose calls do not overlap. And one entry whose
-id sits on a CONTINUATION line, so the header-only limit above is visible in
-a test whichever way the open question is decided.
+`testdata/interleaved-calls.log` was added to close that gap, with the usual
+provenance header, going beyond severity-levels.log in three ways.
+Intervening traffic that CARRIES the id, so a scope is more than its two
+bookends and a test can tell a working scope from one that found only the
+pair. A second call's lines INTERLEAVED with the first's, since a scope that
+merely took a contiguous run would pass against a fixture whose calls do not
+overlap. And one entry whose id sits on a CONTINUATION line, so the
+header-only decision above is visible in a test rather than merely argued
+for.
 
 **Budgets.** The `\` binding is free: `Update`'s key switch binds no
 backslash. The raw log's action line is `⇥ pane`, `␣ facet`, `f facets`,
 `/ search`, `Esc back`, `q quit` — no open hint, since the raw log has no
 rows, and no sort hint, since it has no table — which is 53 columns at
-`hintSep`'s two spaces. Adding `\ whole log` makes it **66**, against the 70
+`hintSep`'s two spaces. Adding `\ all` makes it **60**, against the 70
 columns `detailInlineWidth` gives it and
-`TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth` enforces. That test
-cannot see the scoped line today: it reaches each view by pressing its number
-key, which goes through `setView` and spends both the return and the scope,
-so what it measures is the unscoped line carrying `Esc clear`. A scoped case
-has to be added to it, or those four columns of slack are unguarded.
+`TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth` enforces — ten
+columns of slack. That sweep cannot see the scoped line: it reaches each view
+by pressing its number key, which goes through `setView` and spends both the
+return and the scope, so what it measures is the unscoped line carrying
+`Esc clear`. `TestTheScopedActionLineFitsTheNarrowestThreePaneWidth` covers
+the scoped line on its own terms, jumping into a scope with `⏎` rather than
+switching views, so those ten columns of slack are guarded after all.
 
 ### Keys
 
