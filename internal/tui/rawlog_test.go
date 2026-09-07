@@ -1115,11 +1115,19 @@ func TestScrollingStaysInsideTheScope(t *testing.T) {
 }
 
 // A search inside a scope must not reach past it, in either direction:
-// bbbbbbbb is call B's own id and appears only in its lines, all outside
-// call A's scope, so a forward search for it from inside that scope --
-// and a backward repeat of the same search, which walks searchFrom's other
-// loop -- must both report no match rather than reading past the scope into
-// the rest of the log.
+// bbbbbbbb is call B's own id, and call B's entries lie outside call A's
+// scope in both directions -- forward from the scope's first member, and
+// backward from its last -- so neither a forward search for it nor a
+// backward one may find a match.
+//
+// The backward search starts from the scope's LAST member, not its first.
+// interleaved-calls.log's own header comment (entry 0) names call B's id in
+// prose, so a whole-log backward walk starting any earlier in the scope
+// would reach that header before it ever reached one of call B's real
+// entries, and pass by matching a comment rather than by respecting the
+// scope. Starting at the scope's last member puts call B's own entries (4,
+// then 2, walked backward) between the start and the header, so a
+// mis-routed walk is caught on real call traffic.
 func TestSearchDoesNotReachPastTheScope(t *testing.T) {
 	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -1138,12 +1146,17 @@ func TestSearchDoesNotReachPastTheScope(t *testing.T) {
 		t.Errorf("TopEntry = %d after a forward search that must miss, want it left at %d", m.TopEntry(), before)
 	}
 
+	for range 10 { // more presses than the scope has members
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	last := m.TopEntry()
+
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
 	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
-		t.Errorf("footer = %q after 'N' repeats the search backward, want the miss reported", got)
+		t.Errorf("footer = %q after a backward search from the scope's last member, want the miss reported", got)
 	}
-	if m.TopEntry() != before {
-		t.Errorf("TopEntry = %d after a backward repeat that must miss, want it left at %d", m.TopEntry(), before)
+	if m.TopEntry() != last {
+		t.Errorf("TopEntry = %d after a backward search that must miss, want it left at %d", m.TopEntry(), last)
 	}
 }
 
