@@ -1101,10 +1101,12 @@ func formatHeaderRow(headers []string, kinds []columnKind, widths []int, sortCol
 // anything else is left-aligned and gives way at whichever end
 // clipValueForKind says.
 //
-// Both branches measure display columns rather than runes, which is what
-// lets formatHeaderRow style the result: a cell padded by rune count would
-// be mis-padded the moment it carried an escape sequence, and padding
-// before styling is only safe if the two measures agree.
+// Both branches measure display columns rather than runes, which is the
+// measure columnWidths reserved the column by. The numeric branch padded by
+// rune count until this split, which agreed for the ASCII that formatMs and
+// strconv produce but not with the measure its neighbours use -- so the
+// width a header was reserved and the width it was drawn into could differ
+// for any cell that was not plain ASCII.
 func formatCell(c string, kind columnKind, w int) string {
 	if kind == numericColumn {
 		return padLeft(c, w)

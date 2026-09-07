@@ -397,10 +397,11 @@ func (m *Model) footer(w int) string {
 // screen.
 //
 // Every hint in this footer is one key, a space, and the words for what it
-// does -- including the two whose words contain a space of their own ("6 raw
-// log", "Esc clear"), which is why the split is at the FIRST space and the
-// remainder is left whole. A hint carrying no space is left alone rather
-// than accented entire.
+// does -- including the one whose words contain a space of their own ("6 raw
+// log"), which is why the split is at the FIRST space and the remainder is
+// left whole. A hint carrying no space at all is left alone rather than
+// accented entire: that is a hint clipped down to its bare key, and
+// accenting the fragment whole would mark a word that is not there.
 func styleHintKeys(line string) string {
 	lines := strings.Split(line, "\n")
 	for i, ln := range lines {

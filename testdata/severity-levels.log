@@ -1,6 +1,6 @@
-# SYNTHESISED to exercise the raw log's per-level marking: every other
-# fixture in this repo is TRACE and DEBUG throughout, which is what a real
-# TF_LOG capture looks like, so none of them can show the two levels the raw
+# SYNTHESISED to exercise the raw log's per-level marking: no other fixture
+# in this repo carries an ERROR or a WARN line, which is what a real TF_LOG
+# capture mostly looks like, so none of them can show the two levels the raw
 # log marks. This file carries one line of each level the scanner
 # recognises, plus a multi-line ERROR entry -- the case that decides whether
 # a marking follows the entry or only its first line. The RPC span is

@@ -290,7 +290,7 @@ func TestGoldenTimelineLayouts(t *testing.T) {
 
 // The footer's view-key hints must never vanish. Composed onto one line with
 // the action keys, both groups share one width budget and one clip -- and
-// that line runs to 112 columns at its widest (see keyHints), so a terminal
+// that line runs to 123 columns at its widest (see keyHints), so a terminal
 // too narrow for the pair silences one of them. Two lines gives each group
 // its own budget, so both keep their full names at every width this
 // interface renders at.

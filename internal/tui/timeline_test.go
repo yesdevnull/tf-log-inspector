@@ -1610,10 +1610,25 @@ func TestTimelineLaneRowsScrollToKeepTheCursorOnScreen(t *testing.T) {
 	}
 }
 
+// laneBarOf strips the styling and the label column off one rendered lane
+// row, leaving the bar: the block-and-space pattern that is what this view
+// actually says. Labels are ASCII and are padded to a fixed column count, so
+// dropping labelW+1 runes drops exactly labelW+1 display columns.
+func laneBarOf(t *testing.T, row string, labelW int) string {
+	t.Helper()
+	plain, _ := logfmt.StripANSI(row, nil)
+	r := []rune(plain)
+	if len(r) < labelW+1 {
+		t.Fatalf("lane row %q is shorter than its own label column", plain)
+	}
+	return string(r[labelW+1:])
+}
+
 // hueOf is the style lane idx's bar is drawn in, looked up the way
-// renderTimeline looks it up. The expected-row builders above compose from
-// the production functions rather than from literals, and the hue is one of
-// those: leaving it out would make them assert the bar is UNCOLOURED.
+// renderTimeline looks it up. The expected-row builders that call it
+// compose from the production functions rather than from literals, and the
+// hue is one of those: leaving it out would make them assert the bar is
+// UNCOLOURED.
 //
 // A lane whose provider has no position is fatal rather than silently
 // unstyled. The zero lipgloss.Style renders its argument unchanged, so a
@@ -1657,20 +1672,6 @@ func barHueOf(t *testing.T, row string) string {
 		t.Fatalf("row %q carries an unterminated escape sequence", row)
 	}
 	return area[at : at+end+1]
-}
-
-// laneBarOf strips the styling and the label column off one rendered lane
-// row, leaving the bar: the block-and-space pattern that is what this view
-// actually says. Labels are ASCII and are padded to a fixed column count, so
-// dropping labelW+1 runes drops exactly labelW+1 display columns.
-func laneBarOf(t *testing.T, row string, labelW int) string {
-	t.Helper()
-	plain, _ := logfmt.StripANSI(row, nil)
-	r := []rune(plain)
-	if len(r) < labelW+1 {
-		t.Fatalf("lane row %q is shorter than its own label column", plain)
-	}
-	return string(r[labelW+1:])
 }
 
 // TestTheCursorDoesNotRedrawTheSelectedLanesBar is the property the

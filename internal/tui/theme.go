@@ -10,7 +10,7 @@ import (
 )
 
 // accent is the one colour this interface uses. Everything the eye should
-// find first -- a pane's title, the key in a footer hint, the marker on the
+// find first -- a pane's title, the key in a footer hint, the header of the
 // sorted column -- wears it, and nothing else does. A second colour would
 // have to mean something, and there is no second thing to mean: the
 // interface's other distinctions are already carried by position and by
@@ -38,10 +38,13 @@ const accent = lipgloss.Color("6")
 // border, and none may: text reaches a style already composed, measured and
 // padded to the space it has to fill (see the package's clipping and padding
 // helpers), so a style that resized its argument would put the layout
-// arithmetic and the screen out of step. TestEveryThemedStyleLeavesTheText-
-// WidthUnchanged holds that line for every style, including ones added later.
+// arithmetic and the screen out of step. That line is held for every style,
+// including ones added later, by
+// TestEveryThemedStyleLeavesTheTextWidthUnchanged.
 type theme struct {
-	// title marks a pane's name and the header line naming the open file.
+	// title marks the name of a thing on the frame: the header line naming
+	// the open file, every pane's title, the facet pane's dimension
+	// headings, and the help screen's own title and group headings.
 	title lipgloss.Style
 	// columnHeader marks a table's column names. Weight without accent: a
 	// table has several headers at once and they are scaffolding for the
@@ -58,16 +61,24 @@ type theme struct {
 	// "duration" and its "▾", so nothing reading the frame could still find
 	// the two together.
 	sortedColumn lipgloss.Style
-	// chrome marks what separates content from content -- pane separators,
-	// facet checkboxes. Dimming is what turns a structural character into
-	// something the eye can skip rather than read.
+	// chrome marks what is scaffolding for content rather than content
+	// itself -- the pane separators, the detail pane's label column.
+	// Dimming is what turns a structural character into something the eye
+	// can skip rather than read.
+	//
+	// Nothing a cursor bar can wrap is chrome, however much it looks like
+	// scaffolding. A facet's checkbox is the tempting case and the
+	// forbidden one: its line becomes the bar, and reverse video ends at
+	// the first reset inside what it wraps.
 	chrome lipgloss.Style
-	// key marks the keystroke in a footer hint, leaving the words describing
-	// it plain. The reader scanning the footer is looking for which key to
-	// press, not for the sentence around it.
+	// key marks a keystroke where one is offered -- in a footer hint and in
+	// the help screen's key column -- leaving the words describing it plain.
+	// The reader scanning either is looking for which key to press, not for
+	// the sentence around it.
 	key lipgloss.Style
-	// note marks text that qualifies rather than reports: the observer-effect
-	// caveat, the placeholder in an empty detail pane.
+	// note marks text ABOUT the frame rather than anything the log said: the
+	// observer-effect caveat, the placeholder in an empty detail pane, and
+	// the line that explains why a pane is empty wherever one can be.
 	note lipgloss.Style
 	// alert marks a report the reader has to see because it answers a
 	// keystroke that appeared to do nothing -- a search that found no match,
@@ -187,10 +198,16 @@ func applyColourPreference() {
 // title, this is chrome -- and there is exactly one accent for it, because
 // there is only one thing "look here" can mean. A semantic colour says what
 // something IS: red is an error and nothing else, and a lane's hue is that
-// provider's and no other's. Held on one struct, the two rules would have to
-// be enforced as one, and the single-accent invariant would have to be
-// dropped to admit any of these -- which is what makes the split worth its
-// second type rather than a longer theme.
+// provider's and no other's.
+//
+// Two types rather than a longer theme, because the two rules are applied
+// differently as well as meaning differently. newTheme's helper takes a
+// style and applies THE colour; newSemantics' takes a colour and applies it
+// to a base -- one constructor carrying both would carry both shapes. And a
+// palette has levels and lanes to answer for (forLevel, lane), which a
+// vocabulary of titles and chrome has no business holding. What each type
+// buys most is at the point somebody extends it: a field added lands inside
+// a struct whose doc states the one rule that struct obeys.
 //
 // None of them is the accent. A lane drawn in the colour that elsewhere
 // means "this is a title" would be making a claim about importance it does
