@@ -62,11 +62,11 @@ const hugeWidth = 1 << 30
 // Model rather than recomputed per frame.
 func facetNaturalWidth(facets []model.Facet) int {
 	width := minFacetPaneWidth
+	countWidth := facetCountWidth(facets)
 	for _, f := range facets {
 		width = max(width, lipgloss.Width(facetSectionHeader(f.Name)))
-		kind := facetValueKind(f.Name)
 		for _, v := range f.Values {
-			width = max(width, lipgloss.Width(facetValueLine(" ", v.Value, v.Count, hugeWidth, kind)))
+			width = max(width, facetValueNaturalWidth(v.Value, countWidth))
 		}
 	}
 	return width

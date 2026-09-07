@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
@@ -464,6 +466,7 @@ func (m Model) renderFacets(w, h int) string {
 // (facetFlatIndex) be resolved against a display that also carries headers.
 func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 	focused := m.pane == PaneFacets
+	countWidth := facetCountWidth(m.facets)
 	for dimIdx, f := range m.facets {
 		if dimIdx == m.facetCursor.dim {
 			headerIdx = len(lines)
@@ -481,7 +484,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			// count facetValueLine went to the trouble of keeping whole (or
 			// biting back into the value's tail -- the part a leading
 			// ellipsis was chosen to preserve).
-			line := facetValueLine(check, v.Value, v.Count, w, kind)
+			line := facetValueLine(check, v.Value, v.Count, countWidth, w, kind)
 			switch {
 			case dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val:
 				cursor = len(lines)
@@ -525,8 +528,49 @@ func facetValueKind(dim string) columnKind {
 // gives way, clipped from whichever end its kind allows rather than dropped
 // from the end regardless -- a facet value is a control, so two values that
 // clip to the same text are two checkboxes the user cannot choose between.
-func facetValueLine(check, value string, count, w int, kind columnKind) string {
-	return clipIdentifierField(fmt.Sprintf("[%s] ", check), value, fmt.Sprintf("  %d", count), w, kind)
+func facetValueLine(check, value string, count, countWidth, w int, kind columnKind) string {
+	prefix := fmt.Sprintf("[%s] ", check)
+	avail := w - lipgloss.Width(prefix) - lipgloss.Width(facetCountGap) - countWidth
+	if avail < 1 {
+		// Too narrow to hold a value column and a count column apart. The
+		// count still survives, which the spec requires of every value, and
+		// the value takes what is left of a pane that has nearly nothing.
+		return clipIdentifierField(prefix, value, fmt.Sprintf("%s%d", facetCountGap, count), w, kind)
+	}
+	cell := padRight(clipValueForKind(value, avail, kind), avail)
+	return clipWidth(prefix+cell+facetCountGap+padLeft(strconv.Itoa(count), countWidth), w)
+}
+
+// facetCountGap separates a facet value from its count.
+const facetCountGap = "  "
+
+// facetCountWidth is how many columns the count column takes: the widest
+// count in the pane, so every count is right-aligned into one column and
+// they can be compared down the pane rather than read one at a time.
+//
+// It is measured across EVERY dimension, not per dimension. A column that
+// reset at each heading would put four count columns on one screen and read
+// as four unrelated lists -- the same argument renderHelp measures its key
+// column across every group for.
+func facetCountWidth(facets []model.Facet) int {
+	width := 1
+	for _, f := range facets {
+		for _, v := range f.Values {
+			width = max(width, lipgloss.Width(strconv.Itoa(v.Count)))
+		}
+	}
+	return width
+}
+
+// facetValueNaturalWidth is how wide a value's line is with nothing clipped:
+// the checkbox, the value, the gap and the count column.
+//
+// It is measured rather than rendered because the rendered form PADS the
+// value out to push the count against the pane's right edge, so composing a
+// line at a notional infinite width would measure the padding instead of the
+// content -- and allocate it.
+func facetValueNaturalWidth(value string, countWidth int) int {
+	return lipgloss.Width("[x] ") + lipgloss.Width(value) + lipgloss.Width(facetCountGap) + countWidth
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

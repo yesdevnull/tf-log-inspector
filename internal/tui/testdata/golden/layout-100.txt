@@ -6,11 +6,11 @@
 [1;36mRPCS[0m                     [2m │ [0m                                            [2m │ [0m  google_compute_instance
 [x] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m[2;36mprovider[0m                 
 [1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m  …rm.io/hashicorp/google
-[x] aws_subnet  1        [2m │ [0m                                            [2m │ [0m[2;36mduration[0m                 
+[x] aws_subnet          1[2m │ [0m                                            [2m │ [0m[2;36mduration[0m                 
 [x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m  8ms                    
 [1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m[2;36mresource[0m                 
-[x] TRACE  2             [2m │ [0m                                            [2m │ [0m  no address context in …
-[x] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m                         
+[x] TRACE               2[2m │ [0m                                            [2m │ [0m  no address context in …
+[x] UNKNOWN             1[2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         

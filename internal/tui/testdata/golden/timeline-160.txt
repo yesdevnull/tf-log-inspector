@@ -4,14 +4,14 @@
 [7;2m[x] …istry.terraform.io/hashicorp/aws  2[0m[2m │ [0mgoogle/1 [34m          ░██████████████░                                       [0m[2m │ [0m  ApplyResourceChange                   
 [x] …ry.terraform.io/hashicorp/google  1[2m │ [0m         0s                                                           9.0s[2m │ [0m[2;36mresource type[0m                           
 [1;36mRPCS[0m                                    [2m │ [0mbusy 7.5s of 9.0s (83%)                                                   [2m │ [0m  aws_instance                          
-[x] ApplyResourceChange  3              [2m │ [0mwaiting on aws/1, 4.0s–9.0s — concurrency 1 of 2                          [2m │ [0m[2;36mprovider[0m                                
+[x] ApplyResourceChange                3[2m │ [0mwaiting on aws/1, 4.0s–9.0s — concurrency 1 of 2                          [2m │ [0m[2;36mprovider[0m                                
 [1;36mRESOURCE TYPES[0m                          [2m │ [0mnothing running, 0s–1.0s — before any call                                [2m │ [0m  registry.terraform.io/hashicorp/aws   
-[x] aws_instance  1                     [2m │ [0m                                                                          [2m │ [0m[2;36mduration[0m                                
-[x] aws_subnet  1                       [2m │ [0m                                                                          [2m │ [0m  2.0s                                  
-[x] google_compute_instance  1          [2m │ [0m                                                                          [2m │ [0m[2;36mresource[0m                                
+[x] aws_instance                       1[2m │ [0m                                                                          [2m │ [0m[2;36mduration[0m                                
+[x] aws_subnet                         1[2m │ [0m                                                                          [2m │ [0m  2.0s                                  
+[x] google_compute_instance            1[2m │ [0m                                                                          [2m │ [0m[2;36mresource[0m                                
 [1;36mLEVELS[0m                                  [2m │ [0m                                                                          [2m │ [0m  no address context in log             
-[x] TRACE  4                            [2m │ [0m                                                                          [2m │ [0m                                        
-[x] UNKNOWN  1                          [2m │ [0m                                                                          [2m │ [0m                                        
+[x] TRACE                              4[2m │ [0m                                                                          [2m │ [0m                                        
+[x] UNKNOWN                            1[2m │ [0m                                                                          [2m │ [0m                                        
                                         [2m │ [0m                                                                          [2m │ [0m                                        
                                         [2m │ [0m                                                                          [2m │ [0m                                        
                                         [2m │ [0m                                                                          [2m │ [0m                                        

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
@@ -126,16 +127,26 @@ func TestSpaceOnlyTogglesFromTheFacetPane(t *testing.T) {
 // told apart from one read off the value.
 func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 	m := New(testLog(t, "two-tier.log"), "x.log")
-	out := m.renderFacets(60, 40) // wide and tall enough that nothing is clipped or windowed away
-	for _, want := range []string{
-		"[x] registry.terraform.io/hashicorp/aws  3",
-		"[x] ApplyResourceChange  2",
-		"[x] PlanResourceChange  1",
-		"[x] aws_instance  2",
-		"[x] aws_subnet  1",
+	const w = 60 // wide and tall enough that nothing is clipped or windowed away
+	lines := unstyledLines(strings.Split(m.renderFacets(w, 40), "\n"))
+	for _, want := range []struct{ value, count string }{
+		{"[x] registry.terraform.io/hashicorp/aws", "3"},
+		{"[x] ApplyResourceChange", "2"},
+		{"[x] PlanResourceChange", "1"},
+		{"[x] aws_instance", "2"},
+		{"[x] aws_subnet", "1"},
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("facet pane missing the value line %q:\n%s", want, out)
+		found := false
+		for _, ln := range lines {
+			// The count is flush against the pane's right edge, so the
+			// value and its count are no longer adjacent: assert on the
+			// two ends of the line rather than on one substring.
+			if strings.HasPrefix(ln, want.value) && strings.HasSuffix(ln, want.count) && lipgloss.Width(ln) == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("facet pane has no line reading %q ... %q at %d columns:\n%s", want.value, want.count, w, strings.Join(lines, "\n"))
 		}
 	}
 }
@@ -209,17 +220,27 @@ func TestRowsCacheInvalidatesOnFilterChange(t *testing.T) {
 // "[ ] registry.terraform.i", one checkbox indistinguishable from the
 // other; clipping from the front keeps each one's distinguishing tail.
 func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
-	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 20, facetValueKind(dimProvider))
-	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 20, facetValueKind(dimProvider))
+	aws := facetValueLine(" ", "registry.terraform.io/hashicorp/aws", 1, 1, 20, facetValueKind(dimProvider))
+	google := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 1, 1, 20, facetValueKind(dimProvider))
 	if aws == google {
 		t.Fatalf("two values sharing a long prefix rendered identically at width 20: %q", aws)
 	}
-	if !strings.HasSuffix(aws, "aws  1") {
-		t.Errorf("clipped aws line lost its distinguishing tail or its count: %q", aws)
+	for _, c := range []struct{ line, tail string }{{aws, "aws"}, {google, "google"}} {
+		if !strings.HasSuffix(facetValueCell(c.line), c.tail) {
+			t.Errorf("clipped line lost the tail %q that distinguishes it: %q", c.tail, c.line)
+		}
+		if !strings.HasSuffix(c.line, "1") {
+			t.Errorf("clipped line lost its count: %q", c.line)
+		}
 	}
-	if !strings.HasSuffix(google, "google  1") {
-		t.Errorf("clipped google line lost its distinguishing tail or its count: %q", google)
-	}
+}
+
+// facetValueCell is a facet line's value column: everything left of the
+// count, with the padding that pushes the count against the pane's right
+// edge taken off. Tests about the VALUE have to look here rather than at the
+// line, the two no longer being adjacent.
+func facetValueCell(line string) string {
+	return strings.TrimRight(strings.TrimRight(line, "0123456789"), " ")
 }
 
 // The spec requires facets to show a count for every value. A count sliced
@@ -227,7 +248,7 @@ func TestFacetValueLineKeepsTailWhenClippingASharedPrefix(t *testing.T) {
 // squeeze, so the count must survive even when the value itself is clipped
 // hard.
 func TestFacetValueLineNeverDropsTheCount(t *testing.T) {
-	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 20, facetValueKind(dimProvider))
+	line := facetValueLine(" ", "registry.terraform.io/hashicorp/google", 42, 2, 20, facetValueKind(dimProvider))
 	if !strings.HasSuffix(line, "42") {
 		t.Errorf("count was dropped even though the value was clipped to make room: %q", line)
 	}
@@ -283,7 +304,7 @@ func TestFacetPaneKeepsRPCNamesDistinctAtOneHundredColumns(t *testing.T) {
 // choosing blind.
 func TestFacetValueLineMarksAnEndClippedValue(t *testing.T) {
 	const value = "ApplyResourceChange"
-	line := facetValueLine(" ", value, 2, 24, facetValueKind(dimRPC))
+	line := facetValueLine(" ", value, 2, 1, 24, facetValueKind(dimRPC))
 	if strings.Contains(line, value) {
 		t.Fatalf("value fits whole at width 24, so this no longer exercises clipping: %q", line)
 	}
@@ -948,5 +969,73 @@ func TestTheDimmingNeverReachesTheCursorLine(t *testing.T) {
 	}
 	if !strings.Contains(cursorLine, "\x1b[7m") {
 		t.Errorf("the cursor's own line carries no bar: %q", cursorLine)
+	}
+}
+
+// The counts line up in a column against the pane's right edge, so they can
+// be compared down the pane rather than read one at a time. Ragged -- each
+// count sitting wherever its value happened to end -- they are the one
+// numeric column in this interface that cannot be scanned, which is exactly
+// what the reader is in this pane to do: find the value worth filtering to.
+func TestFacetCountsLineUpInAColumn(t *testing.T) {
+	m := Model{facets: []model.Facet{{Name: dimType, Values: []model.FacetValue{
+		{Value: "aws_subnet", Count: 7},
+		{Value: "aws_instance", Count: 412},
+		{Value: "tls_private_key", Count: 1},
+	}}}}
+	const w = 30
+	// Line 0 is the dimension heading; the rest are values.
+	lines := unstyledLines(strings.Split(m.renderFacets(w, 20), "\n")[1:])
+	if len(lines) != 3 {
+		t.Fatalf("got %d value lines, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	// Every count ends at the pane's right edge, so their right edges
+	// coincide -- which is what a right-aligned column IS. Their left edges
+	// do not, and must not: that is what makes the digits line up by place
+	// value.
+	for i, ln := range lines {
+		if got := lipgloss.Width(ln); got != w {
+			t.Errorf("value line %d is %d columns, not the pane's %d: %q", i, got, w, ln)
+		}
+	}
+	for _, c := range []struct {
+		i     int
+		count string
+	}{{0, "7"}, {1, "412"}, {2, "1"}} {
+		if !strings.HasSuffix(lines[c.i], c.count) {
+			t.Errorf("count %s is not flush against the right edge: %q", c.count, lines[c.i])
+		}
+	}
+}
+
+// The column is measured across EVERY dimension, not per dimension: a
+// column that reset at each heading would leave the pane's value cells
+// ending at four different columns, which is the same argument the help
+// screen's key column is measured across every group for.
+//
+// Where that shows is a value long enough to be CLIPPED. The padding that
+// pushes a short value's count right is invisible either way -- spaces
+// moved from one side of the line to the other -- so the observable
+// difference is how much room a clipped value is left: three columns less
+// beside a four-digit count elsewhere in the pane than beside its own
+// single digit.
+func TestTheFacetCountColumnIsMeasuredAcrossEveryDimension(t *testing.T) {
+	rpcs := model.Facet{Name: dimRPC, Values: []model.FacetValue{{Value: "ApplyResourceChange", Count: 4}}}
+	withWide := Model{facets: []model.Facet{
+		{Name: dimProvider, Values: []model.FacetValue{{Value: "aws", Count: 2326}}},
+		rpcs,
+	}}
+	alone := Model{facets: []model.Facet{rpcs}}
+
+	// The rpc dimension's one value: line 3 where a provider dimension and
+	// its value precede it, line 1 in the pane holding it alone.
+	const w = 25
+	wide := facetValueCell(unstyled(strings.Split(withWide.renderFacets(w, 20), "\n")[3]))
+	narrow := facetValueCell(unstyled(strings.Split(alone.renderFacets(w, 20), "\n")[1]))
+	if !strings.Contains(narrow, "…") {
+		t.Fatalf("the value is not clipped even beside its own single digit, so this exercises nothing: %q", narrow)
+	}
+	if got, want := lipgloss.Width(narrow)-lipgloss.Width(wide), 3; got != want {
+		t.Errorf("a four-digit count elsewhere in the pane costs the clipped value %d columns, want %d:\n%q against %q", got, want, wide, narrow)
 	}
 }
