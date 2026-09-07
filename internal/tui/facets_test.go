@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -935,19 +936,32 @@ func TestReTickingADimensionsLastValueLeavesItUnconstrained(t *testing.T) {
 func TestUntickedFacetValuesAreDimmed(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m.pane = PaneFacets
-	// Move off the first value before unticking it, so what is asserted is
-	// the dimming and not the cursor bar that would otherwise wrap the same
-	// line (see below).
-	m.facetCursor = facetCursor{dim: 0, val: 1}
+	// Park the cursor in ANOTHER dimension before unticking, so what is
+	// asserted is the dimming and not the cursor bar that would otherwise
+	// wrap the same line (see below). The provider dimension holds a single
+	// value in this fixture, so there is no second value of its own to move
+	// to -- a coordinate out of that dimension's range would draw no bar
+	// anywhere and make this pass for the wrong reason.
+	m.facetCursor = facetCursor{dim: 1, val: 0}
 	m.setFacetExclusions(m.facets[0].Name, map[string]bool{m.facets[0].Values[0].Value: true})
 	m.invalidateRows()
 
 	lines := strings.Split(m.renderFacets(60, 40), "\n")
-	// Line 0 is the first dimension's heading, so its first value is line 1.
+	// The provider dimension's heading, its one (unticked) value, then the
+	// rpc dimension's heading, then its first value -- which is TICKED and
+	// under no cursor, the comparison this needs. Read off the rendered
+	// pane, since a heading never reaches the dimming branch at all and
+	// would pass the negative check without exercising it.
+	if got, want := unstyled(lines[1]), "[ ] "; !strings.HasPrefix(got, want) {
+		t.Fatalf("line 1 is %q, not the unticked provider value this asserts on", got)
+	}
+	if got, want := unstyled(lines[3]), "[x] "; !strings.HasPrefix(got, want) {
+		t.Fatalf("line 3 is %q, not a ticked value", got)
+	}
 	if got := lines[1]; !strings.Contains(got, "\x1b[2m") {
 		t.Errorf("unticked value is not dimmed: %q", got)
 	}
-	if got := lines[2]; strings.Contains(got, "\x1b[2m") {
+	if got := lines[3]; strings.Contains(got, "\x1b[2m") {
 		t.Errorf("ticked value is dimmed: %q", got)
 	}
 }
@@ -1060,5 +1074,34 @@ func TestTheFacetPaneNaturalWidthHoldsTheWidestCountToo(t *testing.T) {
 	}
 	if !strings.HasSuffix(lines[0], "2326") {
 		t.Errorf("the widest count did not survive at the natural width: %q", lines[0])
+	}
+}
+
+// The count survives every width. The spec requires a count for every value
+// ("each with counts"), and a checkbox with no count says nothing about what
+// ticking it would narrow -- so where the pane is too narrow to hold a value
+// column and a count column apart, the count takes the right-hand columns
+// and the value gives way, rather than the line being composed value-first
+// and the count clipped off the end.
+//
+// These widths are reached through the facet overlay, which renders at the
+// full terminal width; every inline pane has minFacetPaneWidth beneath it.
+func TestTheFacetCountSurvivesEveryWidth(t *testing.T) {
+	for _, count := range []int{7, 42, 2326} {
+		digits := strconv.Itoa(count)
+		for w := 1; w <= 20; w++ {
+			line := facetValueLine("x", "aws_instance", count, len(digits), w, tailIdentifierColumn)
+			if got := lipgloss.Width(line); got > w {
+				t.Errorf("count %d at width %d: line is %d columns: %q", count, w, got, line)
+			}
+			// Below the count's own width there is nowhere for it to go;
+			// from there up it must be there whole.
+			if w < len(digits) {
+				continue
+			}
+			if !strings.HasSuffix(line, digits) {
+				t.Errorf("count %d at width %d was clipped away: %q", count, w, line)
+			}
+		}
 	}
 }

@@ -212,13 +212,6 @@ const (
 // sitting to the left of one.
 const paneTitleLead = "──"
 
-// minTitledRuleWidth is the narrowest pane whose top rule can carry a name:
-// the lead, plus a space either side of at least one column of the name. A
-// pane narrower than that gets a plain rule -- an unnamed pane is better
-// than a rule interrupted by a single letter, which names nothing and
-// breaks the line for no gain.
-var minTitledRuleWidth = lipgloss.Width(paneTitleLead) + 3
-
 // defaultWidth and defaultHeight size the view before the first
 // tea.WindowSizeMsg arrives -- bubbletea does not report a size until the
 // program has actually started, but View must still render something
@@ -292,23 +285,38 @@ func (m *Model) View() string {
 		return head
 	}
 
+	// The footer is composed FIRST, because how many lines it takes is what
+	// the pane row is budgeted against and it is not a constant: the two
+	// hint lines are the usual answer, but a search prompt, a miss report
+	// and a refused jump each replace the whole footer with ONE line (see
+	// footer). Budgeted at two regardless, those three states leave the
+	// frame a line short of the terminal -- which used to be invisible and
+	// now is not, the pane row's closing rule floating a line above the
+	// bottom of the screen.
+	footerLines := strings.Split(m.footer(w), "\n")
+	if avail := h - 1; len(footerLines) > avail {
+		footerLines = footerLines[len(footerLines)-avail:]
+	}
+
 	// The caveat qualifies DURATIONS, and the help pane shows none. Leaving
-	// it up spends five of a short frame's lines on numbers that are not on
-	// screen, and takes them from the only content that is: at h of 12 it
-	// reduces the key table to the word KEYS. Suppressing it is the same
-	// "what is DRAWN decides" rule actionKeys applies through
+	// it up spends six of a short frame's lines -- its five and the blank
+	// above them -- on numbers that are not on screen, and takes them from
+	// the only content that is: at h of 12 it leaves the key table its first
+	// heading and nothing beneath it, one line being the whole of the pane
+	// row's body. Suppressing it is the
+	// same "what is DRAWN decides" rule actionKeys applies through
 	// detailPaneDrawn, and it withholds no qualification, because there is
 	// no figure on this frame to qualify.
 	var caveat []string
 	if !m.showHelp {
-		caveat = loggingCaveat(h)
+		caveat = loggingCaveat(h, len(footerLines))
 	}
 	// No blank line between the header and the pane row: the row opens with
 	// its own rule, which separates the two as well as a blank would and
 	// says something besides. That line is what pays for the rule closing
 	// the row at the bottom, so the frame gains both rules for nothing.
 	lines := []string{head}
-	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat))), "\n")...)
+	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat), len(footerLines))), "\n")...)
 	if len(caveat) > 0 {
 		lines = append(lines, "")
 		for _, line := range caveat {
@@ -317,10 +325,6 @@ func (m *Model) View() string {
 	}
 	lines = append(lines, "")
 
-	footerLines := strings.Split(m.footer(w), "\n")
-	if avail := h - 1; len(footerLines) > avail {
-		footerLines = footerLines[len(footerLines)-avail:]
-	}
 	if room := h - len(footerLines); len(lines) > room {
 		lines = lines[:room]
 	}
@@ -395,8 +399,9 @@ func (m *Model) footer(w int) string {
 	// REPLACES the whole footer -- so without this a reader who opened the
 	// help after a failed search sees "pattern not found" where the only
 	// two keys that still work should be, on a screen where every other key
-	// is inert. At a height that also cuts the key table down to its title,
-	// nothing on the frame names a working key at all. That is the trap
+	// is inert. At a height that also cuts the key table down to a heading
+	// with no keys under it, nothing on the frame names a working key at
+	// all. That is the trap
 	// View's own comment says the footer exists to prevent, and the reason
 	// renderHelp is allowed to cut without a mark.
 	if m.showHelp {
@@ -642,14 +647,18 @@ func viewKeyHints(v View) string {
 	return strings.Join(append(hints, helpHint), hintSep)
 }
 
-// frameFixedLines is what a frame spends on everything but the pane row and
-// the caveat block: the header, the blank line above the footer, and the
-// footer's two hint lines.
+// frameFixedLines is what a frame spends on everything but the pane row, the
+// caveat block and the footer: the header, and the blank line above the
+// footer.
 //
-// The pane row's own rules are not counted here. They are drawn by
+// The footer is not counted here because it is not a fixed height -- it is
+// two hint lines usually and one line in the three states that replace it
+// (see View) -- so every caller passes its measured height in beside this.
+//
+// The pane row's own rules are not counted here either. They are drawn by
 // framePanes, which needs the pane widths to cross them at the separators,
 // so they belong to the row rather than to the frame around it.
-const frameFixedLines = 4
+const frameFixedLines = 2
 
 // minPaneRowHeight is the least a pane row can be given before the caveat
 // starts taking lines from it: its top rule, which names the panes, and one
@@ -664,12 +673,12 @@ const minPaneRowHeight = 2
 // It never goes below 1: a terminal too short to show everything still shows
 // something rather than an empty pane, and View then trims the surplus out
 // from ABOVE its footer.
-func paneHeight(h, caveatLines int) int {
+func paneHeight(h, caveatLines, footerLines int) int {
 	block := 0
 	if caveatLines > 0 {
 		block = caveatLines + 1
 	}
-	if paneH := h - frameFixedLines - block; paneH > 0 {
+	if paneH := h - frameFixedLines - footerLines - block; paneH > 0 {
 		return paneH
 	}
 	return 1
@@ -709,14 +718,15 @@ const shortLoggingCaveat = "Durations measured under logging: only rankings tran
 // the search query being typed, the miss report, and the reminder that 'q'
 // quits -- that exists nowhere else on screen, so it is the one line that
 // must survive a short terminal.
-func loggingCaveat(h int) []string {
-	// Each bound is frameFixedLines, plus the least a pane row can be worth
-	// drawing at, plus the caveat block: the caveat's own lines and the
-	// blank above them.
+func loggingCaveat(h, footerLines int) []string {
+	// Each bound is frameFixedLines and the footer, plus the least a pane
+	// row can be worth drawing at, plus the caveat block: the caveat's own
+	// lines and the blank above them.
+	fixed := frameFixedLines + footerLines + minPaneRowHeight
 	switch {
-	case h >= frameFixedLines+minPaneRowHeight+len(fullLoggingCaveat)+1:
+	case h >= fixed+len(fullLoggingCaveat)+1:
 		return fullLoggingCaveat
-	case h >= frameFixedLines+minPaneRowHeight+1+1:
+	case h >= fixed+1+1:
 		return []string{shortLoggingCaveat}
 	default:
 		return nil
@@ -855,25 +865,16 @@ func (m *Model) focusablePanes(w int) []Pane {
 	return panes
 }
 
-// renderCentre renders the centre pane's body for the active view. ViewRawLog and ViewTimeline are not one of renderList's
-// rollup/call tables -- the raw log renders directly from m.log.Entries via
+// renderCentre renders the centre pane's body for the active view.
+//
+// ViewRawLog and ViewTimeline are not one of renderList's rollup/call
+// tables -- the raw log renders directly from m.log.Entries via
 // renderRawLog, and the timeline renders from m.timelineSpans() and
 // model.PackLanes via renderTimeline -- so both are dispatched separately
 // here rather than inside renderList itself.
 //
-// The title is what names the view. Without it the centre pane was the only
-// one of the three carrying no label at all, so the pane holding a providers
-// rollup was indistinguishable, at a glance, from the facet pane's list of
-// providers to filter by -- and nothing on screen said the interface had
-// other views to switch to. It comes FIRST, so a pane too short for its
-// content still says what that content was, and it is clipped from its end
-// like the other panes' titles: a title is prose, told apart by its head.
-//
-// The title is not focus-marked, matching the facet pane rather than the
-// detail pane: both of those have a cursor of their own to carry focus (the
-// selected row here, the highlighted value there), and a second reverse-video
-// bar on the title would say nothing the row cursor does not already say.
-// The detail pane marks its title precisely because it has no cursor.
+// The pane's name is not here. It is inset into the pane row's top rule
+// (centreTitle, titledRule), which is what names every pane.
 func (m *Model) renderCentre(w, h int) string {
 	if h <= 0 {
 		return ""
@@ -890,9 +891,21 @@ func (m *Model) renderCentre(w, h int) string {
 
 // centreTitle names the centre pane for the top rule it is inset into.
 //
-// The timeline's title names the TIER it is drawing (see timelineTitle),
+// The name is what says which view the rows beneath it belong to. Unnamed,
+// the pane holding a providers rollup is indistinguishable at a glance from
+// the facet pane's list of providers to filter by, and nothing on screen
+// says the interface has other views to switch to.
+//
+// The timeline's name states the TIER it is drawing (see timelineTitle),
 // which views' own static "TIMELINE" cannot: that table has no notion of the
 // current log, and the tier is a property of it.
+//
+// It is not focus-marked, matching the facet pane rather than the detail
+// pane: both of those have a cursor of their own to carry focus (the
+// selected row here, the highlighted value there), and a second reverse-
+// video bar on the name would say nothing the row cursor does not already
+// say. The detail pane's name is marked precisely because it has no cursor
+// (see pane.focused).
 func (m *Model) centreTitle() string {
 	if m.view == ViewTimeline {
 		return m.timelineTitle()
@@ -979,20 +992,28 @@ func bottomRule(panes []pane) string {
 // Tab's effect reads the same wherever it lands. Only the NAME is reversed,
 // not the rule around it: the bar marks a thing, and the rule is not one.
 //
-// A pane too narrow to inset a name gets a plain rule instead. That is the
-// detail pane clamped to its floor in a narrow terminal, where a rule broken
-// open for a single letter would name nothing and cost the line its
-// continuity.
+// The name is drawn WHOLE or not at all: a pane with no room for it gets a
+// plain rule. Clipping it instead would break the rule open for a fragment
+// -- "── FILTE" at eight columns -- which names nothing, costs the line its
+// continuity, and is unmarked besides, this being the one place in the
+// package that would end-clip a NAME rather than a value.
+//
+// No pane in a two- or three-pane row can reach that: capPaneWidth applies
+// its floor LAST, so the facet pane is never under minFacetPaneWidth's 15
+// against FILTERS' 11, nor the detail pane under minDetailPaneWidth's 19
+// against SPAN DETAIL's 15. What reaches it is a full-width single pane in a
+// terminal of a few columns -- the facet overlay, or the raw log below
+// detailInlineWidth.
 func titledRule(p pane) string {
-	if p.width < minTitledRuleWidth {
+	label := " " + p.title + " "
+	fill := p.width - lipgloss.Width(paneTitleLead) - lipgloss.Width(label)
+	if fill < 0 {
 		return styles.chrome.Render(strings.Repeat(paneRule, max(p.width, 0)))
 	}
-	label := clipWidth(" "+p.title+" ", p.width-lipgloss.Width(paneTitleLead))
 	style := styles.title
 	if p.focused {
 		style = styles.selected
 	}
-	fill := p.width - lipgloss.Width(paneTitleLead) - lipgloss.Width(label)
 	return styles.chrome.Render(paneTitleLead) + style.Render(label) + styles.chrome.Render(strings.Repeat(paneRule, fill))
 }
 
@@ -1068,10 +1089,16 @@ type paneSection []string
 // also where this pane marks keyboard focus -- it has no cursor row of its
 // own -- and that rule is framePanes' to draw.
 func (m *Model) renderDetail(w, h int) (title, body string) {
-	if h <= 0 {
-		return noSelectionTitle, ""
-	}
 	title, sections := m.selectedDetail(w)
+	// The title is settled BEFORE the height is, because it is a claim about
+	// what the cursor is on and not about how much room there is to describe
+	// it. Answering a zero-height pane with noSelectionTitle would say
+	// "there is nothing selected" over a live selection -- and it says it on
+	// the one frame where the rule is the only thing the reader gets, a
+	// terminal of five lines leaving the pane row a single line.
+	if h <= 0 {
+		return title, ""
+	}
 	return title, strings.Join(fitPaneSections(sections, w, h), "\n")
 }
 

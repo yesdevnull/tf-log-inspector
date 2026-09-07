@@ -64,7 +64,7 @@ var views = []viewBinding{
 	{key: "2", view: ViewTypes, title: "BY RESOURCE TYPE", name: "types"},
 	{key: "4", view: ViewCalls, title: "CALLS", name: "calls"},
 	// TIMELINE here is a placeholder title: the timeline renders from its
-	// own state, not from rows(), so renderCentre overrides it at render
+	// own state, not from rows(), so centreTitle overrides it at render
 	// time to name the tier the log actually has (see timelineTitle). This
 	// entry exists so viewTitle(ViewTimeline) is never the empty string
 	// TestEveryViewHasABinding treats as "no title" -- an unreachable branch

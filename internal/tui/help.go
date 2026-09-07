@@ -107,14 +107,22 @@ func renderHelp(w, h int) string {
 	}
 
 	sections := make([]paneSection, 0, len(groups))
-	for _, g := range groups {
-		// A blank line above every group, including the first, which sets
-		// the groups off from the title as well as from each other. It is
-		// carried INSIDE the group rather than appended between them
+	for i, g := range groups {
+		// A blank line above every group but the FIRST, setting them off
+		// from each other. The first needs none: the pane row's top rule is
+		// immediately above it and separates it already, and a blank there
+		// is the whole of what a two-line pane can show -- an opening blank
+		// and a cut mark, where VIEWS and its number keys would have fit.
+		//
+		// It is carried INSIDE the group rather than appended between them
 		// because fitPaneSections drops a group whole: a separator left
 		// outside would survive the group it separated and end the pane on
 		// a blank line.
-		lines := []string{"", styles.title.Render(clipWidth(g.title, w))}
+		var lines []string
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, styles.title.Render(clipWidth(g.title, w)))
 		for _, e := range g.entries {
 			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
 			// clipValueEnd rather than clipWidth, because what a cut takes

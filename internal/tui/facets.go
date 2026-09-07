@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"maps"
 	"sort"
 	"strconv"
@@ -417,12 +416,14 @@ func (m *Model) moveFacetCursor(delta int) {
 
 // facetPaneTitle names the facet pane in the pane row's top rule.
 //
-// The pane had no name of its own before it needed one: its first dimension
-// heading stood at the top of the pane and was read as a title, which it
-// never was -- the pane windows around its cursor, so which heading is at
-// the top depends on where the cursor is. It is called FILTERS rather than
-// FACETS because what a reader does here is filter; "facet" is the word for
-// the machinery, and it is already spelled out on every heading beneath.
+// The pane needs a name of its own because no line inside it is one: the
+// pane windows around its cursor (see renderFacets), so which dimension
+// heading sits at the top depends on where the cursor is, and a heading read
+// as a title is a title that changes when the user presses j.
+//
+// It is FILTERS rather than FACETS because what a reader does here is
+// filter; "facet" is the word for the machinery, and it is already spelled
+// out on every heading beneath.
 const facetPaneTitle = "FILTERS"
 
 // renderFacets renders the facet pane: each dimension's name followed by its
@@ -520,8 +521,10 @@ func facetValueKind(dim string) columnKind {
 	return tailIdentifierColumn
 }
 
-// facetValueLine formats one facet value's line -- a checkbox, the value
-// and its count -- clipped to at most w columns via clipIdentifierField. The
+// facetValueLine formats one facet value's line: a checkbox, the value in a
+// column of its own, and the count right-aligned against the pane's right
+// edge in a column countWidth wide. Too narrow to hold those two columns
+// apart, it falls back to packing them (see the branch below). The
 // count is never truncated: the spec requires facets to show a count for
 // every value ("each with counts"), so a count dropped by clipping would
 // be a spec miss, not just a squeeze. The value itself is the part that
@@ -529,13 +532,23 @@ func facetValueKind(dim string) columnKind {
 // from the end regardless -- a facet value is a control, so two values that
 // clip to the same text are two checkboxes the user cannot choose between.
 func facetValueLine(check, value string, count, countWidth, w int, kind columnKind) string {
-	prefix := fmt.Sprintf("[%s] ", check)
-	avail := w - lipgloss.Width(prefix) - lipgloss.Width(facetCountGap) - countWidth
+	prefix := facetCheckbox(check)
+	avail := w - facetCheckboxWidth - lipgloss.Width(facetCountGap) - countWidth
 	if avail < 1 {
 		// Too narrow to hold a value column and a count column apart. The
-		// count still survives, which the spec requires of every value, and
-		// the value takes what is left of a pane that has nearly nothing.
-		return clipIdentifierField(prefix, value, fmt.Sprintf("%s%d", facetCountGap, count), w, kind)
+		// count takes the right-hand columns and the checkbox and value
+		// share whatever is left, so the count is the LAST thing given up
+		// rather than the first: the spec requires one for every value, and
+		// a checkbox with no count says nothing about what ticking it would
+		// narrow. Reached through the facet overlay, which renders at the
+		// full terminal width; every inline pane has minFacetPaneWidth
+		// beneath it.
+		digits := strconv.Itoa(count)
+		head := w - lipgloss.Width(digits)
+		if head < 1 {
+			return clipWidth(digits, w)
+		}
+		return padRight(clipWidth(prefix+clipValueForKind(value, head-facetCheckboxWidth, kind), head), head) + digits
 	}
 	cell := padRight(clipValueForKind(value, avail, kind), avail)
 	return clipWidth(prefix+cell+facetCountGap+padLeft(strconv.Itoa(count), countWidth), w)
@@ -543,6 +556,18 @@ func facetValueLine(check, value string, count, countWidth, w int, kind columnKi
 
 // facetCountGap separates a facet value from its count.
 const facetCountGap = "  "
+
+// facetCheckbox is the tick box at the head of a value's line, with the
+// space separating it from the value, and facetCheckboxWidth is what it
+// costs. The width is MEASURED off the thing itself rather than written
+// down beside it, the way paneSepWidth is derived from paneSep: a number
+// kept alongside is a number that can disagree with what is drawn, and both
+// this and the natural-width arithmetic depend on the two matching.
+func facetCheckbox(check string) string {
+	return "[" + check + "] "
+}
+
+var facetCheckboxWidth = lipgloss.Width(facetCheckbox(" "))
 
 // facetCountWidth is how many columns the count column takes: the widest
 // count in the pane, so every count is right-aligned into one column and
@@ -552,6 +577,15 @@ const facetCountGap = "  "
 // reset at each heading would put four count columns on one screen and read
 // as four unrelated lists -- the same argument renderHelp measures its key
 // column across every group for.
+//
+// Unlike facetNaturalWidth beside it, this is measured per FRAME rather than
+// kept on the Model. Both walk the same immutable facets, but the saving
+// does not transfer: facetLines already composes a line for every value on
+// every frame, so this adds one integer conversion to a pass that was
+// O(values) regardless. What a stored copy would add is a third statement
+// of the width -- the pane's, the rendered line's, and the field's -- and a
+// Model built without New would carry a zero that silently disagrees with
+// the width its own pane was sized to.
 func facetCountWidth(facets []model.Facet) int {
 	width := 1
 	for _, f := range facets {
@@ -570,7 +604,7 @@ func facetCountWidth(facets []model.Facet) int {
 // line at a notional infinite width would measure the padding instead of the
 // content -- and allocate it.
 func facetValueNaturalWidth(value string, countWidth int) int {
-	return lipgloss.Width("[x] ") + lipgloss.Width(value) + lipgloss.Width(facetCountGap) + countWidth
+	return facetCheckboxWidth + lipgloss.Width(value) + lipgloss.Width(facetCountGap) + countWidth
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

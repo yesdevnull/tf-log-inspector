@@ -95,14 +95,40 @@ type wholeFrameCase struct {
 // fixture that has them.
 func wholeFrameCases(t *testing.T) []wholeFrameCase {
 	t.Helper()
-	timeline := func(fixture string) Model {
-		return update(t, New(testLog(t, fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	press := func(m Model, keys ...rune) Model {
+		for _, k := range keys {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{k}})
+		}
+		return m
 	}
+	open := func(name string) Model { return New(testLog(t, name), "x.log") }
 	return []wholeFrameCase{
-		{"calls/mixed-hcp.log", New(testLog(t, "mixed-hcp.log"), "x.log")},
-		{"timeline/mixed-hcp.log", timeline("mixed-hcp.log")},
-		{"timeline/structured-ui.log", timeline("structured-ui.log")},
+		{"calls/mixed-hcp.log", open("mixed-hcp.log")},
+		{"timeline/mixed-hcp.log", press(open("mixed-hcp.log"), '5')},
+		{"timeline/structured-ui.log", press(open("structured-ui.log"), '5')},
+		// The facet overlay is the third of the three layouts renderPanes
+		// composes, and the only one with no golden behind it. Swept here it
+		// gets the width and height invariants the other two have: its
+		// framing was held by nothing at all, so returning the facet pane
+		// unframed passed the whole package.
+		{"facet overlay/mixed-hcp.log", press(open("mixed-hcp.log"), 'f')},
 	}
+}
+
+// searchingFrame is a raw-log search in progress: the frame whose FOOTER is
+// one line rather than two, the prompt replacing both hint lines.
+//
+// It is not in wholeFrameCases, because the sweeps there Tab to the facet
+// pane to inspect both cursors and a search has the keyboard -- Tab does
+// nothing while the prompt is open. What it is for is the height budget,
+// which is measured against the footer's actual size.
+func searchingFrame(t *testing.T) Model {
+	t.Helper()
+	m := New(testLog(t, "mixed-hcp.log"), "x.log")
+	for _, k := range []rune{'6', '/', 'z'} {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{k}})
+	}
+	return m
 }
 
 // No rendered line may exceed the terminal width at any supported size, or
@@ -1024,12 +1050,14 @@ func tallEntryLog(n int) *model.Log {
 	}
 }
 
-// Below detailInlineWidth the centre pane is the whole row, with no
-// joinPanes beneath it to hold it to the pane height. An entry taller than
-// the pane then pushed the caveat out of View's frame entirely, which
-// contradicts View's own account of what it always shows -- and it takes a
+// Below detailInlineWidth the centre pane is the whole row, and an entry
+// taller than the pane must not push the caveat out of View's frame -- which
+// would contradict View's own account of what it always shows. It takes a
 // realistic entry to do it, not a pathological one: one measured API
 // response accounted for 49% of a 30MB log.
+//
+// What holds it is framePanes, which composes a single pane exactly as it
+// composes three, joinPanes truncating each to the row's height.
 func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	const h = 24
 	m := update(t, New(tallEntryLog(60), "x.log"), tea.WindowSizeMsg{Width: detailInlineWidth - 1, Height: h})
@@ -1053,8 +1081,10 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	}
 }
 
-// detailBody is the detail pane's content without its title line, which is
-// furniture rather than data and carries the pane's focus styling.
+// detailBody is the detail pane's rendered body, with the title it comes
+// back beside checked and discarded -- the title being drawn in the pane
+// row's rule rather than in the body, and so not part of what a caller
+// asserting on the pane's content is measuring.
 //
 // It asserts the title on the way past, and every caller states which one it
 // expects. The title is a claim about the body -- SPAN DETAIL over a group's
@@ -1585,8 +1615,10 @@ func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
 // looks healthy.
 //
 // The heights swept are every one either side of the boundary, from a pane
-// with room for nothing but its title upwards, so the assertion measures
-// the cut rather than a pane that happened to fit. The pane's own lines are
+// with room for a single line of body upwards, so the assertion measures
+// the cut rather than a pane that happened to fit. The pane's NAME is not
+// among the lines being budgeted -- it is inset into the pane row's top
+// rule -- so height 1 is one line of the pane's first section. The pane's own lines are
 // counted from what it renders at full height, so this does not carry its
 // own copy of the layout.
 func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
@@ -1773,10 +1805,6 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 	}
 }
 
-// detailPaneOf is the detail pane's own column of a three-pane frame, the
-// same way centrePaneOf is the centre's. The three panes render overlapping
-// values at their own widths, so an assertion about one of them has to be
-// made against that one.
 // paneTitlesOf reads the names inset into a rendered frame's top rule, one
 // per pane, left to right. That rule is where every pane is named, so it is
 // where an assertion about a pane's title has to look.
@@ -1794,6 +1822,14 @@ func paneTitlesOf(t *testing.T, view string) []string {
 	for _, segment := range strings.Split(lines[1], paneRuleTopSep) {
 		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule)))
 	}
+	// Callers index this by position, so a rule that did not split into the
+	// three panes they expect has to stop the test HERE. Returning the short
+	// slice instead panics inside the caller, which aborts the whole test
+	// BINARY: one regression in rule composition then hides every later
+	// failure in the package, including the tests that would have named it.
+	if len(titles) != 3 {
+		t.Fatalf("top rule split into %d segments, want 3: %q", len(titles), lines[1])
+	}
 	return titles
 }
 
@@ -1803,16 +1839,6 @@ const (
 	centrePaneIndex = 1
 	detailPaneIndex = 2
 )
-
-func detailPaneOf(view string) string {
-	var detail []string
-	for _, line := range strings.Split(unstyled(view), "\n") {
-		if fields := strings.Split(line, paneSep); len(fields) == 3 {
-			detail = append(detail, fields[2])
-		}
-	}
-	return strings.Join(detail, "\n")
-}
 
 // The centre pane must name the view it is showing, in the CENTRE pane
 // specifically. A search of the whole frame would be satisfied by a facet
@@ -1834,7 +1860,7 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 			want = m.timelineTitle()
 		}
 		if title != want {
-			t.Errorf("key %q: centre pane's first line = %q, want %q", b.key, title, want)
+			t.Errorf("key %q: the top rule names the centre pane %q, want %q", b.key, title, want)
 		}
 	}
 }
@@ -2715,11 +2741,11 @@ func TestTheRulesCrossAtEveryPaneSeparator(t *testing.T) {
 func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
 	m := update(t, base, tea.WindowSizeMsg{Width: 160, Height: 40})
-	top, _ := frameRules(t, m.View())
-	for _, want := range []string{facetPaneTitle, "CALLS", spanDetailTitle} {
-		if !strings.Contains(top, want) {
-			t.Errorf("top rule does not name %q: %q", want, top)
-		}
+	// By position, not by a search of the whole rule: three names present in
+	// any order satisfies a Contains sweep, and two panes wearing each
+	// other's name is a worse frame than one pane wearing none.
+	if got, want := paneTitlesOf(t, m.View()), []string{facetPaneTitle, "CALLS", spanDetailTitle}; !slices.Equal(got, want) {
+		t.Errorf("top rule names %q, want %q", got, want)
 	}
 }
 
@@ -2742,8 +2768,20 @@ func TestTheFocusedDetailPaneIsMarkedInTheTopRule(t *testing.T) {
 	if m.pane != PaneDetail {
 		t.Fatal("Tab never reached the detail pane")
 	}
-	if got := strings.Split(m.View(), "\n")[1]; !strings.Contains(got, "\x1b[7m") {
-		t.Errorf("top rule is unmarked with the detail pane focused: %q", got)
+	// Asserted against the detail pane's own SEGMENT of the rule, not the
+	// rule as a whole. Marking any other pane's name satisfies "a bar
+	// appears somewhere", which is the reading that would let the mark move
+	// to the facet pane unnoticed -- and Tab's third stop would then be as
+	// invisible as it was with no mark at all.
+	segments := strings.Split(strings.Split(m.View(), "\n")[1], paneRuleTopSep)
+	if len(segments) != 3 {
+		t.Fatalf("top rule split into %d segments, want 3", len(segments))
+	}
+	for i, segment := range segments {
+		marked := strings.Contains(segment, "\x1b[7m")
+		if want := i == detailPaneIndex; marked != want {
+			t.Errorf("rule segment %d marked = %v, want %v: %q", i, marked, want, segment)
+		}
 	}
 }
 
@@ -2796,7 +2834,8 @@ func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
 // draws. Every one of those is a number that can only be checked by adding
 // it to the others.
 func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
-	for _, c := range wholeFrameCases(t) {
+	cases := append(wholeFrameCases(t), wholeFrameCase{"search/mixed-hcp.log", searchingFrame(t)})
+	for _, c := range cases {
 		for _, w := range []int{160, 100, 70, 40} {
 			for h := 1; h <= 40; h++ {
 				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
@@ -2831,6 +2870,51 @@ func TestPaneBodyHeightAgreesWithWhatTheRowShows(t *testing.T) {
 		}
 		if want := paneBodyHeight(h); shown != want {
 			t.Errorf("row of %d lines shows %d body lines, paneBodyHeight says %d", h, shown, want)
+		}
+	}
+}
+
+// A pane with no room for its name gets a plain rule, and the name is
+// dropped WHOLE. Clipped instead, the rule breaks open for a fragment --
+// "── FILTE" at eight columns -- which names nothing, costs the line its
+// continuity, and carries no mark saying it was cut: this would be the one
+// place in the package that end-clips a NAME rather than a value.
+func TestATooNarrowPaneGetsAPlainRuleRatherThanAClippedName(t *testing.T) {
+	const title = "FILTERS"
+	// The lead is two columns and the name takes a space either side, so
+	// the name fits from that width up and not below it.
+	fits := lipgloss.Width(paneTitleLead) + lipgloss.Width(title) + 2
+	for w := 0; w <= fits+2; w++ {
+		rule := unstyled(titledRule(pane{title: title, width: w}))
+		if got := lipgloss.Width(rule); got != max(w, 0) {
+			t.Errorf("width %d: rule is %d columns: %q", w, got, rule)
+		}
+		named := strings.Contains(rule, title)
+		if want := w >= fits; named != want {
+			t.Errorf("width %d: rule names the pane = %v, want %v: %q", w, named, want, rule)
+		}
+		// Whatever is not the name is rule. A fragment of the name would
+		// leave neither.
+		if !named && strings.Trim(rule, paneRule) != "" {
+			t.Errorf("width %d: unnamed rule is not a plain rule: %q", w, rule)
+		}
+	}
+}
+
+// The detail pane's title says what the cursor is on, not how much room
+// there is to describe it. A pane row of one line -- a terminal of five --
+// draws the rule and nothing else, so a title that answered the height
+// instead would put "nothing is selected" on the only line the reader gets,
+// over a live selection.
+func TestTheDetailTitleIsTheSameAtEveryHeight(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	want, _ := m.renderDetail(40, 20)
+	if want != spanDetailTitle {
+		t.Fatalf("the calls view's detail pane is headed %q, want %q -- fixture assumption changed", want, spanDetailTitle)
+	}
+	for _, h := range []int{20, 3, 2, 1, 0, -1} {
+		if got, _ := m.renderDetail(40, h); got != want {
+			t.Errorf("at body height %d the pane is headed %q, want %q", h, got, want)
 		}
 	}
 }

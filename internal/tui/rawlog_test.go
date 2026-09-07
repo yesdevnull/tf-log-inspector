@@ -752,9 +752,8 @@ func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
 // The first visible entry is begun whatever its height: it is the one entry
 // the user jumped to, and an entry taller than the pane must render its head
 // rather than leave the pane blank. The pane row that composes it is what
-// holds the result to h lines (joinPanes, or renderPanes' single-pane
-// branch), so this is the difference between showing something and showing
-// nothing at all.
+// holds the result to h lines (framePanes, at every width), so this is the
+// difference between showing something and showing nothing at all.
 func TestTheRawLogRendersTheHeadOfAnEntryTallerThanThePane(t *testing.T) {
 	m := update(t, New(tallEntryLog(40), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	out := m.renderRawLog(200, 5)

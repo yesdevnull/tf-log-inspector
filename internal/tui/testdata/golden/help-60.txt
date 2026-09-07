@@ -1,6 +1,5 @@
 [1;36mtfli · x.log · 3 RPC spans, 3 UI spans[0m
 [2m──[0m[1;36m KEYS [0m[2m────────────────────────────────────────────────────[0m
-                                                            
 [1;36mVIEWS[0m                                                       
   [36m1[0m          providers                                      
   [36m2[0m          types                                          
@@ -27,6 +26,7 @@
   [36m⇥ Tab[0m      move focus between panes                       
   [36m?[0m          open or close this help (Esc closes it too)    
   [36mq[0m          quit                                           
+                                                            
                                                             
                                                             
                                                             

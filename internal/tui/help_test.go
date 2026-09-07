@@ -362,9 +362,9 @@ func TestEveryHelpLineFitsTheNarrowestSupportedWidth(t *testing.T) {
 // two working keys should be, over a view the help is not drawing.
 //
 // The short-height frame is the one that matters: there the key table is cut
-// to its title, and renderHelp is allowed to cut without a mark precisely
-// because "the footer carries the quit hint on every frame". This is what
-// makes that true.
+// down to its first group or less, and renderHelp is allowed to cut without
+// a mark precisely because "the footer carries the quit hint on every
+// frame". This is what makes that true.
 func TestTheFooterStillNamesAWorkingKeyOverAFailedSearch(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})

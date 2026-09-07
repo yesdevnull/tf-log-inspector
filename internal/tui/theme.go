@@ -10,9 +10,10 @@ import (
 )
 
 // accent is the one colour this interface uses. Everything the eye should
-// find first -- a pane's title, the key in a footer hint, the header of the
-// sorted column, the label heading a value in a detail pane -- wears it,
-// and nothing outside that list does. A second colour would
+// find first -- a pane's name in the top rule, the key in a footer hint, the
+// header of the sorted column, the label heading a value in a detail pane,
+// and the report the footer raises when a keystroke found nothing -- wears
+// it, and nothing outside that list does. A second colour would
 // have to mean something, and there is no second thing to mean: the
 // interface's other distinctions are already carried by position and by
 // weight.
@@ -68,9 +69,10 @@ type theme struct {
 	// something the eye can skip rather than read, and the frame around the
 	// panes is the only thing on screen that is purely structural.
 	//
-	// The names inset into the top rule are NOT chrome, and take the title
-	// style there as they would anywhere else. What the rule is drawn in
-	// says nothing about what it carries.
+	// The names inset into the top rule are NOT chrome. They take the title
+	// style there, or the cursor bar where the pane has the keyboard (see
+	// titledRule). What the rule is drawn in says nothing about what it
+	// carries.
 	//
 	// Nothing a cursor bar can wrap is chrome, however much it looks like
 	// scaffolding. A facet's checkbox is the tempting case and the
@@ -90,11 +92,12 @@ type theme struct {
 	// many as eight labels, and labels that shouted as loudly as the
 	// heading above them would leave the pane with no hierarchy at all.
 	//
-	// With colour withheld it renders identically to chrome. That is
-	// accepted rather than overlooked: the two never appear where a reader
-	// must tell them apart, a separator being a column of one character
-	// between panes, and there is no third attribute to spend -- bold is
-	// what title and columnHeader are told apart by.
+	// With colour withheld it renders identically to chrome, which is drawn
+	// directly above and below it -- the pane row's rules. That is accepted
+	// rather than overlooked: a full-width horizontal rule and a label are
+	// told apart by shape and position, not by weight, and there is no third
+	// attribute to spend -- bold is what title and columnHeader are told
+	// apart by.
 	fieldLabel lipgloss.Style
 	// excludedValue marks a facet value the filter is currently hiding.
 	// Every value starts ticked, so unticking is the filtering action, and
@@ -107,10 +110,11 @@ type theme struct {
 	// weight: the distinction has to survive NO_COLOR, and this one is read
 	// on every frame the reader has filtered anything at all.
 	//
-	// It renders identically to chrome and to note, and means neither. The
-	// three never meet: a separator is a column of one character between
-	// panes, a note is prose about the frame, and this is a value line
-	// inside the facet pane.
+	// It renders identically to chrome and to note, and means neither. What
+	// keeps them legible apart is shape rather than weight: chrome here is
+	// the rule closing the pane row, drawn across its whole width, and a
+	// note is prose about the frame, where this is one value's line inside
+	// the facet pane.
 	excludedValue lipgloss.Style
 	// key marks a keystroke where one is offered -- in a footer hint and in
 	// the help screen's key column -- leaving the words describing it plain.
