@@ -419,18 +419,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// o narrows the cursor's dimension to the one value under the
-		// cursor, and is bound to the facet pane for the same reason space
-		// is: the facet cursor stays drawn, dimmed, in an unfocused pane,
-		// so a key accepted from the list or the detail pane would rewrite
-		// the ranked numbers with nothing on screen behaving like a
-		// control.
-		if msg.String() == "o" {
-			if m.pane == PaneFacets {
-				m.soloFacetValue()
-			}
-			return m, nil
-		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -441,6 +429,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(-1)
 		case "down", "j":
 			m.moveCursor(1)
+		case "o":
+			// o narrows the cursor's dimension to the one value under the
+			// cursor, and is bound to the facet pane for the same reason
+			// space is: the facet cursor stays drawn, dimmed, in an
+			// unfocused pane, so a key accepted from the list or the detail
+			// pane would rewrite the ranked numbers with nothing on screen
+			// behaving like a control. Space needs a case of its own above
+			// the switch because it arrives as tea.KeySpace; o is dispatched
+			// by msg.String() like every other key here.
+			if m.pane == PaneFacets {
+				m.soloFacetValue()
+			}
 		case "esc":
 			// Esc clears every active filter regardless of which pane has
 			// focus -- the spec binds it globally, not to the facet pane.

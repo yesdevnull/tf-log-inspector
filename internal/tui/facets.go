@@ -94,17 +94,25 @@ func (m Model) allowedFacetValues(dim string) map[string]bool {
 		return nil
 	}
 	allowed := map[string]bool{}
-	for _, f := range m.facets {
-		if f.Name != dim {
-			continue
-		}
-		for _, v := range f.Values {
-			if !excluded[v.Value] {
-				allowed[v.Value] = true
-			}
+	for _, v := range m.facetValues(dim) {
+		if !excluded[v.Value] {
+			allowed[v.Value] = true
 		}
 	}
 	return allowed
+}
+
+// facetValues is the values one dimension offers, in the order the pane
+// draws them, or nil for a dimension the pane does not carry. Dimension
+// names are unique by construction -- three from model.FacetsForSpans and
+// dimLevel from levelFacet -- so the first match is the only match.
+func (m Model) facetValues(dim string) []model.FacetValue {
+	for _, f := range m.facets {
+		if f.Name == dim {
+			return f.Values
+		}
+	}
+	return nil
 }
 
 // uiFilter is the filter as it applies to the UI-hook tier: resource type
@@ -237,27 +245,25 @@ func firstFacetCursor(facets []model.Facet) facetCursor {
 // dimension's last excluded value returns that dimension to unconstrained
 // -- the state a fresh model starts in, rather than an allow-list naming
 // every value (see allowedFacetValues).
+//
+// The exclusion set is rebuilt and handed to setFacetExclusions rather than
+// mutated where it sits, so both writers of this map replace rather than
+// edit in place. A Model is driven through a pointer and never copied (see
+// Model), but the two agreeing costs a map copy of a handful of strings and
+// removes the one asymmetry between them.
 func (m *Model) toggleFacetValue() {
 	dim, val, ok := m.cursorFacetValue()
 	if !ok {
 		return
 	}
-	if m.excludedFacets == nil {
-		m.excludedFacets = map[string]map[string]bool{}
-	}
-	inner := m.excludedFacets[dim]
-	if inner == nil {
-		inner = map[string]bool{}
-		m.excludedFacets[dim] = inner
-	}
-	if inner[val] {
-		delete(inner, val)
-		if len(inner) == 0 {
-			delete(m.excludedFacets, dim)
-		}
+	excluded := map[string]bool{}
+	maps.Copy(excluded, m.excludedFacets[dim])
+	if excluded[val] {
+		delete(excluded, val)
 	} else {
-		inner[val] = true
+		excluded[val] = true
 	}
+	m.setFacetExclusions(dim, excluded)
 	m.invalidateRows()
 }
 
@@ -298,27 +304,40 @@ func (m *Model) soloFacetValue() {
 		return
 	}
 	others := map[string]bool{}
-	for _, f := range m.facets {
-		if f.Name != dim {
-			continue
-		}
-		for _, v := range f.Values {
-			if v.Value != val {
-				others[v.Value] = true
-			}
+	for _, v := range m.facetValues(dim) {
+		if v.Value != val {
+			others[v.Value] = true
 		}
 	}
-	if len(others) == 0 || maps.Equal(m.excludedFacets[dim], others) {
-		// delete is a no-op on a nil map, so the untouched case allocates
-		// nothing.
-		delete(m.excludedFacets, dim)
-	} else {
-		if m.excludedFacets == nil {
-			m.excludedFacets = map[string]map[string]bool{}
-		}
-		m.excludedFacets[dim] = others
+	if maps.Equal(m.excludedFacets[dim], others) {
+		// Already showing this value alone: a second press puts the whole
+		// dimension back. An empty others -- a dimension offering one value
+		// -- takes this branch too, since maps.Equal reads a nil exclusion
+		// set and an empty one alike.
+		others = nil
 	}
+	m.setFacetExclusions(dim, others)
 	m.invalidateRows()
+}
+
+// setFacetExclusions records which of a dimension's values are unticked,
+// keeping the shape allowedFacetValues and filterActive read: a dimension
+// with nothing excluded is ABSENT from the map, not present holding an
+// empty set. It is the one place that shape is decided, so the two writers
+// above cannot come to disagree about what an unconstrained dimension looks
+// like.
+//
+// delete is a no-op on a nil map, so a model whose filter was never touched
+// allocates nothing.
+func (m *Model) setFacetExclusions(dim string, excluded map[string]bool) {
+	if len(excluded) == 0 {
+		delete(m.excludedFacets, dim)
+		return
+	}
+	if m.excludedFacets == nil {
+		m.excludedFacets = map[string]map[string]bool{}
+	}
+	m.excludedFacets[dim] = excluded
 }
 
 // filterActive reports whether any facet value is unticked anywhere, which

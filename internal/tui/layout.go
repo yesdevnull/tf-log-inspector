@@ -1183,8 +1183,9 @@ const (
 )
 
 // clampedStartValue is what the detail pane puts under its start field for
-// a span whose start was clamped. It states the clamp and the value it was clamped
-// to, in --profile's own words ("has its start clamped to zero"), so a
+// a span whose start was clamped. It states the clamp and the value it was
+// clamped to, in --profile's own words ("has its start clamped to zero"),
+// so a
 // reader who has seen the note --profile prints for the same spans
 // recognises this as the same finding rather than a second one.
 const clampedStartValue = "clamped to zero"
