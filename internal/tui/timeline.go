@@ -1467,7 +1467,8 @@ func (m *Model) laneHues() map[string]lipgloss.Style {
 			// the lanes they label are then indistinguishable already; the
 			// first one seen takes the colour rather than the last
 			// overwriting it, so the hue is stable in facet order.
-			if p := laneLabelProvider(v.Value); !hasHue(hues, p) {
+			p := laneLabelProvider(v.Value)
+			if _, taken := hues[p]; !taken {
 				hues[p] = semantic.lane(len(hues))
 			}
 		}
@@ -1475,9 +1476,3 @@ func (m *Model) laneHues() map[string]lipgloss.Style {
 	return hues
 }
 
-// hasHue reports whether p has already been assigned, kept separate so the
-// assignment above reads as the one rule it is.
-func hasHue(hues map[string]lipgloss.Style, p string) bool {
-	_, ok := hues[p]
-	return ok
-}
