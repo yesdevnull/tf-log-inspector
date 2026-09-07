@@ -62,21 +62,21 @@ func TestRawLogHonoursFilters(t *testing.T) {
 }
 
 // A provider facet filters raw log entries by component, not by span
-// ownership: an entry is that provider's traffic (and stays visible) as
+// ownership: an entry is that provider's traffic (and disappears with it) as
 // long as it shares a component with one of that provider's spans, whether
 // or not the entry itself closes a span. two-providers.log's two spans sit
-// on two different components, so selecting aws must keep its own line and
-// drop google's.
+// on two different components, so unticking aws must drop its own line and
+// keep google's.
 func TestRawLogProviderFacetFiltersByComponent(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	m = focusFacets(t, m) // cursor starts on the provider dimension's first (aws) value
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	out := m.renderRawLog(200, 100)
-	if !strings.Contains(out, "aws_subnet") {
-		t.Errorf("aws's own entry missing after selecting the aws provider facet:\n%s", out)
+	if strings.Contains(out, "aws_subnet") {
+		t.Errorf("aws's own entry survived after unticking the aws provider facet:\n%s", out)
 	}
-	if strings.Contains(out, "google_compute_instance") {
-		t.Errorf("google's entry survived after selecting the aws provider facet:\n%s", out)
+	if !strings.Contains(out, "google_compute_instance") {
+		t.Errorf("google's entry went missing after unticking the aws provider facet:\n%s", out)
 	}
 }
 
@@ -212,8 +212,8 @@ func TestSlashSearchJumpsToTheFirstMatch(t *testing.T) {
 // the raw log is filtered, and search must respect what is currently shown.
 func TestSlashSearchHonoursActiveFilter(t *testing.T) {
 	m := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
-	m = focusFacets(t, m) // cursor starts on the provider dimension's first (aws) value
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = focusFacets(t, m) // widens the terminal so the facet pane is drawn
+	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/aws")
 	before := m.TopEntry()
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	for _, r := range "google_compute_instance" {
@@ -464,8 +464,8 @@ func TestEscWithNoFiltersLeavesTheMissReportStanding(t *testing.T) {
 	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
 		t.Fatalf("footer = %q, want the miss reported before Esc is pressed", got)
 	}
-	if len(m.selectedFacets) != 0 {
-		t.Fatalf("selectedFacets = %v, want nothing selected so Esc has no filter to clear", m.selectedFacets)
+	if len(m.excludedFacets) != 0 {
+		t.Fatalf("excludedFacets = %v, want nothing unticked so Esc has no filter to clear", m.excludedFacets)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
@@ -675,16 +675,16 @@ func TestEntryVisibleMatchesAComponentlessEntryAgainstTheNoneFacet(t *testing.T)
 // file's own bytes.
 //
 // The top entry is moved off the fixture's UNKNOWN-level comment header
-// first, so that selecting UNKNOWN leaves nothing visible below it: at the
-// top of the log that header is itself a match and the pane is not empty.
+// first, so that narrowing to UNKNOWN leaves nothing visible below it: at
+// the top of the log that header is itself a match and the pane is not
+// empty.
 func TestTheRawLogSaysWhenAFilterHasHiddenEverything(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if m.TopEntry() != 1 {
 		t.Fatalf("TopEntry = %d, want 1 -- the UNKNOWN comment header must be above the pane", m.TopEntry())
 	}
-	m = moveFacetCursorTo(t, m, dimLevel, "UNKNOWN")
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	showOnly(t, &m, dimLevel, "UNKNOWN")
 
 	out := m.renderRawLog(200, 40)
 	for _, want := range []string{"nothing matches the filter", "Esc"} {
@@ -718,12 +718,12 @@ func TestAnEmptyRawLogWithNoFilterDoesNotBlameAFilter(t *testing.T) {
 // A level facet is what can do this: the level dimension narrows entries and
 // not spans (see levelFacet), so the call stays in the table while its own
 // log entry disappears. provider-rpc.log's calls close on TRACE entries and
-// its comment header is UNKNOWN, so selecting UNKNOWN hides every call's
+// its comment header is UNKNOWN, so narrowing to UNKNOWN hides every call's
 // entry while leaving both calls on screen to press Enter over.
 func TestEnterRefusesAJumpTheFilterWouldHide(t *testing.T) {
 	m := callsModel(t, "provider-rpc.log", "x.log")
-	m = moveFacetCursorTo(t, m, dimLevel, "UNKNOWN")
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = focusFacets(t, m) // widens the terminal so the facet pane is drawn
+	showOnly(t, &m, dimLevel, "UNKNOWN")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}) // hand the keyboard back to the list
 	if m.Focus() != PaneList {
 		t.Fatalf("focus = %v, want the list so Enter is handled", m.Focus())

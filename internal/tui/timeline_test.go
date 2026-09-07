@@ -125,8 +125,7 @@ func TestChangingLanesClampsTheSpanCursor(t *testing.T) {
 
 func TestAFilterThatEmptiesTheTimelineSelectsNothing(t *testing.T) {
 	m := timelineModel(t)
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider)
 	if idx, ok := m.selectedTimelineSpan(); ok {
 		t.Errorf("selectedTimelineSpan = (%d, true) over an empty timeline, want ok == false", idx)
 	}
@@ -174,8 +173,7 @@ func TestAFilterChangeStillClampsTheLaneCursorInTheTimeline(t *testing.T) {
 	if m.timeline.lane != 1 {
 		t.Fatalf("lane = %d after ↓, want 1 -- timeline.log is meant to pack into two lanes", m.timeline.lane)
 	}
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/aws": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/aws")
 	if lanes := m.timelineLanes(); len(lanes) != 1 {
 		t.Fatalf("aws alone packs into %d lanes, want 1", len(lanes))
 	}
@@ -219,8 +217,7 @@ func TestAFilterThatNarrowsTheTimelineKeepsALiveCursor(t *testing.T) {
 		t.Fatalf("cursor = lane %d span %d, want lane 1 span 2 -- google's three calls do not overlap, so they pack into one lane", m.timeline.lane, m.timeline.span)
 	}
 
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {aws: true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider, aws)
 
 	lanes := m.timelineLanes()
 	if len(lanes) != 1 || len(lanes[0].Spans) != 1 {
@@ -463,12 +460,11 @@ func TestTimelineDrawsTheRPCTierForALogCarryingBoth(t *testing.T) {
 
 func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
-	// Narrow the provider dimension to a value no span carries. The facet
-	// maps are unexported and toggleSelectedFacetValue works off the facet
-	// pane's cursor, so this test is in package tui and sets them directly,
-	// as facets_test.go does.
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
-	m.invalidateRows()
+	// Untick every provider, so the dimension admits nothing and no span
+	// survives. The facet maps are unexported and toggleFacetValue works off
+	// the facet pane's cursor, so this test uses facets_test.go's helper
+	// rather than driving the cursor across the pane.
+	showOnly(t, &m, dimProvider)
 	tier, spans := m.timelineSpans()
 	if tier != tierRPC {
 		t.Errorf("tier = %v, want tierRPC: a filter must not change which tier is drawn", tier)
@@ -513,10 +509,9 @@ func TestTimelineAttributionSurvivesAFacetFilterThatReindexesSpans(t *testing.T)
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 	// Narrow to ApplyResourceChange, dropping the Ambiguous PlanResourceChange
 	// span at RPCSpans[0]. See TestFilteringOutEveryRPCSpanDoesNotSwitchTiers
-	// for why this test sets the facet map directly rather than driving the
-	// facet pane's own cursor.
-	m.selectedFacets = map[string]map[string]bool{dimRPC: {"ApplyResourceChange": true}}
-	m.invalidateRows()
+	// for why this test sets the filter through a helper rather than driving
+	// the facet pane's own cursor.
+	showOnly(t, &m, dimRPC, "ApplyResourceChange")
 
 	_, spans := m.timelineSpans()
 	if len(spans) != 2 {
@@ -818,8 +813,7 @@ func TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans(t *testing.T)
 // screen (see TestRenderTimelineGivesCaptureGuidanceForALogWithNoTimedSpans).
 func TestRenderTimelineReportsTheFilterWhenItHidesEverySpan(t *testing.T) {
 	m := New(testLog(t, "timeline.log"), "x.log")
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider)
 	if got := unstyled(m.renderTimeline(80, 10)); got != noMatchNote {
 		t.Errorf("renderTimeline over a filter matching nothing = %q, want %q", got, noMatchNote)
 	}
@@ -1183,8 +1177,7 @@ func TestNoStallsSaysSoRatherThanRenderingNothing(t *testing.T) {
 	// Silence and "no stalls" look identical on screen, and one of them
 	// is a bug.
 	m := timelineModel(t)
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider)
 	if got := m.stallAnnotation(80); strings.TrimSpace(got) == "" {
 		t.Error("stallAnnotation is blank where there are no stalls to report")
 	}
@@ -1988,8 +1981,7 @@ func TestAFilteredTimelineSaysSoWhereTheFiguresAre(t *testing.T) {
 		t.Fatalf("the unfiltered notes already mention a filter (%q), so this test asserts nothing", got)
 	}
 
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/aws": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/aws")
 	notes := m.timelineNotes(commonCentrePaneWidth)
 
 	busy := slices.IndexFunc(notes, func(l string) bool { return strings.HasPrefix(l, "busy ") })
@@ -2017,18 +2009,18 @@ func mentionsTheFilter(line string) bool {
 	return strings.Contains(line, "filter")
 }
 
-// A filter selecting values that hide nothing leaves the figures whole, so
-// there is nothing to qualify: the note is about what the figures COVER,
-// not about which checkboxes are ticked. Selecting every provider in
-// timeline.log is that case, and a note there would tell a reader their
-// numbers are narrowed when they are not.
+// A filter that hides no SPAN leaves the figures whole, so there is nothing
+// to qualify: the note is about what the figures COVER, not about which
+// checkboxes are ticked. Unticking a level is that case -- a level belongs
+// to an entry and no span carries one, so the level dimension narrows the
+// raw log and nothing the timeline draws (see levelFacet) -- and a note
+// here would tell a reader their numbers are narrowed when they are not.
 func TestATimelineFilterThatHidesNothingIsNotAnnounced(t *testing.T) {
 	m := timelineModel(t)
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {
-		"registry.terraform.io/hashicorp/aws":    true,
-		"registry.terraform.io/hashicorp/google": true,
-	}}
-	m.invalidateRows()
+	untick(t, &m, dimLevel, levelValue(t, m))
+	if !m.filterActive() {
+		t.Fatal("no filter is active, so this asserts nothing about one that hides nothing")
+	}
 	_, spans := m.timelineSpans()
 	if len(spans) != len(m.log.RPCSpans) {
 		t.Fatalf("the filter hides %d of %d spans, so this test no longer covers a filter that hides nothing", len(m.log.RPCSpans)-len(spans), len(m.log.RPCSpans))
@@ -2036,6 +2028,20 @@ func TestATimelineFilterThatHidesNothingIsNotAnnounced(t *testing.T) {
 	if got := m.timelineNotes(commonCentrePaneWidth); slices.ContainsFunc(got, mentionsTheFilter) {
 		t.Errorf("notes = %q, which qualifies figures that are the whole log's", got)
 	}
+}
+
+// levelValue is the first value the level dimension offers, so a test can
+// untick a level without hard-coding which levels a fixture happens to
+// carry.
+func levelValue(t *testing.T, m Model) string {
+	t.Helper()
+	for _, f := range m.facets {
+		if f.Name == dimLevel && len(f.Values) > 0 {
+			return f.Values[0].Value
+		}
+	}
+	t.Fatal("the level dimension offers no value to untick")
+	return ""
 }
 
 // The union, not the sum: two spans overlapping cover less wall clock than
@@ -2364,8 +2370,7 @@ func TestALanesHueSurvivesAFilterHidingAnotherProvider(t *testing.T) {
 		t.Fatalf("google's lane is drawn in %q, the first lane's own colour, so a recolour could not show", before)
 	}
 
-	m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/google": true}}
-	m.invalidateRows()
+	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/google")
 
 	if got := barHueOf(t, timelineLaneRows(t, m, m.timelineLanes())[0]); got != before {
 		t.Errorf("google's lane went from %q to %q when a filter hid the other provider", before, got)

@@ -450,8 +450,8 @@ func TestTabSkipsPanesTheWidthHasCollapsed(t *testing.T) {
 	if got := len(m.rows()); got != before {
 		t.Errorf("space after two Tabs left %d call rows, want the unfiltered %d -- a filter was applied through a pane the user cannot see", got, before)
 	}
-	if len(m.selectedFacets) != 0 {
-		t.Errorf("selectedFacets = %v after keys pressed at 80 columns, want nothing selected", m.selectedFacets)
+	if len(m.excludedFacets) != 0 {
+		t.Errorf("excludedFacets = %v after keys pressed at 80 columns, want nothing unticked", m.excludedFacets)
 	}
 }
 
@@ -489,7 +489,7 @@ func TestNarrowingTheTerminalMovesFocusOffACollapsedPane(t *testing.T) {
 // registers a *Model and bubbletea re-updates whatever Update returns; a
 // value receiver made every message start from a fresh copy, so the model
 // the caller held and the model bubbletea rendered were two models -- and
-// selectedFacets, a map, was shared between them, so a facet toggle written
+// excludedFacets, a map, was shared between them, so a facet toggle written
 // to one silently rewrote the other's ranked numbers.
 func TestUpdateDrivesTheModelItWasCalledOn(t *testing.T) {
 	m := New(testLog(t, "two-providers.log"), "x.log")

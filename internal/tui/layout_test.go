@@ -2173,8 +2173,7 @@ func TestEveryLineExplainingAnEmptyPaneIsDrawnAsANote(t *testing.T) {
 		t.Helper()
 		m := update(t, New(testLog(t, fixture), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 		m.view = view
-		m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
-		m.invalidateRows()
+		showOnly(t, &m, dimProvider)
 		return m
 	}
 	for _, tc := range []struct {

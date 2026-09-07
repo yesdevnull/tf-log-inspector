@@ -25,9 +25,9 @@ const (
 // from several lines and carries no level of its own, which is why
 // model.FacetsForSpans cannot produce this dimension and it is built here.
 //
-// Selecting a level therefore narrows the RAW LOG only, through
+// Unticking a level therefore narrows the RAW LOG only, through
 // Filter.MatchEntry. The ranked views roll up spans, and no span has a
-// level to match, so ticking TRACE leaves the providers, types and calls
+// level to match, so unticking TRACE leaves the providers, types and calls
 // tables exactly as they were -- not a bug, but the reason has to be
 // written down somewhere, because it is not visible from the screen.
 //
@@ -57,23 +57,53 @@ func levelFacet(entries []logfmt.Entry) model.Facet {
 	return f
 }
 
-// filter derives the model.Filter this model's facet selections represent.
-// A dimension with nothing selected contributes a nil map, so it keeps
-// Filter's own "no opinion" meaning -- an untouched facet pane must show
-// the whole log. A dimension with one or more values selected contributes
-// exactly that allow-list: a span passes only if its value for that
-// dimension was selected.
+// filter derives the model.Filter this model's ticked checkboxes represent:
+// per dimension, every value the pane offers except the ones the reader has
+// unticked (allowedFacetValues).
 //
 // This is the filter as it applies to the RPC tier and to log entries. The
 // UI-hook tier is filtered by uiFilter instead, and every count or rollup
 // drawn from m.log.UISpans goes through that one.
 func (m Model) filter() model.Filter {
 	return model.Filter{
-		Providers: m.selectedFacets[dimProvider],
-		RPCs:      m.selectedFacets[dimRPC],
-		Types:     m.selectedFacets[dimType],
-		Levels:    m.selectedLevels(),
+		Providers: m.allowedFacetValues(dimProvider),
+		RPCs:      m.allowedFacetValues(dimRPC),
+		Types:     m.allowedFacetValues(dimType),
+		Levels:    m.allowedLevels(),
 	}
+}
+
+// allowedFacetValues turns one dimension's exclusions into the allow-list
+// model.Filter takes: every value the facet pane offers for that dimension
+// except the ones the reader has unticked.
+//
+// A dimension with nothing excluded contributes NIL -- Filter's "no
+// opinion" -- rather than an allow-list that happens to name every value.
+// The two would filter alike, but nil says what an untouched pane means and
+// costs no per-span map lookup, and it is what filterActive and the empty-
+// pane notes elsewhere are consistent with.
+//
+// A dimension with every value excluded contributes an EMPTY non-nil map,
+// which model.Filter admits nothing through. That is the reading the
+// checkboxes require: no box ticked is no value admitted. It is also why
+// this cannot report "no opinion" by length alone.
+func (m Model) allowedFacetValues(dim string) map[string]bool {
+	excluded := m.excludedFacets[dim]
+	if len(excluded) == 0 {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, f := range m.facets {
+		if f.Name != dim {
+			continue
+		}
+		for _, v := range f.Values {
+			if !excluded[v.Value] {
+				allowed[v.Value] = true
+			}
+		}
+	}
+	return allowed
 }
 
 // uiFilter is the filter as it applies to the UI-hook tier: resource type
@@ -101,34 +131,44 @@ func (m Model) uiFilter() model.Filter {
 	return model.Filter{Providers: uiProviderTypes(f.Providers), Types: f.Types}
 }
 
-// uiProviderTypes turns the selected RPC-tier provider ADDRESSES into the
-// provider TYPE names the UI-hook tier carries, so a provider ticked in the
-// facet pane narrows both tiers to the same provider.
+// uiProviderTypes turns an allow-list of RPC-tier provider ADDRESSES into
+// one of the provider TYPE names the UI-hook tier carries, so unticking a
+// provider in the facet pane narrows both tiers to the same providers.
 //
 // A UI-hook span's provider is hook.resource.implied_provider, which is the
 // provider's type name ("azurerm"), and a registry address
 // ("registry.terraform.io/hashicorp/azurerm") ends in that same type name.
-// So the last "/"-separated segment of a selected address is the value the
+// So the last "/"-separated segment of an allowed address is the value the
 // UI tier would spell it with, and a UI span passes when its provider is
-// the type of ANY selected address.
+// the type of ANY allowed address. A nil allow-list is "no opinion" and
+// stays nil; an empty one admits nothing and stays empty, so unticking a
+// dimension's last value empties both tiers alike.
 //
 // LIMITATION -- not every provider address is in registry form. A provider
 // served without a ProviderAddr reports a bare "provider" for
 // tf_provider_addr, and internal/span substitutes the component name in its
 // place, producing addresses like
 // "provider.terraform-provider-github_v6.3.1" whose last segment is not a
-// type name at all. Nothing here can derive a type from one, so a selection
-// containing such an address does not narrow the UI tier on its account:
-// it matches every UI provider rather than excluding rows on a derivation
-// that cannot be trusted. Since the values within a dimension are
-// alternatives, one such address makes the whole dimension unconstrained
-// for this tier.
-func uiProviderTypes(selected map[string]bool) map[string]bool {
-	if len(selected) == 0 {
+// type name at all. Nothing here can derive a type from one, so an
+// allow-list containing such an address does not narrow the UI tier on its
+// account: it matches every UI provider rather than excluding rows on a
+// derivation that cannot be trusted. Since the values within a dimension
+// are alternatives, one such address makes the whole dimension
+// unconstrained for this tier.
+//
+// Because every value starts ticked, the allow-list holds nearly the whole
+// dimension by default, so ONE address of that shape anywhere in the
+// capture is enough to keep this tier unconstrained however many providers
+// the reader unticks. That is the same failure the rule was written to
+// choose -- showing rows that could have been hidden, rather than hiding
+// rows on a guess -- but it is reached far more often now than when the
+// allow-list held only what the reader had picked out.
+func uiProviderTypes(allowed map[string]bool) map[string]bool {
+	if allowed == nil {
 		return nil
 	}
-	types := make(map[string]bool, len(selected))
-	for addr := range selected {
+	types := make(map[string]bool, len(allowed))
+	for addr := range allowed {
 		slash := strings.LastIndex(addr, "/")
 		if slash < 0 {
 			return nil
@@ -138,18 +178,18 @@ func uiProviderTypes(selected map[string]bool) map[string]bool {
 	return types
 }
 
-// selectedLevels turns the level dimension's selected value names back into
-// the logfmt.Level values Filter.MatchEntry compares against. The names are
-// Level.String()'s own, so ParseLevel reverses them exactly, "UNKNOWN"
-// included. Nothing selected contributes a nil map, which is Filter's "no
-// opinion".
-func (m Model) selectedLevels() map[logfmt.Level]bool {
-	sel := m.selectedFacets[dimLevel]
-	if len(sel) == 0 {
+// allowedLevels turns the level dimension's allow-list of value names back
+// into the logfmt.Level values Filter.MatchEntry compares against. The names
+// are Level.String()'s own, so ParseLevel reverses them exactly, "UNKNOWN"
+// included. Nil and empty are carried across unchanged: nil is Filter's "no
+// opinion", empty admits no level at all.
+func (m Model) allowedLevels() map[logfmt.Level]bool {
+	allowed := m.allowedFacetValues(dimLevel)
+	if allowed == nil {
 		return nil
 	}
-	levels := make(map[logfmt.Level]bool, len(sel))
-	for name := range sel {
+	levels := make(map[logfmt.Level]bool, len(allowed))
+	for name := range allowed {
 		levels[logfmt.ParseLevel(name)] = true
 	}
 	return levels
@@ -190,28 +230,29 @@ func firstFacetCursor(facets []model.Facet) facetCursor {
 	return facetCursor{}
 }
 
-// toggleSelectedFacetValue flips whether the facet pane's cursor value is
-// selected, and invalidates any cached rows so the next render reflects the
-// change. Selecting a value in a dimension narrows that dimension to
-// exactly the selected values; deselecting the last one in a dimension
-// returns it to unconstrained.
-func (m *Model) toggleSelectedFacetValue() {
+// toggleFacetValue flips whether the facet pane's cursor value is ticked,
+// and invalidates any cached rows so the next render reflects the change.
+// Unticking a value hides it; ticking it back restores it, and re-ticking a
+// dimension's last excluded value returns that dimension to unconstrained
+// -- the state a fresh model starts in, rather than an allow-list naming
+// every value (see allowedFacetValues).
+func (m *Model) toggleFacetValue() {
 	dim, val, ok := m.cursorFacetValue()
 	if !ok {
 		return
 	}
-	if m.selectedFacets == nil {
-		m.selectedFacets = map[string]map[string]bool{}
+	if m.excludedFacets == nil {
+		m.excludedFacets = map[string]map[string]bool{}
 	}
-	inner := m.selectedFacets[dim]
+	inner := m.excludedFacets[dim]
 	if inner == nil {
 		inner = map[string]bool{}
-		m.selectedFacets[dim] = inner
+		m.excludedFacets[dim] = inner
 	}
 	if inner[val] {
 		delete(inner, val)
 		if len(inner) == 0 {
-			delete(m.selectedFacets, dim)
+			delete(m.excludedFacets, dim)
 		}
 	} else {
 		inner[val] = true
@@ -219,17 +260,17 @@ func (m *Model) toggleSelectedFacetValue() {
 	m.invalidateRows()
 }
 
-// filterActive reports whether any facet value is selected anywhere, which
+// filterActive reports whether any facet value is unticked anywhere, which
 // is what several panes need in order to tell "the filter hid everything"
 // apart from "there was nothing here to begin with" -- two states that
 // render byte-identically without it.
 //
 // It checks the inner maps rather than trusting the outer one to be empty:
-// deselecting a dimension's last value already deletes the dimension (see
-// toggleSelectedFacetValue), and this must stay true whatever a later
-// caller does with the map.
+// re-ticking a dimension's last excluded value already deletes the
+// dimension (see toggleFacetValue), and this must stay true whatever a
+// later caller does with the map.
 func (m Model) filterActive() bool {
-	for _, values := range m.selectedFacets {
+	for _, values := range m.excludedFacets {
 		if len(values) > 0 {
 			return true
 		}
@@ -237,13 +278,13 @@ func (m Model) filterActive() bool {
 	return false
 }
 
-// clearFilters deselects every facet value, restoring every view to the
+// clearFilters re-ticks every facet value, restoring every view to the
 // unfiltered log. Esc is bound to this per the spec's key table.
 func (m *Model) clearFilters() {
-	if len(m.selectedFacets) == 0 {
+	if len(m.excludedFacets) == 0 {
 		return
 	}
-	m.selectedFacets = nil
+	m.excludedFacets = nil
 	m.invalidateRows()
 }
 
@@ -298,7 +339,7 @@ func (m *Model) moveFacetCursor(delta int) {
 // wide and h lines tall. The cursor marks the value space would toggle --
 // drawn as a bar, not just prefixed with ">", so it is actually visible
 // rather than merely inferable -- and a checkbox marks whether it is
-// currently selected.
+// currently admitted, every value starting ticked.
 //
 // The lines are windowed around the cursor by the same pin-to-edge rule the
 // centre table uses (scrollWindow). Showing the first h lines instead would
@@ -340,9 +381,9 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 		lines = append(lines, styles.title.Render(clipWidth(facetSectionHeader(f.Name), w)))
 		kind := facetValueKind(f.Name)
 		for valIdx, v := range f.Values {
-			check := " "
-			if m.selectedFacets[f.Name][v.Value] {
-				check = "x"
+			check := "x"
+			if m.excludedFacets[f.Name][v.Value] {
+				check = " "
 			}
 			// Every line is built at the full pane width, cursor or not:
 			// the escapes cursorBar adds cost no terminal columns, so its

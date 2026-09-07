@@ -75,7 +75,7 @@ func TestHelpLeavesQuitWorking(t *testing.T) {
 // focus and Space the facet selection, and neither was being looked at.
 func modalState(m Model) string {
 	return fmt.Sprintf("view=%v sort=%v selected=%d pane=%v facets=%v rawtop=%d",
-		m.ActiveView(), m.sortCol, m.Selected(), m.pane, m.selectedFacets, m.raw.top)
+		m.ActiveView(), m.sortCol, m.Selected(), m.pane, m.excludedFacets, m.raw.top)
 }
 
 // Every other key is inert while the help is open -- the same modal

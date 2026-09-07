@@ -152,3 +152,24 @@ func TestFacetKeyLabelsAnEmptyValueTheSameWayEverywhere(t *testing.T) {
 		t.Errorf("MatchSpan rejected a span with an empty resource type against %q", none)
 	}
 }
+
+// A dimension whose allow-list is present but EMPTY admits nothing. The
+// distinction is nil against empty, not len against zero: nil is the
+// caller having no opinion about the dimension, an empty allow-list is the
+// caller having ruled every value out. The facet pane builds its allow-list
+// by removing the values the reader unticked (see the tui package's
+// filter), so a reader who unticks a dimension's last value hands one of
+// these down -- and reading it as "no opinion" would answer that untick by
+// putting the whole log back on screen.
+func TestAnEmptyAllowListMatchesNothing(t *testing.T) {
+	f := Filter{
+		Providers: map[string]bool{},
+		Levels:    map[logfmt.Level]bool{},
+	}
+	if f.MatchSpan(sp("aws_instance", "aws", "ReadResource", 1)) {
+		t.Error("a span passed a dimension whose allow-list admits no value")
+	}
+	if f.MatchEntry(logfmt.Entry{Level: logfmt.LevelTrace}) {
+		t.Error("an entry passed a level allow-list that admits no level")
+	}
+}

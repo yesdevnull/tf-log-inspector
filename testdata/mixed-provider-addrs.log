@@ -1,13 +1,24 @@
-# SYNTHESISED to exercise a provider address that is NOT in registry form.
+# SYNTHESISED to exercise the two provider-address shapes SIDE BY SIDE, so a
+# filter can keep one and drop the other.
+#
 # terraform-plugin-sdk reports a bare "provider" for tf_provider_addr when a
 # provider is served without a ProviderAddr in its ServeOpts (measured on
 # terraform-provider-github v6.3.1 across 1,104 lines of a real HCP log), and
-# internal/span substitutes the component name in its place -- so this log's
-# one RPC provider is "provider.terraform-provider-github_v6.3.1", which has
-# no "/" and so no derivable provider type.
+# internal/span substitutes the component name in its place -- so one of this
+# log's RPC providers is "provider.terraform-provider-github_v6.3.1", which
+# has no "/" and so no derivable provider type. The other,
+# "registry.terraform.io/hashicorp/local", is in registry form and its type
+# derives from its last segment.
+#
+# Two are needed because the facet pane starts with every value TICKED:
+# leaving one address in the allow-list means unticking the other, so a log
+# with a single provider cannot express "narrowed to this address" at all.
+# The pair also puts the two rules against each other on one fixture -- keep
+# the registry address and the UI tier narrows with it, keep the bare one and
+# the UI tier is left alone (see uiProviderTypes).
 #
 # It carries UI-hook spans under two DIFFERENT implied providers (github and
-# local) so that a rule deriving a type from that address anyway would be
+# local) so that a rule deriving a type from the bare address anyway would be
 # visible: no UI provider can equal any segment of it, so both rows' figures
 # would go to zero at once.
 #
@@ -20,3 +31,4 @@
 {"@level":"info","@message":"local_file.config: Creating...","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:02.200000+10:00","hook":{"resource":{"addr":"local_file.config","module":"","resource":"local_file.config","implied_provider":"local","resource_type":"local_file","resource_name":"config","resource_key":null},"action":"create"},"type":"apply_start"}
 {"@level":"info","@message":"local_file.config: Creation complete after 1s","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03.200000+10:00","hook":{"resource":{"addr":"local_file.config","module":"","resource":"local_file.config","implied_provider":"local","resource_type":"local_file","resource_name":"config","resource_key":null},"action":"create","elapsed_seconds":1,"id_key":"id","id_value":"f-1"},"type":"apply_complete"}
 2026-09-04T09:15:06.400+1000 [TRACE] provider.terraform-provider-github_v6.3.1: Received downstream response: tf_req_id=1a2b3c4d-0001-4a1b-8c2d-000000000001 tf_resource_type=github_repository tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=provider tf_req_duration_ms=3800 @caller=github.com/hashicorp/terraform-plugin-go@v0.23.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2026-09-04T09:15:06.399+1000
+2026-09-04T09:15:03.150+1000 [TRACE] provider.terraform-provider-local_v2.5.1_x5: Received downstream response: tf_req_id=1a2b3c4d-0002-4a1b-8c2d-000000000002 tf_resource_type=local_file tf_rpc=ApplyResourceChange tf_proto_version=5.3 tf_provider_addr=registry.terraform.io/hashicorp/local tf_req_duration_ms=900 @caller=github.com/hashicorp/terraform-plugin-go@v0.23.0/tfprotov5/internal/tf5serverlogging/downstream_request.go:37 @module=sdk.proto timestamp=2026-09-04T09:15:03.149+1000

@@ -116,7 +116,7 @@ const (
 // Model is the bubbletea model for tfli's full-screen interface. It wraps a
 // loaded log; nothing here mutates the log.
 //
-// It is driven through a POINTER and never copied: selectedFacets is a map,
+// It is driven through a POINTER and never copied: excludedFacets is a map,
 // so a copy shares the user's filter with the model it was copied from and
 // a toggle applied to one silently rewrites the other's ranked numbers.
 // Init, Update and View all take pointer receivers for that reason, and
@@ -146,10 +146,14 @@ type Model struct {
 	// the other options' counts would make it hard to see what widening the
 	// filter again would show.
 	facets []model.Facet
-	// selectedFacets holds, per facet dimension name, the values the user
-	// has toggled on. Nothing selected in a dimension means unconstrained;
-	// filter() turns this into the model.Filter every view is built from.
-	selectedFacets map[string]map[string]bool
+	// excludedFacets holds, per facet dimension name, the values the user
+	// has UNTICKED. Every value starts ticked and admitted, so an untouched
+	// pane shows the whole log with every box marked: the checkboxes are a
+	// legend for what the views beside them are showing, not a tally of
+	// picks the reader has accumulated. Nothing excluded in a dimension
+	// leaves it unconstrained; filter() turns this into the model.Filter
+	// every view is built from.
+	excludedFacets map[string]map[string]bool
 	// facetCursor is the pane's highlighted value: which dimension (index
 	// into facets) and which value within it space would toggle, and what
 	// up/down/j/k move when the facet pane has focus.
@@ -370,7 +374,7 @@ func (m *Model) Init() tea.Cmd {
 // Update handles one message and returns the model to render next, which is
 // always the receiver itself. The receiver is a POINTER, so there is exactly
 // one Model: the caches on it (see rowsCache) survive, and a facet toggle --
-// which mutates the selectedFacets map in place -- cannot be written to one
+// which mutates the excludedFacets map in place -- cannot be written to one
 // model while another is rendered.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -411,7 +415,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Type == tea.KeySpace {
 			if m.pane == PaneFacets {
-				m.toggleSelectedFacetValue()
+				m.toggleFacetValue()
 			}
 			return m, nil
 		}

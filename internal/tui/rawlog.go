@@ -151,19 +151,24 @@ func componentProviders(spans []span.Span, entries []logfmt.Entry) map[uint16]st
 // selected would hide precisely the context -- the provider's own
 // surrounding output -- that jumping to a slow call exists to show.
 //
-// With no provider facet selected every entry passes regardless of
-// component. Once one is selected, an entry whose component maps to no
-// provider (Terraform's own core lines, plan output) is hidden: the filter
-// asked for one provider's traffic, and a core line is not that. Such an
-// entry resolves to the empty provider, so it is normalised through
-// model.FacetKey and matched against "(none)" -- the same key the facet
-// pane offers for a span with no provider address -- rather than against a
-// raw "" no checkbox can ever select.
+// With every provider still ticked the dimension is nil -- "no opinion" --
+// and every entry passes regardless of component. Once one is unticked, an
+// entry whose component maps to no provider (Terraform's own core lines,
+// plan output) is hidden: the filter asked for particular providers'
+// traffic, and a core line is not that. Such an entry resolves to the empty
+// provider, so it is normalised through model.FacetKey and matched against
+// "(none)" -- the same key the facet pane offers for a span with no provider
+// address -- rather than against a raw "" no checkbox can ever tick.
+//
+// The nil test is not a length test, for the reason model.Filter's own
+// doc gives: an allow-list that is present but EMPTY is every provider
+// unticked, and admits nothing. Reading that as "no opinion" would answer
+// the reader's last untick by putting the whole log back on screen.
 func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entry) bool {
 	if !f.MatchEntry(e) {
 		return false
 	}
-	if len(f.Providers) == 0 {
+	if f.Providers == nil {
 		return true
 	}
 	return f.Providers[model.FacetKey(compProviders[e.Comp])]

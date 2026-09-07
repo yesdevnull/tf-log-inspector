@@ -83,38 +83,37 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 // The two provider vocabularies are relatable, so the checkbox is
 // TRANSLATED rather than dropped: a UI-hook span's provider is the
 // provider's type name, and a registry address ends in that same type name
-// (see uiProviderTypes). Ticking one provider must therefore keep the UI
-// figures of the resource types that provider serves AND remove the rows
-// belonging to other providers -- rows that do not match the ticked filter,
-// each carrying zeroes in every RPC column.
+// (see uiProviderTypes). Leaving one provider ticked must therefore keep
+// the UI figures of the resource types that provider serves AND remove the
+// rows belonging to the providers unticked beside it -- rows that would
+// otherwise sit there carrying zeroes in every RPC column.
 //
-// two-tier.log is both cases in one fixture: aws_instance has figures in
-// both tiers under the ticked provider, and local_file is a UI-only type
-// under a different one.
+// mixed-provider-addrs.log is both cases in one fixture: local_file has
+// figures in both tiers under the provider left ticked, and
+// github_repository belongs to the one unticked.
 func TestAProviderFacetTranslatesIntoTheUITiersVocabulary(t *testing.T) {
-	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/local")
 	if !m.filterActive() {
-		t.Fatal("ticking the provider facet did not activate a filter")
+		t.Fatal("unticking a provider did not activate a filter")
 	}
 
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 	// Cells in typeColumns' order: resource type, UI res., UI total,
 	// RPC calls, RPC total, RPC max.
-	want := []string{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}
+	want := []string{"local_file", "1", "1.0s", "1", "900ms", "900ms"}
 	got, _ := paneRowStartingWith(t, centre, want[0])
 	if !slices.Equal(got, want) {
-		t.Errorf("with the aws provider ticked, types row for aws_instance = %v, want %v -- the UI tier spells this provider \"aws\" and must still be counted:\n%s", got, want, centre)
+		t.Errorf("narrowed to the local provider, types row for local_file = %v, want %v -- the UI tier spells this provider \"local\" and must still be counted:\n%s", got, want, centre)
 	}
-	if _, _, ok := findPaneRow(centre, "local_file"); ok {
-		t.Errorf("local_file belongs to the local provider but survived an aws-only filter:\n%s", centre)
+	if _, _, ok := findPaneRow(centre, "github_repository"); ok {
+		t.Errorf("github_repository belongs to the unticked provider but survived the filter:\n%s", centre)
 	}
 	if !strings.Contains(centre, "whole seconds") {
 		t.Errorf("the UI-hook resolution caveat went with the UI figures, so nothing on screen qualifies them:\n%s", centre)
 	}
-	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 3 UI spans") {
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "1 of 2 UI spans") {
 		t.Errorf("header = %q, want it to count the UI spans the types view actually shows", header)
 	}
 }
@@ -125,21 +124,22 @@ func TestAProviderFacetTranslatesIntoTheUITiersVocabulary(t *testing.T) {
 // "provider.terraform-provider-github_v6.3.1", whose last segment is a
 // binary name, not a provider type.
 //
-// No type can be derived from it, so ticking it must not narrow the UI tier
-// at all: excluding rows on an untrustworthy derivation is the same wrong
-// answer as excluding them on an untranslated one. bare-provider-addr.log
-// carries UI-hook spans under two different implied providers, so a rule
-// that derived a type from that address anyway would zero both rows at
-// once.
+// No type can be derived from it, so leaving it ticked must not narrow the
+// UI tier at all: excluding rows on an untrustworthy derivation is the same
+// wrong answer as excluding them on an untranslated one.
+// mixed-provider-addrs.log carries UI-hook spans under two different implied
+// providers, so a rule that derived a type from that address anyway would
+// zero both rows at once. It is the same fixture
+// TestAProviderFacetTranslatesIntoTheUITiersVocabulary narrows the other
+// way, so the two rules are asserted against one log.
 func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
-	m := update(t, New(testLog(t, "bare-provider-addr.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	const bare = "provider.terraform-provider-github_v6.3.1"
 	if strings.Contains(bare, "/") {
 		t.Fatalf("fixture assumption changed: %q has a %q, so a provider type could be derived from it", bare, "/")
 	}
-	m = moveFacetCursorTo(t, m, dimProvider, bare)
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	showOnly(t, &m, dimProvider, bare)
 
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 	// Cells in typeColumns' order: resource type, UI res., UI total,
@@ -150,7 +150,7 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
 		if !slices.Equal(got, want) {
-			t.Errorf("with a non-registry provider ticked, types row for %s = %v, want %v -- no provider type can be derived from it, so it must exclude no UI row:\n%s", want[0], got, want, centre)
+			t.Errorf("narrowed to a non-registry provider, types row for %s = %v, want %v -- no provider type can be derived from it, so it must exclude no UI row:\n%s", want[0], got, want, centre)
 		}
 	}
 	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 2 UI spans") {
@@ -164,30 +164,28 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 func TestAnRPCFacetDoesNotZeroTheUITier(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = moveFacetCursorTo(t, m, dimRPC, "ApplyResourceChange")
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	showOnly(t, &m, dimRPC, "ApplyResourceChange")
 
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 	got, _ := paneRowStartingWith(t, centre, "aws_instance")
 	want := []string{"aws_instance", "2", "5.0s", "1", "250ms", "250ms"}
 	if !slices.Equal(got, want) {
-		t.Errorf("with an RPC ticked, types row for aws_instance = %v, want %v -- the RPC filter belongs to the RPC tier alone:\n%s", got, want, centre)
+		t.Errorf("narrowed to one RPC, types row for aws_instance = %v, want %v -- the RPC filter belongs to the RPC tier alone:\n%s", got, want, centre)
 	}
 }
 
 // Resource type IS shared between the tiers -- it is why
-// model.JoinByResourceType keys on it and on nothing else -- so ticking one
-// must narrow BOTH tiers. Without this, "filter the UI tier by less" is
+// model.JoinByResourceType keys on it and on nothing else -- so narrowing to
+// one must narrow BOTH tiers. Without this, "filter the UI tier by less" is
 // satisfied by not filtering it at all.
 func TestATypeFacetNarrowsBothTiers(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	m = moveFacetCursorTo(t, m, dimType, "aws_instance")
-	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	showOnly(t, &m, dimType, "aws_instance")
 
 	rows := m.rows()
 	if len(rows) != 1 || rows[0].cells[0] != "aws_instance" {
-		t.Fatalf("ticking resource type aws_instance left %d rows, want just that type: %v", len(rows), rows)
+		t.Fatalf("narrowing to resource type aws_instance left %d rows, want just that type: %v", len(rows), rows)
 	}
 	// local_file's UI-hook resource is the one the type filter has to
 	// remove: it belongs to no RPC-tier span, so only the UI slice can

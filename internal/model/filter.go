@@ -19,9 +19,17 @@ type Facet struct {
 	Values []FacetValue
 }
 
-// Filter is a cumulative facet selection. An empty or nil map means the
-// dimension is unconstrained -- "no opinion", never "match nothing", so a
-// zero Filter passes everything.
+// Filter is a cumulative facet selection: an allow-list per dimension, all
+// of which must hold.
+//
+// A NIL map is the caller having no opinion about that dimension, so a zero
+// Filter passes everything. An EMPTY non-nil map is the opposite -- an
+// allow-list that admits no value -- and matches nothing. The two are told
+// apart rather than both read as "unconstrained" because the facet pane
+// builds its allow-lists by removing the values the reader unticked, and a
+// reader who unticks a dimension's last value hands down an empty one:
+// reading that as "no opinion" would answer their last untick by putting
+// the whole log back on screen.
 type Filter struct {
 	Providers map[string]bool
 	RPCs      map[string]bool
@@ -32,9 +40,11 @@ type Filter struct {
 // selected reports whether a value passes one dimension. The value is
 // normalised through FacetKey, so it is compared against the same key
 // FacetsForSpans offered the user as a checkbox: a span with no value for
-// the dimension passes when "(none)" is selected, and only then.
+// the dimension passes when "(none)" is selected, and only then. A nil set
+// is no opinion and passes everything; an empty one admits nothing (see
+// Filter).
 func selected(set map[string]bool, v string) bool {
-	if len(set) == 0 {
+	if set == nil {
 		return true
 	}
 	return set[FacetKey(v)]
@@ -51,7 +61,7 @@ func (f Filter) MatchSpan(s span.Span) bool {
 // MatchEntry applies the level dimension. Span dimensions do not apply to a
 // raw entry: most entries belong to no span at all.
 func (f Filter) MatchEntry(e logfmt.Entry) bool {
-	if len(f.Levels) == 0 {
+	if f.Levels == nil {
 		return true
 	}
 	return f.Levels[e.Level]

@@ -108,8 +108,8 @@ func TestSpaceOnlyTogglesFromTheFacetPane(t *testing.T) {
 		if got := len(m.rows()); got != before {
 			t.Errorf("space with %v focused left %d rows, want the unfiltered %d", want, got, before)
 		}
-		if len(m.selectedFacets) != 0 {
-			t.Errorf("space with %v focused selected %v, want nothing", want, m.selectedFacets)
+		if len(m.excludedFacets) != 0 {
+			t.Errorf("space with %v focused unticked %v, want nothing", want, m.excludedFacets)
 		}
 	}
 }
@@ -127,11 +127,11 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 	m := New(testLog(t, "two-tier.log"), "x.log")
 	out := m.renderFacets(60, 40) // wide and tall enough that nothing is clipped or windowed away
 	for _, want := range []string{
-		"[ ] registry.terraform.io/hashicorp/aws  3",
-		"[ ] ApplyResourceChange  2",
-		"[ ] PlanResourceChange  1",
-		"[ ] aws_instance  2",
-		"[ ] aws_subnet  1",
+		"[x] registry.terraform.io/hashicorp/aws  3",
+		"[x] ApplyResourceChange  2",
+		"[x] PlanResourceChange  1",
+		"[x] aws_instance  2",
+		"[x] aws_subnet  1",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("facet pane missing the value line %q:\n%s", want, out)
@@ -140,9 +140,13 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 }
 
 // Without a visible cursor, space's "toggle whatever the cursor points at"
-// is unusable -- the user cannot tell what they are about
-// to select. two-providers.log's provider values are sorted alphabetically
-// (aws, then google), so the cursor starts on the aws value.
+// is unusable -- the user cannot tell what they are about to untick.
+// two-providers.log's provider values are sorted alphabetically (aws, then
+// google), so the cursor starts on the aws value and one j moves it onto
+// google. Unticking there must remove GOOGLE's row and leave aws's: a space
+// that acted on the cursor's value and a space that acted on the dimension's
+// first value both leave one row, and only the row's identity tells them
+// apart.
 func TestRenderFacetsHighlightsTheCursorValue(t *testing.T) {
 	m := focusFacets(t, New(testLog(t, "two-providers.log"), "x.log"))
 	out := m.renderFacets(50, 20)
@@ -176,10 +180,10 @@ func TestFacetCursorMovesAndSpaceTogglesValueUnderCursor(t *testing.T) {
 
 	rows := m.rows()
 	if len(rows) != 1 {
-		t.Fatalf("got %d provider rows after selecting one value, want 1: %+v", len(rows), rows)
+		t.Fatalf("got %d provider rows after unticking one value, want 1: %+v", len(rows), rows)
 	}
-	if rows[0].cells[0] != "registry.terraform.io/hashicorp/google" {
-		t.Errorf("selected provider row = %q, want the google provider -- space acted on the wrong value", rows[0].cells[0])
+	if rows[0].cells[0] != "registry.terraform.io/hashicorp/aws" {
+		t.Errorf("surviving provider row = %q, want the aws provider -- space acted on the wrong value", rows[0].cells[0])
 	}
 }
 
@@ -428,6 +432,74 @@ func moveFacetCursorTo(t *testing.T, m Model, dim, value string) Model {
 	return m
 }
 
+// untick excludes exactly the named values of one dimension, as if the
+// reader had moved the facet cursor onto each and pressed space. The facet
+// maps are unexported, so tests in this package that want a particular
+// filter state set it through these two helpers rather than driving the
+// cursor across the pane.
+func untick(t *testing.T, m *Model, dim string, values ...string) {
+	t.Helper()
+	offered := map[string]bool{}
+	for _, f := range m.facets {
+		if f.Name != dim {
+			continue
+		}
+		for _, v := range f.Values {
+			offered[v.Value] = true
+		}
+	}
+	excluded := map[string]bool{}
+	for _, v := range values {
+		if !offered[v] {
+			t.Fatalf("dimension %q offers no value %q, so unticking it is not a filter the reader could reach", dim, v)
+		}
+		excluded[v] = true
+	}
+	if m.excludedFacets == nil {
+		m.excludedFacets = map[string]map[string]bool{}
+	}
+	if len(excluded) == 0 {
+		delete(m.excludedFacets, dim)
+	} else {
+		m.excludedFacets[dim] = excluded
+	}
+	m.invalidateRows()
+}
+
+// showOnly narrows one dimension to exactly the named values by unticking
+// every OTHER value it offers -- the complement of untick, for tests whose
+// subject is what survives a filter rather than what it removes. Named with
+// no values at all, it unticks the whole dimension, which is the filter
+// that admits nothing.
+func showOnly(t *testing.T, m *Model, dim string, values ...string) {
+	t.Helper()
+	keep := map[string]bool{}
+	for _, v := range values {
+		keep[v] = true
+	}
+	var drop []string
+	var kept int
+	for _, f := range m.facets {
+		if f.Name != dim {
+			continue
+		}
+		for _, v := range f.Values {
+			if keep[v.Value] {
+				kept++
+				continue
+			}
+			drop = append(drop, v.Value)
+		}
+	}
+	if kept != len(keep) {
+		t.Fatalf("dimension %q does not offer every one of %v, so this is not the filter the test means", dim, values)
+	}
+	if len(drop) == 0 {
+		t.Fatalf("dimension %q offers nothing beyond %v, so narrowing to them filters nothing", dim, values)
+	}
+	untick(t, m, dim, drop...)
+}
+
 // The spec names levels as one of the facet dimensions and its mock-up
 // draws a LEVELS section. A level belongs to an ENTRY, not to a span, so
 // the dimension is built here from the log's entries and its counts are
@@ -488,29 +560,34 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 		t.Fatal("fixture assumption changed: the TRACE-only line this test narrows away is not shown unfiltered")
 	}
 
-	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelDebug.String())
+	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelTrace.String())
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 
 	rawAfter := m.renderRawLog(200, 100)
 	if rawAfter == rawBefore {
-		t.Errorf("selecting a level left the raw log unchanged:\n%s", rawAfter)
+		t.Errorf("unticking a level left the raw log unchanged:\n%s", rawAfter)
 	}
 	if strings.Contains(rawAfter, "Called downstream") {
-		t.Errorf("an entry outside the selected level survived the filter:\n%s", rawAfter)
+		t.Errorf("an entry at the unticked level survived the filter:\n%s", rawAfter)
 	}
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if got := m.rows(); len(got) != len(callsBefore) {
-		t.Errorf("selecting a level changed the rollup rows from %d to %d -- a span has no level to filter on", len(callsBefore), len(got))
+		t.Errorf("unticking a level changed the rollup rows from %d to %d -- a span has no level to filter on", len(callsBefore), len(got))
 	}
 }
 
-// The facet pane advertises a count beside every value, and ticking that
-// value must list exactly that many calls. The two numbers come from
-// different code paths -- model.FacetsForSpans counts them,
-// model.Filter.MatchSpan filters by them -- so a value the pane offers but
-// the filter cannot match shows a positive count against an empty table,
-// which reads as "this dimension really has no calls" rather than as a bug.
+// The facet pane advertises a count beside every value, and unticking that
+// value must hide exactly that many calls and keep every other. Each span
+// dimension partitions the spans -- a span has one provider, one RPC, one
+// resource type -- so the complement of the advertised count is what must
+// remain, which is a sharper claim than "the list got shorter": a filter
+// dropping the wrong rows, or more rows than it named, still gets shorter.
+//
+// The two numbers come from different code paths -- model.FacetsForSpans
+// counts them, model.Filter.MatchSpan filters by them -- so a value the
+// pane offers but the filter cannot match hides nothing when unticked,
+// leaving a box the reader can clear with no effect on screen.
 //
 // "(none)" is the value that broke: a provider-level RPC such as
 // GetProviderSchema belongs to no resource type, so its span's ResourceType
@@ -522,8 +599,10 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 // future dimension whose offered key and matched key disagree fails here.
 // The level dimension is excluded deliberately and not by oversight -- its
 // counts are ENTRY counts and it filters the raw log only (see levelFacet).
-func TestTickingAFacetValueListsItsAdvertisedCount(t *testing.T) {
+func TestUntickingAFacetValueHidesExactlyItsAdvertisedCount(t *testing.T) {
 	facets := New(testLog(t, "provider-level-rpc.log"), "x.log").facets
+	base := callsModel(t, "provider-level-rpc.log", "x.log")
+	all := len(base.rows())
 	var sawNone bool
 	for _, f := range facets {
 		if f.Name == dimLevel {
@@ -536,14 +615,14 @@ func TestTickingAFacetValueListsItsAdvertisedCount(t *testing.T) {
 			if v.Value == model.FacetKey("") {
 				sawNone = true
 			}
-			// A fresh model per value: selectedFacets is a map, so a
+			// A fresh model per value: excludedFacets is a map, so a
 			// toggle applied to one model is visible to any other sharing
 			// it, and each value must be measured on its own.
 			m := callsModel(t, "provider-level-rpc.log", "x.log")
 			m = moveFacetCursorTo(t, m, f.Name, v.Value)
 			m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-			if got := len(m.rows()); got != v.Count {
-				t.Errorf("%s=%q advertises %d calls, ticking it lists %d", f.Name, v.Value, v.Count, got)
+			if got, want := len(m.rows()), all-v.Count; got != want {
+				t.Errorf("%s=%q advertises %d calls, unticking it leaves %d of %d, want %d", f.Name, v.Value, v.Count, got, all, want)
 			}
 		}
 	}
@@ -577,7 +656,54 @@ func TestFacetCursorStartsOnADimensionThatHasValues(t *testing.T) {
 		t.Errorf("no cursor bar drawn anywhere in the facet pane:\n%s", out)
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	if !m.selectedFacets[dim][val] {
-		t.Errorf("space did not select %s=%q, the value the cursor points at", dim, val)
+	if !m.excludedFacets[dim][val] {
+		t.Errorf("space did not untick %s=%q, the value the cursor points at", dim, val)
+	}
+}
+
+// Every facet value starts TICKED, because the pane's checkboxes say what is
+// currently visible rather than what has been picked out. A pane of empty
+// boxes above a list showing everything states the opposite of what the
+// screen is doing, and leaves the reader to discover by experiment which
+// direction the boxes run in. Starting them all ticked makes unticking the
+// filtering action, and the pane a legend for the view beside it.
+func TestEveryFacetValueStartsTicked(t *testing.T) {
+	m := New(testLog(t, "provider-level-rpc.log"), "x.log")
+	m = focusFacets(t, m)
+	out := m.renderFacets(60, 40)
+	if strings.Contains(out, "[ ]") {
+		t.Errorf("an untouched facet pane draws an empty checkbox:\n%s", out)
+	}
+	if !strings.Contains(out, "[x]") {
+		t.Fatalf("no ticked checkbox drawn at all, so the assertion above holds vacuously:\n%s", out)
+	}
+	if m.filterActive() {
+		t.Error("an untouched facet pane reports an active filter, so every pane will explain an empty list as filtered")
+	}
+}
+
+// Unticking a dimension's every value shows NOTHING, not everything. The
+// reading has to follow the boxes: no box ticked is no value admitted. The
+// opposite -- treating an exhausted dimension as unconstrained, which is
+// what an allow-list built by exclusion falls into if empty means "no
+// opinion" -- would answer the reader's last untick by putting every row
+// back on screen.
+func TestUntickingEveryValueInADimensionShowsNothing(t *testing.T) {
+	m := callsModel(t, "provider-level-rpc.log", "x.log")
+	var dim model.Facet
+	for _, f := range m.facets {
+		if f.Name == dimProvider {
+			dim = f
+		}
+	}
+	if len(dim.Values) == 0 {
+		t.Fatalf("fixture assumption changed: dimension %q has no values to untick", dimProvider)
+	}
+	for _, v := range dim.Values {
+		m = moveFacetCursorTo(t, m, dim.Name, v.Value)
+		m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	}
+	if got := len(m.rows()); got != 0 {
+		t.Errorf("every %s unticked still lists %d calls, want none", dimProvider, got)
 	}
 }
