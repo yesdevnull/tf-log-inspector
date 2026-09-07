@@ -785,6 +785,28 @@ func TestSoloAgainRestoresItsOwnDimensionAndNoOther(t *testing.T) {
 	}
 }
 
+// o reads the STATE of a dimension, not how it got there. A reader who
+// unticked every value but one with space alone has reached the state o
+// writes, so o restores from it -- there is no hidden "soloed" mode that
+// could disagree with the checkboxes on screen about which of two identical
+// panes the reader is looking at.
+func TestSoloRestoresADimensionNarrowedBySpaceAlone(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = focusFacets(t, m)
+	untick(t, &m, dimProvider, "registry.terraform.io/hashicorp/google")
+	if got := len(m.rows()); got != 1 {
+		t.Fatalf("unticking google left %d provider rows, want 1 -- the state o is meant to read", got)
+	}
+
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	if got := len(m.rows()); got != 2 {
+		t.Errorf("o over a dimension already showing one value left %d rows, want the unfiltered 2", got)
+	}
+}
+
 // o acts only from the facet pane, exactly as space does. The facet cursor
 // stays drawn -- dimmed -- in an unfocused pane, so an o accepted from the
 // list or the detail pane rewrites the ranked numbers this tool exists to
