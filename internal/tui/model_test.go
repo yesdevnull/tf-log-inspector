@@ -665,3 +665,76 @@ func TestARememberedCursorIsClampedToTheRowsThatRemain(t *testing.T) {
 		t.Errorf("the calls view came back on row %d of %d rows", m.Selected(), n)
 	}
 }
+
+// Backslash drops the scope and leaves the position, so the entry on the
+// pane's first line stays there and the rest of the log resumes beneath it.
+// What PRECEDED it does not appear: renderRawLog draws downward only, so
+// unscoping reveals what follows and never what comes before, which is one
+// scroll up away.
+func TestBackslashDropsTheScopeAndKeepsThePosition(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.raw.scope == nil {
+		t.Fatal("Enter built no scope")
+	}
+	top, topLine := m.TopEntry(), m.TopLine()
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if m.raw.scope != nil {
+		t.Errorf("the scope survived a backslash")
+	}
+	if m.TopEntry() != top || m.TopLine() != topLine {
+		t.Errorf("position moved from %d+%d to %d+%d", top, topLine, m.TopEntry(), m.TopLine())
+	}
+}
+
+// Backslash is inert with no scope live, and inert outside the raw log.
+// Advertising a key that does nothing is the defect this package removes
+// wherever it finds it; doing something invisible is worse.
+func TestBackslashIsInertWithoutAScope(t *testing.T) {
+	base := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	for _, c := range []struct {
+		name string
+		m    Model
+	}{
+		{"calls view", base},
+		{"raw log reached by its own key", update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})},
+	} {
+		before := c.m.View()
+		after := update(t, c.m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+		if after.View() != before {
+			t.Errorf("%s: backslash changed the frame", c.name)
+		}
+	}
+}
+
+// setView drops the scope, exactly as it drops the return. Reaching a view by
+// its own key is the reader saying where they want to be, and the scope is
+// part of the jump that took them elsewhere. Left standing, Enter then 1 then
+// 6 gives a scoped raw log with no return behind it: Esc takes the
+// clearFilters branch and does not drop it, and only backslash gets the
+// reader out -- a key they may never have pressed.
+func TestAViewChangeDropsTheScope(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	if m.raw.scope != nil {
+		t.Errorf("the scope survived a view change of the reader's own")
+	}
+}
+
+// Esc returns and drops the scope together. The scope belongs to the jump
+// that made it, so this is not a third meaning for Esc -- it is part of the
+// first.
+func TestEscDropsTheScopeWithTheReturn(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewCalls {
+		t.Errorf("Esc left the view at %v", m.view)
+	}
+	if m.raw.scope != nil {
+		t.Errorf("the scope survived the return")
+	}
+}
