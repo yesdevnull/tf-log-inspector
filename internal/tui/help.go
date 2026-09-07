@@ -65,6 +65,7 @@ var helpGroups = func() []helpGroup {
 		}},
 		{title: "FILTERING", entries: []helpEntry{
 			{keys: "␣ Space", what: "untick the value under the cursor to hide it"},
+			{keys: "o", what: "show only that value -- again undoes it"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
 			{keys: "Esc", what: "clear every active filter -- or close this help"},
 			{keys: "/", what: "search the raw log for a pattern"},

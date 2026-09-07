@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -256,6 +257,61 @@ func (m *Model) toggleFacetValue() {
 		}
 	} else {
 		inner[val] = true
+	}
+	m.invalidateRows()
+}
+
+// soloFacetValue narrows the cursor's dimension to the value the cursor is
+// on, by unticking every OTHER value that dimension offers, and invalidates
+// any cached rows so the next render reflects the change. Other dimensions
+// are left exactly as they were, so it composes with the cumulative rule
+// rather than overriding it: soloing a provider does not undo a resource
+// type the reader narrowed to earlier.
+//
+// It exists because every value starts ticked (see Model.excludedFacets),
+// which makes narrowing to ONE value of a dimension cost a press of space
+// for every other value it offers -- nineteen of them on a real capture's
+// provider list. Space is still the way to hide one value; this is the way
+// to keep one.
+//
+// Pressed again on a value that is already its dimension's only ticked one,
+// it puts the whole dimension back. The alternative undo is Esc, which
+// clears every dimension at once, so without this the price of soloing a
+// provider is whatever else the reader had narrowed. "Already soloed" is
+// compared against the exclusions this would write, not against a flag, so
+// a dimension the reader narrowed to one value with space alone is restored
+// by o just the same -- the two routes reach one state and o reads the
+// state, not how it was reached.
+//
+// A dimension offering a single value has no others to untick, so soloing
+// it leaves the dimension unconstrained rather than holding an empty
+// exclusion set -- the same shape toggleFacetValue keeps, and the one
+// allowedFacetValues and filterActive both read.
+func (m *Model) soloFacetValue() {
+	dim, val, ok := m.cursorFacetValue()
+	if !ok {
+		return
+	}
+	others := map[string]bool{}
+	for _, f := range m.facets {
+		if f.Name != dim {
+			continue
+		}
+		for _, v := range f.Values {
+			if v.Value != val {
+				others[v.Value] = true
+			}
+		}
+	}
+	if len(others) == 0 || maps.Equal(m.excludedFacets[dim], others) {
+		// delete is a no-op on a nil map, so the untouched case allocates
+		// nothing.
+		delete(m.excludedFacets, dim)
+	} else {
+		if m.excludedFacets == nil {
+			m.excludedFacets = map[string]map[string]bool{}
+		}
+		m.excludedFacets[dim] = others
 	}
 	m.invalidateRows()
 }

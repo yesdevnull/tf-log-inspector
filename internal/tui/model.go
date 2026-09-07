@@ -419,6 +419,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// o narrows the cursor's dimension to the one value under the
+		// cursor, and is bound to the facet pane for the same reason space
+		// is: the facet cursor stays drawn, dimmed, in an unfocused pane,
+		// so a key accepted from the list or the detail pane would rewrite
+		// the ranked numbers with nothing on screen behaving like a
+		// control.
+		if msg.String() == "o" {
+			if m.pane == PaneFacets {
+				m.soloFacetValue()
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true

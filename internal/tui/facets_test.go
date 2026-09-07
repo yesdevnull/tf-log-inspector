@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
@@ -700,5 +701,114 @@ func TestEveryFacetValueStartsTicked(t *testing.T) {
 	}
 	if m.filterActive() {
 		t.Error("an untouched facet pane reports an active filter, so every pane will explain an empty list as filtered")
+	}
+}
+
+// o narrows a dimension to the value under the cursor by unticking every
+// OTHER value it offers -- all of them, not just the next one -- and leaves
+// the rest of the pane alone. two-tier.log's level dimension is the one
+// with three values, which is what tells "unticked the others" apart from
+// "unticked one other".
+func TestSoloNarrowsADimensionToTheValueUnderTheCursor(t *testing.T) {
+	m := New(testLog(t, "two-tier.log"), "x.log")
+	levels := map[string]bool{}
+	for _, f := range m.facets {
+		if f.Name == dimLevel {
+			for _, v := range f.Values {
+				levels[v.Value] = true
+			}
+		}
+	}
+	if len(levels) < 3 {
+		t.Fatalf("fixture assumption changed: the level dimension offers %d values, want at least 3 so soloing can leave more than one unticked", len(levels))
+	}
+
+	m = moveFacetCursorTo(t, m, dimLevel, logfmt.LevelTrace.String())
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	delete(levels, logfmt.LevelTrace.String())
+	if got := m.excludedFacets[dimLevel]; !maps.Equal(got, levels) {
+		t.Errorf("soloing TRACE unticked %v, want every other level (%v)", got, levels)
+	}
+	if len(m.excludedFacets) != 1 {
+		t.Errorf("soloing one dimension touched %v, want the level dimension alone", m.excludedFacets)
+	}
+}
+
+// What the reader sees of it: one keystroke leaves the views showing the
+// cursor's value and nothing else. This is the whole point of the key --
+// every value starts ticked, so reaching one provider out of twenty
+// otherwise costs nineteen presses of space.
+func TestSoloNarrowsTheViewsToTheCursorValue(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}}) // the providers view: one row per provider
+	if before := len(m.rows()); before != 2 {
+		t.Fatalf("fixture assumption changed: %d provider rows, want 2 so soloing one is visible", before)
+	}
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	rows := m.rows()
+	if len(rows) != 1 {
+		t.Fatalf("soloing one provider left %d rows, want 1: %+v", len(rows), rows)
+	}
+	if rows[0].cells[0] != "registry.terraform.io/hashicorp/aws" {
+		t.Errorf("surviving provider row = %q, want the one the cursor was on", rows[0].cells[0])
+	}
+}
+
+// o pressed again on the value it soloed puts that dimension back, and only
+// that dimension. Esc is the other way to undo a solo and it clears the
+// WHOLE pane, so without this the cost of soloing a provider is the resource
+// type the reader narrowed to five minutes earlier.
+func TestSoloAgainRestoresItsOwnDimensionAndNoOther(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	// A level exclusion is the one that survives visibly: levels narrow the
+	// raw log and no span (see levelFacet), so it cannot be confused with
+	// the provider filter being restored beneath it.
+	m = focusFacets(t, m)
+	untick(t, &m, dimLevel, logfmt.LevelTrace.String())
+
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	if got := len(m.rows()); got != 2 {
+		t.Errorf("soloing twice left %d provider rows, want the unfiltered 2", got)
+	}
+	if _, still := m.excludedFacets[dimProvider]; still {
+		t.Errorf("the provider dimension is still narrowed after a second o: %v", m.excludedFacets)
+	}
+	if !m.excludedFacets[dimLevel][logfmt.LevelTrace.String()] {
+		t.Errorf("a second o cleared the level dimension too: %v, want TRACE still unticked", m.excludedFacets)
+	}
+}
+
+// o acts only from the facet pane, exactly as space does. The facet cursor
+// stays drawn -- dimmed -- in an unfocused pane, so an o accepted from the
+// list or the detail pane rewrites the ranked numbers this tool exists to
+// report with nothing on screen that was behaving like a control.
+func TestSoloOnlyActsFromTheFacetPane(t *testing.T) {
+	base := update(t, New(testLog(t, "two-providers.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	before := len(base.rows())
+	if before < 2 {
+		t.Fatalf("fixture assumption changed: %d call rows, want at least 2 so a stray solo would be visible", before)
+	}
+	for _, want := range []Pane{PaneList, PaneDetail} {
+		m := base
+		for i := 0; i < int(paneCount) && m.Focus() != want; i++ {
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		}
+		if m.Focus() != want {
+			t.Fatalf("focus never reached %v", want)
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+		if got := len(m.rows()); got != before {
+			t.Errorf("o with %v focused left %d rows, want the unfiltered %d", want, got, before)
+		}
+		if len(m.excludedFacets) != 0 {
+			t.Errorf("o with %v focused unticked %v, want nothing", want, m.excludedFacets)
+		}
 	}
 }
