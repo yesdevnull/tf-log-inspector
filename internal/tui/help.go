@@ -30,8 +30,10 @@ type helpGroup struct {
 	entries []helpEntry
 }
 
-// helpTitle names the screen. It survives every height cut, the same way
-// the detail pane's title does.
+// helpTitle names the screen. It is inset into the pane row's top rule
+// rather than drawn in the pane's own space, the same way every other pane
+// is named, so it survives every height cut without costing the key table a
+// line.
 const helpTitle = "KEYS"
 
 // helpGroups is the key table, in the order a reader meets the interface:
@@ -136,5 +138,5 @@ func renderHelp(w, h int) string {
 		}
 		sections = append(sections, lines)
 	}
-	return strings.Join(fitPaneSections(styles.title.Render(clipWidth(helpTitle, w)), sections, w, h), "\n")
+	return strings.Join(fitPaneSections(sections, w, h), "\n")
 }

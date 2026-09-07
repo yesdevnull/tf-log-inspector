@@ -1,12 +1,34 @@
-[1;36mtfli -- plan.log -- 3 RPC spans, 0 UI spans[0m
-
-[1;36mTIMELINE (rpc)[0m
+[1;36mtfli · plan.log · 3 RPC spans, 0 UI spans[0m
+[2m──[0m[1;36m TIMELINE (rpc) [0m[2m──────────────────────────────────────────[0m
 [7maws/1    [0m[32m     ░███████████     ░████████████████████████████[0m
 google/1 [34m        ▒██████████▓                               [0m
          0s                                             9.0s
-busy 7.5s of 9.0s (83%)
-waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2
-nothing running, 0s–1.0s — before any call
+busy 7.5s of 9.0s (83%)                                     
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2            
+nothing running, 0s–1.0s — before any call                  
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+[2m────────────────────────────────────────────────────────────[0m
 
 [2mDurations here are measured under logging, which is not[0m
 [2mfree: one workspace planned in 24.1s unlogged and 522.2s[0m

@@ -174,7 +174,7 @@ func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
 				if n := len(strings.Split(view, "\n")); n > h {
 					t.Errorf("%s at %dx%d: View() is %d lines, which loses its top %d:\n%s", c.name, w, h, n, n-h, view)
 				}
-				if !strings.HasPrefix(unstyled(view), "tfli -- ") {
+				if !strings.HasPrefix(unstyled(view), "tfli · ") {
 					t.Errorf("%s at %dx%d: View() does not start with the header line:\n%s", c.name, w, h, view)
 				}
 			}
@@ -196,7 +196,7 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("View() at height 2 is %d lines, want 2:\n%s", len(lines), view)
 	}
-	if !strings.HasPrefix(unstyled(lines[0]), "tfli -- x.log") {
+	if !strings.HasPrefix(unstyled(lines[0]), "tfli · x.log") {
 		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
 	}
 	// The surviving footer line must be the ACTION line, not the view-key
@@ -925,7 +925,7 @@ func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
 // whole log's; with no filter it must read as the plain count it always did,
 // since "2 of 2" on every frame is noise that says nothing.
 func TestHeaderReportsFilteredCountsOnlyWhileAFilterIsActive(t *testing.T) {
-	const unfiltered = "tfli -- x.log -- 2 RPC spans, 0 UI spans"
+	const unfiltered = "tfli · x.log · 2 RPC spans, 0 UI spans"
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	if got := header(&m); got != unfiltered {
 		t.Fatalf("fixture assumption changed: unfiltered header = %q, want %q", got, unfiltered)
@@ -935,7 +935,7 @@ func TestHeaderReportsFilteredCountsOnlyWhileAFilterIsActive(t *testing.T) {
 	// they order by value ascending), which carries one of the two spans.
 	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	if want := "tfli -- x.log -- 1 of 2 RPC spans, 0 of 0 UI spans"; header(&m) != want {
+	if want := "tfli · x.log · 1 of 2 RPC spans, 0 of 0 UI spans"; header(&m) != want {
 		t.Errorf("header under an active filter = %q, want %q -- nothing on screen says the rankings are narrowed", header(&m), want)
 	}
 
@@ -1070,11 +1070,11 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 // wrong row goes unnoticed.
 func detailBody(t *testing.T, m Model, wantTitle string, w, h int) string {
 	t.Helper()
-	lines := strings.Split(unstyled(m.renderDetail(w, h)), "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], wantTitle) {
-		t.Fatalf("detail pane is not headed %q:\n%s", wantTitle, strings.Join(lines, "\n"))
+	title, body := m.renderDetail(w, h)
+	if title != wantTitle {
+		t.Fatalf("detail pane is headed %q, want %q:\n%s", title, wantTitle, body)
 	}
-	return strings.TrimRight(strings.Join(lines[1:], "\n"), " \n")
+	return strings.TrimRight(unstyled(body), " \n")
 }
 
 // selectRow moves the list cursor down to the row whose first cell is want,
@@ -1593,7 +1593,8 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	// A rollup row, since only a rollup pane has a slowest-call section
 	// beneath an aggregate for a short pane to choose between.
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	full := strings.Split(unstyled(m.renderDetail(50, 40)), "\n")
+	_, whole := m.renderDetail(50, 40)
+	full := strings.Split(unstyled(whole), "\n")
 	// The blank separator, the heading, and the call beneath it: a field is
 	// two lines now, which is what makes the middle height -- heading drawn,
 	// value gone -- reachable at all.
@@ -1610,7 +1611,8 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	}
 
 	for h := 1; h <= len(full)+2; h++ {
-		lines := strings.Split(unstyled(m.renderDetail(50, h)), "\n")
+		_, got := m.renderDetail(50, h)
+		lines := strings.Split(unstyled(got), "\n")
 		if n := len(lines); n > h {
 			t.Errorf("height %d: the pane is %d lines:\n%s", h, n, strings.Join(lines, "\n"))
 		}
@@ -1626,11 +1628,15 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 				t.Errorf("height %d rendered:\n%s\n\nwant the aggregate and a cut mark\n%s", h, strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		default:
-			// Not even room for the aggregate. The title survives, since it
-			// names the pane, and every height but 1 -- which has no line to
-			// spare -- marks the cut on its last line.
+			// Not even room for the aggregate. The FIRST section is
+			// appended whatever the budget, so the pane shows as much of
+			// its most important block as fits rather than nothing at all,
+			// and every height but 1 -- which has no line to spare -- marks
+			// the cut on its last line. The pane's name is not at stake
+			// here: it is inset into the row's top rule, outside this
+			// budget entirely.
 			if lines[0] != full[0] {
-				t.Errorf("height %d gave up the pane's title: %q", h, lines[0])
+				t.Errorf("height %d gave up the pane's first line: %q", h, lines[0])
 			}
 			if h > 1 && lines[h-1] != moreBelowMark {
 				t.Errorf("height %d does not mark the cut on its last line:\n%s", h, strings.Join(lines, "\n"))
@@ -1745,8 +1751,9 @@ func TestTheDetailPanePlaceholderMeansThereIsNoSelection(t *testing.T) {
 //
 // The titles are asserted in the RENDERED frame, not through renderDetail,
 // because the title is also where the detail pane carries keyboard focus:
-// a title composed correctly and then lost to the pane's own width or focus
-// styling would still leave the frame mislabelled.
+// a title composed correctly and then lost to the rule it is inset into, to
+// the pane's own width, or to the focus styling would still leave the frame
+// mislabelled.
 func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 	base := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	for _, c := range []struct {
@@ -1759,7 +1766,7 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 		{'6', noSelectionTitle},  // the raw log has no row to describe
 	} {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
-		title := strings.TrimRight(strings.SplitN(detailPaneOf(m.View()), "\n", 2)[0], " ")
+		title := paneTitlesOf(t, m.View())[detailPaneIndex]
 		if title != c.title {
 			t.Errorf("view %c: detail pane is headed %q, want %q", c.key, title, c.title)
 		}
@@ -1770,6 +1777,33 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 // same way centrePaneOf is the centre's. The three panes render overlapping
 // values at their own widths, so an assertion about one of them has to be
 // made against that one.
+// paneTitlesOf reads the names inset into a rendered frame's top rule, one
+// per pane, left to right. That rule is where every pane is named, so it is
+// where an assertion about a pane's title has to look.
+//
+// The rule is pinned at line 1 -- immediately under the header. Finding it
+// by shape instead would be finding it by the very characters this is
+// checking the composition of.
+func paneTitlesOf(t *testing.T, view string) []string {
+	t.Helper()
+	lines := strings.Split(unstyled(view), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("frame of %d lines has no top rule", len(lines))
+	}
+	var titles []string
+	for _, segment := range strings.Split(lines[1], paneRuleTopSep) {
+		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule)))
+	}
+	return titles
+}
+
+// The panes' positions in a three-pane frame, for the assertions that read
+// one pane's title out of the top rule.
+const (
+	centrePaneIndex = 1
+	detailPaneIndex = 2
+)
+
 func detailPaneOf(view string) string {
 	var detail []string
 	for _, line := range strings.Split(unstyled(view), "\n") {
@@ -1790,7 +1824,7 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	for _, b := range views {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
-		title := strings.TrimRight(strings.SplitN(centrePaneOf(m.View()), "\n", 2)[0], " ")
+		title := paneTitlesOf(t, m.View())[centrePaneIndex]
 		want := b.title
 		if b.view == ViewTimeline {
 			// The timeline's rendered title names the TIER it draws (see
@@ -2391,7 +2425,7 @@ func TestEveryLineExplainingAnEmptyPaneIsDrawnAsANote(t *testing.T) {
 	// only a selection that stands for nothing.
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	m.rowsCache, m.rowsCached, m.selected = []row{{cells: []string{"x"}, spanIdx: noSpanIdx}}, true, 0
-	out := m.renderDetail(50, 20)
+	_, out := m.renderDetail(50, 20)
 	if !strings.Contains(unstyled(out), noSelectionNote) {
 		t.Fatalf("the detail pane draws no placeholder, so there is nothing here to be marked:\n%s", out)
 	}
@@ -2532,8 +2566,10 @@ func TestAPaneWithMoreToShowSaysSoRatherThanMarkingACut(t *testing.T) {
 		t.Fatalf("moreBelowMark is %q, which does not say there is more to show", moreBelowMark)
 	}
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	full := strings.Split(unstyled(m.renderDetail(50, 40)), "\n")
-	short := strings.Split(unstyled(m.renderDetail(50, len(full)-2)), "\n")
+	_, whole := m.renderDetail(50, 40)
+	full := strings.Split(unstyled(whole), "\n")
+	_, cut := m.renderDetail(50, len(full)-2)
+	short := strings.Split(unstyled(cut), "\n")
 	if last := short[len(short)-1]; last != moreBelowMark {
 		t.Errorf("a pane with content below the fold ends on %q, want %q", last, moreBelowMark)
 	}
@@ -2584,6 +2620,166 @@ func TestTheHelpNamesTheKeysThatHaveNoFooterHint(t *testing.T) {
 		}
 		if !named {
 			t.Errorf("the help's key column does not name %q, which no footer hint advertises either:\n%s", key, rendered)
+		}
+	}
+}
+
+// paneSeparatorColumns are the columns a three-pane row at width w puts its
+// separators in, computed from the pane widths rather than read off a
+// rendered frame: what the rules have to line up WITH is the arithmetic
+// renderPanes does, and a test that read the columns off the frame would
+// agree with a rule and a separator that had drifted together.
+//
+// paneSep is " │ ", so the bar itself sits one column into the separator.
+func paneSeparatorColumns(m Model, w int) []int {
+	facetW := facetPaneWidth(m.facetPaneNatural, w)
+	listW := layoutCentreWidth(m, w)
+	return []int{facetW + 1, facetW + paneSepWidth + listW + 1}
+}
+
+// runeColumns reports which columns of line hold r. Columns rather than byte
+// offsets: the box-drawing characters are multi-byte and single-column, so a
+// byte offset would answer a question no rendered frame asks.
+func runeColumns(line string, r rune) []int {
+	var cols []int
+	for i, c := range []rune(line) {
+		if c == r {
+			cols = append(cols, i)
+		}
+	}
+	return cols
+}
+
+// frameRules returns the pane row's top and bottom rules from a rendered
+// frame. The top rule is pinned at index 1 -- immediately under the header,
+// with no blank line between them -- because that adjacency is what pays for
+// the bottom rule in the height budget. The bottom rule is found by shape,
+// since how far down it falls depends on the pane height.
+func frameRules(t *testing.T, frame string) (top, bottom string) {
+	t.Helper()
+	lines := strings.Split(unstyled(frame), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("frame of %d lines has no pane row", len(lines))
+	}
+	top = lines[1]
+	for _, ln := range lines[2:] {
+		if ln != "" && strings.Trim(ln, "─┴") == "" {
+			bottom = ln
+		}
+	}
+	if bottom == "" {
+		t.Fatalf("no bottom rule in frame:\n%s", strings.Join(lines, "\n"))
+	}
+	return top, bottom
+}
+
+// The pane row is closed top and bottom. Without the bottom rule the panes
+// trail off into a column of separators -- at the default height that is
+// most of the frame -- and nothing on screen says where the content ends
+// and the empty space begins.
+func TestThePaneRowIsRuledTopAndBottom(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
+	for _, w := range []int{70, 100, 160} {
+		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+		top, bottom := frameRules(t, m.View())
+		if !strings.HasPrefix(top, "──") {
+			t.Errorf("width %d: top rule does not open with a rule: %q", w, top)
+		}
+		if got := lipgloss.Width(bottom); got != w {
+			t.Errorf("width %d: bottom rule is %d columns", w, got)
+		}
+	}
+}
+
+// The rules cross exactly where the separators are. A crossing a column out
+// is worse than no crossing at all: it reads as a pane boundary that the
+// rows beneath it disagree with.
+func TestTheRulesCrossAtEveryPaneSeparator(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
+	const w = 160
+	m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+	top, bottom := frameRules(t, m.View())
+	want := paneSeparatorColumns(m, w)
+	if got := runeColumns(top, '┬'); !slices.Equal(got, want) {
+		t.Errorf("top rule crosses at %v, separators are at %v\n%s", got, want, top)
+	}
+	if got := runeColumns(bottom, '┴'); !slices.Equal(got, want) {
+		t.Errorf("bottom rule crosses at %v, separators are at %v\n%s", got, want, bottom)
+	}
+}
+
+// Every pane is named in the top rule, the facet pane included. It is the
+// one pane with no title of its own -- its first dimension heading used to
+// stand in for one -- so it is the pane a rule-borne title can silently
+// leave unnamed.
+func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
+	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
+	m := update(t, base, tea.WindowSizeMsg{Width: 160, Height: 40})
+	top, _ := frameRules(t, m.View())
+	for _, want := range []string{facetPaneTitle, "CALLS", spanDetailTitle} {
+		if !strings.Contains(top, want) {
+			t.Errorf("top rule does not name %q: %q", want, top)
+		}
+	}
+}
+
+// The detail pane's focus is marked on its title in the rule. It is the one
+// pane with no cursor row of its own, so without this Tab's third stop
+// leaves no mark anywhere on the frame.
+func TestTheFocusedDetailPaneIsMarkedInTheTopRule(t *testing.T) {
+	base := update(t, New(testLog(t, "mixed-hcp.log"), "plan.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	unfocused := strings.Split(base.View(), "\n")[1]
+	if strings.Contains(unfocused, "\x1b[7m") {
+		t.Errorf("top rule is marked with the keyboard on the list pane: %q", unfocused)
+	}
+	m := base
+	for range focusablePaneCount(&m, 160) {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		if m.pane == PaneDetail {
+			break
+		}
+	}
+	if m.pane != PaneDetail {
+		t.Fatal("Tab never reached the detail pane")
+	}
+	if got := strings.Split(m.View(), "\n")[1]; !strings.Contains(got, "\x1b[7m") {
+		t.Errorf("top rule is unmarked with the detail pane focused: %q", got)
+	}
+}
+
+// focusablePaneCount is how many stops Tab has at width w, so the sweep
+// above bounds itself rather than looping until it happens to land.
+func focusablePaneCount(m *Model, w int) int {
+	return len(m.focusablePanes(w))
+}
+
+// A pane row too short for both rules keeps CONTENT over chrome. Two rules
+// and no body is a frame that spends every line it has saying where the
+// content would have been.
+func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
+	p := pane{title: "CALLS", content: "first\nsecond\nthird", width: 20}
+	for _, c := range []struct {
+		h        int
+		wantBody []string
+	}{
+		{1, nil},
+		{2, []string{"first"}},
+		{3, []string{"first"}},
+		{4, []string{"first", "second"}},
+	} {
+		lines := strings.Split(unstyled(framePanes(c.h, p)), "\n")
+		if len(lines) != c.h {
+			t.Errorf("h %d: framePanes returned %d lines", c.h, len(lines))
+			continue
+		}
+		var body []string
+		for _, ln := range lines[1:] {
+			if strings.Trim(ln, "─┴") != "" {
+				body = append(body, strings.TrimRight(ln, " "))
+			}
+		}
+		if !slices.Equal(body, c.wantBody) {
+			t.Errorf("h %d: body %q, want %q", c.h, body, c.wantBody)
 		}
 	}
 }

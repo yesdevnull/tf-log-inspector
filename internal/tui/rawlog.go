@@ -195,9 +195,9 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 // filter skips the others without ever measuring them -- which is always
 // begun. That is what makes an entry taller than the whole pane render its
 // head rather than leaving the pane blank: it is the entry at m.raw.top, the
-// one a jump or a search put there, and its lines are cut to h by whichever
-// pane composes them (joinPanes, or renderPanes' single-pane branch) rather
-// than being allowed to push the caveat off the frame.
+// one a jump or a search put there, and its lines are cut to h by the pane
+// row that composes them (framePanes, at every width) rather than being
+// allowed to push the caveat off the frame.
 func (m Model) renderRawLog(w, h int) string {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)

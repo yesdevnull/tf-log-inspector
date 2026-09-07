@@ -365,7 +365,7 @@ func TestFilteringClampsTheSelection(t *testing.T) {
 	if m.Selected() != 0 {
 		t.Errorf("Selected = %d after the filter narrowed the list to 1 row, want 0", m.Selected())
 	}
-	if got := m.renderDetail(60, 20); strings.Contains(got, noSelectionNote) {
+	if _, got := m.renderDetail(60, 20); strings.Contains(got, noSelectionNote) {
 		t.Errorf("detail pane lost its span because the selection was left past the end of the list:\n%s", got)
 	}
 }
@@ -396,22 +396,6 @@ func TestOnlyTheFocusedPaneDrawsALiveCursor(t *testing.T) {
 	}
 	if !strings.Contains(list, "\x1b[7;2m") {
 		t.Errorf("unfocused list cursor is not drawn at all:\n%s", list)
-	}
-}
-
-// The detail pane has no cursor of its own, so Tab's third stop is
-// invisible unless the pane says so some other way.
-func TestDetailPaneTitleMarksFocus(t *testing.T) {
-	m := New(testLog(t, "two-providers.log"), "x.log")
-	if got := m.renderDetail(40, 20); strings.Contains(got, "\x1b[7m") {
-		t.Errorf("detail pane marks focus it does not have:\n%s", got)
-	}
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyTab}) // PaneList -> PaneDetail
-	if m.Focus() != PaneDetail {
-		t.Fatalf("focus = %v after one Tab from the list, want PaneDetail", m.Focus())
-	}
-	if got := m.renderDetail(40, 20); !strings.Contains(got, "\x1b[7m") {
-		t.Errorf("detail pane does not show that it has focus:\n%s", got)
 	}
 }
 
@@ -917,5 +901,52 @@ func TestReTickingADimensionsLastValueLeavesItUnconstrained(t *testing.T) {
 	}
 	if m.filterActive() {
 		t.Error("re-ticking the last unticked value still reports an active filter, so every pane will explain an empty list as filtered")
+	}
+}
+
+// An unticked value recedes. Every value starts ticked, so unticking is the
+// filtering action, and the pane's job after one is to show at a glance what
+// is still admitted -- which a column of identical lines distinguished by
+// one character inside a bracket does not.
+//
+// Dimming is an attribute rather than a colour, so it survives NO_COLOR the
+// same way the cursor bar does.
+func TestUntickedFacetValuesAreDimmed(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.pane = PaneFacets
+	// Move off the first value before unticking it, so what is asserted is
+	// the dimming and not the cursor bar that would otherwise wrap the same
+	// line (see below).
+	m.facetCursor = facetCursor{dim: 0, val: 1}
+	m.setFacetExclusions(m.facets[0].Name, map[string]bool{m.facets[0].Values[0].Value: true})
+	m.invalidateRows()
+
+	lines := strings.Split(m.renderFacets(60, 40), "\n")
+	// Line 0 is the first dimension's heading, so its first value is line 1.
+	if got := lines[1]; !strings.Contains(got, "\x1b[2m") {
+		t.Errorf("unticked value is not dimmed: %q", got)
+	}
+	if got := lines[2]; strings.Contains(got, "\x1b[2m") {
+		t.Errorf("ticked value is dimmed: %q", got)
+	}
+}
+
+// The cursor's own line is never dimmed, however it is ticked. cursorBar
+// requires unstyled input -- reverse video ends at the first reset inside
+// what it wraps -- so a dimmed line under the cursor would show a bar that
+// stopped partway along.
+func TestTheDimmingNeverReachesTheCursorLine(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.pane = PaneFacets
+	m.facetCursor = facetCursor{dim: 0, val: 0}
+	m.setFacetExclusions(m.facets[0].Name, map[string]bool{m.facets[0].Values[0].Value: true})
+	m.invalidateRows()
+
+	cursorLine := strings.Split(m.renderFacets(60, 40), "\n")[1]
+	if strings.Contains(cursorLine, "\x1b[2m") {
+		t.Errorf("the cursor's own unticked line is dimmed: %q", cursorLine)
+	}
+	if !strings.Contains(cursorLine, "\x1b[7m") {
+		t.Errorf("the cursor's own line carries no bar: %q", cursorLine)
 	}
 }

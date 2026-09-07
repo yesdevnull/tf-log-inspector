@@ -413,6 +413,16 @@ func (m *Model) moveFacetCursor(delta int) {
 	m.facetCursor = m.facetCursorAt(idx)
 }
 
+// facetPaneTitle names the facet pane in the pane row's top rule.
+//
+// The pane had no name of its own before it needed one: its first dimension
+// heading stood at the top of the pane and was read as a title, which it
+// never was -- the pane windows around its cursor, so which heading is at
+// the top depends on where the cursor is. It is called FILTERS rather than
+// FACETS because what a reader does here is filter; "facet" is the word for
+// the machinery, and it is already spelled out on every heading beneath.
+const facetPaneTitle = "FILTERS"
+
 // renderFacets renders the facet pane: each dimension's name followed by its
 // values and their counts (counts always reflect the whole log, not the
 // current filter -- see the doc comment on Model.facets), at most w columns
@@ -472,9 +482,19 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			// biting back into the value's tail -- the part a leading
 			// ellipsis was chosen to preserve).
 			line := facetValueLine(check, v.Value, v.Count, w, kind)
-			if dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val {
+			switch {
+			case dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val:
 				cursor = len(lines)
 				line = cursorBar(line, w, focused)
+			case m.excludedFacets[f.Name][v.Value]:
+				// An unticked value recedes, so what the filter still
+				// admits reads at a glance rather than by inspecting the
+				// character inside each bracket. The cursor's own line is
+				// the case this must NOT reach, and the switch is what
+				// keeps it out: cursorBar's reverse video ends at the
+				// first reset inside what it wraps, so a dimmed line under
+				// the cursor would show a bar that stopped partway along.
+				line = styles.excludedValue.Render(line)
 			}
 			lines = append(lines, line)
 		}

@@ -63,10 +63,14 @@ type theme struct {
 	// the two together.
 	sortedColumn lipgloss.Style
 	// chrome marks what is scaffolding for content rather than content
-	// itself. The pane separators are its one use: dimming is what turns a
-	// structural character into something the eye can skip rather than
-	// read, and a separator is the only thing on the frame that is purely
-	// structural.
+	// itself: the pane row's separators, and the rules that close it top
+	// and bottom. Dimming is what turns a structural character into
+	// something the eye can skip rather than read, and the frame around the
+	// panes is the only thing on screen that is purely structural.
+	//
+	// The names inset into the top rule are NOT chrome, and take the title
+	// style there as they would anywhere else. What the rule is drawn in
+	// says nothing about what it carries.
 	//
 	// Nothing a cursor bar can wrap is chrome, however much it looks like
 	// scaffolding. A facet's checkbox is the tempting case and the
@@ -92,6 +96,22 @@ type theme struct {
 	// between panes, and there is no third attribute to spend -- bold is
 	// what title and columnHeader are told apart by.
 	fieldLabel lipgloss.Style
+	// excludedValue marks a facet value the filter is currently hiding.
+	// Every value starts ticked, so unticking is the filtering action, and
+	// what the pane has to answer afterwards is what is still admitted --
+	// which a column of identical lines told apart by one character inside
+	// a bracket does not. Dimming the whole line lets the exclusions recede
+	// and leaves the survivors standing.
+	//
+	// Faint rather than a colour, for the same reason levelError carries
+	// weight: the distinction has to survive NO_COLOR, and this one is read
+	// on every frame the reader has filtered anything at all.
+	//
+	// It renders identically to chrome and to note, and means neither. The
+	// three never meet: a separator is a column of one character between
+	// panes, a note is prose about the frame, and this is a value line
+	// inside the facet pane.
+	excludedValue lipgloss.Style
 	// key marks a keystroke where one is offered -- in a footer hint and in
 	// the help screen's key column -- leaving the words describing it plain.
 	// The reader scanning either is looking for which key to press, not for
@@ -133,6 +153,7 @@ func (t theme) all() map[string]lipgloss.Style {
 		"sortedColumn":    t.sortedColumn,
 		"chrome":          t.chrome,
 		"fieldLabel":      t.fieldLabel,
+		"excludedValue":   t.excludedValue,
 		"key":             t.key,
 		"note":            t.note,
 		"alert":           t.alert,
@@ -164,6 +185,7 @@ func newTheme(colour bool) theme {
 		sortedColumn:    accented(base.Bold(true)),
 		chrome:          base.Faint(true),
 		fieldLabel:      accented(base.Faint(true)),
+		excludedValue:   base.Faint(true),
 		key:             accented(base),
 		note:            base.Faint(true),
 		alert:           accented(base.Bold(true)),

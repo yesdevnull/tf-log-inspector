@@ -196,6 +196,29 @@ const paneSep = " │ "
 // keeps the two in step whatever that measurement turns out to be.
 var paneSepWidth = lipgloss.Width(paneSep)
 
+// paneRule is the character the pane row's top and bottom rules are drawn
+// in, and paneRuleTopSep and paneRuleBottomSep are what those rules cross a
+// pane separator with. Each crossing is exactly paneSep's three columns, so
+// the ┬ and the ┴ land in the │'s own column and the frame's verticals read
+// as one line from the top rule to the bottom.
+const (
+	paneRule          = "─"
+	paneRuleTopSep    = "─┬─"
+	paneRuleBottomSep = "─┴─"
+)
+
+// paneTitleLead is the rule drawn before a pane's name in the top rule. Two
+// columns, so a name reads as inset INTO the rule rather than as a caption
+// sitting to the left of one.
+const paneTitleLead = "──"
+
+// minTitledRuleWidth is the narrowest pane whose top rule can carry a name:
+// the lead, plus a space either side of at least one column of the name. A
+// pane narrower than that gets a plain rule -- an unnamed pane is better
+// than a rule interrupted by a single letter, which names nothing and
+// breaks the line for no gain.
+var minTitledRuleWidth = lipgloss.Width(paneTitleLead) + 3
+
 // defaultWidth and defaultHeight size the view before the first
 // tea.WindowSizeMsg arrives -- bubbletea does not report a size until the
 // program has actually started, but View must still render something
@@ -223,13 +246,13 @@ const (
 // so a view even one line too tall loses its topmost line off the top of
 // the screen, and the topmost line here is the header naming the open file.
 //
-// h is a ceiling rather than a target, and the layouts differ on whether
-// they reach it: joinPanes pads every pane it composes out to h, so the two-
-// and three-pane widths fill the frame exactly, while the single-pane
-// layouts -- renderPanes' sub-detailInlineWidth branch and the facet overlay
-// -- clip at h without padding to it and stop wherever their content ran
-// out. A short frame simply leaves blank terminal beneath it, which costs
-// the reader nothing.
+// h is a target rather than a ceiling, at every width: framePanes composes
+// one pane the same way it composes three, padding each out to the row's
+// height and closing the row with a rule, so the frame fills the terminal
+// exactly whether the layout is the full three panes, the facet overlay, or
+// a full-width raw log. A row that stopped wherever its content ran out
+// would leave its bottom rule floating in the middle of the screen, which
+// says the content ended somewhere it did not.
 //
 // The footer is composed onto the END of an already-trimmed frame rather
 // than trimmed along with everything else, because a frame trimmed from
@@ -280,7 +303,11 @@ func (m *Model) View() string {
 	if !m.showHelp {
 		caveat = loggingCaveat(h)
 	}
-	lines := []string{head, ""}
+	// No blank line between the header and the pane row: the row opens with
+	// its own rule, which separates the two as well as a blank would and
+	// says something besides. That line is what pays for the rule closing
+	// the row at the bottom, so the frame gains both rules for nothing.
+	lines := []string{head}
 	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat))), "\n")...)
 	if len(caveat) > 0 {
 		lines = append(lines, "")
@@ -303,6 +330,14 @@ func (m *Model) View() string {
 	return strings.Join(lines, "\n")
 }
 
+// headerSep divides the header's three fields. A middle dot rather than the
+// double hyphen this codebase's prose uses, because these are FIELDS rather
+// than a sentence with an aside in it -- and because "tfli -- plan.log"
+// reads as a command line whose flags have been terminated, which is a
+// sentence about invoking the tool rather than a heading naming what it has
+// open.
+const headerSep = "·"
+
 // header names the file and its span counts.
 //
 // While a filter is active it reports the matching count against the whole
@@ -319,11 +354,11 @@ func (m *Model) View() string {
 func header(m *Model) string {
 	rpc, ui := len(m.log.RPCSpans), len(m.log.UISpans)
 	if !m.filterActive() {
-		return fmt.Sprintf("tfli -- %s -- %d RPC spans, %d UI spans", m.name, rpc, ui)
+		return fmt.Sprintf("tfli %s %s %s %d RPC spans, %d UI spans", headerSep, m.name, headerSep, rpc, ui)
 	}
 	f := m.filter()
-	return fmt.Sprintf("tfli -- %s -- %d of %d RPC spans, %d of %d UI spans",
-		m.name, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
+	return fmt.Sprintf("tfli %s %s %s %d of %d RPC spans, %d of %d UI spans",
+		headerSep, m.name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
 }
 
 // countMatching counts the spans passing f. It exists rather than a call to
@@ -608,9 +643,18 @@ func viewKeyHints(v View) string {
 }
 
 // frameFixedLines is what a frame spends on everything but the pane row and
-// the caveat block: the header, the blank line beneath it, the blank line
-// above the footer, and the footer's two hint lines.
-const frameFixedLines = 5
+// the caveat block: the header, the blank line above the footer, and the
+// footer's two hint lines.
+//
+// The pane row's own rules are not counted here. They are drawn by
+// framePanes, which needs the pane widths to cross them at the separators,
+// so they belong to the row rather than to the frame around it.
+const frameFixedLines = 4
+
+// minPaneRowHeight is the least a pane row can be given before the caveat
+// starts taking lines from it: its top rule, which names the panes, and one
+// line of content beneath. A row of one line is a rule over nothing.
+const minPaneRowHeight = 2
 
 // paneHeight is how many lines the pane row itself gets in a frame h lines
 // tall carrying caveatLines lines of caveat. The caveat block costs one line
@@ -666,12 +710,13 @@ const shortLoggingCaveat = "Durations measured under logging: only rankings tran
 // quits -- that exists nowhere else on screen, so it is the one line that
 // must survive a short terminal.
 func loggingCaveat(h int) []string {
-	// Each bound is frameFixedLines, plus one line for the pane row, plus
-	// the caveat block: the caveat's own lines and the blank above them.
+	// Each bound is frameFixedLines, plus the least a pane row can be worth
+	// drawing at, plus the caveat block: the caveat's own lines and the
+	// blank above them.
 	switch {
-	case h >= frameFixedLines+1+len(fullLoggingCaveat)+1:
+	case h >= frameFixedLines+minPaneRowHeight+len(fullLoggingCaveat)+1:
 		return fullLoggingCaveat
-	case h >= frameFixedLines+1+1+1:
+	case h >= frameFixedLines+minPaneRowHeight+1+1:
 		return []string{shortLoggingCaveat}
 	default:
 		return nil
@@ -691,37 +736,59 @@ func (m *Model) renderPanes(w, h int) string {
 	// The help takes the whole pane row, at every width. It is not a fourth
 	// pane and has no focus of its own: while it is open every key but the
 	// three that leave it is inert, so there is nothing for Tab to reach.
+	// bodyH is what a pane's own renderer is given: the row's height less
+	// the rules framePanes draws around it. Every branch below renders to
+	// it, so the frame's arithmetic is stated once here rather than at each
+	// of the five sites that would otherwise each have to subtract.
+	bodyH := paneBodyHeight(h)
 	if m.showHelp {
-		return renderHelp(w, h)
+		return framePanes(h, pane{title: helpTitle, content: renderHelp(w, bodyH), width: w})
 	}
 	if m.facetOverlayShowing(w) {
-		return m.renderFacets(w, h)
+		return framePanes(h, pane{title: facetPaneTitle, content: m.renderFacets(w, bodyH), width: w})
 	}
 	switch {
 	case w >= facetInlineWidth:
 		facetW := facetPaneWidth(m.facetPaneNatural, w)
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - facetW - detailW - 2*paneSepWidth
-		return joinPanes(h,
-			pane{m.renderFacets(facetW, h), facetW},
-			pane{m.renderCentre(listW, h), listW},
-			pane{m.renderDetail(detailW, h), detailW},
+		detailTitle, detail := m.renderDetail(detailW, bodyH)
+		return framePanes(h,
+			pane{title: facetPaneTitle, content: m.renderFacets(facetW, bodyH), width: facetW},
+			pane{title: m.centreTitle(), content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	case m.detailPaneDrawn(w):
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - detailW - paneSepWidth
-		return joinPanes(h,
-			pane{m.renderCentre(listW, h), listW},
-			pane{m.renderDetail(detailW, h), detailW},
+		detailTitle, detail := m.renderDetail(detailW, bodyH)
+		return framePanes(h,
+			pane{title: m.centreTitle(), content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	default:
-		// The centre pane is the whole row here, with no joinPanes beneath
-		// it to hold it to h lines. renderRawLog renders its first visible
-		// entry from the top down whatever that entry's height -- a
-		// provider's multi-line HTTP body dump is the realistic case -- so
-		// without this clamp that overflow pushes the caveat out of View's
-		// frame, on the one layout that has no other pane to absorb it.
-		return clipLines(m.renderCentre(w, h), h)
+		// renderRawLog renders its first visible entry from the top down
+		// whatever that entry's height -- a provider's multi-line HTTP body
+		// dump is the realistic case -- so the centre pane can overflow the
+		// height it was given. framePanes holds it to the row regardless,
+		// the same way it holds every other pane, which is why the one
+		// layout with no second pane beside it needs no clamp of its own.
+		return framePanes(h, pane{title: m.centreTitle(), content: m.renderCentre(w, bodyH), width: w})
+	}
+}
+
+// paneBodyHeight is how many lines of a pane row h lines tall are the panes'
+// own, the rest being the rules framePanes draws around them. It mirrors
+// framePanes' short-row rule exactly -- content before chrome -- so a pane
+// is never rendered to a height the row cannot show.
+func paneBodyHeight(h int) int {
+	switch {
+	case h <= 1:
+		return 0
+	case h == 2:
+		return 1
+	default:
+		return h - 2
 	}
 }
 
@@ -750,20 +817,6 @@ func (m *Model) facetOverlayShowing(w int) bool {
 // apart, so there is one.
 func (m *Model) detailPaneDrawn(w int) bool {
 	return !m.facetOverlayShowing(w) && w >= detailInlineWidth
-}
-
-// clipLines truncates s to at most h lines, the same bound joinPanes applies
-// to every pane it composes. It is the single-pane equivalent: a pane row is
-// h lines tall however many lines the pane inside it produced.
-func clipLines(s string, h int) string {
-	if h <= 0 {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= h {
-		return s
-	}
-	return strings.Join(lines[:h], "\n")
 }
 
 // paneWidth is the width the pane row is composed at: the terminal's own
@@ -802,8 +855,7 @@ func (m *Model) focusablePanes(w int) []Pane {
 	return panes
 }
 
-// renderCentre renders the centre pane: its title, then its content for the
-// active view. ViewRawLog and ViewTimeline are not one of renderList's
+// renderCentre renders the centre pane's body for the active view. ViewRawLog and ViewTimeline are not one of renderList's
 // rollup/call tables -- the raw log renders directly from m.log.Entries via
 // renderRawLog, and the timeline renders from m.timelineSpans() and
 // model.PackLanes via renderTimeline -- so both are dispatched separately
@@ -826,39 +878,134 @@ func (m *Model) renderCentre(w, h int) string {
 	if h <= 0 {
 		return ""
 	}
-	title := clipWidth(viewTitle(m.view), w)
-	// The timeline's title names the TIER it is drawing (see timelineTitle),
-	// which views' own static "TIMELINE" cannot: that table has no notion of
-	// the current log, and the tier is a property of it.
-	if m.view == ViewTimeline {
-		title = clipWidth(m.timelineTitle(), w)
-	}
-	title = styles.title.Render(title)
-	if h == 1 {
-		return title
-	}
 	switch m.view {
 	case ViewRawLog:
-		return title + "\n" + m.renderRawLog(w, h-1)
+		return m.renderRawLog(w, h)
 	case ViewTimeline:
-		return title + "\n" + m.renderTimeline(w, h-1)
+		return m.renderTimeline(w, h)
 	default:
-		return title + "\n" + m.renderList(w, h-1)
+		return m.renderList(w, h)
 	}
 }
 
-// pane is one column of a composed pane row: its rendered content and the
-// width it was rendered at.
-type pane struct {
-	content string
-	width   int
+// centreTitle names the centre pane for the top rule it is inset into.
+//
+// The timeline's title names the TIER it is drawing (see timelineTitle),
+// which views' own static "TIMELINE" cannot: that table has no notion of the
+// current log, and the tier is a property of it.
+func (m *Model) centreTitle() string {
+	if m.view == ViewTimeline {
+		return m.timelineTitle()
+	}
+	return viewTitle(m.view)
 }
 
-// joinPanes composes panes side by side into one h-line block. Each pane's
-// lines are right-padded to its declared width so every pane starts at the
-// same column on every row, and each pane's line list is padded with blank
-// lines up to h so a shorter pane (an empty detail pane, say) does not
-// shrink the row it appears in.
+// pane is one column of a composed pane row: its name, its rendered body,
+// the width it was rendered at, and whether the keyboard is in it.
+//
+// The name and the body are separate because the name is not drawn in the
+// body's space: it is inset into the pane row's top rule (see titledRule),
+// which is what lets the frame be closed top and bottom without costing the
+// body a line. A pane renderer therefore returns its body ALONE, and the
+// title travels beside it.
+//
+// focused is read only by the detail pane, the one pane with no cursor row
+// of its own to mark. The other panes answer Tab with their cursor bars.
+type pane struct {
+	title   string
+	content string
+	width   int
+	focused bool
+}
+
+// framePanes composes panes side by side into one h-line block, ruled top
+// and bottom, with each pane's name inset into the top rule.
+//
+// The rules are what close the frame. Without the bottom one the panes trail
+// off into a column of separators -- at the default height that is most of
+// the frame -- and nothing on screen says where the content ends.
+//
+// A short row spends its lines on CONTENT before chrome, in that order: the
+// top rule first, since it carries the pane names and so is the only line
+// that says what the reader is looking at; then the body; then the bottom
+// rule, which is pure scaffolding and is the first thing dropped. A two-line
+// row is therefore a named rule and one line of content, not two rules and
+// nothing between them.
+func framePanes(h int, panes ...pane) string {
+	if h <= 0 {
+		return ""
+	}
+	rows := []string{topRule(panes)}
+	if h == 1 {
+		return rows[0]
+	}
+	bodyH, bottom := h-1, false
+	if h >= 3 {
+		bodyH, bottom = h-2, true
+	}
+	rows = append(rows, strings.Split(joinPanes(bodyH, panes...), "\n")...)
+	if bottom {
+		rows = append(rows, bottomRule(panes))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// topRule is the pane row's opening line: each pane's name inset into a
+// rule, crossed at every separator.
+func topRule(panes []pane) string {
+	segments := make([]string, len(panes))
+	for i, p := range panes {
+		segments[i] = titledRule(p)
+	}
+	return strings.Join(segments, styles.chrome.Render(paneRuleTopSep))
+}
+
+// bottomRule is the pane row's closing line: a plain rule at each pane's
+// width, crossed at every separator. It is styled whole rather than per
+// segment, there being nothing inside it carrying styling of its own.
+func bottomRule(panes []pane) string {
+	segments := make([]string, len(panes))
+	for i, p := range panes {
+		segments[i] = strings.Repeat(paneRule, max(p.width, 0))
+	}
+	return styles.chrome.Render(strings.Join(segments, paneRuleBottomSep))
+}
+
+// titledRule is one pane's share of the top rule: the lead, the pane's name
+// with a space either side, and rule to the pane's full width.
+//
+// The name takes the title style, or reverse video where the pane has the
+// keyboard -- the same bar the other panes mark their cursor rows with, so
+// Tab's effect reads the same wherever it lands. Only the NAME is reversed,
+// not the rule around it: the bar marks a thing, and the rule is not one.
+//
+// A pane too narrow to inset a name gets a plain rule instead. That is the
+// detail pane clamped to its floor in a narrow terminal, where a rule broken
+// open for a single letter would name nothing and cost the line its
+// continuity.
+func titledRule(p pane) string {
+	if p.width < minTitledRuleWidth {
+		return styles.chrome.Render(strings.Repeat(paneRule, max(p.width, 0)))
+	}
+	label := clipWidth(" "+p.title+" ", p.width-lipgloss.Width(paneTitleLead))
+	style := styles.title
+	if p.focused {
+		style = styles.selected
+	}
+	fill := p.width - lipgloss.Width(paneTitleLead) - lipgloss.Width(label)
+	return styles.chrome.Render(paneTitleLead) + style.Render(label) + styles.chrome.Render(strings.Repeat(paneRule, fill))
+}
+
+// joinPanes composes panes' BODIES side by side into one h-line block. Each
+// pane's lines are right-padded to its declared width so every pane starts
+// at the same column on every row, and each pane's line list is padded with
+// blank lines up to h so a shorter pane (an empty detail pane, say) does not
+// shrink the row it appears in. A pane with MORE lines than h is truncated
+// to it, which is what holds a row to its height whether it composes one
+// pane or three.
+//
+// It draws no rules and reads no titles: framePanes puts those around what
+// this returns.
 func joinPanes(h int, panes ...pane) string {
 	if h <= 0 {
 		return ""
@@ -914,29 +1061,18 @@ type paneSection []string
 // describe: a view with no rows at all (ViewRawLog, whose rows() is nil), or
 // a selection index outside the rows there are.
 //
-// The title and the body come from one dispatch (selectedDetail) and the
-// height budget is applied by another (fitPaneSections); all this adds is
-// the focus marking, which belongs to neither.
-func (m *Model) renderDetail(w, h int) string {
+// The title and the body come from one dispatch (selectedDetail), so the
+// heading and what it heads cannot disagree, and the height budget is
+// applied by another (fitPaneSections). Both are returned rather than
+// composed here: the title is drawn in the pane row's top rule, which is
+// also where this pane marks keyboard focus -- it has no cursor row of its
+// own -- and that rule is framePanes' to draw.
+func (m *Model) renderDetail(w, h int) (title, body string) {
 	if h <= 0 {
-		return ""
+		return noSelectionTitle, ""
 	}
 	title, sections := m.selectedDetail(w)
-	// The detail pane has no cursor of its own to mark, so its title
-	// carries the focus instead: Tab's third stop would otherwise be
-	// invisible, leaving the user no way to tell that the keyboard had
-	// moved off the list.
-	// Focused, the title becomes the cursor bar and takes reverse video
-	// instead of the title style: the two cannot both apply, because the
-	// bar's reverse video ends at the first reset inside what it wraps
-	// (see cursorBar).
-	line := clipWidth(title, w)
-	if m.pane == PaneDetail {
-		line = cursorBar(line, w, true)
-	} else {
-		line = styles.title.Render(line)
-	}
-	return strings.Join(fitPaneSections(line, sections, w, h), "\n")
+	return title, strings.Join(fitPaneSections(sections, w, h), "\n")
 }
 
 // The detail pane's titles, one per KIND of row it can be describing.
@@ -1013,8 +1149,12 @@ func (m *Model) selectedDetail(w int) (string, []paneSection) {
 // below a fold, and the two say different things.
 const moreBelowMark = "… more"
 
-// fitPaneSections composes a title and body sections into at most h
-// lines, marking any cut with moreBelowMark.
+// fitPaneSections composes a pane's body sections into at most h lines,
+// marking any cut with moreBelowMark.
+//
+// The pane's title is not among them. It is inset into the pane row's top
+// rule (see titledRule), outside this budget entirely, so it survives every
+// height without this having to spend a line keeping it.
 //
 // The FIRST section is always appended, so a pane with room for anything at
 // all shows as much of its most important block as fits, clipped by line as
@@ -1024,11 +1164,11 @@ const moreBelowMark = "… more"
 // end on a heading with nothing under it, or on a figure's label with the
 // figure gone.
 //
-// The title survives every cut, since it names the pane and carries its
-// focus (see renderDetail). At h of 1 that leaves no line for the mark, and
-// a one-line pane is the one case where a cut goes unmarked.
-func fitPaneSections(title string, sections []paneSection, w, h int) []string {
-	lines := []string{title}
+// At h of 1 there is no line to spare for the mark, so a one-line pane is
+// the one case where a cut goes unmarked. What it shows instead is the first
+// line of its first section, which says more than a bare mark would.
+func fitPaneSections(sections []paneSection, w, h int) []string {
+	var lines []string
 	cut := false
 	for i, s := range sections {
 		if i > 0 && len(lines)+len(s) > h {
