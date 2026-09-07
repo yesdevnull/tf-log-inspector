@@ -885,3 +885,37 @@ func TestOIsQueryTextWhileASearchIsOpen(t *testing.T) {
 		t.Errorf("footer = %q, want the query to have taken the o as text", got)
 	}
 }
+
+// Re-ticking a dimension's last unticked value leaves that dimension
+// UNCONSTRAINED -- absent from the exclusion map, not present holding an
+// empty set. It is the shape toggleFacetValue's doc claims and the one
+// allowedFacetValues and filterActive both read: the first returns nil for
+// "no opinion" and the second counts a dimension by whether its set is
+// non-empty, so an empty set left behind is one edit from meaning the
+// opposite of what the checkboxes show.
+//
+// Asserted on the TOGGLE path specifically. The same rule on the solo path
+// has its own test, and until this one existed those were the only two
+// holding it -- a rule stated by one function and guarded only through
+// another.
+func TestReTickingADimensionsLastValueLeavesItUnconstrained(t *testing.T) {
+	m := New(testLog(t, "two-providers.log"), "x.log")
+	m = focusFacets(t, m)
+	dim, val, ok := m.cursorFacetValue()
+	if !ok {
+		t.Fatal("the facet cursor points at no value, so space has nothing to toggle")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if !m.excludedFacets[dim][val] {
+		t.Fatalf("space did not untick %s=%q, so the re-tick below asserts nothing", dim, val)
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+
+	if got, present := m.excludedFacets[dim]; present {
+		t.Errorf("re-ticking the last unticked value left %v in the exclusion map, want the dimension absent", got)
+	}
+	if m.filterActive() {
+		t.Error("re-ticking the last unticked value still reports an active filter, so every pane will explain an empty list as filtered")
+	}
+}
