@@ -10,10 +10,10 @@ import (
 // '?' and dismissed with '?' or Esc.
 //
 // It exists because the footer cannot be the answer. The footer's action
-// line is clipped from its end at 70 columns and each hint is pared down to
-// fit -- "␣ facet", "↔ span" -- so it can say which keys act on what is on
-// screen but not what any of them mean, and it drops the ones that would
-// not fit. This is where those are spelled out.
+// line reaches 70 columns and each hint is pared down to fit -- "␣ facet",
+// "↔ span" -- so it can say WHICH keys act on what is on screen but not
+// what any of them mean. And the keys it never names at all -- n and N, the
+// page keys, the arrows -- are only here.
 
 // helpEntry is one binding: the keys that trigger it, and what it does.
 type helpEntry struct {
@@ -49,7 +49,7 @@ const helpTitle = "KEYS"
 // direction is not testable and rests on review; the sweep in
 // TestHelpDocumentsEveryKeyTheFooterAdvertises covers the other one, which
 // is that no key the footer names is missing from here.
-func helpGroups() []helpGroup {
+var helpGroups = func() []helpGroup {
 	viewEntries := make([]helpEntry, 0, len(views))
 	for _, b := range views {
 		viewEntries = append(viewEntries, helpEntry{keys: b.key, what: b.name})
@@ -66,17 +66,17 @@ func helpGroups() []helpGroup {
 		{title: "FILTERING", entries: []helpEntry{
 			{keys: "␣ Space", what: "toggle the facet value under the cursor"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
-			{keys: "Esc", what: "clear every active filter"},
+			{keys: "Esc", what: "clear every active filter -- or close this help"},
 			{keys: "/", what: "search the raw log for a pattern"},
 			{keys: "n N", what: "step to the next or previous match"},
 		}},
 		{title: "EVERYWHERE", entries: []helpEntry{
 			{keys: "⇥ Tab", what: "move focus between panes"},
-			{keys: "?", what: "open or close this help"},
+			{keys: "?", what: "open or close this help (Esc closes it too)"},
 			{keys: "q", what: "quit"},
 		}},
 	}
-}
+}()
 
 // helpKeyGap is the space between the key column and its description.
 const helpKeyGap = "  "
@@ -95,7 +95,7 @@ const helpKeyGap = "  "
 // costly than it looks: the footer carries the quit hint on every frame, so
 // the one key a stranded reader needs is never the one clipped away.
 func renderHelp(w, h int) string {
-	groups := helpGroups()
+	groups := helpGroups
 	keyWidth := 0
 	for _, g := range groups {
 		for _, e := range g.entries {
@@ -114,7 +114,14 @@ func renderHelp(w, h int) string {
 		lines := []string{"", clipWidth(g.title, w)}
 		for _, e := range g.entries {
 			pad := strings.Repeat(" ", keyWidth-lipgloss.Width(e.keys))
-			lines = append(lines, clipWidth("  "+e.keys+pad+helpKeyGap+e.what, w))
+			// clipValueEnd rather than clipWidth, because what a cut takes
+			// off an entry is its QUALIFIER -- "in the table views", "in a
+			// timeline lane" -- and clipWidth cuts without a mark. An
+			// unmarked cut leaves "sort by the next column" reading as an
+			// unconditional binding on the one screen a reader consults to
+			// learn what a key does, which is the opposite of what s does
+			// in the timeline and the raw log.
+			lines = append(lines, clipValueEnd("  "+e.keys+pad+helpKeyGap+e.what, w))
 		}
 		sections = append(sections, lines)
 	}

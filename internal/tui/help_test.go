@@ -161,7 +161,7 @@ func TestHelpListsEveryBoundViewKeyByItsOwnName(t *testing.T) {
 // decodes it there instead of listing it as something to press.
 func TestHelpDocumentsEveryKeyTheFooterAdvertises(t *testing.T) {
 	documented := map[string]bool{}
-	for _, g := range helpGroups() {
+	for _, g := range helpGroups {
 		for _, e := range g.entries {
 			for _, f := range strings.Fields(e.keys) {
 				documented[f] = true
@@ -263,9 +263,19 @@ func TestTheFooterOffersHelpAndSaysWhichWayItGoes(t *testing.T) {
 // number keys left standing there would advertise keys that do nothing --
 // over the very screen that says what each key does.
 func TestTheFooterDropsEveryInertHintWhileTheHelpIsOpen(t *testing.T) {
-	open := helpModel(t, 100, 40)
+	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	open := update(t, shut, helpKey)
 	footer := open.keyHints(100)
-	for _, inert := range []string{"⇥ pane", "␣ facet", openHint, sortHint, "f facets", "/ search", "Esc clear", "1 providers", helpHint} {
+	inertHints := []string{"⇥ pane", "␣ facet", openHint, sortHint, "f facets", "/ search", "Esc clear", "1 providers", helpHint}
+	// Asserted PRESENT with the help shut first. These are literals, and a
+	// hint renamed in actionKeys would otherwise leave its row silently
+	// asserting the absence of a string the footer never contained.
+	for _, hint := range inertHints {
+		if !strings.Contains(shut.keyHints(100), hint) {
+			t.Fatalf("the shut footer does not offer %q, so its absence with the help open proves nothing: %q", hint, shut.keyHints(100))
+		}
+	}
+	for _, inert := range inertHints {
 		if strings.Contains(footer, inert) {
 			t.Errorf("the footer offers %q over an open help, where the key does nothing: %q", inert, footer)
 		}
@@ -321,5 +331,141 @@ func TestEveryHelpLineFitsTheNarrowestSupportedWidth(t *testing.T) {
 		if n := lipgloss.Width(line); n > narrowest {
 			t.Errorf("help line is %d columns, more than the %d a narrow terminal gives it: %q", n, narrowest, line)
 		}
+	}
+}
+
+// The footer must always name a key that works. footer() replaces the whole
+// hint block with the raw log's search report, and notFound survives into
+// the help because only invalidateRows clears it -- so a reader who searched,
+// missed, and then pressed ? was shown "pattern not found" where the only
+// two working keys should be, over a view the help is not drawing.
+//
+// The short-height frame is the one that matters: there the key table is cut
+// to its title, and renderHelp is allowed to cut without a mark precisely
+// because "the footer carries the quit hint on every frame". This is what
+// makes that true.
+func TestTheFooterStillNamesAWorkingKeyOverAFailedSearch(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	for _, r := range "zzzz" {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.raw.notFound {
+		t.Fatalf("the search found something, so this cannot reach the state it is about")
+	}
+
+	m = update(t, m, helpKey)
+	for _, h := range []int{40, 12} {
+		sized := update(t, m, tea.WindowSizeMsg{Width: 100, Height: h})
+		frame := sized.View()
+		for _, want := range []string{helpCloseHint, quitHint} {
+			if !strings.Contains(frame, want) {
+				t.Errorf("at height %d the help frame does not name %q, so nothing on it names a working key:\n%s", h, want, frame)
+			}
+		}
+		if strings.Contains(frame, "pattern not found") {
+			t.Errorf("at height %d the help frame reports a search in a view it is not drawing:\n%s", h, frame)
+		}
+	}
+}
+
+// A frame short enough to cut the key table must still show some of it. The
+// durations caveat takes five lines and qualifies figures the help pane does
+// not show, so left up it spends a short frame on numbers that are not there
+// and takes them from the only content that is.
+func TestTheHelpKeepsItsTableOnAShortFrame(t *testing.T) {
+	short := helpModel(t, 100, 12)
+	frame := short.View()
+	if !strings.Contains(frame, helpTitle) {
+		t.Fatalf("the help title is gone at height 12:\n%s", frame)
+	}
+	if !strings.Contains(frame, "VIEWS") {
+		t.Errorf("at height 12 the help is cut to its title, naming no key at all:\n%s", frame)
+	}
+	if strings.Contains(frame, "measured under logging") {
+		t.Errorf("the durations caveat is drawn over a pane showing no durations:\n%s", frame)
+	}
+}
+
+// A description cut for width must SAY it was cut. The tail is where the
+// qualifier lives, so "sort by the next column, in the table views" clipped
+// silently reads as an unconditional binding -- the opposite of what s does
+// in the timeline and the raw log, asserted on the one screen a reader
+// consults to find out.
+func TestAClippedHelpDescriptionIsMarked(t *testing.T) {
+	const narrow = 45
+	rendered := renderHelp(narrow, 200)
+	full := renderHelp(hugeWidth, 200)
+	if !strings.Contains(full, "in the table views") {
+		t.Fatalf("no help entry carries a trailing qualifier, so this checks nothing:\n%s", full)
+	}
+	var clipped []string
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, "  ") && line != "" {
+			clipped = append(clipped, line)
+		}
+	}
+	if len(clipped) == 0 {
+		t.Fatalf("no entry lines at %d columns:\n%s", narrow, rendered)
+	}
+	marked := 0
+	for _, line := range clipped {
+		if strings.HasSuffix(line, detailCutMark) {
+			marked++
+		}
+	}
+	if marked == 0 {
+		t.Errorf("at %d columns not one entry line is marked as cut, so every clipped description reads as complete:\n%s", narrow, rendered)
+	}
+}
+
+// renderHelp is a pane entry point and every other one guards a non-positive
+// height. The guard belongs in fitPaneSections, which is what actually
+// slices, so both its callers get it. A panic here is a panic inside the alt
+// screen, which leaves the user's terminal wrecked.
+func TestTheHelpDoesNotPanicAtAnyHeightOrWidth(t *testing.T) {
+	for _, h := range []int{-2, -1, 0, 1, 2, 3} {
+		for _, w := range []int{-1, 0, 1, 60, 200} {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("renderHelp(%d, %d) panicked: %v", w, h, r)
+					}
+				}()
+				renderHelp(w, h)
+			}()
+		}
+	}
+}
+
+// The help and the facet overlay both take the whole pane row, so between
+// detailInlineWidth and facetInlineWidth they compete. The help must win: it
+// is modal, and a reader who pressed the documented help key over an open
+// overlay would otherwise get the facets back with showHelp silently set and
+// every other key inert.
+func TestTheHelpTakesThePaneRowFromAnOpenFacetOverlay(t *testing.T) {
+	const w = 80
+	if w >= facetInlineWidth || w < detailInlineWidth {
+		t.Fatalf("%d is outside the band where the facet overlay and the help compete", w)
+	}
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: w, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if !m.facetOverlayShowing(w) || !strings.Contains(m.View(), "PROVIDERS") {
+		t.Fatalf("the facet overlay is not open at %d columns, so this cannot show what the help displaces", w)
+	}
+
+	open := update(t, m, helpKey)
+	frame := open.View()
+	if !strings.Contains(frame, helpTitle) {
+		t.Errorf("? over an open facet overlay drew no key table:\n%s", frame)
+	}
+	if strings.Contains(frame, "PROVIDERS") {
+		t.Errorf("? over an open facet overlay left the facets drawn:\n%s", frame)
+	}
+	closed := update(t, open, helpKey)
+	if back := closed.View(); !strings.Contains(back, "PROVIDERS") {
+		t.Errorf("closing the help did not restore the facet overlay it displaced:\n%s", back)
 	}
 }

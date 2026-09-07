@@ -268,7 +268,17 @@ func (m *Model) View() string {
 		return head
 	}
 
-	caveat := loggingCaveat(h)
+	// The caveat qualifies DURATIONS, and the help pane shows none. Leaving
+	// it up spends five of a short frame's lines on numbers that are not on
+	// screen, and takes them from the only content that is: at h of 12 it
+	// reduces the key table to the word KEYS. Suppressing it is the same
+	// "what is DRAWN decides" rule actionKeys applies through
+	// detailPaneDrawn, and it withholds no qualification, because there is
+	// no figure on this frame to qualify.
+	var caveat []string
+	if !m.showHelp {
+		caveat = loggingCaveat(h)
+	}
 	lines := []string{head, ""}
 	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat))), "\n")...)
 	if len(caveat) > 0 {
@@ -344,6 +354,18 @@ func countMatching(f model.Filter, spans []span.Span) int {
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer(w int) string {
+	// The help is modal in Update, so it is modal here too. The raw log's
+	// search report below describes a view the help is not drawing, and it
+	// REPLACES the whole footer -- so without this a reader who opened the
+	// help after a failed search sees "pattern not found" where the only
+	// two keys that still work should be, on a screen where every other key
+	// is inert. At a height that also cuts the key table down to its title,
+	// nothing on the frame names a working key at all. That is the trap
+	// View's own comment says the footer exists to prevent, and the reason
+	// renderHelp is allowed to cut without a mark.
+	if m.showHelp {
+		return m.keyHints(w)
+	}
 	if m.blockedJump {
 		return jumpBlockedNote
 	}
@@ -501,7 +523,7 @@ func (m *Model) actionKeys(w int) string {
 	if m.detailPaneDrawn(w) && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)
 	}
-	if _, sortable := tables[m.view]; sortable {
+	if _, sortable := tables[m.view]; sortable && len(m.rows()) > 0 {
 		keys = append(keys, sortHint)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", "Esc clear", quitHint), "  ")
@@ -938,7 +960,7 @@ func fitPaneSections(title string, sections []paneSection, w, h int) []string {
 	if cut {
 		lines = append(lines, clipWidth(detailCutMark, w))
 	}
-	if len(lines) > h {
+	if h > 0 && len(lines) > h {
 		lines = lines[:h]
 		if h > 1 {
 			lines[h-1] = clipWidth(detailCutMark, w)

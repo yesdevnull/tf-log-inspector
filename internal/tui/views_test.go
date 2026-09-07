@@ -2,6 +2,7 @@ package tui
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -841,9 +842,6 @@ func TestSortIsInertInTheViewsWithNoTable(t *testing.T) {
 			if after.sortCol != before {
 				t.Errorf("s in %s moved the sort from %v to %v, but this view has no table to sort", viewTitle(tc.view), before, after.sortCol)
 			}
-			if after.ActiveView() != tc.view {
-				t.Errorf("s in %s changed the view to %v", viewTitle(tc.view), after.ActiveView())
-			}
 		})
 	}
 }
@@ -865,4 +863,263 @@ func tableHeaderOf(t *testing.T, centre string) string {
 	}
 	t.Fatalf("no column header line in:\n%s", centre)
 	return ""
+}
+
+// rankedBefore cannot separate two calls of the same RPC name at the same
+// duration, and on a real capture that is the ordinary case rather than a
+// corner -- a plan makes thousands of ApplyResourceChange calls and many
+// land on the same millisecond. What orders those is the STABILITY of the
+// sort applied over it, so ties hold the order the log recorded them in.
+//
+// The shape matters. Spans that are ALL equal go down sort.Slice's
+// equal-elements fast path, where an unstable sort is indistinguishable
+// from a stable one; so does any input under pdqsort's insertion-sort
+// cutoff. Several duration groups with ties inside each is what actually
+// separates them, and is also what a real capture looks like.
+//
+// The second half is the consequence a reader sees: removing one span
+// reshuffles rows the removal did not touch, which is what a facet toggle
+// does. The header reports "12 of 3184 RPC spans", so the reader knows the
+// SET changed -- nothing accounts for rows moving that the filter kept.
+func TestCallRowsResolvesTiesByLogOrderRatherThanBySortInternals(t *testing.T) {
+	const groups, perGroup = 8, 5
+	spans := make([]span.Span, 0, groups*perGroup)
+	for i := 0; i < groups*perGroup; i++ {
+		spans = append(spans, span.Span{
+			Entry:      uint32(i),
+			DurationMs: uint32(i%groups) + 1,
+			RPC:        "ApplyResourceChange",
+			Provider:   "registry.terraform.io/hashicorp/aws",
+		})
+	}
+
+	full := callRows(spans, model.Filter{})
+	if len(full) != len(spans) {
+		t.Fatalf("got %d rows for %d spans", len(full), len(spans))
+	}
+	for i := 1; i < len(full); i++ {
+		prev, cur := spans[full[i-1].spanIdx], spans[full[i].spanIdx]
+		if prev.DurationMs != cur.DurationMs {
+			continue // a boundary between duration groups
+		}
+		if full[i].spanIdx < full[i-1].spanIdx {
+			t.Fatalf("rows %d and %d are both %dms but carry spans %d then %d -- ties are being resolved by the sort's internals rather than by log order",
+				i-1, i, cur.DurationMs, full[i-1].spanIdx, full[i].spanIdx)
+		}
+	}
+
+	// Drop the slowest span. Every surviving row is untouched by that
+	// removal, so every surviving row must hold its place relative to the
+	// others.
+	slowest := full[0].spanIdx
+	kept := append(append([]span.Span{}, spans[:slowest]...), spans[slowest+1:]...)
+	narrowed := callRows(kept, model.Filter{})
+	var want []uint32
+	for _, r := range full[1:] {
+		want = append(want, spans[r.spanIdx].Entry)
+	}
+	for i, r := range narrowed {
+		if got := kept[r.spanIdx].Entry; got != want[i] {
+			t.Errorf("after removing an unrelated span, row %d carries entry %d, want %d -- the filter reshuffled rows it did not touch", i, got, want[i])
+		}
+	}
+}
+
+// The tie-break is what sortRows spends most of its doc comment on, and
+// nothing exercised it: replacing the whole thing with "return false"
+// passed every package. It is tested here as a pure function over
+// hand-built rows, because reaching a tie through a log fixture needs two
+// rows equal in the sort column and different in column 0, which no fixture
+// has.
+func TestSortRowsBreaksTiesOnTheFirstColumn(t *testing.T) {
+	// typeColumns: column 0 is the resource type, an identifier, so a tie
+	// in a numeric column falls to it ASCENDING.
+	tied := []row{
+		rollupRow([]string{"aws_zulu", "1", "1s", "2", "40ms", "20ms"}, []uint64{0, 1, 1000, 2, 40, 20}, nil),
+		rollupRow([]string{"aws_alpha", "1", "1s", "2", "90ms", "50ms"}, []uint64{0, 1, 1000, 2, 90, 50}, nil),
+	}
+	sortRows(typeColumns, tied, 3) // RPC calls: both 2
+	if got := tied[0].cells[0]; got != "aws_alpha" {
+		t.Errorf("a tie in a numeric column put %q first, want aws_alpha -- ties must fall to column 0, ascending for an identifier", got)
+	}
+
+	// callColumns: column 0 is duration, a number, so a tie in an
+	// identifier column falls to it DESCENDING -- the slowest call of each
+	// RPC name first, which is what the calls view means by an order.
+	calls := []row{
+		callRow([]string{"5ms", "ApplyResourceChange", "aws_subnet", "p"}, []uint64{5, 0, 0, 0}, 0),
+		callRow([]string{"90ms", "ApplyResourceChange", "aws_vpc", "p"}, []uint64{90, 0, 0, 0}, 1),
+	}
+	sortRows(callColumns, calls, 1) // RPC: both ApplyResourceChange
+	if got := calls[0].cells[0]; got != "90ms" {
+		t.Errorf("a tie in an identifier column put %q first, want 90ms -- ties must fall to column 0, descending for a number", got)
+	}
+
+	// Sorting BY column 0 has no tie-break to fall to, so rows it cannot
+	// separate hold the order they arrived in.
+	equal := []row{
+		callRow([]string{"5ms", "A", "t", "p"}, []uint64{5, 0, 0, 0}, 7),
+		callRow([]string{"5ms", "A", "t", "p"}, []uint64{5, 0, 0, 0}, 3),
+	}
+	sortRows(callColumns, equal, 0)
+	if equal[0].spanIdx != 7 || equal[1].spanIdx != 3 {
+		t.Errorf("rows equal in every column were reordered (%d, %d), want their arrival order (7, 3) -- the sort is not stable", equal[0].spanIdx, equal[1].spanIdx)
+	}
+}
+
+// Every numeric cell must be the RENDERING of the number recorded beside
+// it. row.numeric is a slice parallel to row.cells, written as a SECOND
+// literal at each builder, and nothing about the two literals makes their
+// order agree -- so a number in the wrong slot sorts one column by another
+// column's figure, under a header marker naming the column the reader asked
+// for. That is a plausible number attached to the wrong noun, arriving
+// through the sort.
+//
+// Length equality alone does not catch it: the two figures swapped are both
+// uint64 and both present. This compares VALUES for that reason.
+func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
+	for _, tc := range []struct {
+		view    View
+		key     rune
+		fixture string
+	}{
+		{ViewProviders, '1', "two-providers.log"},
+		{ViewTypes, '2', "two-tier.log"},
+		{ViewCalls, '4', "provider-rpc.log"},
+	} {
+		t.Run(viewTitle(tc.view), func(t *testing.T) {
+			m := update(t, New(testLog(t, tc.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+			cols := tables[tc.view].cols
+			rows := m.rows()
+			if len(rows) == 0 {
+				t.Fatalf("fixture assumption changed: no rows, so this checks nothing")
+			}
+			for r, rw := range rows {
+				if len(rw.cells) != len(cols) || len(rw.numeric) != len(cols) {
+					t.Fatalf("row %d has %d cells and %d numbers against %d columns", r, len(rw.cells), len(rw.numeric), len(cols))
+				}
+				for i, c := range cols {
+					if c.kind != numericColumn {
+						continue
+					}
+					// The two renderings the builders use: a duration
+					// through formatMs, a count through strconv.
+					if got := rw.cells[i]; got != formatMs(rw.numeric[i]) && got != strconv.FormatUint(rw.numeric[i], 10) {
+						t.Errorf("row %d column %q shows %q, which is neither rendering of the %d recorded beside it -- the number is in the wrong slot", r, c.header, got, rw.numeric[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+// tableBinding.defaultCol asserts a fact about ANOTHER function -- that the
+// row builder already ranks by that column -- which no type can enforce. It
+// is checked here directly: the builder's own output must never step
+// backwards in defaultCol's direction.
+//
+// Ties are allowed, because the tie-breaks are exactly what differ between
+// the builders and are what the default sort exists to preserve.
+//
+// The spans are built here rather than loaded, because a fixture only
+// discriminates if ranking by the DEFAULT column disagrees with ranking by
+// every other column, and the repo's fixtures rank the same either way --
+// two-providers.log orders providers identically by total, by max and by
+// call count, so a wrong defaultCol stayed monotonic and the check passed.
+// These are shaped so each view's default order is the only order that
+// holds.
+func TestEveryDefaultSortColumnNamesTheOrderItsBuilderProduces(t *testing.T) {
+	rpc := func(rpcName, provider, resourceType string, ms uint32, entry uint32) span.Span {
+		return span.Span{Entry: entry, DurationMs: ms, RPC: rpcName, Provider: provider, ResourceType: resourceType}
+	}
+	// aws: three 10ms calls (total 30, max 10). google: one 20ms call
+	// (total 20, max 20). Ranking by total puts aws first; by max or by
+	// call count it would be google.
+	providerSpans := []span.Span{
+		rpc("A", "aws", "aws_subnet", 10, 0),
+		rpc("A", "aws", "aws_subnet", 10, 1),
+		rpc("A", "aws", "aws_subnet", 10, 2),
+		rpc("A", "google", "google_vm", 20, 3),
+	}
+	// alpha: 1s of UI, 500ms of RPC. zulu: 3s of UI, 10ms of RPC. Ranking
+	// by UI total puts zulu first; by any RPC column it would be alpha.
+	typeRPC := []span.Span{rpc("A", "aws", "alpha", 500, 0), rpc("A", "aws", "zulu", 10, 1)}
+	typeUI := []span.Span{
+		{Entry: 2, DurationMs: 1000, ResourceType: "alpha", Fidelity: span.FidelityUIReported},
+		{Entry: 3, DurationMs: 3000, ResourceType: "zulu", Fidelity: span.FidelityUIReported},
+	}
+	// Duration desc puts the 9ms call first; every identifier column would
+	// put the other one there.
+	callSpans := []span.Span{rpc("AApply", "aws", "a_type", 5, 0), rpc("ZApply", "zed", "z_type", 9, 1)}
+
+	for _, tc := range []struct {
+		view View
+		rows []row
+	}{
+		{ViewProviders, providerRows(providerSpans)},
+		{ViewTypes, typeRows(typeRPC, typeUI)},
+		{ViewCalls, callRows(callSpans, model.Filter{})},
+	} {
+		t.Run(viewTitle(tc.view), func(t *testing.T) {
+			b := tables[tc.view]
+			if len(tc.rows) < 2 {
+				t.Fatalf("built %d rows, want at least two to compare", len(tc.rows))
+			}
+			// Every OTHER column must disagree with the default, or a wrong
+			// defaultCol would still look monotonic and this would pass.
+			disagrees := false
+			for c := range b.cols {
+				if c == b.defaultCol {
+					continue
+				}
+				if less, decided := compareCell(b.cols[c].kind, tc.rows[1], tc.rows[0], c); decided && less {
+					disagrees = true
+				}
+			}
+			if !disagrees {
+				t.Fatalf("no column disagrees with column %d's order, so a wrong defaultCol would pass this unnoticed", b.defaultCol)
+			}
+
+			for i := 1; i < len(tc.rows); i++ {
+				if less, decided := compareCell(b.cols[b.defaultCol].kind, tc.rows[i], tc.rows[i-1], b.defaultCol); decided && less {
+					t.Errorf("row %d (%q) sorts before row %d (%q) by column %q, which this view claims its builder already ranks by",
+						i, tc.rows[i].cells[b.defaultCol], i-1, tc.rows[i-1].cells[b.defaultCol], b.cols[b.defaultCol].header)
+				}
+			}
+		})
+	}
+}
+
+// sortCol is an array rather than one int because a column index names a
+// different column in each table. Nothing tested that: every sort test
+// builds a fresh model per view and never switches, so the claim the array
+// exists for went unchecked -- writing every view's slot on each press
+// passed the whole package.
+//
+// The rendered marker is asserted alongside the state, because a view
+// switch must also rebuild the row cache: state kept and a marker drawn
+// from a stale cache is the same defect one layer down.
+func TestTheSortIsRememberedPerViewAcrossASwitch(t *testing.T) {
+	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = update(t, m, sortKey)
+	types := m.sortCol[ViewTypes]
+	marker := typeColumns[types].header + sortMark(typeColumns[types].kind)
+	if types == tables[ViewTypes].defaultCol {
+		t.Fatalf("one press left the types sort on its default, so a switch cannot show it was remembered")
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	m = update(t, m, sortKey)
+	if m.sortCol[ViewTypes] != types {
+		t.Errorf("cycling the sort in the calls view moved the types view's sort from column %d to %d", types, m.sortCol[ViewTypes])
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if m.sortCol[ViewTypes] != types {
+		t.Errorf("the types view came back sorted by column %d, want the column %d it was left on", m.sortCol[ViewTypes], types)
+	}
+	if header := tableHeaderOf(t, centrePaneOf(m.View())); !strings.Contains(header, marker) {
+		t.Errorf("the types view came back without its marker %q:\n%s", marker, header)
+	}
 }

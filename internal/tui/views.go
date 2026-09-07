@@ -446,6 +446,11 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 // two ways: in a group whose two longest calls are equal, the detail pane
 // would name the earlier-logged one while the calls table ranked the other
 // above it.
+//
+// It is NOT a total order: two calls of the same RPC name at the same
+// duration are equal under it, and on a real capture that is the ordinary
+// case rather than a corner. What settles those is the stability of the
+// sort applied over it, not this rule -- see callRows.
 func rankedBefore(a, b span.Span) bool {
 	if a.DurationMs != b.DurationMs {
 		return a.DurationMs > b.DurationMs
@@ -577,7 +582,14 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 			idx = append(idx, i)
 		}
 	}
-	sort.Slice(idx, func(i, j int) bool {
+	// STABLE, because rankedBefore is not a total order: two calls of the
+	// same RPC name at the same duration are equal under it, which is the
+	// ordinary case on a real capture. Sorted unstably they arrive in
+	// whatever order the sort's internals produce, and that order changes
+	// when the SET changes -- so toggling a facet reshuffles tied rows the
+	// filter did not touch, with nothing on screen accounting for the move.
+	// Stable, they hold the order the log recorded them in.
+	sort.SliceStable(idx, func(i, j int) bool {
 		return rankedBefore(rpcSpans[idx[i]], rpcSpans[idx[j]])
 	})
 

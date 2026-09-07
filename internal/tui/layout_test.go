@@ -2069,3 +2069,22 @@ func TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth(t *testing.T) {
 		})
 	}
 }
+
+// A log with no spans of either tier draws capture guidance where the table
+// would be -- no header, no columns, no rows -- so there is nothing for a
+// sort to reorder even though the view is one that has a table. The hint
+// asks what the frame CONTAINS, the way the open and span hints do, rather
+// than which view is on: which view is on is a static fact, and this one is
+// not.
+func TestActionKeysDropTheSortHintWhenNoTableIsDrawn(t *testing.T) {
+	m := update(t, New(testLog(t, "core-only.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	if _, sortable := tables[m.ActiveView()]; !sortable {
+		t.Fatalf("the opening view has no table at all, so this cannot show the hint being dropped for want of ROWS")
+	}
+	if len(m.rows()) != 0 {
+		t.Fatalf("fixture assumption changed: %d rows, want a log with nothing to sort", len(m.rows()))
+	}
+	if got := m.actionKeys(160); strings.Contains(got, sortHint) {
+		t.Errorf("the footer offers %q over a frame drawing capture guidance instead of a table: %q", sortHint, got)
+	}
+}
