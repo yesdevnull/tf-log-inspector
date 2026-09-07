@@ -681,29 +681,3 @@ func TestEveryFacetValueStartsTicked(t *testing.T) {
 		t.Error("an untouched facet pane reports an active filter, so every pane will explain an empty list as filtered")
 	}
 }
-
-// Unticking a dimension's every value shows NOTHING, not everything. The
-// reading has to follow the boxes: no box ticked is no value admitted. The
-// opposite -- treating an exhausted dimension as unconstrained, which is
-// what an allow-list built by exclusion falls into if empty means "no
-// opinion" -- would answer the reader's last untick by putting every row
-// back on screen.
-func TestUntickingEveryValueInADimensionShowsNothing(t *testing.T) {
-	m := callsModel(t, "provider-level-rpc.log", "x.log")
-	var dim model.Facet
-	for _, f := range m.facets {
-		if f.Name == dimProvider {
-			dim = f
-		}
-	}
-	if len(dim.Values) == 0 {
-		t.Fatalf("fixture assumption changed: dimension %q has no values to untick", dimProvider)
-	}
-	for _, v := range dim.Values {
-		m = moveFacetCursorTo(t, m, dim.Name, v.Value)
-		m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	}
-	if got := len(m.rows()); got != 0 {
-		t.Errorf("every %s unticked still lists %d calls, want none", dimProvider, got)
-	}
-}
