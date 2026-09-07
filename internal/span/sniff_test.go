@@ -227,3 +227,67 @@ func TestSnifferCorrelationCapBounded(t *testing.T) {
 		t.Errorf("BestFidelity = %v, %v; want paired, true", f, ok)
 	}
 }
+
+// The spread of entries per request id, which is what sizes a scope built on
+// that field. The mean alone cannot: a log where every call has eleven
+// entries and one where most have two and a few have hundreds share a mean
+// and mean opposite things for a feature that shows a reader one call.
+func TestSnifferReportsTheSpreadOfEntriesPerRequestID(t *testing.T) {
+	var comps logfmt.Interner
+	s := NewSniffer(&comps)
+	// Three calls: one entry, three entries, five entries.
+	for id, n := range map[string]int{"one": 1, "three": 3, "five": 5} {
+		for range n {
+			s.Entry(0, logfmt.Entry{}, "anything at all", logfmt.ParseFields("tf_req_id="+id, nil))
+		}
+	}
+	c := s.Report()
+	if got, want := c.DistinctReqIDs, uint64(3); got != want {
+		t.Errorf("DistinctReqIDs = %d, want %d", got, want)
+	}
+	if got, want := c.MinEntriesPerReqID, uint64(1); got != want {
+		t.Errorf("MinEntriesPerReqID = %d, want %d", got, want)
+	}
+	if got, want := c.MedianEntriesPerReqID, uint64(3); got != want {
+		t.Errorf("MedianEntriesPerReqID = %d, want %d", got, want)
+	}
+	if got, want := c.MaxEntriesPerReqID, uint64(5); got != want {
+		t.Errorf("MaxEntriesPerReqID = %d, want %d", got, want)
+	}
+	if c.ReqIDTrackingFull {
+		t.Errorf("ReqIDTrackingFull on a log of three ids")
+	}
+}
+
+// A log with no request ids at all reports zeroes rather than a spread over
+// nothing, so the report cannot show a median of a set it never saw.
+func TestSnifferReportsNoSpreadWithoutRequestIDs(t *testing.T) {
+	var comps logfmt.Interner
+	s := NewSniffer(&comps)
+	s.Entry(0, logfmt.Entry{}, "no fields here", nil)
+	c := s.Report()
+	if c.DistinctReqIDs != 0 || c.MinEntriesPerReqID != 0 || c.MedianEntriesPerReqID != 0 || c.MaxEntriesPerReqID != 0 {
+		t.Errorf("a log with no request ids reported distinct=%d min=%d median=%d max=%d",
+			c.DistinctReqIDs, c.MinEntriesPerReqID, c.MedianEntriesPerReqID, c.MaxEntriesPerReqID)
+	}
+}
+
+// Past the tracking cap the figures under-report, and the report says so
+// rather than presenting a saturated count as a measurement. The cap is what
+// stops a pathological log growing the set without limit; the flag is what
+// stops a reader mistaking the ceiling for the answer -- which matters most
+// on exactly the large workspace where the number would be interesting.
+func TestSnifferFlagsASaturatedRequestIDSet(t *testing.T) {
+	var comps logfmt.Interner
+	s := NewSniffer(&comps)
+	for i := range maxTrackedReqIDs + 10 {
+		s.Entry(0, logfmt.Entry{}, "anything at all", logfmt.ParseFields(fmt.Sprintf("tf_req_id=id%d", i), nil))
+	}
+	c := s.Report()
+	if !c.ReqIDTrackingFull {
+		t.Errorf("ReqIDTrackingFull is false after %d distinct ids against a cap of %d", maxTrackedReqIDs+10, maxTrackedReqIDs)
+	}
+	if got, want := c.DistinctReqIDs, uint64(maxTrackedReqIDs); got != want {
+		t.Errorf("DistinctReqIDs = %d, want it capped at %d", got, want)
+	}
+}

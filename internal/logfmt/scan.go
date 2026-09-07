@@ -39,13 +39,24 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 		scratch  []byte
 		off      uint64
 
-		open     bool
-		cur      Entry
-		curMsg   string
-		runLen   uint64
-		baseTS   time.Time
-		haveBase bool
-		ord      uint32
+		open   bool
+		cur    Entry
+		curMsg string
+		// contFields is the parse buffer for a continuation line, kept
+		// beside fieldBuf rather than sharing it: flush reads fieldBuf
+		// after the continuations of its entry have been scanned, so one
+		// buffer would have the header's fields overwritten by the last
+		// continuation's.
+		contFields Fields
+		// curContReqID records that a continuation of the entry now open
+		// carried a tf_req_id. Compared at flush against the header's own
+		// fields, it is what tells an id that was merely unparsed from one
+		// that was never there.
+		curContReqID bool
+		runLen       uint64
+		baseTS       time.Time
+		haveBase     bool
+		ord          uint32
 	)
 
 	flush := func() {
@@ -56,6 +67,11 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 			st.LongContinuationRuns++
 		}
 		fieldBuf = ParseFields(curMsg, fieldBuf[:0])
+		if curContReqID {
+			if _, ok := fieldBuf.Get("tf_req_id"); !ok {
+				st.ContinuationOnlyReqIDEntries++
+			}
+		}
 		st.Entries++
 		st.ByLevel[cur.Level]++
 		for _, s := range sinks {
@@ -64,6 +80,7 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 		ord++
 		open = false
 		curMsg = ""
+		curContReqID = false
 		runLen = 0
 	}
 
@@ -161,6 +178,21 @@ func Scan(r io.Reader, comps *Interner, sinks ...Sink) (Stats, error) {
 				st.ContinuationLines++
 				st.ContinuationBytes += uint64(raw)
 				st.UntimestampedLines++
+				// A substring test first, and the parser only on the lines
+				// that pass it. The parser is what decides -- the key
+				// spelled inside a JSON body is not a field, and counting
+				// it would overstate the blind spot, biasing a decision
+				// towards paying for parsing that would buy nothing -- but
+				// running it on every continuation line of a 1GB log to
+				// reject nearly all of them is a cost this scan does not
+				// need to pay.
+				if strings.Contains(text, reqIDKey+"=") {
+					contFields = ParseFields(text, contFields[:0])
+					if _, ok := contFields.Get(reqIDKey); ok {
+						st.ContinuationReqIDLines++
+						curContReqID = true
+					}
+				}
 				runLen++
 				cur.Len += raw
 				if cur.Lines == math.MaxUint16 {

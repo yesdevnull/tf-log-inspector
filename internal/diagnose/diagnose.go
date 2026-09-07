@@ -521,6 +521,38 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 // keeps a crafted value from reaching --diagnose, the one artefact that
 // leaves the machine, verbatim: it collapses into the shared "<other>"
 // bucket with every other hostile value instead.
+// writeReqIDSpread reports how many distinct request ids the log carries and
+// how much traffic each wears, which is what sizes anything that groups a
+// log by call.
+//
+// Nothing is written when the log carries no request ids: a spread over an
+// empty set would read as a measurement of zero-entry calls rather than of
+// no calls at all.
+func writeReqIDSpread(b *strings.Builder, c span.Capabilities) {
+	if c.DistinctReqIDs == 0 {
+		return
+	}
+	fmt.Fprintf(b, "  %-25s %d\n", "distinct req ids", c.DistinctReqIDs)
+	fmt.Fprintf(b, "  %-25s min %d, median %d, max %d\n", "entries per req id",
+		c.MinEntriesPerReqID, c.MedianEntriesPerReqID, c.MaxEntriesPerReqID)
+	// The cap is stated where the figures it bounds are read, not in a
+	// footnote: a saturated count mistaken for a measurement is the whole
+	// hazard, and it bites hardest on the large capture where the number
+	// would otherwise be most interesting.
+	if c.ReqIDTrackingFull {
+		fmt.Fprintf(b, "  %-25s tracking capped -- the four figures above under-report\n", "")
+	}
+}
+
+// plural picks a suffix for n, so a count of one does not read as a count of
+// several.
+func plural(n uint64, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 func maskedTypeCounts(m map[string]uint64) map[string]uint64 {
 	out := make(map[string]uint64, len(m))
 	for k, v := range m {
@@ -735,11 +767,15 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "  %-25s %d\n", "response duration fields", r.Caps.DurationFields)
 	fmt.Fprintf(b, "  %-25s %d\n", "req id fields", r.Caps.ReqIDFields)
 	fmt.Fprintf(b, "  %-25s %d\n", "correlated req ids", r.Caps.CorrelatedReqIDs)
+	writeReqIDSpread(b, r.Caps)
 	fmt.Fprintf(b, "  %-25s %d\n", "provider entries", r.Caps.ProviderEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "core vertex lines", r.Caps.CoreVertexLines)
 	fmt.Fprintf(b, "  %-25s %d\n", "core GRPC lines", r.Caps.CoreGRPCLines)
-	fmt.Fprintf(b, "  %-25s %d (fields are read from header lines only -- tier above may be conservative)\n\n",
+	fmt.Fprintf(b, "  %-25s %d (fields are read from header lines only -- tier above may be conservative)\n",
 		"continuation lines not parsed for fields", r.Stats.ContinuationLines)
+	fmt.Fprintf(b, "  %-25s %d line(s), costing %d entr%s their only id (upper bound)\n\n",
+		"  of those, carrying an id", r.Stats.ContinuationReqIDLines,
+		r.Stats.ContinuationOnlyReqIDEntries, plural(r.Stats.ContinuationOnlyReqIDEntries, "y", "ies"))
 
 	fmt.Fprintf(b, "SPANS\n")
 	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)

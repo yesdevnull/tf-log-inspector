@@ -1557,3 +1557,49 @@ func TestReportRendersMalformedAndUnmatchedCountsWithNoAddressContext(t *testing
 		t.Errorf("report drops the unmatched-terminator count with no address context:\n%s", section)
 	}
 }
+
+// The report carries the three figures that size a request-id scope: how
+// many distinct calls the log names, how much traffic each wears, and how
+// much of that traffic hides its id on a continuation line the scan does not
+// parse for fields.
+//
+// They are reported together because they are only useful together. A mean
+// scope size says nothing without the spread; a spread says nothing about
+// what a header-only reader would miss.
+func TestReportSizesTheRequestIDScope(t *testing.T) {
+	const ts = "2022-12-15T00:16:20.800Z [TRACE] provider.aws: "
+	in := ts + "Sending request downstream: tf_req_id=abc123\n" +
+		ts + "Called provider defined validator.String: tf_req_id=abc123\n" +
+		ts + "Received downstream response: tf_req_id=abc123 tf_rpc=ReadResource tf_req_duration_ms=5\n" +
+		ts + "HTTP Response Received: @module=aws\n" +
+		"  http.duration=10705 tf_req_id=def456\n"
+
+	// The fixture names two ids but only ONE of them on a header. abc123 is
+	// on three header lines; def456 is on a continuation, so the sniffer --
+	// which reads fields from headers, like everything else downstream --
+	// never sees it. That is the point of reporting the three together: the
+	// spread describes the calls a header-only reader can find, and the
+	// continuation figure is the only sign the others exist.
+	out := render(t, build(t, in))
+	for _, want := range []string{
+		"distinct req ids          1",
+		"entries per req id        min 3, median 3, max 3",
+		"of those, carrying an id 1 line(s), costing 1 entry their only id",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A log with no request ids reports no spread at all, rather than a median
+// over an empty set -- which would read as a measurement of calls carrying
+// no entries instead of a log carrying no calls.
+func TestReportOmitsTheRequestIDSpreadWhenThereAreNone(t *testing.T) {
+	out := render(t, build(t, "2022-12-15T00:16:20.800Z [TRACE] a: nothing structured here\n"))
+	for _, unwanted := range []string{"distinct req ids", "entries per req id"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("report carries %q for a log with no request ids:\n%s", unwanted, out)
+		}
+	}
+}

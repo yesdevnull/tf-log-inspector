@@ -26,6 +26,10 @@ type Entry struct {
 	Timestamped bool   // false for interleaved non-hclog content
 }
 
+// reqIDKey is Terraform's per-call request identifier, the field that ties a
+// provider's log lines to the one RPC that produced them.
+const reqIDKey = "tf_req_id"
+
 // Stats summarises a scan. It is the raw material of the diagnostic report.
 type Stats struct {
 	Entries              uint64
@@ -35,10 +39,28 @@ type Stats struct {
 	UntimestampedLines   uint64 // every physical line with no timestamp
 	StructuredLines      uint64 // lines detected as Terraform's UI JSON stream
 	LongContinuationRuns uint64 // runs longer than longRun lines
-	BackwardsTimestamps  uint64
-	LinesSaturated       uint64
-	ByLevel              [6]uint64
-	Bytes                uint64
-	SawANSI              bool
-	FirstTS, LastTS      time.Time
+	// ContinuationReqIDLines counts continuation lines carrying a tf_req_id
+	// field, and ContinuationOnlyReqIDEntries the entries whose id appears
+	// ONLY there -- the header having carried none.
+	//
+	// Fields are read from header lines only (see the continuation branch in
+	// Scan), so an id a provider wrote onto a wrapped line reaches nothing
+	// downstream. These size that blind spot from either end: how many lines
+	// hold an unread id, and how many entries it actually costs. The second
+	// is the one a design turns on, because an entry whose header carries the
+	// id too loses nothing when its continuations go unparsed.
+	//
+	// Both are UPPER BOUNDS. ParseFields splits on whitespace, so the key
+	// spelled inside a body value counts as a field, and nothing short of
+	// decoding the body could tell them apart. Any feature reading ids off
+	// continuations inherits the same blind spot, so this measures what such
+	// a feature would actually see.
+	ContinuationReqIDLines       uint64
+	ContinuationOnlyReqIDEntries uint64
+	BackwardsTimestamps          uint64
+	LinesSaturated               uint64
+	ByLevel                      [6]uint64
+	Bytes                        uint64
+	SawANSI                      bool
+	FirstTS, LastTS              time.Time
 }

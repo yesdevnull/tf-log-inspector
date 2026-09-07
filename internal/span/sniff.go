@@ -2,6 +2,7 @@ package span
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
@@ -29,6 +30,32 @@ type Capabilities struct {
 	CoreVertexLines   uint64 // core graph-walk lines naming a resource address
 	CoreGRPCLines     uint64 // core "GRPCProvider: <RPC>" lines
 	UIHookCompletions uint64 // structured-output completion-bearing hook lines, UIHookBuilder's precondition
+
+	// DistinctReqIDs is how many different tf_req_id values the log carries,
+	// and Min/Median/MaxEntriesPerReqID the spread of how many entries each
+	// of them appears on. Together they size what grouping a log by request
+	// id would actually yield.
+	//
+	// The spread is reported rather than a mean because the mean cannot tell
+	// the two shapes apart that matter: a log where every call carries eleven
+	// entries and one where most carry two and a handful carry hundreds share
+	// a mean and mean opposite things for anything that shows a reader one
+	// call.
+	//
+	// All four count HEADER-borne ids only, as everything reading fields
+	// does. An id written onto a continuation line is invisible here, and
+	// Stats.ContinuationOnlyReqIDEntries is what sizes that blind spot --
+	// the two are read together or not at all.
+	//
+	// All four are capped at maxTrackedReqIDs distinct ids. ReqIDTrackingFull
+	// says the cap was reached, so they under-report -- which is the safe
+	// direction, but only if the reader is told, since a ceiling read as a
+	// measurement is worse than no measurement.
+	DistinctReqIDs        uint64
+	MinEntriesPerReqID    uint64
+	MedianEntriesPerReqID uint64
+	MaxEntriesPerReqID    uint64
+	ReqIDTrackingFull     bool
 }
 
 // BestFidelity reports the highest-fidelity tier this log can support, and
@@ -61,6 +88,15 @@ type Sniffer struct {
 	caps   Capabilities
 	comps  *logfmt.Interner
 	reqIDs map[string]struct{} // request-side tf_req_id seen, capped at maxTrackedReqIDs
+	// reqIDCounts is entries-per-id over EVERY entry carrying one, where
+	// reqIDs above holds only the request side. They answer different
+	// questions -- correlation needs to know an id was requested, the spread
+	// needs to know how much traffic wears it -- so they are two sets rather
+	// than one carrying a flag.
+	reqIDCounts map[string]uint32
+	// reqIDsFull records that a new id was refused for the cap, so the
+	// figures derived from reqIDCounts can say they under-report.
+	reqIDsFull bool
 }
 
 // NewSniffer returns a Sniffer resolving component ids via comps.
@@ -97,6 +133,7 @@ func (s *Sniffer) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields)
 	reqID, hasReqID := f.Get("tf_req_id")
 	if hasReqID {
 		s.caps.ReqIDFields++
+		s.countReqID(reqID)
 	}
 	switch {
 	case isRequest && hasReqID:
@@ -154,5 +191,48 @@ func (s *Sniffer) Structured(ord uint32, e logfmt.Entry, line string) {
 	s.caps.UIHookCompletions++
 }
 
-// Report returns the accumulated capabilities.
-func (s *Sniffer) Report() Capabilities { return s.caps }
+// countReqID records one more entry carrying id.
+//
+// An id already tracked always counts, cap or no cap: refusing it would
+// leave a tracked id's own total wrong, which is worse than a short set. It
+// is only a NEW id past the cap that is refused, and that sets the flag the
+// report reads.
+//
+// id is cloned on first insertion for the reason trackRequestID clones:
+// Sink.Entry's strings are valid only for the call, and a retained substring
+// pins its whole source line.
+func (s *Sniffer) countReqID(id string) {
+	if n, ok := s.reqIDCounts[id]; ok {
+		s.reqIDCounts[id] = n + 1
+		return
+	}
+	if len(s.reqIDCounts) >= maxTrackedReqIDs {
+		s.reqIDsFull = true
+		return
+	}
+	if s.reqIDCounts == nil {
+		s.reqIDCounts = make(map[string]uint32)
+	}
+	s.reqIDCounts[strings.Clone(id)] = 1
+}
+
+// Report returns the accumulated capabilities, with the request-id spread
+// derived from the tracked counts. It is derived here rather than maintained
+// per entry because a median cannot be: it needs the whole set.
+func (s *Sniffer) Report() Capabilities {
+	c := s.caps
+	c.DistinctReqIDs = uint64(len(s.reqIDCounts))
+	c.ReqIDTrackingFull = s.reqIDsFull
+	if len(s.reqIDCounts) == 0 {
+		return c
+	}
+	counts := make([]uint32, 0, len(s.reqIDCounts))
+	for _, n := range s.reqIDCounts {
+		counts = append(counts, n)
+	}
+	slices.Sort(counts)
+	c.MinEntriesPerReqID = uint64(counts[0])
+	c.MaxEntriesPerReqID = uint64(counts[len(counts)-1])
+	c.MedianEntriesPerReqID = uint64(counts[len(counts)/2])
+	return c
+}

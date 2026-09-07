@@ -522,3 +522,68 @@ func TestScanRealFixtures(t *testing.T) {
 		}
 	}
 }
+
+// A tf_req_id on a CONTINUATION line is counted, and separately so is the
+// entry whose header carried none.
+//
+// Fields are read from header lines only, so an id that a provider wrote
+// onto a wrapped line is invisible to everything downstream -- including any
+// feature that groups a call's entries by request id. The two counts size
+// that blind spot from either end: how much of it there is, and how many
+// entries it actually costs. An entry whose header carries the id as well
+// loses nothing when its continuations are unread, which is why the
+// continuation-only count is the one a design decision turns on.
+func TestScanCountsRequestIdsOnContinuationLines(t *testing.T) {
+	const ts = "2026-08-29T10:34:43.124+0200 [TRACE] provider.aws: "
+	in := ts + "HTTP Response Received: @module=aws\n" +
+		"  http.response.body= {}\n" +
+		"  http.duration=10705 tf_req_id=abc123\n" +
+		ts + "Received downstream response: tf_req_id=abc123 tf_rpc=ReadResource\n" +
+		"  a continuation whose header already carried the id, tf_req_id=abc123\n" +
+		ts + "no id anywhere on this one\n" +
+		"  nor on its continuation\n"
+
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got, want := st.Entries, uint64(3); got != want {
+		t.Fatalf("Entries = %d, want %d -- the fixture did not group as intended", got, want)
+	}
+	if got, want := st.ContinuationReqIDLines, uint64(2); got != want {
+		t.Errorf("ContinuationReqIDLines = %d, want %d", got, want)
+	}
+	// Only the first entry: the second carries the id on its header too, and
+	// the third carries none at all.
+	if got, want := st.ContinuationOnlyReqIDEntries, uint64(1); got != want {
+		t.Errorf("ContinuationOnlyReqIDEntries = %d, want %d", got, want)
+	}
+}
+
+// The count is an UPPER BOUND, and this pins the reason. ParseFields splits
+// on whitespace, so a key spelled inside a JSON body value parses as a field
+// and is counted -- there is no way to tell the two apart without decoding
+// the body, which the scan deliberately never does.
+//
+// That is the honest measure rather than a defect, because any feature
+// reading ids off continuation lines inherits exactly this blind spot: it
+// would scope by the same parse and admit the same line. A count that came
+// back small therefore settles the question outright; one that came back
+// large would need this case ruled out before it could be trusted.
+func TestScanCountsARequestIdQuotedInsideABodyAsWell(t *testing.T) {
+	const ts = "2026-08-29T10:34:43.124+0200 [TRACE] provider.aws: "
+	in := ts + "HTTP Response Received: @module=aws\n" +
+		`  http.response.body= {"note":"the string tf_req_id=abc is inside this body"}` + "\n"
+
+	var comps Interner
+	var c collector
+	st, err := Scan(strings.NewReader(in), &comps, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got, want := st.ContinuationOnlyReqIDEntries, uint64(1); got != want {
+		t.Errorf("ContinuationOnlyReqIDEntries = %d, want %d -- the bound is meant to include this case", got, want)
+	}
+}
