@@ -1282,13 +1282,14 @@ func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
 }
 
 // Scoped, the refusal asks whether the filter admits ANY member of the call,
-// not whether it admits the response entry. The pane no longer opens on the
-// response, so that entry being hidden is not decisive -- and refusing a jump
-// whose other lines are perfectly visible would deny the reader a pane that
-// would have worked.
-func TestAJumpProceedsWhenTheFilterAdmitsSomeOfTheCall(t *testing.T) {
+// not whether it admits the response entry. The pane opens on the first
+// member the filter admits, so the response entry being hidden is not
+// decisive -- and refusing a jump whose other lines are perfectly visible
+// would deny the reader a pane that would have worked.
+func TestAJumpProceedsWhenTheFilterAdmitsTheCall(t *testing.T) {
 	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
-	// Hide DEBUG, which is the call's HTTP entry but not its TRACE lines.
+	// Hide DEBUG: its request id is continuation-borne (see ScopeFor), so
+	// it is outside the call's scope -- every scope member is TRACE.
 	m.setFacetExclusions(dimLevel, map[string]bool{"DEBUG": true})
 	m.invalidateRows()
 
@@ -1297,7 +1298,7 @@ func TestAJumpProceedsWhenTheFilterAdmitsSomeOfTheCall(t *testing.T) {
 		t.Errorf("the jump was refused though the filter admits the call's TRACE lines")
 	}
 	if m.blockedJump {
-		t.Errorf("blockedJump set for a call the filter partly admits")
+		t.Errorf("blockedJump set for a call the filter admits")
 	}
 }
 
@@ -1323,10 +1324,11 @@ func TestAJumpIsRefusedWhenTheFilterHidesTheWholeCall(t *testing.T) {
 // not be the scope's own first member: a call whose OPENING line the filter
 // hides, but whose later traffic it shows, still opens -- on the later
 // line, not the hidden one. entryVisible weighs only level and provider
-// (see its own doc comment), and every fixture's scope is level-uniform
-// (testdata/interleaved-calls.log's two calls, testdata/severity-levels.log's
-// pair), so telling "checks the whole scope" apart from "checks the first
-// member" takes a log built directly rather than a fixture file.
+// (see its own doc comment), and every fixture's scope is level-uniform --
+// for instance, testdata/interleaved-calls.log's two calls and
+// testdata/severity-levels.log's pair -- so telling "checks the whole
+// scope" apart from "checks the first member" takes a log built directly
+// rather than a fixture file.
 func TestAJumpOpensOnTheFirstAdmittedMemberEvenWhenAnEarlierOneIsHidden(t *testing.T) {
 	l := manyEntryLog(3)
 	l.Entries[0].Level, l.Entries[0].ReqID = logfmt.LevelTrace, 1

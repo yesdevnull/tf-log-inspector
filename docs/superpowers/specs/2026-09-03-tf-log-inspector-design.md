@@ -1128,8 +1128,8 @@ of these carries `tf_req_id`:
 So a scope is not two protocol bookends with the reader's imagination in
 between. It is the provider's own work on that call — its validators, its
 plan modifiers, its schema and resource-identity lookups, its
-semantic-equality decisions — which is exactly the content `⏎` promises and
-today does not deliver.
+semantic-equality decisions — which is exactly the content a two-entry
+scope would have missed.
 
 **What the 2174 triple does and does not license.** `response entries 2174`,
 `request entries 2174`, `correlated req ids 2174` and `spans built 2174` on
@@ -1442,10 +1442,13 @@ selected call in the raw log · `s` cycle sort · `/` search · `Esc` leave an
 opened call, then clear filters · `?` help · `q` quit.
 
 **Shipped 2026-09-07:** `Esc` returns from an opened call before it clears
-the filters, and the footer names whichever of the two is live. `⏎` opens the
-raw log at the entry that CLOSED the call, with a few lines of what preceded
-it above (`jumpContextLines`), and refuses with a footer report rather than
-jumping when the active filter hides that entry.
+the filters, and the footer names whichever of the two is live. For a call
+with no request id, `⏎` opens the raw log at the entry that CLOSED it, with
+a few lines of what preceded it above (`jumpContextLines`), and refuses with
+a footer report rather than jumping when the active filter hides that entry.
+For a call WITH a request id, `⏎` opens at the scope's first member the
+filter admits, with no `jumpContextLines` (see *Scoping the raw log to one
+call*), and refuses only when the filter hides every member of the scope.
 
 **Shipped 2026-09-07:** `\` drops a raw-log scope back to the whole log (see
 *Scoping the raw log to one call*).

@@ -181,8 +181,9 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	// Scoped, the question is whether the filter admits any member at all.
 	// The pane opens on the first ADMITTED member, so the response entry
 	// being hidden is not decisive: refusing on it would deny a pane whose
-	// other lines are perfectly visible. Unscoped, the question is the old
-	// one, asked of the single entry the pane will open on.
+	// other lines are perfectly visible. Unscoped, there is no scope to
+	// ask, so the question is asked of the single entry the pane will open
+	// on.
 	open := -1
 	for _, i := range scope {
 		if entryVisible(f, compProviders, m.log.Entries[i]) {
@@ -208,6 +209,9 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	m.setView(ViewRawLog)
 	m.returnTo, m.hasReturn = from, true
 	if len(scope) > 0 {
+		// jumpContextLines is NOT applied here: the scope already supplies
+		// what led to the call, and backing up from the admitted member
+		// would open the pane on lines outside the scope.
 		m.raw.scope = scope
 		m.raw.top, m.raw.topLine = open, 0
 		return
