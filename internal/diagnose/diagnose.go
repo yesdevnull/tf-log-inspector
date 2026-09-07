@@ -766,6 +766,7 @@ func (r Report) Render(w io.Writer) error {
 	fmt.Fprintf(b, "  %-25s %d\n", "request entries", r.Caps.RequestEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "response duration fields", r.Caps.DurationFields)
 	fmt.Fprintf(b, "  %-25s %d\n", "req id fields", r.Caps.ReqIDFields)
+	fmt.Fprintf(b, "    %-25s %d of %d responses\n", "on a response", r.Caps.ResponseReqIDFields, r.Caps.ResponseEntries)
 	fmt.Fprintf(b, "  %-25s %d\n", "correlated req ids", r.Caps.CorrelatedReqIDs)
 	writeReqIDSpread(b, r.Caps)
 	fmt.Fprintf(b, "  %-25s %d\n", "provider entries", r.Caps.ProviderEntries)

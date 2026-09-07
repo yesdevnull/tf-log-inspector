@@ -1603,3 +1603,15 @@ func TestReportOmitsTheRequestIDSpreadWhenThereAreNone(t *testing.T) {
 		}
 	}
 }
+
+// The report states how many responses carried an id against how many there
+// were, because their difference is the number of spans that would have no
+// id to scope by.
+func TestReportStatesResponsesCarryingARequestId(t *testing.T) {
+	const ts = "2022-12-15T00:16:20.800Z [TRACE] provider.aws: "
+	out := render(t, build(t, ts+"Received downstream response: tf_req_id=abc tf_req_duration_ms=5\n"+
+		ts+"Received downstream response: tf_req_duration_ms=9\n"))
+	if want := "on a response             1 of 2 responses"; !strings.Contains(out, want) {
+		t.Errorf("report missing %q:\n%s", want, out)
+	}
+}

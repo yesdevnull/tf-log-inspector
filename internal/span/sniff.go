@@ -25,6 +25,7 @@ type Capabilities struct {
 	RequestEntries    uint64 // "Sending request downstream" entries
 	DurationFields    uint64 // response entries carrying tf_req_duration_ms
 	ReqIDFields       uint64 // entries carrying tf_req_id
+	ResponseReqIDFields uint64 // response entries carrying tf_req_id, gated the way DurationFields is. ReqIDFields counts every entry with the field, which sizes a scope and cannot answer how many spans would have no id to scope BY: that question is about responses, since a span is built from one.
 	CorrelatedReqIDs  uint64 // response entries whose tf_req_id was also seen on a request entry
 	ProviderEntries   uint64 // entries whose component starts with "provider."
 	CoreVertexLines   uint64 // core graph-walk lines naming a resource address
@@ -134,6 +135,9 @@ func (s *Sniffer) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields)
 	if hasReqID {
 		s.caps.ReqIDFields++
 		s.countReqID(reqID)
+		if isResponse {
+			s.caps.ResponseReqIDFields++
+		}
 	}
 	switch {
 	case isRequest && hasReqID:

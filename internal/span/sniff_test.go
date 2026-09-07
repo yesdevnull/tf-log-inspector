@@ -297,3 +297,22 @@ func TestSnifferFlagsASaturatedRequestIDSet(t *testing.T) {
 		t.Errorf("DistinctReqIDs = %d, want it capped at %d", got, want)
 	}
 }
+
+// ResponseReqIDFields counts RESPONSE entries carrying tf_req_id, gated the
+// way DurationFields directly above it is gated and for the same reason.
+// ReqIDFields counts every entry with the field, which is right for sizing a
+// scope and useless for the question this answers: how many spans would fall
+// back to an unscoped jump because their response carried no id.
+func TestSnifferCountsRequestIdsOnResponsesSeparately(t *testing.T) {
+	const ts = "2022-12-15T00:16:20.800Z [TRACE] provider.aws: "
+	c := sniff(t, ts+"Sending request downstream: tf_req_id=abc\n"+
+		ts+"Received downstream response: tf_req_id=abc tf_req_duration_ms=5\n"+
+		ts+"Received downstream response: tf_req_duration_ms=9\n")
+
+	if got, want := c.ReqIDFields, uint64(2); got != want {
+		t.Errorf("ReqIDFields = %d, want %d -- every entry carrying the field", got, want)
+	}
+	if got, want := c.ResponseReqIDFields, uint64(1); got != want {
+		t.Errorf("ResponseReqIDFields = %d, want %d -- responses only", got, want)
+	}
+}
