@@ -1335,12 +1335,11 @@ the figure when the set hit the cap. The cap does not touch the scope itself:
 the scope reads `Entry.ReqID` out of the interner, whose ceiling is 65534,
 not out of the sniffer's set.
 
-**Consequences for what shipped on 2026-09-07.** `jumpContextLines` STAYS,
-and this is worth stating because the first draft of this section had it
-deleted. It leaves a few lines of what preceded a call visible above it,
-which a scope supplies properly by including the request side — but only when
-there is a scope. The three fallback cases above have none, and those jumps
-need the context exactly as they do now.
+**Consequences for what shipped on 2026-09-07.** `jumpContextLines` STAYS.
+It leaves a few lines of what preceded a call visible above it, which a scope
+supplies properly by including the request side — but only where there IS a
+scope. The three fallback cases above have none, and those jumps need the
+context exactly as they do now.
 
 Line scrolling stays load-bearing either way: a single HTTP response entry
 runs to dozens of lines, and scoping makes that entry the thing being read
