@@ -807,6 +807,37 @@ func TestSoloRestoresADimensionNarrowedBySpaceAlone(t *testing.T) {
 	}
 }
 
+// Soloing a dimension that offers a single value leaves it UNCONSTRAINED --
+// absent from the exclusion map -- rather than holding an exclusion set with
+// nothing in it. The two filter alike today, so this asserts the map's shape
+// directly: allowedFacetValues reads nil as "no opinion" and filterActive
+// counts a dimension by whether its set is non-empty, and an empty set
+// sitting in the map is one edit away from being read as either. It is the
+// invariant toggleFacetValue keeps when its last exclusion is re-ticked, and
+// soloFacetValue's doc claims to keep it too.
+func TestSoloingASingleValueDimensionLeavesItUnconstrained(t *testing.T) {
+	m := New(testLog(t, "two-tier.log"), "x.log")
+	var providers int
+	for _, f := range m.facets {
+		if f.Name == dimProvider {
+			providers = len(f.Values)
+		}
+	}
+	if providers != 1 {
+		t.Fatalf("fixture assumption changed: the provider dimension offers %d values, want 1 so soloing has no other value to untick", providers)
+	}
+
+	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+
+	if got, present := m.excludedFacets[dimProvider]; present {
+		t.Errorf("soloing the only value of a dimension left %v in the exclusion map, want the dimension absent", got)
+	}
+	if m.filterActive() {
+		t.Error("soloing the only value of a dimension reports an active filter, so every pane will explain an empty list as filtered")
+	}
+}
+
 // o acts only from the facet pane, exactly as space does. The facet cursor
 // stays drawn -- dimmed -- in an unfocused pane, so an o accepted from the
 // list or the detail pane rewrites the ranked numbers this tool exists to
