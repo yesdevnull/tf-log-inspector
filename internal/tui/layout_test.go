@@ -879,11 +879,12 @@ func paneSepColumns(t *testing.T, view string) []int {
 // reads as a complete name.
 func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 	s := span.Span{RPC: "ValidateResourceTypeConfig", Provider: "aws", DurationMs: 5}
-	line := unstyled(spanDetailLines(s, attrib.Attribution{}, false, 20)[0])
+	// Line 0 is the "RPC" label; line 1 is the value beneath it.
+	line := unstyled(spanDetailLines(s, attrib.Attribution{}, false, 20)[1])
 	if strings.Contains(line, s.RPC) {
 		t.Fatalf("the RPC name fits whole at width 20, so this no longer exercises clipping: %q", line)
 	}
-	if !strings.HasPrefix(line, "RPC   Valid") {
+	if !strings.HasPrefix(line, "  Valid") {
 		t.Errorf("RPC detail line %q lost the head that distinguishes the name", line)
 	}
 	if !strings.Contains(line, "…") {
@@ -902,15 +903,18 @@ func TestSpanDetailMarksAClippedRPCName(t *testing.T) {
 // its own.
 func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
 	fields := []detailField{
-		{label: "Total", value: "742.4s", kind: numericColumn},
-		{label: "Prov", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
+		{label: "total", value: "742.4s", kind: numericColumn},
+		{label: "provider", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
 	}
-	got := unstyledLines(detailFieldLines(fields, 10))
-	if want := "Total 742."; got[0] != want {
-		t.Errorf("numeric line at 10 columns = %q, want %q -- a number keeps its head", got[0], want)
+	// Six columns, so the two-column indent leaves a four-column budget --
+	// the same squeeze the old label column produced at ten. Each field is
+	// two lines, so the values are at 1 and 3.
+	got := unstyledLines(detailFieldLines(fields, 6))
+	if want := "  742."; got[1] != want {
+		t.Errorf("numeric line at 6 columns = %q, want %q -- a number keeps its head", got[1], want)
 	}
-	if want := "Prov  …aws"; got[1] != want {
-		t.Errorf("identifier line at 10 columns = %q, want %q -- an identifier keeps its tail", got[1], want)
+	if want := "  …aws"; got[3] != want {
+		t.Errorf("identifier line at 6 columns = %q, want %q -- an identifier keeps its tail", got[3], want)
 	}
 }
 
@@ -1115,14 +1119,21 @@ func TestProvidersDetailPaneShowsTheGroupAggregateAndItsSlowestCall(t *testing.T
 		t.Fatalf("ActiveView = %v after '1', want the providers view this test is about", m.ActiveView())
 	}
 	want := strings.Join([]string{
-		"Prov  registry.terraform.io/hashicorp/aws",
-		"Total 6ms",
-		"Calls 2",
-		"Max   5ms",
-		"Types 2",
-		"RPCs  1",
+		"provider",
+		"  registry.terraform.io/hashicorp/aws",
+		"total",
+		"  6ms",
+		"calls",
+		"  2",
+		"max",
+		"  5ms",
+		"resource types",
+		"  2",
+		"RPC methods",
+		"  1",
 		"",
-		"Slowest ApplyResourceChange",
+		"slowest call",
+		"  ApplyResourceChange",
 	}, "\n")
 	// 50 columns is wider than the longest line here, so nothing is clipped
 	// and the comparison is against the values themselves.
@@ -1150,23 +1161,29 @@ func TestARollupWithNoDetailProducesNoSections(t *testing.T) {
 //
 // Front-clipping is the whole reason two "…/hashicorp/…" addresses stay
 // apart there, and the same for two resource types sharing a provider's
-// prefix. Cut from the wrong end, every provider line reads "Prov
-// registry.terr…" and every aws type "Type      aws_…": a pane that cannot
-// tell its own rows apart, rendering plausible text for whichever row the
-// cursor is on.
+// prefix. Cut from the wrong end, every provider line reads
+// "  registry.terra…" and every aws type "  aws_…": a pane that cannot tell
+// its own rows apart, rendering plausible text for whichever row the cursor
+// is on.
 //
 // The width comes from the pane's own policy at that terminal width rather
 // than from a number written here, so this follows the layout instead of
-// pinning a guess at it. Every row of each view is asserted, since the point
+// pinning a guess at it. Every row of the view is asserted, since the point
 // is that the rows differ.
+//
+// Only the providers view is exercised. two-tier.log's resource types used
+// to clip here too, but the definition-list layout gave the value the six
+// columns the label column had been taking, and "aws_instance" now fits the
+// pane whole -- so that case would assert a clip that no longer happens.
+// The guard below fails rather than passing quietly if the same becomes
+// true of a provider address.
 func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 	for _, c := range []struct {
 		fixture string
 		key     rune
 		want    []string
 	}{
-		{"two-providers.log", '1', []string{"Prov  …icorp/google", "Prov  …ashicorp/aws"}},
-		{"two-tier.log", '2', []string{"Type      …instance", "Type      …cal_file", "Type      …s_subnet"}},
+		{"two-providers.log", '1', []string{"  …hashicorp/google", "  …io/hashicorp/aws"}},
 	} {
 		m := update(t, New(testLog(t, c.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
 		w := detailPaneWidth(m.detailPaneNatural, detailInlineWidth)
@@ -1178,9 +1195,17 @@ func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 		}
 		for i, want := range c.want {
 			m.selected = i
-			first := strings.SplitN(detailBody(t, m, rollupDetailTitle, w, 20), "\n", 2)[0]
-			if first != want {
-				t.Errorf("%s view %c row %d: pane's first line at %d columns = %q, want %q -- an identifier keeps its tail", c.fixture, c.key, i, w, first, want)
+			// The identifier is the FIRST field's value, so it is the
+			// second line of the block: the label heads it.
+			lines := strings.Split(detailBody(t, m, rollupDetailTitle, w, 20), "\n")
+			if len(lines) < 2 {
+				t.Fatalf("%s view %c row %d: the pane rendered %q, too few lines to hold a labelled value", c.fixture, c.key, i, lines)
+			}
+			if !strings.Contains(want, "…") {
+				t.Fatalf("%s view %c row %d: the expected line %q carries no ellipsis, so this case no longer exercises clipping", c.fixture, c.key, i, want)
+			}
+			if lines[1] != want {
+				t.Errorf("%s view %c row %d: pane's identifier at %d columns = %q, want %q -- an identifier keeps its tail", c.fixture, c.key, i, w, lines[1], want)
 			}
 		}
 	}
@@ -1208,24 +1233,38 @@ func TestTheDetailPaneFollowsTheSelection(t *testing.T) {
 	}
 	want := []string{
 		strings.Join([]string{
-			"Prov  registry.terraform.io/hashicorp/google",
-			"Total 8ms",
-			"Calls 1",
-			"Max   8ms",
-			"Types 1",
-			"RPCs  1",
+			"provider",
+			"  registry.terraform.io/hashicorp/google",
+			"total",
+			"  8ms",
+			"calls",
+			"  1",
+			"max",
+			"  8ms",
+			"resource types",
+			"  1",
+			"RPC methods",
+			"  1",
 			"",
-			"Slowest ApplyResourceChange",
+			"slowest call",
+			"  ApplyResourceChange",
 		}, "\n"),
 		strings.Join([]string{
-			"Prov  registry.terraform.io/hashicorp/aws",
-			"Total 5ms",
-			"Calls 1",
-			"Max   5ms",
-			"Types 1",
-			"RPCs  1",
+			"provider",
+			"  registry.terraform.io/hashicorp/aws",
+			"total",
+			"  5ms",
+			"calls",
+			"  1",
+			"max",
+			"  5ms",
+			"resource types",
+			"  1",
+			"RPC methods",
+			"  1",
 			"",
-			"Slowest ApplyResourceChange",
+			"slowest call",
+			"  ApplyResourceChange",
 		}, "\n"),
 	}
 	for i := range want {
@@ -1259,27 +1298,38 @@ func TestTheCallsDetailPaneFollowsTheSelection(t *testing.T) {
 	// first, then the 5ms aws one.
 	want := []string{
 		strings.Join([]string{
-			"RPC   ApplyResourceChange",
-			"Type  google_compute_instance",
-			"Prov  registry.terraform.io/hashicorp/google",
-			"Dur   8ms",
+			"RPC",
+			"  ApplyResourceChange",
+			"resource type",
+			"  google_compute_instance",
+			"provider",
+			"  registry.terraform.io/hashicorp/google",
+			"duration",
+			"  8ms",
 			// two-providers.log carries no terraform.ui stream, so no call
 			// in it can be attributed to a resource -- a fact about the LOG,
 			// not about this call.
-			"Res   no address context in log",
+			"resource",
+			"  no address context in log",
 		}, "\n"),
 		strings.Join([]string{
-			"RPC   ApplyResourceChange",
-			"Type  aws_subnet",
-			"Prov  registry.terraform.io/hashicorp/aws",
-			"Dur   5ms",
+			"RPC",
+			"  ApplyResourceChange",
+			"resource type",
+			"  aws_subnet",
+			"provider",
+			"  registry.terraform.io/hashicorp/aws",
+			"duration",
+			"  5ms",
 			// two-providers.log opens on this very call, so its 5ms
 			// duration exceeds its own 0ms offset from the log's first
 			// entry and ReportedBuilder clamps the start (see
 			// span.Span.StartClamped). The pane says so: the timeline
 			// draws such a span somewhere it did not run.
-			"Start clamped to zero",
-			"Res   no address context in log",
+			"start",
+			"  clamped to zero",
+			"resource",
+			"  no address context in log",
 		}, "\n"),
 	}
 	for i := range want {
@@ -1313,12 +1363,18 @@ func TestTheCallsDetailPaneNamesTheResourceThroughAttribs(t *testing.T) {
 		t.Fatalf("fixture assumption changed: %d call rows, want 3", got)
 	}
 	named := strings.Join([]string{
-		"RPC   ApplyResourceChange",
-		"Type  aws_instance",
-		"Prov  registry.terraform.io/hashicorp/aws",
-		"Dur   250ms",
-		"Res   web",
-		"Attr  contained",
+		"RPC",
+		"  ApplyResourceChange",
+		"resource type",
+		"  aws_instance",
+		"provider",
+		"  registry.terraform.io/hashicorp/aws",
+		"duration",
+		"  250ms",
+		"resource",
+		"  web",
+		"attribution",
+		"  contained",
 	}, "\n")
 	if got := detailBody(t, m, spanDetailTitle, 100, 20); got != named {
 		t.Errorf("named row's detail pane =\n%s\n\nwant\n%s", got, named)
@@ -1326,13 +1382,20 @@ func TestTheCallsDetailPaneNamesTheResourceThroughAttribs(t *testing.T) {
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	ambiguous := strings.Join([]string{
-		"RPC   PlanResourceChange",
-		"Type  aws_instance",
-		"Prov  registry.terraform.io/hashicorp/aws",
-		"Dur   120ms",
-		"Start clamped to zero",
-		"Res   2 candidates",
-		"Attr  ambiguous",
+		"RPC",
+		"  PlanResourceChange",
+		"resource type",
+		"  aws_instance",
+		"provider",
+		"  registry.terraform.io/hashicorp/aws",
+		"duration",
+		"  120ms",
+		"start",
+		"  clamped to zero",
+		"resource",
+		"  2 candidates",
+		"attribution",
+		"  ambiguous",
 	}, "\n")
 	if got := detailBody(t, m, spanDetailTitle, 100, 20); got != ambiguous {
 		t.Errorf("ambiguous row's detail pane =\n%s\n\nwant\n%s", got, ambiguous)
@@ -1353,14 +1416,21 @@ func TestTypesDetailPaneShowsBothTiers(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = selectRow(t, m, "aws_instance")
 	want := strings.Join([]string{
-		"Type      aws_instance",
-		"UI res.   2",
-		"UI total  5.0s",
-		"RPC calls 2",
-		"RPC total 370ms",
-		"RPC max   250ms",
+		"resource type",
+		"  aws_instance",
+		"UI res.",
+		"  2",
+		"UI total",
+		"  5.0s",
+		"RPC calls",
+		"  2",
+		"RPC total",
+		"  370ms",
+		"RPC max",
+		"  250ms",
 		"",
-		"Slowest ApplyResourceChange",
+		"slowest call",
+		"  ApplyResourceChange",
 	}, "\n")
 	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("types detail pane =\n%s\n\nwant\n%s", got, want)
@@ -1382,14 +1452,21 @@ func TestTypesDetailPaneDescribesAnRPCOnlyType(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = selectRow(t, m, "aws_subnet")
 	want := strings.Join([]string{
-		"Type      aws_subnet",
-		"UI res.   0",
-		"UI total  0s",
-		"RPC calls 1",
-		"RPC total 40ms",
-		"RPC max   40ms",
+		"resource type",
+		"  aws_subnet",
+		"UI res.",
+		"  0",
+		"UI total",
+		"  0s",
+		"RPC calls",
+		"  1",
+		"RPC total",
+		"  40ms",
+		"RPC max",
+		"  40ms",
 		"",
-		"Slowest ApplyResourceChange",
+		"slowest call",
+		"  ApplyResourceChange",
 	}, "\n")
 	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("aws_subnet detail pane =\n%s\n\nwant\n%s", got, want)
@@ -1456,14 +1533,21 @@ func TestTypesDetailPaneStatesAUIOnlyTypeHasNoRPCCalls(t *testing.T) {
 	m := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = selectRow(t, m, "local_file")
 	want := strings.Join([]string{
-		"Type      local_file",
-		"UI res.   1",
-		"UI total  1.0s",
-		"RPC calls 0",
-		"RPC total 0s",
-		"RPC max   0s",
+		"resource type",
+		"  local_file",
+		"UI res.",
+		"  1",
+		"UI total",
+		"  1.0s",
+		"RPC calls",
+		"  0",
+		"RPC total",
+		"  0s",
+		"RPC max",
+		"  0s",
 		"",
-		"Slowest no RPC-tier calls",
+		"slowest call",
+		"  no RPC-tier calls",
 	}, "\n")
 	if got := detailBody(t, m, rollupDetailTitle, 50, 20); got != want {
 		t.Errorf("UI-only types detail pane =\n%s\n\nwant\n%s", got, want)
@@ -1491,14 +1575,19 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 	// beneath an aggregate for a short pane to choose between.
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	full := strings.Split(unstyled(m.renderDetail(50, 40)), "\n")
-	const slowestSectionLines = 2 // the blank separator and the Slowest line
+	// The blank separator, the heading, and the call beneath it: a field is
+	// two lines now, which is what makes the middle height -- heading drawn,
+	// value gone -- reachable at all.
+	const slowestSectionLines = 3
 	if n := len(full); n < 1+slowestSectionLines+1 {
 		t.Fatalf("fixture assumption changed: the whole pane is %d lines, too few to have a section to drop:\n%s", n, strings.Join(full, "\n"))
 	}
 	aggregate := full[:len(full)-slowestSectionLines] // title and the group's own figures
-	slowest := full[len(full)-1]
-	if !strings.HasPrefix(slowest, slowestHeading) {
-		t.Fatalf("fixture assumption changed: the pane's last line is %q, not the slowest call", slowest)
+	if heading := full[len(full)-2]; heading != slowestHeading {
+		t.Fatalf("fixture assumption changed: the pane's second-last line is %q, not the slowest-call heading", heading)
+	}
+	if value := full[len(full)-1]; !strings.HasPrefix(value, detailIndent) {
+		t.Fatalf("fixture assumption changed: the pane's last line is %q, not a value under the slowest-call heading", value)
 	}
 
 	for h := 1; h <= len(full)+2; h++ {
@@ -1528,12 +1617,20 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 				t.Errorf("height %d does not mark the cut on its last line:\n%s", h, strings.Join(lines, "\n"))
 			}
 		}
-		// Whatever the height, no line of a labelled figure may survive
-		// without its figure, and no heading without what it heads.
+		// Whatever the height, no label may survive without the value it
+		// heads. A field is two lines now, so the way that goes wrong is a
+		// pane ENDING on a label: a value line is indented, the cut mark
+		// says content was removed, and a bare label at the foot says
+		// neither -- it reads as a field the pane failed to fill in. It is
+		// how the group pane came to draw its slowest-call heading over a
+		// blank when slowestLines was taken by index.
 		for _, ln := range lines {
-			if ln == slowestHeading || strings.HasSuffix(ln, " ") {
-				t.Errorf("height %d left the dangling line %q:\n%s", h, ln, strings.Join(lines, "\n"))
+			if strings.HasSuffix(ln, " ") {
+				t.Errorf("height %d left the padded line %q:\n%s", h, ln, strings.Join(lines, "\n"))
 			}
+		}
+		if last := lines[len(lines)-1]; len(lines) > 1 && last != detailCutMark && last != "" && !strings.HasPrefix(last, detailIndent) {
+			t.Errorf("height %d ends on the bare label %q, with nothing under it:\n%s", h, last, strings.Join(lines, "\n"))
 		}
 	}
 }
@@ -1556,7 +1653,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 	m := update(t, New(l, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 
-	wantLine := "Type      " + m.rows()[m.Selected()].cells[0]
+	wantLine := detailIndent + m.rows()[m.Selected()].cells[0]
 	if got := m.detailPaneNatural; got < lipgloss.Width(wantLine) {
 		t.Errorf("detailPaneNatural = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
 	}
@@ -1838,6 +1935,25 @@ func TestSpanDetailLinesReportsAClampedStart(t *testing.T) {
 	}
 }
 
+// detailValueFor returns the value line sitting beneath label in a rendered
+// detail block. Every field is two lines -- the label, then its value
+// indented under it -- so a test naming a field asks for the label and gets
+// what it heads. The lines must be unstyled first: the label line carries
+// the accent theme.fieldLabel puts on it.
+func detailValueFor(t *testing.T, lines []string, label string) string {
+	t.Helper()
+	for i, ln := range lines {
+		if ln == label {
+			if i+1 >= len(lines) {
+				t.Fatalf("the %q label is the last line, so it heads nothing: %q", label, lines)
+			}
+			return lines[i+1]
+		}
+	}
+	t.Fatalf("no %q field among %q", label, lines)
+	return ""
+}
+
 // TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress covers a pane that
 // was never sized against the only per-resource identifier the UI tier has.
 // detailNaturalWidth measured spanDetailLines over l.RPCSpans alone, which
@@ -1852,14 +1968,17 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 		t.Fatal("structured-ui.log carries no UI-hook spans, so it no longer exercises this")
 	}
 	var widest string
+	addresses := map[string]bool{}
 	for _, s := range l.UISpans {
-		for _, line := range unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, hugeWidth)) {
+		lines := unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, hugeWidth))
+		addresses[detailValueFor(t, lines, "address")] = true
+		for _, line := range lines {
 			if lipgloss.Width(line) > lipgloss.Width(widest) {
 				widest = line
 			}
 		}
 	}
-	if !strings.HasPrefix(widest, "Addr") {
+	if !addresses[widest] {
 		t.Fatalf("the widest UI-hook detail line is %q, not an address, so this asserts nothing", widest)
 	}
 	if got := detailNaturalWidth(l); got < lipgloss.Width(widest) {
@@ -1893,15 +2012,7 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 		UISpans:  []span.Span{ui},
 	}
 
-	var addr string
-	for _, line := range unstyledLines(spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth)) {
-		if strings.HasPrefix(line, "Addr") {
-			addr = line
-		}
-	}
-	if addr == "" {
-		t.Fatal("the UI-hook span has no Addr line, so this asserts nothing")
-	}
+	addr := detailValueFor(t, unstyledLines(spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth)), "address")
 
 	got := detailNaturalWidth(l)
 	for _, line := range reachableDetailLines(l) {
@@ -2263,5 +2374,68 @@ func TestStyleHintKeysAccentsTheKeyAndNothingElse(t *testing.T) {
 		if n := strings.Count(got, "\x1b[0m"); n != tc.accents {
 			t.Errorf("styleHintKeys(%q) accented %d fragments, want %d: %q", tc.in, n, tc.accents, got)
 		}
+	}
+}
+
+// A detail field is a definition list, not a table row: the label on its own
+// line and the value indented two columns beneath it. The single-line
+// "label value" shape spent six columns of every line on the label, which on
+// a pane capped at maxDetailPaneWidth is where a provider address lost its
+// registry host and a resource type lost its prefix.
+func TestADetailFieldRendersAsALabelThenItsValueIndented(t *testing.T) {
+	got := unstyledLines(detailFieldLines([]detailField{
+		{label: "provider", value: "registry.terraform.io/hashicorp/aws", kind: tailIdentifierColumn},
+		{label: "duration", value: "8ms", kind: numericColumn},
+	}, 40))
+	want := []string{
+		"provider",
+		"  registry.terraform.io/hashicorp/aws",
+		"duration",
+		"  8ms",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("detailFieldLines = %q, want %q", got, want)
+	}
+}
+
+// The value is budgeted against the pane less the indent, and nothing else.
+// Under the old shape it was the pane less a six-column label column, so
+// this is the four columns the change buys -- the whole point of it, and the
+// part a reader would notice only as an ellipsis that stopped appearing.
+func TestADetailValueIsClippedAgainstThePaneLessTheIndent(t *testing.T) {
+	const w = 20
+	const indent = 2
+	fits := strings.Repeat("a", w-indent)
+	got := unstyledLines(detailFieldLines([]detailField{
+		{label: "resource", value: fits, kind: headIdentifierColumn},
+	}, w))
+	if len(got) != 2 {
+		t.Fatalf("detailFieldLines = %q, want two lines", got)
+	}
+	if got[1] != "  "+fits {
+		t.Errorf("a value of exactly %d columns was clipped: %q, want %q", w-indent, got[1], "  "+fits)
+	}
+	over := unstyledLines(detailFieldLines([]detailField{
+		{label: "resource", value: fits + "a", kind: headIdentifierColumn},
+	}, w))
+	if !strings.Contains(over[1], "…") {
+		t.Errorf("a value one column over the budget was not marked as clipped: %q", over[1])
+	}
+	if n := lipgloss.Width(over[1]); n > w {
+		t.Errorf("a clipped value line is %d columns, more than the %d the pane gives it: %q", n, w, over[1])
+	}
+}
+
+// The label is told from the value it heads by an accent, and by the DIM
+// WEIGHT underneath it. Colour is withheld by not setting a foreground (see
+// newTheme), so a label carrying the accent alone would render byte-identical
+// to its own value under NO_COLOR -- collapsing the pane into an
+// undifferentiated column of lines for exactly the readers who cannot have
+// the tint. The indent survives there too, but the indent alone does not say
+// which of two lines is the label.
+func TestADetailLabelStaysMarkedWithColourWithheld(t *testing.T) {
+	plain := newTheme(false)
+	if got := plain.fieldLabel.Render("provider"); !strings.Contains(got, "\x1b[2m") {
+		t.Errorf("with colour off, a detail label is not dimmed: rendered %q, want it to contain %q", got, "\x1b[2m")
 	}
 }

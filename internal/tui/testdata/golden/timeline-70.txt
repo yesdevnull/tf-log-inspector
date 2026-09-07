@@ -1,16 +1,16 @@
 [1;36mtfli -- plan.log -- 3 RPC spans, 0 UI spans[0m
 
 [1;36mTIMELINE (rpc)[0m                                  [2m │ [0m[1;36mSPAN DETAIL[0m        
-[7maws/1    [0m[32m    ▒████████    ▒█████████████████████[0m[2m │ [0m[2mRPC   [0mApplyResourc…
-google/1 [34m      ▒████████░                       [0m[2m │ [0m[2mType  [0maws_instance 
-         0s                                 9.0s[2m │ [0m[2mProv  [0m…ashicorp/aws
-busy 7.5s of 9.0s (83%)                         [2m │ [0m[2mDur   [0m2.0s         
-waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2[2m │ [0m[2mRes   [0mno address c…
-nothing running, 0s–1.0s — before any call      [2m │ [0m                   
-                                                [2m │ [0m                   
-                                                [2m │ [0m                   
-                                                [2m │ [0m                   
-                                                [2m │ [0m                   
+[7maws/1    [0m[32m    ▒████████    ▒█████████████████████[0m[2m │ [0m[2;36mRPC[0m                
+google/1 [34m      ▒████████░                       [0m[2m │ [0m  ApplyResourceCha…
+         0s                                 9.0s[2m │ [0m[2;36mresource type[0m      
+busy 7.5s of 9.0s (83%)                         [2m │ [0m  aws_instance     
+waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2[2m │ [0m[2;36mprovider[0m           
+nothing running, 0s–1.0s — before any call      [2m │ [0m  …io/hashicorp/aws
+                                                [2m │ [0m[2;36mduration[0m           
+                                                [2m │ [0m  2.0s             
+                                                [2m │ [0m[2;36mresource[0m           
+                                                [2m │ [0m  no address conte…
                                                 [2m │ [0m                   
                                                 [2m │ [0m                   
                                                 [2m │ [0m                   

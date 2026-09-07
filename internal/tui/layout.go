@@ -1084,17 +1084,17 @@ func fitPaneSections(title string, sections []paneSection, w, h int) []string {
 func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) []string {
 	fields := []detailField{
 		{label: "RPC", value: s.RPC, kind: headIdentifierColumn},
-		{label: "Type", value: s.ResourceType, kind: tailIdentifierColumn},
-		{label: "Prov", value: s.Provider, kind: tailIdentifierColumn},
-		{label: "Dur", value: formatMs(uint64(s.DurationMs)), kind: numericColumn},
+		{label: "resource type", value: s.ResourceType, kind: tailIdentifierColumn},
+		{label: "provider", value: s.Provider, kind: tailIdentifierColumn},
+		{label: "duration", value: formatMs(uint64(s.DurationMs)), kind: numericColumn},
 	}
 	if s.StartClamped {
-		fields = append(fields, detailField{label: "Start", value: clampedStartValue, kind: headIdentifierColumn})
+		fields = append(fields, detailField{label: "start", value: clampedStartValue, kind: headIdentifierColumn})
 	}
 	if s.Fidelity == span.FidelityUIReported {
 		// An observed address, stated by the log rather than inferred from
 		// it, so it carries no confidence marker.
-		fields = append(fields, detailField{label: "Addr", value: s.Address, kind: tailIdentifierColumn})
+		fields = append(fields, detailField{label: "address", value: s.Address, kind: tailIdentifierColumn})
 		return detailFieldLines(fields, w)
 	}
 	return detailFieldLines(append(fields, attributionFields(a, hasContext)...), w)
@@ -1113,16 +1113,16 @@ func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) 
 // gives way instead.
 func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 	if !hasContext {
-		return []detailField{{label: "Res", value: noAddressContextValue, kind: headIdentifierColumn}}
+		return []detailField{{label: "resource", value: noAddressContextValue, kind: headIdentifierColumn}}
 	}
 	switch a.Confidence {
 	case attrib.Ambiguous:
 		return []detailField{
-			{label: "Res", value: fmt.Sprintf("%d candidates", a.Candidates), kind: headIdentifierColumn},
-			{label: "Attr", value: a.Confidence.String(), kind: headIdentifierColumn},
+			{label: "resource", value: fmt.Sprintf("%d candidates", a.Candidates), kind: headIdentifierColumn},
+			{label: "attribution", value: a.Confidence.String(), kind: headIdentifierColumn},
 		}
 	case attrib.Unattributed:
-		return []detailField{{label: "Res", value: unattributedValue, kind: headIdentifierColumn}}
+		return []detailField{{label: "resource", value: unattributedValue, kind: headIdentifierColumn}}
 	}
 
 	name := a.Name
@@ -1144,12 +1144,12 @@ func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 		name += "[" + a.Key + "]"
 	}
 	fields := []detailField{
-		{label: "Res", value: name, kind: headIdentifierColumn},
+		{label: "resource", value: name, kind: headIdentifierColumn},
 	}
 	if a.Module != "" {
-		fields = append(fields, detailField{label: "Mod", value: a.Module, kind: tailIdentifierColumn})
+		fields = append(fields, detailField{label: "module", value: a.Module, kind: tailIdentifierColumn})
 	}
-	return append(fields, detailField{label: "Attr", value: a.Confidence.String(), kind: headIdentifierColumn})
+	return append(fields, detailField{label: "attribution", value: a.Confidence.String(), kind: headIdentifierColumn})
 }
 
 // noAddressContextValue and unattributedValue say two different things. The
@@ -1177,10 +1177,12 @@ const clampedStartValue = "clamped to zero"
 const noSelectionNote = "(nothing selected)"
 
 // slowestHeading labels the one call behind a rollup row's group that took
-// longest. Without it the RPC name beside it reads as the ROW's own, which
+// longest. Without it the RPC name beneath it reads as the ROW's own, which
 // for a row totalling several calls is a wrong answer rather than a missing
-// one.
-const slowestHeading = "Slowest"
+// one. It names the call rather than saying "slowest" alone, because on its
+// own line above the value there is room to say what the superlative is
+// about.
+const slowestHeading = "slowest call"
 
 // noRPCCallsNote is what stands under that label for a group with no
 // RPC-tier span -- a resource type Terraform's UI hooks reported and the
@@ -1208,12 +1210,15 @@ func rollupDetailSections(d *rollupDetail, w int) []paneSection {
 	}
 	return []paneSection{
 		detailFieldLines(d.aggregate, w),
-		{"", slowestLine(d.slowest, w)},
+		append(paneSection{""}, slowestLines(d.slowest, w)...),
 	}
 }
 
-// slowestLine names the group's longest RPC-tier call, or states that the
-// group has none.
+// slowestLines names the group's longest RPC-tier call, or states that the
+// group has none. It is a field like any other, so it is the same two lines
+// -- the heading, then the call beneath it -- and it is returned whole
+// rather than by index: taking one line of a two-line field is how the
+// heading came to stand over a blank.
 //
 // It names the call and stops there. The call's DURATION is by construction
 // the same number as the aggregate's Max ("RPC max" in the types view) two
@@ -1225,25 +1230,39 @@ func rollupDetailSections(d *rollupDetail, w int) []paneSection {
 //
 // The RPC name and the no-calls note are both told apart by their HEAD, so
 // both end-clip: see columnKind.
-func slowestLine(slowest *span.Span, w int) string {
+func slowestLines(slowest *span.Span, w int) []string {
 	value := noRPCCallsNote
 	if slowest != nil {
 		value = slowest.RPC
 	}
 	return detailFieldLines([]detailField{
 		{label: slowestHeading, value: value, kind: headIdentifierColumn},
-	}, w)[0]
+	}, w)
 }
 
-// detailLabelWidth is the floor for the label column every detail block
-// lines its values up on: the span fields' longest labels ("Addr", "Attr")
-// plus two spaces. A block whose own labels are wider than that -- the types
-// view heads its figures with the table's own "RPC calls" -- widens to fit
-// them, so the label and the value it labels can never run together.
-const detailLabelWidth = 6
+// detailIndent is what a detail value is set in from the left margin, under
+// the label naming it. Two columns: enough that the pair reads as one unit
+// without colour -- which is the case that has to work, since NO_COLOR
+// leaves the label's accent off (see theme.fieldLabel) -- and cheap enough
+// that the value still gains four columns over the six-column label column
+// this replaced.
+const detailIndent = "  "
 
-// detailFieldLines lays fields out as one labelled value per line, at most w
-// terminal columns each, with the values aligned in a common column.
+// detailFieldLines lays fields out as a definition list: each label on its
+// own line, then its value indented beneath it, every line at most w
+// terminal columns.
+//
+// Two lines rather than one because the pane is capped at
+// maxDetailPaneWidth, and a label column spent six of those columns on every
+// line -- the columns a provider address needs for its registry host and a
+// resource type for its prefix. The value now has the pane less the indent,
+// so what used to clip at 34 columns clips at 38.
+//
+// It costs height: a span with attribution runs to twelve lines or more
+// where it ran to six. A pane too short for that clips by line and marks the
+// cut (fitPaneSections), which is the trade -- a value cut in half says less
+// than a field the reader has to scroll for, and the fields most often cut
+// are the last ones, which are the inferred ones.
 //
 // Which end of an over-long value gives way is the field's KIND, routed
 // through the same clipIdentifierField and clipValueForKind the tables and
@@ -1254,18 +1273,15 @@ const detailLabelWidth = 6
 // Every kind goes through the one call: the taxonomy owns the exemption,
 // not this render site.
 func detailFieldLines(fields []detailField, w int) []string {
-	labelW := detailLabelWidth
+	lines := make([]string, 0, 2*len(fields))
 	for _, f := range fields {
-		labelW = max(labelW, lipgloss.Width(f.label)+1)
-	}
-	lines := make([]string, len(fields))
-	for i, f := range fields {
-		// Dimmed, and padded BEFORE it is dimmed: the label column is
-		// scaffolding for the value beside it, the same as a pane separator
-		// is for the panes either side, and clipIdentifierField budgets the
-		// value's width from the prefix it is handed -- which it measures in
-		// display columns, so the escapes cost the value nothing.
-		lines[i] = clipIdentifierField(styles.chrome.Render(padRight(f.label, labelW)), f.value, "", w, f.kind)
+		// The label is clipped and styled whole, the way a table's header
+		// cell is: a style wrapped around part of it would put escapes
+		// inside a value the frame is read for.
+		lines = append(lines,
+			styles.fieldLabel.Render(clipWidth(f.label, w)),
+			clipIdentifierField(detailIndent, f.value, "", w, f.kind),
+		)
 	}
 	return lines
 }

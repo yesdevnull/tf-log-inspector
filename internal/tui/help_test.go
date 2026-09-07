@@ -217,7 +217,7 @@ func TestHelpReplacesThePaneRowAndKeepsTheHeaderAndFooter(t *testing.T) {
 	// that covered only part of the row would still be caught. Each is a
 	// string the 100-column calls frame renders whole; see
 	// testdata/golden/layout-100.txt.
-	paneRow := []string{"PROVIDERS", "duration" + sortDescMark, "RPC   ApplyResourceChange"}
+	paneRow := []string{"PROVIDERS", "duration" + sortDescMark, detailIndent + "ApplyResourceChange"}
 
 	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	behind := unstyled(shut.View())

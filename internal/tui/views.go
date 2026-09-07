@@ -364,7 +364,10 @@ func (m *Model) jumpTarget() (spans []span.Span, idx int, ok bool) {
 // reading the same sequence twice rather than matching label to label. It
 // then adds the two facts the table has no column for: how many distinct
 // resource types and RPC methods the provider's calls span, which are the
-// reason to look at the pane over a providers row at all.
+// reason to look at the pane over a providers row at all. Every label is the
+// table header's own spelling, which is what the correspondence rests on: a
+// pane reading "Total" beside a column headed "total" invites the reader to
+// check whether they are the same figure.
 func providerRows(rpcSpans []span.Span) []row {
 	buckets := model.RollupBy(rpcSpans, func(s span.Span) string { return s.Provider })
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.Provider })
@@ -381,12 +384,12 @@ func providerRows(rpcSpans []span.Span) []row {
 			[]uint64{0, b.TotalMs, uint64(b.Count), uint64(b.MaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
-					{label: "Prov", value: b.Key, kind: tailIdentifierColumn},
-					{label: "Total", value: formatMs(b.TotalMs), kind: numericColumn},
-					{label: "Calls", value: strconv.Itoa(b.Count), kind: numericColumn},
-					{label: "Max", value: formatMs(uint64(b.MaxMs)), kind: numericColumn},
-					{label: "Types", value: strconv.Itoa(g.resourceTypes), kind: numericColumn},
-					{label: "RPCs", value: strconv.Itoa(g.rpcs), kind: numericColumn},
+					{label: "provider", value: b.Key, kind: tailIdentifierColumn},
+					{label: "total", value: formatMs(b.TotalMs), kind: numericColumn},
+					{label: "calls", value: strconv.Itoa(b.Count), kind: numericColumn},
+					{label: "max", value: formatMs(uint64(b.MaxMs)), kind: numericColumn},
+					{label: "resource types", value: strconv.Itoa(g.resourceTypes), kind: numericColumn},
+					{label: "RPC methods", value: strconv.Itoa(g.rpcs), kind: numericColumn},
 				},
 				slowest: g.slowest,
 			},
@@ -423,7 +426,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
-					{label: "Type", value: r.ResourceType, kind: tailIdentifierColumn},
+					{label: "resource type", value: r.ResourceType, kind: tailIdentifierColumn},
 					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
 					{label: "UI total", value: formatMs(r.UITotalMs), kind: numericColumn},
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},

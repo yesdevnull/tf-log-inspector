@@ -1,16 +1,16 @@
 [1;36mtfli -- plan.log -- 3 RPC spans, 0 UI spans[0m
 
 [1;36mPROVIDERS[0m                [2m │ [0m[1;36mTIMELINE (rpc)[0m                              [2m │ [0m[1;36mSPAN DETAIL[0m              
-[7;2m[x] ….io/hashicorp/aws  2[0m[2m │ [0m[7maws/1    [0m[32m   ░███████▓   ▒███████████████████[0m[2m │ [0m[2mRPC   [0mApplyResourceChange
-[x] …/hashicorp/google  1[2m │ [0mgoogle/1 [34m     ░███████▒                     [0m[2m │ [0m[2mType  [0maws_instance       
-[1;36mRPCS[0m                     [2m │ [0m         0s                             9.0s[2m │ [0m[2mProv  [0m…m.io/hashicorp/aws
-[x] ApplyResourceChan…  3[2m │ [0mbusy 7.5s of 9.0s (83%)                     [2m │ [0m[2mDur   [0m2.0s               
-[1;36mRESOURCE TYPES[0m           [2m │ [0mwaiting on aws/1, 4.0s–9.0s — concurrency 1…[2m │ [0m[2mRes   [0mno address context…
-[x] aws_instance  1      [2m │ [0mnothing running, 0s–1.0s — before any call  [2m │ [0m                         
-[x] aws_subnet  1        [2m │ [0m                                            [2m │ [0m                         
-[x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m                         
-[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m                         
-[x] TRACE  4             [2m │ [0m                                            [2m │ [0m                         
+[7;2m[x] ….io/hashicorp/aws  2[0m[2m │ [0m[7maws/1    [0m[32m   ░███████▓   ▒███████████████████[0m[2m │ [0m[2;36mRPC[0m                      
+[x] …/hashicorp/google  1[2m │ [0mgoogle/1 [34m     ░███████▒                     [0m[2m │ [0m  ApplyResourceChange    
+[1;36mRPCS[0m                     [2m │ [0m         0s                             9.0s[2m │ [0m[2;36mresource type[0m            
+[x] ApplyResourceChan…  3[2m │ [0mbusy 7.5s of 9.0s (83%)                     [2m │ [0m  aws_instance           
+[1;36mRESOURCE TYPES[0m           [2m │ [0mwaiting on aws/1, 4.0s–9.0s — concurrency 1…[2m │ [0m[2;36mprovider[0m                 
+[x] aws_instance  1      [2m │ [0mnothing running, 0s–1.0s — before any call  [2m │ [0m  …aform.io/hashicorp/aws
+[x] aws_subnet  1        [2m │ [0m                                            [2m │ [0m[2;36mduration[0m                 
+[x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m  2.0s                   
+[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m[2;36mresource[0m                 
+[x] TRACE  4             [2m │ [0m                                            [2m │ [0m  no address context in …
 [x] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         

@@ -1,16 +1,16 @@
 [1;36mtfli -- plan.log -- 2 RPC spans, 0 UI spans[0m
 
 [1;36mPROVIDERS[0m                [2m │ [0m[1;36mCALLS[0m                                       [2m │ [0m[1;36mSPAN DETAIL[0m              
-[7;2m[x] ….io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m[2m │ [0m[2mRPC   [0mApplyResourceChange
-[x] …/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyReso…  …_instance  …p/google[0m[2m │ [0m[2mType  [0m…e_compute_instance
-[1;36mRPCS[0m                     [2m │ [0m      5ms  ApplyReso…  aws_subnet  …corp/aws[2m │ [0m[2mProv  [0m…o/hashicorp/google
-[x] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m[2mDur   [0m8ms                
-[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m[2mRes   [0mno address context…
-[x] aws_subnet  1        [2m │ [0m                                            [2m │ [0m                         
-[x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m                         
-[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m                         
-[x] TRACE  2             [2m │ [0m                                            [2m │ [0m                         
-[x] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m                         
+[7;2m[x] ….io/hashicorp/aws  1[0m[2m │ [0m[1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m[2m │ [0m[2;36mRPC[0m                      
+[x] …/hashicorp/google  1[2m │ [0m[7m      8ms  ApplyReso…  …_instance  …p/google[0m[2m │ [0m  ApplyResourceChange    
+[1;36mRPCS[0m                     [2m │ [0m      5ms  ApplyReso…  aws_subnet  …corp/aws[2m │ [0m[2;36mresource type[0m            
+[x] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m  google_compute_instance
+[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m[2;36mprovider[0m                 
+[x] aws_subnet  1        [2m │ [0m                                            [2m │ [0m  …rm.io/hashicorp/google
+[x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m[2;36mduration[0m                 
+[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m  8ms                    
+[x] TRACE  2             [2m │ [0m                                            [2m │ [0m[2;36mresource[0m                 
+[x] UNKNOWN  1           [2m │ [0m                                            [2m │ [0m  no address context in …
                          [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         
                          [2m │ [0m                                            [2m │ [0m                         

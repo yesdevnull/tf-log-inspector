@@ -62,15 +62,29 @@ type theme struct {
 	// the two together.
 	sortedColumn lipgloss.Style
 	// chrome marks what is scaffolding for content rather than content
-	// itself -- the pane separators, the detail pane's label column.
-	// Dimming is what turns a structural character into something the eye
-	// can skip rather than read.
+	// itself -- the pane separators, and the facet pane's scrolled-header
+	// stand-in. Dimming is what turns a structural character into something
+	// the eye can skip rather than read.
 	//
 	// Nothing a cursor bar can wrap is chrome, however much it looks like
 	// scaffolding. A facet's checkbox is the tempting case and the
 	// forbidden one: its line becomes the bar, and reverse video ends at
 	// the first reset inside what it wraps.
 	chrome lipgloss.Style
+	// fieldLabel marks the label heading a value in a detail pane, where the
+	// label sits on its own line above what it names (detailFieldLines).
+	// Accent over the dim weight, and it needs BOTH: the indent alone does
+	// not say which of two lines is the label, and colour is withheld by not
+	// setting a foreground (see newTheme), so an accent-only label would
+	// render byte-identical to its own value under NO_COLOR -- leaving the
+	// pane an undifferentiated column of lines for exactly the readers who
+	// cannot have the tint. Dimmed, it degrades to what the label column
+	// looked like when the label shared a line with its value.
+	//
+	// It is quieter than title on purpose: a pane holds one title and eight
+	// or more labels, and labels that shouted as loudly as the heading above
+	// them would leave the pane with no hierarchy at all.
+	fieldLabel lipgloss.Style
 	// key marks a keystroke where one is offered -- in a footer hint and in
 	// the help screen's key column -- leaving the words describing it plain.
 	// The reader scanning either is looking for which key to press, not for
@@ -111,6 +125,7 @@ func (t theme) all() map[string]lipgloss.Style {
 		"columnHeader":    t.columnHeader,
 		"sortedColumn":    t.sortedColumn,
 		"chrome":          t.chrome,
+		"fieldLabel":      t.fieldLabel,
 		"key":             t.key,
 		"note":            t.note,
 		"alert":           t.alert,
@@ -141,6 +156,7 @@ func newTheme(colour bool) theme {
 		columnHeader:    base.Bold(true),
 		sortedColumn:    accented(base.Bold(true)),
 		chrome:          base.Faint(true),
+		fieldLabel:      accented(base.Faint(true)),
 		key:             accented(base),
 		note:            base.Faint(true),
 		alert:           accented(base.Bold(true)),
