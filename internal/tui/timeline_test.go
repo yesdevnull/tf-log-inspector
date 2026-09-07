@@ -248,8 +248,12 @@ func TestEnterFromTheTimelineOpensTheSelectedSpanInTheRawLog(t *testing.T) {
 	if m.view != ViewRawLog {
 		t.Fatalf("view = %v after Enter, want ViewRawLog", m.view)
 	}
-	// At or before the entry that closed the span: the jump leaves a few
-	// lines of context above it (see jumpContextLines).
+	// The pane opens on the SCOPE's first member (see jumpToSpan), not
+	// jumpContextLines above the entry that closed the span. timeline.log's
+	// selected span is a single standalone "Received downstream response"
+	// line, with no other traffic in the file sharing its id, so its scope
+	// holds only its own entry and the pane lands exactly there -- "at or
+	// before" is what this assertion actually needs.
 	if m.TopEntry() > want {
 		t.Errorf("top entry = %d, past the entry that closed the selected span, %d", m.TopEntry(), want)
 	}

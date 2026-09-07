@@ -24,10 +24,14 @@ func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {
 	if m.ActiveView() != ViewRawLog {
 		t.Fatalf("enter did not switch to the raw log, view = %v", m.ActiveView())
 	}
-	// The jump leaves a few lines of what preceded the call above it (see
-	// jumpContextLines), so the pane opens at or before the call's own
-	// entry rather than exactly on it -- and the call's line must be among
-	// the lines actually drawn, which is the part that matters.
+	// The pane opens on the SCOPE's first member (see jumpToSpan), not
+	// jumpContextLines above the call's own entry. provider-rpc.log's two
+	// calls are each a single standalone "Received downstream response"
+	// line, with no other traffic anywhere in the file sharing its id, so
+	// the scope this call opens on holds only its own entry and the pane
+	// lands exactly there. The assertion only needs "at or before" though --
+	// what this test actually pins is that the call's own line is among the
+	// lines actually drawn, which the check below this one covers.
 	want := int(m.log.RPCSpans[rows[1].spanIdx].Entry)
 	if m.TopEntry() > want {
 		t.Errorf("TopEntry = %d, past the selected row's span at %d", m.TopEntry(), want)
@@ -1004,14 +1008,13 @@ func TestScrollingUpUndoesScrollingDown(t *testing.T) {
 
 // Opening a call opens on the SCOPE's first entry, not jumpContextLines
 // above the call's own closing one -- the scope already supplies whatever
-// of the call's own traffic came before it (see jumpToSpan). Whether
-// anything is visible above the closing entry now depends on the scope
-// rather than a fixed backup: multiline-body.log's closing entry is
-// redacted differently from the entry before it, so the two carry
-// different request ids and the scope holds only the closing entry itself.
-// The pane opens exactly on it, with nothing above -- correctly, since the
-// scope has nothing earlier to show.
-func TestOpeningACallShowsWhatCameBeforeIt(t *testing.T) {
+// of the call's own traffic came before it (see jumpToSpan). What is
+// visible above the closing entry is whatever the scope holds earlier than
+// it: multiline-body.log's closing entry is redacted differently from the
+// entry before it, so the two carry different request ids and the scope
+// holds only the closing entry itself. The pane opens exactly on it, with
+// nothing above -- correctly, since the scope has nothing earlier to show.
+func TestOpeningACallOpensOnItsScopesFirstEntry(t *testing.T) {
 	m := update(t, New(testLog(t, "multiline-body.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
 	target := m.log.RPCSpans[0].Entry
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -1036,6 +1039,14 @@ func TestOpeningACallShowsWhatCameBeforeIt(t *testing.T) {
 //
 // Both calls report tf_req_duration_ms=600, and the table sorts with
 // sort.SliceStable, so the file's order decides the tie and call A is row 0.
+//
+// The count below counts non-blank LINES and compares it against the
+// number of ENTRIES in want, which only agrees because call A's four
+// entries are each single-line -- the per-line timestamp match shares the
+// same dependency, since a multi-line scope member's continuation lines
+// carry no timestamp of their own. A fixture edit that gave one of these
+// entries a continuation would fail this test loudly rather than pass it
+// while asserting something else.
 func TestOpeningACallDrawsOnlyThatCallsEntries(t *testing.T) {
 	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -1061,6 +1072,98 @@ func TestOpeningACallDrawsOnlyThatCallsEntries(t *testing.T) {
 	}
 	if drawn != len(want) {
 		t.Errorf("the pane drew %d entries, want the call's %d", drawn, len(want))
+	}
+}
+
+// A scroll must not walk past the scope: nextRawEntry and prevRawEntry are
+// what stepRawLogDown and stepRawLogUp lean on to stop at its last and first
+// member rather than spilling into the rest of the log once the scope runs
+// out. Pressing past either end has to land on a member of the scope, and
+// the pane must never draw a line belonging to call B or to the HTTP entry
+// that carries no id.
+func TestScrollingStaysInsideTheScope(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v", m.view)
+	}
+	scope := map[int]bool{1: true, 3: true, 6: true, 7: true}
+	outside := []string{"09:15:00.100", "09:15:00.300", "09:15:00.400", "09:15:00.700"}
+	checkInsideScope := func(step string) {
+		t.Helper()
+		if !scope[m.TopEntry()] {
+			t.Errorf("TopEntry = %d after scrolling %s past the scope, want one of its four members", m.TopEntry(), step)
+		}
+		for _, line := range rawLogBody(m, 200, 20) {
+			for _, ts := range outside {
+				if strings.Contains(line, ts) {
+					t.Errorf("scrolling %s drew a line outside the scope: %q", step, line)
+				}
+			}
+		}
+	}
+
+	for range len(scope) + 10 { // more presses than the scope has members
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	checkInsideScope("down")
+
+	for range len(scope) + 10 {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	}
+	checkInsideScope("up")
+}
+
+// A search inside a scope must not reach past it, in either direction:
+// bbbbbbbb is call B's own id and appears only in its lines, all outside
+// call A's scope, so a forward search for it from inside that scope --
+// and a backward repeat of the same search, which walks searchFrom's other
+// loop -- must both report no match rather than reading past the scope into
+// the rest of the log.
+func TestSearchDoesNotReachPastTheScope(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Fatalf("Enter left the view at %v", m.view)
+	}
+	before := m.TopEntry()
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "bbbbbbbb")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Errorf("footer = %q after a forward search for call B's id, want the miss reported", got)
+	}
+	if m.TopEntry() != before {
+		t.Errorf("TopEntry = %d after a forward search that must miss, want it left at %d", m.TopEntry(), before)
+	}
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if got := footerOf(m.View()); !strings.Contains(got, "not found") {
+		t.Errorf("footer = %q after 'N' repeats the search backward, want the miss reported", got)
+	}
+	if m.TopEntry() != before {
+		t.Errorf("TopEntry = %d after a backward repeat that must miss, want it left at %d", m.TopEntry(), before)
+	}
+}
+
+// A call carrying no request id -- Log.ScopeFor(0) is nil -- takes the
+// unscoped jump path: the pane backs up jumpContextLines from the closing
+// entry rather than a scope choosing its own lines. No fixture under
+// testdata gives an RPC span a zero ReqID, so this builds one directly:
+// manyEntryLog's entries carry no tf_req_id at all, and the span placed over
+// it inherits ReqID's zero value.
+func TestJumpWithNoRequestIDBacksUpFromTheClosingEntry(t *testing.T) {
+	l := manyEntryLog(10)
+	const entry = 9
+	l.RPCSpans = []span.Span{{RPC: "ReadResource", Provider: "registry.terraform.io/hashicorp/aws", Entry: entry}}
+	m := New(l, "x.log")
+	m.jumpToSpan(l.RPCSpans, 0)
+	if m.raw.scope != nil {
+		t.Errorf("scope = %v after a jump with no request id, want nil -- there is no id to build one from", m.raw.scope)
+	}
+	if got, want := m.TopEntry(), entry-jumpContextLines; got != want {
+		t.Errorf("TopEntry = %d after the jump, want %d lines of context above the closing entry %d", got, want, entry)
 	}
 }
 
