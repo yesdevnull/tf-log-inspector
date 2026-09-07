@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -373,4 +374,97 @@ func TestEveryStyleThePaletteHoldsIsNamedInColours(t *testing.T) {
 	if got := len(s.colours()); got != want {
 		t.Errorf("colours() names %d styles but the palette holds %d -- one missing is checked by nothing above", got, want)
 	}
+}
+
+// withColourPreference runs fn with the vocabularies settled from the
+// environment, and puts them back afterwards.
+//
+// Restoring matters more than it looks: Go runs a package's tests in one
+// process, and these two are package-level, so a test that left them
+// colourless would strip the styling from every test that ran after it --
+// including the goldens, which are committed styled.
+func withColourPreference(t *testing.T, noColour string, fn func()) {
+	t.Helper()
+	if noColour == "" {
+		t.Setenv("NO_COLOR", "")
+		os.Unsetenv("NO_COLOR")
+	} else {
+		t.Setenv("NO_COLOR", noColour)
+	}
+	saveStyles, saveSemantic := styles, semantic
+	t.Cleanup(func() { styles, semantic = saveStyles, saveSemantic })
+	applyColourPreference()
+	fn()
+}
+
+// The wiring, not the predicate. colourWanted is tested thoroughly above,
+// and that says nothing about whether anything acts on its answer: deleting
+// the two lines that do left the whole suite green, which is why they are a
+// function rather than two lines inside a Run that no test can call.
+func TestTheVocabulariesAreSettledFromTheEnvironment(t *testing.T) {
+	withColourPreference(t, "1", func() {
+		for name, style := range styles.all() {
+			if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
+				t.Errorf("with NO_COLOR set, theme style %s still names colour %#v", name, fg)
+			}
+		}
+		for name, style := range semantic.colours() {
+			if fg := style.GetForeground(); fg != lipgloss.TerminalColor(lipgloss.NoColor{}) {
+				t.Errorf("with NO_COLOR set, semantic style %s still names colour %#v", name, fg)
+			}
+		}
+	})
+	withColourPreference(t, "", func() {
+		if got := styles.title.GetForeground(); got != lipgloss.TerminalColor(accent) {
+			t.Errorf("with NO_COLOR unset, a title is drawn in %#v rather than the accent", got)
+		}
+		if got := semantic.levelError.GetForeground(); got != lipgloss.TerminalColor(errorColour) {
+			t.Errorf("with NO_COLOR unset, an ERROR line is drawn in %#v rather than red", got)
+		}
+	})
+}
+
+// colourSGR matches the escape sequences that set a foreground: the ANSI
+// eight (30-37), their bright forms (90-97), and the extended form (38).
+var colourSGR = regexp.MustCompile(`\x1b\[[0-9;]*(3[0-8]|9[0-7])[;m]`)
+
+// A reader who sets NO_COLOR must get a frame with no colour anywhere in it
+// -- not merely styles that would withhold colour if a render site asked
+// them for it. A site that builds its own style instead of drawing from the
+// two vocabularies keeps its colour, and nothing else here would notice: the
+// per-style tests inspect the vocabularies rather than the frame.
+//
+// Attributes are asserted PRESENT in the same sweep, because the failure
+// this design exists to avoid is the opposite one -- withholding colour by
+// switching the renderer's profile, which drops reverse video with it and
+// leaves the reader no way to see which row the cursor is on.
+func TestNoFrameCarriesColourWhenItIsWithheld(t *testing.T) {
+	withColourPreference(t, "1", func() {
+		var frames []string
+		for _, c := range wholeFrameCases(t) {
+			for _, w := range []int{70, 100, 160} {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: 40})
+				facets, help := focusFacets(t, m), update(t, m, helpKey)
+				frames = append(frames, m.View(), facets.View(), help.View())
+			}
+		}
+		raw := update(t, New(testLog(t, "severity-levels.log"), "x.log"), tea.WindowSizeMsg{Width: 120, Height: 30})
+		raw = update(t, raw, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+		frames = append(frames, raw.View())
+
+		attributes := 0
+		for _, frame := range frames {
+			for _, line := range strings.Split(frame, "\n") {
+				if colourSGR.MatchString(line) {
+					t.Errorf("a frame rendered with colour withheld still carries it: %q", line)
+				}
+				if strings.Contains(line, "\x1b[") {
+					attributes++
+				}
+			}
+		}
+		if attributes == 0 {
+			t.Error("no frame carries any styling at all, so withholding colour has taken the attributes with it")
+		}
+	})
 }

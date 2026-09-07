@@ -151,11 +151,34 @@ func colourWanted() bool {
 	return !ok || v == ""
 }
 
-// styles is the theme every render site draws from. It carries colour until
-// Run withholds it, which Run must do before the program starts drawing:
-// every render site reads this value, so replacing it mid-run would change
-// the frame under the reader.
-var styles = newTheme(true)
+// styles is the theme every render site draws from, and semantic is the
+// palette beside it. Both carry colour until applyColourPreference decides
+// otherwise.
+//
+// They are built WITH colour at init rather than from the environment, so
+// that what this package renders under `go test` does not depend on whose
+// machine it runs on: the goldens are committed styled, and a developer with
+// NO_COLOR set in their shell would otherwise fail every golden.
+var (
+	styles   = newTheme(true)
+	semantic = newSemantics(true)
+)
+
+// applyColourPreference settles both vocabularies from the environment.
+//
+// It is a function rather than two lines inside Run because Run cannot be
+// called from a test -- it blocks on a terminal -- and two lines that
+// nothing can reach are two lines nothing can check. Deleting them left the
+// whole suite green: colourWanted was tested thoroughly in isolation, which
+// says nothing about whether anything acts on the answer.
+//
+// Run calls it BEFORE the first frame, and it must: every render site reads
+// these values, so replacing them mid-run would change the frame under the
+// reader.
+func applyColourPreference() {
+	c := colourWanted()
+	styles, semantic = newTheme(c), newSemantics(c)
+}
 
 // The semantic colours. These are the interface's SECOND vocabulary, and it
 // is kept apart from the theme deliberately.
@@ -275,7 +298,3 @@ func (s semanticStyles) forLevel(l logfmt.Level) (lipgloss.Style, bool) {
 func (s semanticStyles) lane(i int) lipgloss.Style {
 	return s.lanes[i%len(s.lanes)]
 }
-
-// semantic is the palette every render site draws from, rebuilt by Run
-// alongside the theme when colour is not wanted.
-var semantic = newSemantics(true)
