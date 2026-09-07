@@ -300,6 +300,13 @@ func newSemantics(colour bool) semanticStyles {
 // levels recede", would dim almost every line on screen: no line would stand
 // out against another and the pane would only be harder to read. Marking the
 // two levels that ARE rare is the same judgement from the other end.
+//
+// This says nothing at all about a STRUCTURED capture. logfmt's scanner does
+// not read @level from a structured line, so every such entry arrives as
+// LevelUnknown and none of them is ever marked -- including the errors. The
+// marking is therefore silent on that format rather than reporting it has
+// nothing to go on, which is worth knowing before reading an unmarked
+// structured log as one without errors in it.
 func (s semanticStyles) forLevel(l logfmt.Level) (lipgloss.Style, bool) {
 	switch l {
 	case logfmt.LevelError:
