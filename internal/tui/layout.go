@@ -721,23 +721,45 @@ func caveatBlockLines(n int) int {
 // logging enabled against 522.2s with debug plus provider TRACE. A reader
 // who mistook these figures for wall-clock truth would be optimising time
 // that does not exist without the log, so the caveat travels with every
-// rendered duration rather than living only in documentation. Its longest
-// line is 59 display columns; below that it is clipped mid-sentence like any
-// other line, since no width floor protects it. shortLoggingCaveat is the
-// answer to a frame short of HEIGHT, not of width.
+// rendered duration rather than living only in documentation. Below
+// caveatWidth it is clipped mid-sentence like any other line, since no width
+// floor protects it. shortLoggingCaveat is the answer to a frame short of
+// HEIGHT, not of width.
+//
+// It does NOT promise the rankings survive, and said so until 2026-09-07:
+// "Rankings hold, since every span paid the same cost". Spans do not pay the
+// same cost. The tax is charged per LINE, and --diagnose's entries-per-
+// request-id spread measured 4 to 1934 lines under one call's id in a single
+// capture -- a 484-fold range, inside one log. A call that waits on a network
+// round trip logs almost nothing while it waits; one doing per-attribute work
+// logs constantly. So logging inflates chatty local work against genuine
+// waiting, and the order the two are ranked in is approximate. Telling a
+// reader otherwise, on the one line shown over every frame, is the
+// reassurance this tool can least afford to give.
 var fullLoggingCaveat = []string{
 	"Durations here are measured under logging, which is not",
 	"free: one workspace planned in 24.1s unlogged and 522.2s",
-	"with debug plus provider TRACE. Rankings hold, since every",
-	"span paid the same cost, but absolute times do not transfer",
-	"to an unlogged run.",
+	"with debug plus provider TRACE. A call that logs heavily",
+	"is inflated more than one that waits, so rankings are",
+	"approximate and absolute times do not transfer.",
 }
+
+// caveatWidth is the full caveat's longest line, and the bound the short form
+// is held to as well. It is a constant rather than a sentence in a doc
+// comment because it is a MEASURED number that an edit to the wording moves:
+// stated in prose it went stale silently, and it decides where the text
+// starts being clipped mid-sentence.
+const caveatWidth = 56
 
 // shortLoggingCaveat is the same warning in one whole sentence, for a frame
 // with no room for the full text. It is a rewrite rather than the first line
 // of fullLoggingCaveat, because a caveat cut off mid-sentence reads as a
 // rendering fault rather than as a warning that was deliberately shortened.
-const shortLoggingCaveat = "Durations measured under logging: only rankings transfer."
+//
+// "approximate" rather than the "only rankings transfer" it read until
+// 2026-09-07, for the reason given above: rankings do not transfer intact
+// either, and a short frame is no excuse for a shorter truth.
+const shortLoggingCaveat = "Durations measured under logging; rankings approximate."
 
 // loggingCaveat is the caveat's lines for a frame h lines tall: the full
 // text where it fits, one sentence where it does not, and nothing at all

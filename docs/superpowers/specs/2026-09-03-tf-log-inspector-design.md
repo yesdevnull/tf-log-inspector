@@ -248,13 +248,30 @@ produced by one call**.
 
 ### What this means for the tool
 
-- **Rankings within a capture remain valid.** Every span in a log paid the
-  same logging tax, so "which resource type cost the most" and "which call was
-  slowest" survive. The Microsoft Graph reads really are the slow ones.
+- **Rankings within a capture are APPROXIMATE, not valid.** Corrected
+  2026-09-07; this read "Every span in a log paid the same logging tax", and
+  that is false. The tax is charged per LINE, and `--diagnose`'s
+  entries-per-request-id spread measures 4 to 1934 lines under one call's id
+  in a single capture — a 484-fold range, inside one log and largely inside
+  one provider. A call waiting on a network round trip logs almost nothing
+  while it waits; one doing per-attribute work logs constantly (the capture's
+  `validator.String` and `planmodifier.String` templates run to 791 and 900).
+  So the tax falls hardest on chatty local work and lightest on genuine
+  waiting, which is the opposite of what a reader wants ranked.
+  What survives is the coarse shape: a resource type totalling 247s against
+  the next at 19s is not an artefact of logging. What does not survive is any
+  close ranking, and two calls within a factor of a few cannot be ordered from
+  a logged capture at all.
+- **The Microsoft Graph reads really are the slow ones** — that conclusion
+  holds, and holds *more* strongly than the raw figures suggest: network waits
+  are the least inflated calls in the log, so they are ranked below where they
+  belong rather than above.
 - **Absolute durations do not transfer to an unlogged run**, and neither do
   ratios between a heavily-logging provider and a quiet one. A provider that
   dumps HTTP bodies is penalised against one that does not, so cross-provider
-  comparison is the least trustworthy reading.
+  comparison is the least trustworthy reading — and per the correction above,
+  the same penalty operates call to call WITHIN one provider, which this
+  bullet used to confine to the cross-provider case.
 - **The TUI must not present these as wall-clock truth.** Phase 3 and phase 4
   render timelines and rollups from exactly these numbers; a timeline that
   says "116 seconds" invites a reader to go and optimise 116 seconds that will

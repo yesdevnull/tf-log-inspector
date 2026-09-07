@@ -2973,3 +2973,47 @@ func TestTheFooterNamesWhicheverEscMeaningIsLive(t *testing.T) {
 		t.Errorf("the footer still offers %q once the return has been spent:\n%s", escBackHint, got)
 	}
 }
+
+// The caveat is as wide as it says it is, and the short form is no wider
+// than the long one.
+//
+// Its width is a measured number that decides where the text starts being
+// clipped mid-sentence, and it was stated in prose and held by nothing --
+// so an edit to the wording moved the truth and left the claim behind.
+// caveatWidth is that number, checked here against the lines themselves.
+//
+// The short form's bound is its own: it answers a frame short of HEIGHT, so
+// nothing else stops it being written wider than the text it stands in for
+// and clipping at a width the full caveat would have survived.
+func TestTheLoggingCaveatIsAsWideAsItSaysItIs(t *testing.T) {
+	widest := 0
+	for _, line := range fullLoggingCaveat {
+		widest = max(widest, lipgloss.Width(line))
+	}
+	if widest != caveatWidth {
+		t.Errorf("the full caveat's longest line is %d columns, caveatWidth says %d", widest, caveatWidth)
+	}
+	if got := lipgloss.Width(shortLoggingCaveat); got > caveatWidth {
+		t.Errorf("the short caveat is %d columns, wider than the full caveat's %d", got, caveatWidth)
+	}
+}
+
+// Neither caveat may claim the rankings are safe. Spans emit wildly
+// different volumes of logging -- a measured 4 to 1934 entries under one
+// request id in a single capture -- and the tax is charged per line, so a
+// chatty call is inflated more than a quiet one and the order they are
+// ranked in is approximate.
+//
+// This is a text assertion because the defect was a text defect: the caveat
+// read "Rankings hold, since every span paid the same cost", which is
+// reassurance the tool's own --diagnose counters contradict, on the one
+// line shown over every frame.
+func TestNeitherCaveatPromisesTheRankingsHold(t *testing.T) {
+	for _, s := range append(append([]string{}, fullLoggingCaveat...), shortLoggingCaveat) {
+		for _, forbidden := range []string{"Rankings hold", "rankings hold", "same cost", "only rankings transfer"} {
+			if strings.Contains(s, forbidden) {
+				t.Errorf("a caveat line promises the rankings survive: %q contains %q", s, forbidden)
+			}
+		}
+	}
+}
