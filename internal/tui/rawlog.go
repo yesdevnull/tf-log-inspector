@@ -175,29 +175,45 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	// would have had the jump worked. The filter is the user's own, so it is
 	// left standing and the refusal is reported in the footer instead: Esc
 	// clears it, and Enter then lands where it was asked to.
-	if !entryVisible(m.filter(), componentProviders(m.log.RPCSpans, m.log.Entries), m.log.Entries[entry]) {
+	f, compProviders := m.filter(), componentProviders(m.log.RPCSpans, m.log.Entries)
+	scope := m.log.ScopeFor(spans[idx].ReqID)
+
+	// Scoped, the question is whether the filter admits any member at all.
+	// The pane opens on the first ADMITTED member, so the response entry
+	// being hidden is not decisive: refusing on it would deny a pane whose
+	// other lines are perfectly visible. Unscoped, the question is the old
+	// one, asked of the single entry the pane will open on.
+	open := -1
+	for _, i := range scope {
+		if entryVisible(f, compProviders, m.log.Entries[i]) {
+			open = i
+			break
+		}
+	}
+	if len(scope) == 0 && entryVisible(f, compProviders, m.log.Entries[entry]) {
+		open = entry
+	}
+	if open < 0 {
+		// Landing on a pane the filter has emptied is indistinguishable
+		// from a jump that worked, so the refusal is reported in the footer
+		// over the view the reader pressed Enter in.
 		m.blockedJump = true
 		return
 	}
+
 	// Recorded AFTER setView, which spends any mark already standing: this
 	// jump is the one Esc should undo, not whatever earlier jump the reader
 	// has since navigated away from.
 	from := m.view
 	m.setView(ViewRawLog)
 	m.returnTo, m.hasReturn = from, true
-	// The scope is what makes this "open the call" rather than "park the
-	// whole log on one of its lines". Its first member is the earliest entry
-	// in the FILE carrying the id, which is where the call's own traffic
-	// begins -- so jumpContextLines is NOT applied here: the scope already
-	// supplies what led to the call, and backing up three lines would open
-	// the pane on lines outside it.
-	if scope := m.log.ScopeFor(spans[idx].ReqID); len(scope) > 0 {
+	if len(scope) > 0 {
 		m.raw.scope = scope
-		m.raw.top, m.raw.topLine = scope[0], 0
+		m.raw.top, m.raw.topLine = open, 0
 		return
 	}
 	m.raw.scope = nil
-	m.raw.top, m.raw.topLine = entry, 0
+	m.raw.top, m.raw.topLine = open, 0
 	// Back up a few lines, so the call's own line arrives with what led to
 	// it above rather than pinned to the top of the pane with none of it in
 	// sight. Span.Entry is the entry that CLOSED the call, so the

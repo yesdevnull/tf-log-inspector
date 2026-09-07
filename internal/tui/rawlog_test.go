@@ -1281,6 +1281,44 @@ func TestAnEmptyScopedPaneNamesTheKeyThatWidensIt(t *testing.T) {
 	}
 }
 
+// Scoped, the refusal asks whether the filter admits ANY member of the call,
+// not whether it admits the response entry. The pane no longer opens on the
+// response, so that entry being hidden is not decisive -- and refusing a jump
+// whose other lines are perfectly visible would deny the reader a pane that
+// would have worked.
+func TestAJumpProceedsWhenTheFilterAdmitsSomeOfTheCall(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	// Hide DEBUG, which is the call's HTTP entry but not its TRACE lines.
+	m.setFacetExclusions(dimLevel, map[string]bool{"DEBUG": true})
+	m.invalidateRows()
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog {
+		t.Errorf("the jump was refused though the filter admits the call's TRACE lines")
+	}
+	if m.blockedJump {
+		t.Errorf("blockedJump set for a call the filter partly admits")
+	}
+}
+
+// It refuses when the filter admits NONE of them, reported in the footer over
+// the view the reader pressed Enter in -- landing in an empty pane is
+// indistinguishable from a jump that worked.
+func TestAJumpIsRefusedWhenTheFilterHidesTheWholeCall(t *testing.T) {
+	m := update(t, New(testLog(t, "interleaved-calls.log"), "x.log"), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m.setFacetExclusions(dimLevel, map[string]bool{"TRACE": true, "DEBUG": true, "UNKNOWN": true})
+	m.invalidateRows()
+
+	before := m.view
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != before {
+		t.Errorf("the jump proceeded with every one of the call's entries hidden")
+	}
+	if !m.blockedJump {
+		t.Errorf("blockedJump not set for a wholly hidden call")
+	}
+}
+
 // A UI-hook span's ReqID is always 0 (span.uihook.go), and ScopeFor answers
 // id 0 with nil (see its own doc comment), so jumping in from a UI-tier
 // timeline span leaves hasReturn standing with no scope to name. That empty

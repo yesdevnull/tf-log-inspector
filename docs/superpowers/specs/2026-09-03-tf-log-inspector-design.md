@@ -1068,7 +1068,7 @@ something went wrong.
 
 ### Scoping the raw log to one call
 
-**Designed 2026-09-07, not yet built.**
+**Shipped 2026-09-07.**
 
 `⏎` on a call opened the raw log at that call's line, and the reader's report
 of it was that "'opening' a CALL to view its entries is inconsistent": what
@@ -1447,8 +1447,8 @@ raw log at the entry that CLOSED the call, with a few lines of what preceded
 it above (`jumpContextLines`), and refuses with a footer report rather than
 jumping when the active filter hides that entry.
 
-**Designed 2026-09-07, not yet built:** `\` drops a raw-log scope back to the
-whole log (see *Scoping the raw log to one call*).
+**Shipped 2026-09-07:** `\` drops a raw-log scope back to the whole log (see
+*Scoping the raw log to one call*).
 
 **Added 2026-09-07, with `s`:** the sorted column is marked in the table
 header, in the direction its kind implies. That states the DEFAULT ranking
