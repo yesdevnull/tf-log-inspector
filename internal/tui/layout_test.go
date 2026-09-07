@@ -1604,7 +1604,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 		case h > len(aggregate):
 			// Room for the aggregate but not for the slowest section: it
 			// must go whole, with a line left over to say that it did.
-			if got, want := lines, append(append([]string{}, aggregate...), detailCutMark); !slices.Equal(got, want) {
+			if got, want := lines, append(append([]string{}, aggregate...), moreBelowMark); !slices.Equal(got, want) {
 				t.Errorf("height %d rendered:\n%s\n\nwant the aggregate and a cut mark\n%s", h, strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		default:
@@ -1614,7 +1614,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 			if lines[0] != full[0] {
 				t.Errorf("height %d gave up the pane's title: %q", h, lines[0])
 			}
-			if h > 1 && lines[h-1] != detailCutMark {
+			if h > 1 && lines[h-1] != moreBelowMark {
 				t.Errorf("height %d does not mark the cut on its last line:\n%s", h, strings.Join(lines, "\n"))
 			}
 		}
@@ -1630,7 +1630,7 @@ func TestAShortDetailPaneKeepsOrDropsTheSlowestSectionWhole(t *testing.T) {
 				t.Errorf("height %d left the padded line %q:\n%s", h, ln, strings.Join(lines, "\n"))
 			}
 		}
-		if last := lines[len(lines)-1]; len(lines) > 1 && last != detailCutMark && last != "" && !strings.HasPrefix(last, detailIndent) {
+		if last := lines[len(lines)-1]; len(lines) > 1 && last != moreBelowMark && last != "" && !strings.HasPrefix(last, detailIndent) {
 			t.Errorf("height %d ends on the bare label %q, with nothing under it:\n%s", h, last, strings.Join(lines, "\n"))
 		}
 	}
@@ -2441,5 +2441,45 @@ func TestADetailLabelStaysMarkedWithColourWithheld(t *testing.T) {
 	plain := newTheme(false)
 	if got := plain.fieldLabel.Render("provider"); !strings.Contains(got, "\x1b[2m") {
 		t.Errorf("with colour off, a detail label is not dimmed: rendered %q, want it to contain %q", got, "\x1b[2m")
+	}
+}
+
+// A field whose value is empty says so. An RPC-level call such as
+// GetProviderSchema belongs to no resource type, so its span carries an
+// empty ResourceType -- a fact about the call, not a failure to render it.
+// Under the folded layout an empty value left its label with an empty
+// column beside it, which reads as empty; on its own line it leaves the
+// label heading a blank line, which reads as a field the pane could not
+// fill in. It is spelled with model.FacetKey's own word, so the detail pane
+// and the facet pane call the same absence the same thing on one frame.
+func TestADetailFieldWithNoValueSaysSo(t *testing.T) {
+	s := span.Span{RPC: "GetProviderSchema", Provider: "aws", DurationMs: 12}
+	if s.ResourceType != "" {
+		t.Fatal("fixture assumption changed: the span carries a resource type, so this exercises nothing")
+	}
+	lines := unstyledLines(spanDetailLines(s, attrib.Attribution{}, false, 40))
+	if got := detailValueFor(t, lines, "resource type"); strings.TrimSpace(got) == "" {
+		t.Errorf("an empty resource type renders as %q -- a label over a blank line", got)
+	}
+	if got := detailValueFor(t, lines, "resource type"); !strings.Contains(got, model.FacetKey("")) {
+		t.Errorf("an empty resource type renders as %q, want it to state the absence as %q", got, model.FacetKey(""))
+	}
+}
+
+// A pane with more to show than it has room for says there is MORE, rather
+// than marking the cut with a bare ellipsis. The two cuts a pane makes are
+// otherwise told apart only by two columns of indentation: a value clipped
+// for width carries an ellipsis in the value position, and a height cut
+// carries one where a label would sit. A reader cannot be asked to read a
+// figure's absence off an indent.
+func TestAPaneWithMoreToShowSaysSoRatherThanMarkingACut(t *testing.T) {
+	if !strings.Contains(moreBelowMark, "more") {
+		t.Fatalf("moreBelowMark is %q, which does not say there is more to show", moreBelowMark)
+	}
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	full := strings.Split(unstyled(m.renderDetail(50, 40)), "\n")
+	short := strings.Split(unstyled(m.renderDetail(50, len(full)-2)), "\n")
+	if last := short[len(short)-1]; last != moreBelowMark {
+		t.Errorf("a pane with content below the fold ends on %q, want %q", last, moreBelowMark)
 	}
 }

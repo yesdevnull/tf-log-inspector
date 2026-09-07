@@ -415,7 +415,9 @@ func TestAClippedHelpDescriptionIsMarked(t *testing.T) {
 	}
 	marked := 0
 	for _, line := range clipped {
-		if strings.HasSuffix(line, detailCutMark) {
+		// clipValueEnd's own marker: this description was too WIDE. A
+		// height cut carries different words (see moreBelowMark).
+		if strings.HasSuffix(line, "…") {
 			marked++
 		}
 	}

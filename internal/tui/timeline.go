@@ -633,7 +633,7 @@ func (m *Model) renderTimeline(w, h int) string {
 	if room := max(h-axisH-laneReserve, 0); len(notes) > room {
 		notes = notes[:room]
 		// The cut is marked the same way the detail pane marks its own
-		// height cut (see detailCutMark), and for the stronger version of
+		// height cut (see moreBelowMark), and for the stronger version of
 		// the same reason: the stalls are ordered longest first, so what a
 		// short pane drops is the tail of the ranking, and an annotation
 		// that merely stopped early would read as the whole of what there
@@ -647,7 +647,7 @@ func (m *Model) renderTimeline(w, h int) string {
 		// pane of one line, which the lane row has taken -- the same
 		// unmarked case fitPaneSections has at that same height.
 		if room > 0 {
-			notes[room-1] = clipWidth(detailCutMark, w)
+			notes[room-1] = clipWidth(moreBelowMark, w)
 		}
 	}
 
@@ -686,7 +686,7 @@ func (m *Model) renderTimeline(w, h int) string {
 // more lanes than it had room to draw: "+3" for three lanes not on screen.
 // Nothing was cut means nothing is said, so a one-lane log and a five-lane
 // log showing one lane no longer render the same frame -- the silence this
-// view's own cut marks (detailCutMark on the notes, on the stall list, and
+// view's own cut marks (moreBelowMark on the notes, on the stall list, and
 // on the detail pane beside it) all exist to refuse.
 //
 // It is a count rather than a bare ellipsis because the number is the whole
@@ -748,7 +748,7 @@ const clampedStartNote = "Note: a clamped start -- duration exceeding the offset
 // caveat of its own -- the clamped-start note the bars' positions, the
 // filter note every figure below it -- and a reader who never sees one
 // reads what it qualifies as a fact about the plan. A stall line lost to
-// the cut is a finding not shown, and detailCutMark says so on the reader's
+// the cut is a finding not shown, and moreBelowMark says so on the reader's
 // behalf -- the same distinction noMatchNote is justified by, between a
 // pane that shows less and a pane that misleads.
 //
@@ -1102,7 +1102,7 @@ func laneEndCol(ms, spanMs uint32, barW int) int {
 //
 // The right label is drawn only where it fits WHOLE, with a column of space
 // separating it from the left one, and is otherwise replaced by
-// detailCutMark. Neither half of that is presentation. A bar exactly as
+// axisLabelCutMark. Neither half of that is presentation. A bar exactly as
 // wide as the two labels together left no gap, so they ran into each other
 // as a single token ("0s521.4s"); a bar narrower still had the pair cut by
 // clipWidth, which marks nothing, leaving a fragment that reads as a whole
@@ -1117,6 +1117,13 @@ func laneEndCol(ms, spanMs uint32, barW int) int {
 // bars' own left edge. A bar with no room even for the mark beside it keeps
 // the left label alone, which is where the closing clipWidth takes over.
 //
+// axisLabelCutMark stands in for the timeline axis's right-hand label when
+// the bar is too narrow to carry it. It is a bare ellipsis and NOT
+// moreBelowMark: this is a value that would not fit, the same thing a
+// clipped identifier's ellipsis says, where moreBelowMark says content
+// exists below the fold. One mark for each meaning.
+const axisLabelCutMark = "…"
+
 // The result is exactly barW columns wide, whichever of those it drew.
 func timeAxis(spanMs uint32, barW int) string {
 	if barW <= 0 {
@@ -1125,7 +1132,7 @@ func timeAxis(spanMs uint32, barW int) string {
 	left := formatMs(0)
 	right := formatMs(uint64(spanMs))
 	if !axisLabelsFit(left, right, barW) {
-		right = detailCutMark
+		right = axisLabelCutMark
 		if !axisLabelsFit(left, right, barW) {
 			right = ""
 		}
@@ -1279,7 +1286,7 @@ func concurrencyClause(s model.Stall) string {
 // more than one call sharing that name. At most maxStallsShown, longest
 // first: the pane's height is finite, and a screenful of short stalls is
 // noise beside the one that mattered. A list SHORTENED to that few carries
-// detailCutMark, so that what was left out is visible rather than silently
+// moreBelowMark, so that what was left out is visible rather than silently
 // absent -- see the mark's own doc comment, and writeSlowestCalls in
 // internal/profile, which states the same rule as "(top N)" only when it
 // actually truncated.
@@ -1436,7 +1443,7 @@ func (m *Model) stallAnnotation(w int) string {
 		lines = append(lines, clipValueEnd(line, w))
 	}
 	if truncated {
-		lines = append(lines, clipWidth(detailCutMark, w))
+		lines = append(lines, clipWidth(moreBelowMark, w))
 	}
 	return strings.Join(lines, "\n")
 }

@@ -984,17 +984,26 @@ func (m *Model) selectedDetail(w int) (string, []paneSection) {
 	return noSelectionTitle, nothing
 }
 
-// detailCutMark is the last line of a pane that had more to show than h
+// moreBelowMark is the last line of a pane that had more to show than h
 // lines to show it in -- the detail pane, the help, the timeline's notes
-// and stall list. The pane marks a value clipped for WIDTH with
-// an ellipsis (see clipValueFront); a pane clipped for HEIGHT that marked
-// nothing would leave the two cuts telling the reader different amounts
-// about themselves, and the height cut is the one that can remove a whole
-// figure rather than the tail of one.
-const detailCutMark = "…"
+// and stall list.
+//
+// It NAMES what it means rather than marking the cut with a bare ellipsis.
+// A pane makes two kinds of cut and they must not read alike: a value
+// clipped for WIDTH carries an ellipsis in the value position (see
+// clipValueFront), and a height cut carries one where a LABEL would sit.
+// Two columns of indentation is the whole difference between "this figure
+// is too wide to show" and "this figure is below the fold", and a reader
+// cannot be asked to read a figure's absence off an indent. Saying "more"
+// answers the only question the line exists to answer.
+//
+// It is not the mark a timeline axis uses when its right-hand label will
+// not fit (see timeAxis). That is a value that did not fit, not content
+// below a fold, and the two say different things.
+const moreBelowMark = "… more"
 
 // fitPaneSections composes a title and body sections into at most h
-// lines, marking any cut with detailCutMark.
+// lines, marking any cut with moreBelowMark.
 //
 // The FIRST section is always appended, so a pane with room for anything at
 // all shows as much of its most important block as fits, clipped by line as
@@ -1018,12 +1027,12 @@ func fitPaneSections(title string, sections []paneSection, w, h int) []string {
 		lines = append(lines, s...)
 	}
 	if cut {
-		lines = append(lines, clipWidth(detailCutMark, w))
+		lines = append(lines, clipWidth(moreBelowMark, w))
 	}
 	if h > 0 && len(lines) > h {
 		lines = lines[:h]
 		if h > 1 {
-			lines[h-1] = clipWidth(detailCutMark, w)
+			lines[h-1] = clipWidth(moreBelowMark, w)
 		}
 	}
 	return lines
@@ -1275,6 +1284,17 @@ const detailIndent = "  "
 func detailFieldLines(fields []detailField, w int) []string {
 	lines := make([]string, 0, 2*len(fields))
 	for _, f := range fields {
+		// An empty value is a fact about the call -- an RPC-level method
+		// belongs to no resource type -- and it is spelled with the word
+		// model.FacetKey gives an empty value, so the detail pane and the
+		// facet pane call one absence one thing on the same frame. Left
+		// empty it would leave the label heading a blank line, which reads
+		// as a field the pane failed to fill in rather than as a field with
+		// nothing in it.
+		if f.value == "" {
+			f.value = model.FacetKey("")
+			f.kind = headIdentifierColumn
+		}
 		// The label is clipped and styled whole, the way a table's header
 		// cell is: a style wrapped around part of it would put escapes
 		// inside a value the frame is read for.

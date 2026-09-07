@@ -716,7 +716,7 @@ const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_
 // lines tall: the full text where it fits, one sentence where it does not,
 // and a marked cut where even that does not.
 //
-// The mark is detailCutMark, the same ellipsis the detail pane marks its own
+// The mark is moreBelowMark, the same words the detail pane marks its own
 // height cut with, so the two cuts tell a reader the same amount about
 // themselves. A pane of one line has no room for it, the single unmarked
 // case fitPaneSections has for the same reason.
@@ -735,7 +735,7 @@ func fitCaptureGuidance(w, h int) string {
 		cut := make([]string, h)
 		copy(cut, lines)
 		if h > 1 {
-			cut[h-1] = detailCutMark
+			cut[h-1] = moreBelowMark
 		}
 		lines = cut
 	}

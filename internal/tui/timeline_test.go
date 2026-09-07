@@ -926,9 +926,9 @@ func TestTheAxisDropsARightLabelItCannotShowWhole(t *testing.T) {
 		spanMs uint32
 		want   string
 	}{
-		{"labels that would run together as one token", 8, 521400, "0s     " + detailCutMark},
-		{"a label that would be cut to a shorter number", 5, 521400, "0s  " + detailCutMark},
-		{"a sub-second window that would read as seconds", 5, 800, "0s  " + detailCutMark},
+		{"labels that would run together as one token", 8, 521400, "0s     " + axisLabelCutMark},
+		{"a label that would be cut to a shorter number", 5, 521400, "0s  " + axisLabelCutMark},
+		{"a sub-second window that would read as seconds", 5, 800, "0s  " + axisLabelCutMark},
 		{"no room for even the mark", 3, 521400, "0s "},
 		{"one column of separation is all it needs", 9, 521400, "0s 521.4s"},
 		{"room to spare", 12, 521400, "0s    521.4s"},
@@ -1018,8 +1018,8 @@ func TestTheShortestPanesStillDrawALaneRow(t *testing.T) {
 			// same unmarked cut fitPaneSections has at that height.
 			continue
 		}
-		if got := lines[len(lines)-1]; got != detailCutMark {
-			t.Errorf("h=%d: last line = %q, want %q -- the notes went unsaid with nothing marking it", h, got, detailCutMark)
+		if got := lines[len(lines)-1]; got != moreBelowMark {
+			t.Errorf("h=%d: last line = %q, want %q -- the notes went unsaid with nothing marking it", h, got, moreBelowMark)
 		}
 	}
 }
@@ -1058,8 +1058,8 @@ func TestCaptureGuidanceCutForHeightSaysSo(t *testing.T) {
 
 	// Too short even for that: the cut is marked rather than left reading
 	// as a finished sentence.
-	if lines := strings.Split(m.renderTimeline(w, 2), "\n"); lines[len(lines)-1] != detailCutMark {
-		t.Errorf("guidance in a 2-line pane = %q, want its cut marked with %q", lines, detailCutMark)
+	if lines := strings.Split(m.renderTimeline(w, 2), "\n"); lines[len(lines)-1] != moreBelowMark {
+		t.Errorf("guidance in a 2-line pane = %q, want its cut marked with %q", lines, moreBelowMark)
 	}
 
 	// A pane of one line has no room for the mark either -- the same
@@ -1118,7 +1118,7 @@ func TestRenderTimelineKeepsALaneRowWhenTheAnnotationWouldFillThePane(t *testing
 // annotation's own room, so stalls the annotation had to say go unsaid --
 // and an annotation that simply stopped early would read as the whole of
 // what there was to report. This package already refuses that equivalence
-// for the detail pane (see detailCutMark), and the stall list is where it
+// for the detail pane (see moreBelowMark), and the stall list is where it
 // matters most: the reason to look at this view is the LONGEST wait, and a
 // silent cut is indistinguishable from there being no more.
 //
@@ -1137,8 +1137,8 @@ func TestRenderTimelineMarksAnAnnotationCutForHeight(t *testing.T) {
 	if len(shown) >= len(full) {
 		t.Fatalf("annotation was not cut at h=4 (%d of %d lines shown), so this test asserts nothing", len(shown), len(full))
 	}
-	if got := shown[len(shown)-1]; got != detailCutMark {
-		t.Errorf("last annotation line = %q, want %q: %d of %d notes went unsaid with nothing marking it", got, detailCutMark, len(full)-len(shown), len(full))
+	if got := shown[len(shown)-1]; got != moreBelowMark {
+		t.Errorf("last annotation line = %q, want %q: %d of %d notes went unsaid with nothing marking it", got, moreBelowMark, len(full)-len(shown), len(full))
 	}
 	// The cut takes the line it marks, so the notes above it survive
 	// intact rather than the mark replacing the first of them.
@@ -1282,7 +1282,7 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 	}
 	// Nothing was dropped here, so nothing may claim it was: the cut mark
 	// and its absence are what tell a complete list from a shortened one.
-	if strings.Contains(got, detailCutMark) {
+	if strings.Contains(got, moreBelowMark) {
 		t.Errorf("stallAnnotation marks a cut over a fixture with %d stalls: %q", len(want), got)
 	}
 }
@@ -1381,7 +1381,9 @@ func TestARangeClipsItsOwnTailAtTheCommonPaneWidth(t *testing.T) {
 	if want := "waiting on aws/1, 20.0s–60.0s"; !strings.HasPrefix(got, want) {
 		t.Errorf("stallAnnotation at %d columns = %q, which no longer opens on %q -- the lane and the window are what the ordering exists to keep", commonCentrePaneWidth, got, want)
 	}
-	if !strings.HasSuffix(got, detailCutMark) {
+	// clipValueEnd's marker, not a height cut: this line was too WIDE, and
+	// the two cuts carry different marks (see moreBelowMark).
+	if !strings.HasSuffix(got, "…") {
 		t.Errorf("stallAnnotation at %d columns = %q, want the cut marked", commonCentrePaneWidth, got)
 	}
 }
@@ -1517,7 +1519,7 @@ func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
 		"waiting on aws/1, 2.0s–12.0s — concurrency 1 of 2",
 		"waiting on aws/1, 14.0s–22.0s — concurrency 1 of 2",
 		"waiting on aws/1, 24.0s–30.0s — concurrency 1 of 2",
-		detailCutMark,
+		moreBelowMark,
 	}
 	if !slices.Equal(lines, want) {
 		t.Fatalf("stallAnnotation = %v, want %v (the three longest, longest first, and a mark for the rest)", lines, want)
@@ -1868,7 +1870,7 @@ func TestTheTimelineDeclaresAClampedStart(t *testing.T) {
 
 	// A pane too short for the whole block cuts it from the tail, and what
 	// must survive that cut is the caveat, not the stall line: a stall
-	// dropped is a finding not shown, and detailCutMark says so, while the
+	// dropped is a finding not shown, and moreBelowMark says so, while the
 	// caveat dropped leaves the bars above reading as facts they are not.
 	short := strings.Split(m.renderTimeline(60, 5), "\n")
 	if len(short) != 5 {
@@ -1877,8 +1879,8 @@ func TestTheTimelineDeclaresAClampedStart(t *testing.T) {
 	if !strings.Contains(short[2], "clamped") {
 		t.Errorf("a cut pane dropped the clamped-start note ahead of the stall line:\n%s", strings.Join(short, "\n"))
 	}
-	if got := short[len(short)-1]; got != detailCutMark {
-		t.Errorf("last line = %q, want %q: the block was cut with nothing marking it", got, detailCutMark)
+	if got := short[len(short)-1]; got != moreBelowMark {
+		t.Errorf("last line = %q, want %q: the block was cut with nothing marking it", got, moreBelowMark)
 	}
 
 	// A log with nothing clamped must not carry the note: a caveat shown
