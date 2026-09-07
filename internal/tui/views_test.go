@@ -1153,3 +1153,35 @@ func TestTheSortedHeaderKeepsItsNameAndItsMarkerTogether(t *testing.T) {
 		t.Errorf("the rendered header does not carry %q as one run -- the name and its marker have been styled apart: %q", want, header)
 	}
 }
+
+// The sorted column's header is marked APART from its siblings. That is how
+// a reader learns which column answered the s they just pressed, and until
+// now only a golden said so -- and a golden is what -update rewrites.
+//
+// Asserted as a difference rather than against named styles, so a deliberate
+// change of treatment does not have to come here to be re-stated.
+func TestTheSortedColumnHeaderIsMarkedApartFromItsSiblings(t *testing.T) {
+	cols := []column{
+		{header: "resource type", kind: tailIdentifierColumn},
+		{header: "n", kind: numericColumn},
+	}
+	data := []row{rollupRow([]string{"registry.terraform.io/hashicorp/aws", "1"}, []uint64{0, 1}, nil)}
+	header := strings.Split(renderTable(nil, cols, 1, data, "", -1, true, 60, 10), "\n")[0]
+
+	var prefixes []string
+	for _, part := range strings.Split(header, "\x1b[0m") {
+		if at := strings.Index(part, "\x1b["); at >= 0 {
+			prefixes = append(prefixes, sgrPrefix(part[at:]))
+		}
+	}
+	if len(prefixes) != 2 {
+		t.Fatalf("the header carries %d styled cells, want one per column: %q", len(prefixes), header)
+	}
+	sibling, sortedPrefix := prefixes[0], prefixes[1]
+	if sibling == "" || sortedPrefix == "" {
+		t.Fatalf("a header cell is drawn unstyled: %q", header)
+	}
+	if sibling == sortedPrefix {
+		t.Errorf("the sorted column's header is drawn exactly like its sibling (%q), so nothing says which column the sort is on: %q", sibling, header)
+	}
+}

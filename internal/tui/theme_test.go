@@ -468,3 +468,51 @@ func TestNoFrameCarriesColourWhenItIsWithheld(t *testing.T) {
 		}
 	})
 }
+
+// lastSGR is the final escape sequence on a line, or "" if it carries none.
+func lastSGR(line string) string {
+	at := strings.LastIndex(line, "\x1b[")
+	if at < 0 {
+		return ""
+	}
+	end := strings.IndexByte(line[at:], 'm')
+	if end < 0 {
+		return line[at:]
+	}
+	return line[at : at+end+1]
+}
+
+// No line may leave the terminal styled. This is the one failure that
+// escapes the program: a frame ending with reverse video or a colour still
+// switched on corrupts whatever the user's shell prints next, and nothing in
+// this package -- or in bubbletea -- would report it.
+//
+// It is a real hazard rather than a theoretical one, because almost every
+// styled line here is clipped after it is styled, and a clip that dropped a
+// closing reset would do exactly this.
+func TestNoRenderedLineLeavesTheTerminalStyled(t *testing.T) {
+	styled := 0
+	for _, c := range wholeFrameCases(t) {
+		for _, w := range []int{1, 12, 40, 60, 70, 100, 160} {
+			for _, h := range []int{1, 2, 5, 12, 40} {
+				m := update(t, c.m, tea.WindowSizeMsg{Width: w, Height: h})
+				facets, help := focusFacets(t, m), update(t, m, helpKey)
+				for _, frame := range []string{m.View(), facets.View(), help.View()} {
+					for _, line := range strings.Split(frame, "\n") {
+						last := lastSGR(line)
+						if last == "" {
+							continue
+						}
+						styled++
+						if last != "\x1b[0m" {
+							t.Errorf("%s at %dx%d: a line ends with styling still on (%q): %q", c.name, w, h, last, line)
+						}
+					}
+				}
+			}
+		}
+	}
+	if styled == 0 {
+		t.Fatal("no rendered line carried styling at all, so nothing above was checked")
+	}
+}

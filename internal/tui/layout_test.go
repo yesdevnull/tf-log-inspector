@@ -2124,3 +2124,128 @@ func TestActionKeysDropTheSortHintWhenNoTableIsDrawn(t *testing.T) {
 		t.Errorf("the footer offers %q over a frame drawing capture guidance instead of a table: %q", sortHint, got)
 	}
 }
+
+// alert exists so a report answering an apparently-dead keystroke is seen.
+// Drawn like ordinary text it would be a sentence in the footer where hints
+// usually are, on a frame the reader is already puzzled by -- which is the
+// whole of what it was added to prevent.
+//
+// Both states are asserted to SAY the right thing as well as to be marked,
+// so a footer that lost its report entirely could not pass by being plain.
+func TestAReportAnsweringADeadKeystrokeIsMarked(t *testing.T) {
+	base := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	for _, tc := range []struct {
+		what string
+		set  func(m *Model)
+		says string
+	}{
+		{"a jump the filter refused", func(m *Model) { m.blockedJump = true }, jumpBlockedNote},
+		{"a search that found nothing", func(m *Model) {
+			m.view, m.raw.notFound, m.raw.lastQuery = ViewRawLog, true, "zzzz"
+		}, "/zzzz  pattern not found"},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			m := base
+			tc.set(&m)
+			got := m.footer(100)
+			if unstyled(got) != tc.says {
+				t.Fatalf("the footer reads %q, not the report this is about (%q)", unstyled(got), tc.says)
+			}
+			if !strings.HasPrefix(got, "\x1b[") {
+				t.Errorf("%s is drawn like ordinary text: %q", tc.what, got)
+			}
+		})
+	}
+}
+
+// Every line that explains why a pane is empty is drawn as a note. They are
+// the frames a reader is most likely to be staring at wondering whether the
+// tool broke, and the sentence answering them should not read as log
+// content.
+//
+// One assertion per pane that can render one, because each composes its own
+// and nothing makes them agree.
+func TestEveryLineExplainingAnEmptyPaneIsDrawnAsANote(t *testing.T) {
+	empty := func(t *testing.T, fixture string, view View) Model {
+		t.Helper()
+		m := update(t, New(testLog(t, fixture), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+		m.view = view
+		m.selectedFacets = map[string]map[string]bool{dimProvider: {"registry.terraform.io/hashicorp/nothing": true}}
+		m.invalidateRows()
+		return m
+	}
+	for _, tc := range []struct {
+		what   string
+		render func(t *testing.T) string
+	}{
+		{"the table", func(t *testing.T) string { m := empty(t, "provider-rpc.log", ViewCalls); return m.renderList(80, 20) }},
+		{"the raw log", func(t *testing.T) string {
+			m := empty(t, "provider-rpc.log", ViewRawLog)
+			return m.renderRawLog(80, 20)
+		}},
+		{"the timeline", func(t *testing.T) string {
+			m := empty(t, "timeline.log", ViewTimeline)
+			return m.renderTimeline(80, 20)
+		}},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			out := tc.render(t)
+			if !strings.Contains(unstyled(out), noMatchNote) {
+				t.Fatalf("%s does not explain itself, so there is nothing here to be marked:\n%s", tc.what, out)
+			}
+			for _, line := range strings.Split(out, "\n") {
+				if !strings.Contains(unstyled(line), noMatchNote) {
+					continue
+				}
+				if !strings.Contains(line, "\x1b[") {
+					t.Errorf("%s explains itself in ordinary text: %q", tc.what, line)
+				}
+			}
+		})
+	}
+
+	// The detail pane's placeholder is the fourth, and it needs no filter --
+	// only a selection that stands for nothing.
+	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.rowsCache, m.rowsCached, m.selected = []row{{cells: []string{"x"}, spanIdx: noSpanIdx}}, true, 0
+	out := m.renderDetail(50, 20)
+	if !strings.Contains(unstyled(out), noSelectionNote) {
+		t.Fatalf("the detail pane draws no placeholder, so there is nothing here to be marked:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(unstyled(line), noSelectionNote) && !strings.Contains(line, "\x1b[") {
+			t.Errorf("the detail placeholder is drawn in ordinary text: %q", line)
+		}
+	}
+}
+
+// styleHintKeys accents the key and nothing else, and never changes what a
+// line says or how wide it is.
+//
+// The shapes that matter are the ones the footer actually composes: a hint
+// whose words contain a space, several hints on one line, and a line clipped
+// down to a bare key -- which is left alone rather than accented whole,
+// since there is no word left for the accent to be marking.
+func TestStyleHintKeysAccentsTheKeyAndNothingElse(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		accents int
+	}{
+		{"1 providers  2 types  6 raw log  ? help", 4},
+		{"⇥ pane  Esc clear  q quit", 3},
+		{"q", 0},
+		{"", 0},
+		{"⇥ pane  ␣", 1},
+	} {
+		got := styleHintKeys(tc.in)
+		if unstyled(got) != tc.in {
+			t.Errorf("styleHintKeys(%q) says %q -- the text must be untouched", tc.in, unstyled(got))
+		}
+		if lipgloss.Width(got) != lipgloss.Width(tc.in) {
+			t.Errorf("styleHintKeys(%q) is %d columns, want %d", tc.in, lipgloss.Width(got), lipgloss.Width(tc.in))
+		}
+		if n := strings.Count(got, "\x1b[0m"); n != tc.accents {
+			t.Errorf("styleHintKeys(%q) accented %d fragments, want %d: %q", tc.in, n, tc.accents, got)
+		}
+	}
+}
