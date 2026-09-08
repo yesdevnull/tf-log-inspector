@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -426,7 +427,7 @@ func laneLabels(spans []span.Span, lanes []model.Lane) []string {
 	for i, lane := range lanes {
 		provider := laneProvider(spans, lane)
 		counts[provider]++
-		labels[i] = fmt.Sprintf("%s/%d", provider, counts[provider])
+		labels[i] = fmt.Sprintf("%s/%d", logfmt.DisplayText(provider), counts[provider])
 	}
 	return labels
 }

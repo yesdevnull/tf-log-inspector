@@ -32,6 +32,18 @@ func testLog(t *testing.T, name string) *model.Log {
 	return l
 }
 
+func TestResizingDoesNotReopenTheFacetOverlay(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "x.log")
+	m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
+	if m.Focus() != PaneList || m.facetOverlayShowing(90) {
+		t.Fatal("narrowing reopened the facet overlay and took focus from the list")
+	}
+}
+
 // callsModel is a fresh model showing the CALLS view, for the many tests
 // whose subject is something other than which view is on -- a jump, a clip,
 // a facet, a pane width -- but which need call rows to work with.

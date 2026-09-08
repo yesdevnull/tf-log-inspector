@@ -538,6 +538,7 @@ func facetValueKind(dim string) columnKind {
 // from the end regardless -- a facet value is a control, so two values that
 // clip to the same text are two checkboxes the user cannot choose between.
 func facetValueLine(check, value string, count, countWidth, w int, kind columnKind) string {
+	value = logfmt.DisplayText(value)
 	prefix := facetCheckbox(check)
 	avail := w - facetCheckboxWidth - lipgloss.Width(facetCountGap) - countWidth
 	if avail < 1 {
@@ -618,7 +619,7 @@ func facetCountWidth(facets []model.Facet) int {
 // line at a notional infinite width would measure the padding instead of the
 // content -- and allocate it.
 func facetValueNaturalWidth(value string, countWidth int) int {
-	return facetCheckboxWidth + lipgloss.Width(value) + lipgloss.Width(facetCountGap) + countWidth
+	return facetCheckboxWidth + lipgloss.Width(logfmt.DisplayText(value)) + lipgloss.Width(facetCountGap) + countWidth
 }
 
 // facetSectionHeader upper-cases and pluralises a dimension name for

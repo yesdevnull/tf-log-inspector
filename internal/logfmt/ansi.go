@@ -1,6 +1,32 @@
 package logfmt
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+)
+
+// DisplayText makes untrusted text safe for a single display line. Controls
+// are shown as visible escapes so decoded JSON and filenames cannot issue
+// terminal commands or inject rows. Apply styling only after this step.
+func DisplayText(s string) string {
+	// Raw files and filenames may contain single-byte C1 controls that are
+	// invalid UTF-8 and would otherwise bypass rune-based control checks.
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			quoted := strconv.QuoteRune(r)
+			b.WriteString(quoted[1 : len(quoted)-1])
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 // HasANSI reports whether s contains an ANSI escape sequence.
 func HasANSI(s string) bool { return strings.IndexByte(s, 0x1b) >= 0 }

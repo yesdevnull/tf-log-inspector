@@ -230,6 +230,27 @@ func (m *Model) pageRawLog(delta int) {
 	m.scrollRawLog(delta * rawLogPageSize)
 }
 
+// reconcileRawCursor keeps an admitted entry on screen after filtering.
+// Prefer the current position or a later match; look backwards only when
+// no admitted entries remain below it. Both searches respect a call scope.
+func (m *Model) reconcileRawCursor() {
+	visible := m.rawLogVisible()
+	for i, ok := m.nextRawEntry(m.raw.top); ok; i, ok = m.nextRawEntry(i + 1) {
+		if visible(i) {
+			if i != m.raw.top {
+				m.raw.top, m.raw.topLine = i, 0
+			}
+			return
+		}
+	}
+	for i, ok := m.prevRawEntry(m.raw.top - 1); ok; i, ok = m.prevRawEntry(i - 1) {
+		if visible(i) {
+			m.raw.top, m.raw.topLine = i, 0
+			return
+		}
+	}
+}
+
 // scrollRawLog moves the raw log by delta LINES -- forward for positive,
 // back for negative -- clamped so neither paging nor an arrow key can walk
 // off either end.
@@ -428,7 +449,7 @@ func (m Model) renderRawLog(w, h int) string {
 			}
 			var plain string
 			plain, scratch = logfmt.StripANSI(ln, scratch)
-			line := clipWidth(plain, w)
+			line := clipWidth(logfmt.DisplayText(plain), w)
 			if marked {
 				line = style.Render(line)
 			}

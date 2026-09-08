@@ -563,6 +563,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.paneWidth() >= facetInlineWidth {
+			m.showFacetOverlay = false
+		}
 		m.keepFocusOnADrawnPane()
 	}
 	return m, nil
@@ -749,6 +752,9 @@ func (m *Model) invalidateRows() {
 	m.timelineWallClockCached = false
 	m.raw.notFound = false
 	m.clampSelection()
+	if m.view == ViewRawLog {
+		m.reconcileRawCursor()
+	}
 	if m.view == ViewTimeline {
 		m.clampTimelineSelection()
 	}

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -65,6 +66,7 @@ const maxResourceTypeColWidth = 49
 func resourceTypeColWidth(types []string) int {
 	width := typeColWidth
 	for _, t := range types {
+		t = logfmt.DisplayText(t)
 		if len(t) > width {
 			width = len(t)
 		}
@@ -87,6 +89,7 @@ func resourceTypeColWidth(types []string) int {
 // identifier, and both are restricted to ASCII by Terraform's own naming
 // rules. Revisit this if truncate is ever applied to arbitrary text.
 func truncate(s string, n int) string {
+	s = logfmt.DisplayText(s)
 	if len(s) <= n {
 		return s
 	}
@@ -109,6 +112,11 @@ func Render(w io.Writer, l *model.Log) error {
 	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n")
 	fmt.Fprintf(b, "--diagnose, this report is not safe to share.\n\n")
 	writeLoggingCaveat(b)
+	if l.UISaturatedDurations > 0 {
+		fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", l.UISaturatedDurations)
+		fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\n")
+		fmt.Fprintf(b, "and timeline positions may be inaccurate.\n\n")
+	}
 
 	if len(l.RPCSpans) == 0 && len(l.UISpans) == 0 {
 		fmt.Fprintf(b, "NO SPANS\n")
@@ -183,7 +191,7 @@ func writeProviderRollup(b *strings.Builder, rpcSpans []span.Span) {
 	fmt.Fprintf(b, "  %8s %8s %8s  %s\n", "total", "calls", "max", "provider")
 	for _, bkt := range buckets {
 		fmt.Fprintf(b, "  %8s %8d %8s  %s\n",
-			formatMs(bkt.TotalMs), bkt.Count, formatMs(uint64(bkt.MaxMs)), bkt.Key)
+			formatMs(bkt.TotalMs), bkt.Count, formatMs(uint64(bkt.MaxMs)), logfmt.DisplayText(bkt.Key))
 	}
 	fmt.Fprintf(b, "\n")
 }
@@ -215,7 +223,7 @@ func writeSlowestCalls(b *strings.Builder, rpcSpans []span.Span) {
 	for _, s := range rows {
 		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
 			formatMs(uint64(s.DurationMs)), typeColWidth, truncate(s.RPC, typeColWidth),
-			width, truncate(s.ResourceType, width), s.Provider)
+			width, truncate(s.ResourceType, width), logfmt.DisplayText(s.Provider))
 	}
 	fmt.Fprintf(b, "\n")
 }
@@ -253,7 +261,7 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 	for _, s := range rows {
 		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
 			formatMs(uint64(s.DurationMs)), actionColWidth, truncate(s.RPC, actionColWidth),
-			width, truncate(s.ResourceType, width), s.Address)
+			width, truncate(s.ResourceType, width), logfmt.DisplayText(s.Address))
 	}
 	fmt.Fprintf(b, "\n")
 }

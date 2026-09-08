@@ -24,6 +24,26 @@ func TestRunDiagnoseOnFixture(t *testing.T) {
 	}
 }
 
+func TestDiagnoseEscapesComponentAndMessageControls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "controls.log")
+	line := "2026-09-08T00:00:00.000Z [DEBUG] source\bname: message\btext\n"
+	if err := os.WriteFile(path, []byte(line+line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := run([]string{"--diagnose", path}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsRune(out.String(), '\b') {
+		t.Errorf("diagnose emitted a terminal control: %q", out.String())
+	}
+	for _, want := range []string{`source\bname`, `message\btext`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report does not display escaped text %q", want)
+		}
+	}
+}
+
 // The mixed fixture's plan output must register as real non-hclog content,
 // driven by the plan block rather than by the fixture's comment header.
 func TestRunReportsNonHclogContent(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -357,12 +358,16 @@ const headerSep = "·"
 // it.
 func header(m *Model) string {
 	rpc, ui := len(m.log.RPCSpans), len(m.log.UISpans)
+	name := logfmt.DisplayText(m.name)
+	if n := m.log.UISaturatedDurations; n > 0 {
+		name = fmt.Sprintf("WARNING: %d UI durations capped %s %s", n, headerSep, name)
+	}
 	if !m.filterActive() {
-		return fmt.Sprintf("tfli %s %s %s %d RPC spans, %d UI spans", headerSep, m.name, headerSep, rpc, ui)
+		return fmt.Sprintf("tfli %s %s %s %d RPC spans, %d UI spans", headerSep, name, headerSep, rpc, ui)
 	}
 	f := m.filter()
 	return fmt.Sprintf("tfli %s %s %s %d of %d RPC spans, %d of %d UI spans",
-		headerSep, m.name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
+		headerSep, name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
 }
 
 // countMatching counts the spans passing f. It exists rather than a call to
@@ -417,9 +422,9 @@ func (m *Model) footer(w int) string {
 		// treatment of this interface's own would make their own text look
 		// like part of the furniture.
 		case m.raw.searching:
-			return "/" + m.raw.query
+			return "/" + logfmt.DisplayText(m.raw.query)
 		case m.raw.notFound:
-			return styles.alert.Render("/" + m.raw.lastQuery + "  pattern not found")
+			return styles.alert.Render("/" + logfmt.DisplayText(m.raw.lastQuery) + "  pattern not found")
 		}
 	}
 	return styleHintKeys(m.keyHints(w))
@@ -1593,7 +1598,7 @@ func detailFieldLines(fields []detailField, w int) []string {
 		// silently into something that still reads as a label.
 		lines = append(lines,
 			styles.fieldLabel.Render(clipWidth(f.label, w)),
-			clipIdentifierField(detailIndent, f.value, "", w, f.kind),
+			clipIdentifierField(detailIndent, logfmt.DisplayText(f.value), "", w, f.kind),
 		)
 	}
 	return lines

@@ -17,6 +17,26 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
+func TestSaturatedUIDurationsAreMarkedInTheHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "capture.log")
+	data := []byte(`{"@level":"info","@timestamp":"2026-09-04T09:15:02Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":1e300,"resource":{"addr":"local_file.example","implied_provider":"local","resource_type":"local_file"}}}` + "\n")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(l, path)
+	for _, width := range []int{60, 100, 160} {
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		head := strings.SplitN(unstyled(m.View()), "\n", 2)[0]
+		if !strings.Contains(head, "WARNING") || !strings.Contains(head, "1 UI duration") || !strings.Contains(head, "capped") {
+			t.Errorf("at width %d the header hides saturated durations: %q", width, head)
+		}
+	}
+}
+
 // updateGolden regenerates testdata/golden when set. The goldens hold what
 // the interface actually renders, escape sequences and all, so read a
 // regenerated one with scripts/read-golden.sh, which strips the styling and
