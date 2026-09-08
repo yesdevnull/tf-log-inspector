@@ -97,14 +97,34 @@ func run(args []string, stdout, stderr io.Writer) error {
 // writeReport sends render's output to outPath if set, otherwise to stdout.
 // Both --diagnose and --profile funnel their report through this so neither
 // mode can regress the -o handling on its own.
-func writeReport(stdout io.Writer, outPath string, render func(io.Writer) error) error {
+func writeReport(stdout io.Writer, inputPath, outPath string, render func(io.Writer) error) error {
 	w := stdout
 	var out *os.File
 	if outPath != "" {
-		var err error
-		out, err = os.Create(outPath)
+		inputInfo, err := os.Stat(inputPath)
+		if err != nil {
+			return fmt.Errorf("checking %s: %w", inputPath, err)
+		}
+		// Open without truncation so the identity check applies to the
+		// descriptor we actually write, including symbolic and hard links.
+		out, err = os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE, 0o666)
 		if err != nil {
 			return fmt.Errorf("creating %s: %w", outPath, err)
+		}
+		outputInfo, err := out.Stat()
+		if err != nil {
+			out.Close()
+			return fmt.Errorf("checking %s: %w", outPath, err)
+		}
+		if os.SameFile(inputInfo, outputInfo) {
+			out.Close()
+			return fmt.Errorf("input %s and output %s are the same file", inputPath, outPath)
+		}
+		if outputInfo.Mode().IsRegular() {
+			if err := out.Truncate(0); err != nil {
+				out.Close()
+				return fmt.Errorf("truncating %s: %w", outPath, err)
+			}
 		}
 		w = out
 	}
@@ -157,7 +177,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 
-	return writeReport(stdout, outPath, report.Render)
+	return writeReport(stdout, path, outPath, report.Render)
 }
 
 // runProfile loads path and writes the unmasked performance report.
@@ -166,7 +186,7 @@ func runProfile(path, outPath string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return writeReport(stdout, outPath, func(w io.Writer) error {
+	return writeReport(stdout, path, outPath, func(w io.Writer) error {
 		return profile.Render(w, l)
 	})
 }
