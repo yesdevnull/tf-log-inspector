@@ -37,3 +37,17 @@ Baseline controls detect persistent infrastructure failures; they cannot
 conclusively attribute transient failures that disappear on the control run.
 Terminal-security tests inspect emitted bytes without executing clipboard
 commands in a live terminal.
+
+## PR feedback
+
+The PR's path-restoration concern was checked against real mutation runs:
+`internal/../internal/model/rollup.go` is rejected before writing, while
+`./internal/model/rollup.go` is accepted and restored successfully. Both cases
+are now covered by `TestMutationPathSpellingsPreserveSource`; the validation
+logic needed no change. The script's existing Python 3.9 minimum is explicit
+in its usage text.
+
+The test harness now discovers Git solely through `PATH`, removing the
+machine-specific wrapper path. Agent verification supplies its Git wrapper
+through the test environment. Independent review retained the new test, and
+the complete script test suite passed with that environment.
