@@ -2,6 +2,7 @@ package logfmt
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -154,6 +155,9 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 				st.LastTS = h.TS
 
 				delta := h.TS.Sub(baseTS).Milliseconds()
+				if delta > math.MaxUint32 {
+					return st, fmt.Errorf("line %d: timestamp offset %dms exceeds supported maximum %dms", st.PhysicalLines, delta, uint64(math.MaxUint32))
+				}
 				if delta < 0 {
 					// Concurrent goroutines can emit out of order. Clamp
 					// rather than wrapping the unsigned field.

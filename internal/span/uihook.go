@@ -19,17 +19,19 @@ import (
 // of this struct's shape, not of code elsewhere remembering not to read
 // them.
 type uiLine struct {
-	Timestamp string `json:"@timestamp"`
-	Type      string `json:"type"`
-	Hook      *struct {
-		Resource *struct {
-			Addr            string `json:"addr"`
-			ResourceType    string `json:"resource_type"`
-			ImpliedProvider string `json:"implied_provider"`
-		} `json:"resource"`
-		Action  string  `json:"action"`
-		Elapsed float64 `json:"elapsed_seconds"`
-	} `json:"hook"`
+	Timestamp string  `json:"@timestamp"`
+	Type      string  `json:"type"`
+	Hook      *uiHook `json:"hook"`
+}
+
+type uiHook struct {
+	Resource *struct {
+		Addr            string `json:"addr"`
+		ResourceType    string `json:"resource_type"`
+		ImpliedProvider string `json:"implied_provider"`
+	} `json:"resource"`
+	Action  string  `json:"action"`
+	Elapsed float64 `json:"elapsed_seconds"`
 }
 
 // isCompletionType reports whether t is a UI-hook type carrying a real,
@@ -112,7 +114,13 @@ func (b *UIHookBuilder) relativeMs(ts string) uint32 {
 
 // Structured implements logfmt.StructuredSink.
 func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
-	var ul uiLine
+	// Every valid envelope contributes a timestamp. Only completion hooks
+	// use uiHook's schema: action hooks carry an object in hook.action.
+	var ul struct {
+		Timestamp string          `json:"@timestamp"`
+		Type      string          `json:"type"`
+		Hook      json.RawMessage `json:"hook"`
+	}
 	if err := json.Unmarshal([]byte(line), &ul); err != nil {
 		b.malformed++
 		return
@@ -123,7 +131,15 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 	if !isCompletionType(ul.Type) {
 		return
 	}
-	if ul.Hook == nil || ul.Hook.Resource == nil {
+	if len(ul.Hook) == 0 {
+		return
+	}
+	var hook *uiHook
+	if err := json.Unmarshal(ul.Hook, &hook); err != nil {
+		b.malformed++
+		return
+	}
+	if hook == nil || hook.Resource == nil {
 		return
 	}
 
@@ -133,8 +149,8 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 	// the unsigned field) and against overflowing uint32 once scaled to
 	// milliseconds.
 	var durationMs uint32
-	if ul.Hook.Elapsed > 0 {
-		scaled := math.Round(ul.Hook.Elapsed * 1000)
+	if hook.Elapsed > 0 {
+		scaled := math.Round(hook.Elapsed * 1000)
 		if scaled > math.MaxUint32 {
 			durationMs = math.MaxUint32
 			// Counted, not just clamped: an unmarked saturation is
@@ -159,10 +175,10 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		EndMs:        endMs,
 		DurationMs:   durationMs,
 		StartClamped: clamped,
-		RPC:          b.kept.retain(ul.Hook.Action),
-		Provider:     b.kept.retain(ul.Hook.Resource.ImpliedProvider),
-		ResourceType: b.kept.retain(ul.Hook.Resource.ResourceType),
-		Address:      strings.Clone(ul.Hook.Resource.Addr),
+		RPC:          b.kept.retain(hook.Action),
+		Provider:     b.kept.retain(hook.Resource.ImpliedProvider),
+		ResourceType: b.kept.retain(hook.Resource.ResourceType),
+		Address:      strings.Clone(hook.Resource.Addr),
 		Fidelity:     FidelityUIReported,
 	})
 }

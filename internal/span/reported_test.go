@@ -104,7 +104,7 @@ func TestReportedBuilderSurvivesFollowingContinuation(t *testing.T) {
 
 func TestReportedBuilderIgnoresEntriesWithoutDuration(t *testing.T) {
 	in := "2022-12-15T00:16:20.800Z [TRACE] provider.aws: Sending request downstream: tf_rpc=ReadResource\n" +
-		"2026-08-29T10:34:43.151+0200 [TRACE] terraform.NewContext: complete\n"
+		"2022-12-15T00:16:21.000Z [TRACE] terraform.NewContext: complete\n"
 	var b ReportedBuilder
 	scanInto(t, in, &b)
 	if got := b.Spans(); len(got) != 0 {
