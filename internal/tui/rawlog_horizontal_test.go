@@ -53,7 +53,7 @@ func TestRawLogArrowsRevealClippedTextAndStopAtEdges(t *testing.T) {
 }
 
 func TestRawLogHorizontalScrollRespectsFocusAndResize(t *testing.T) {
-	m := horizontalLog(t, strings.Repeat("prefix", 30)+"TAIL")
+	m := horizontalLog(t, "START"+strings.Repeat("prefix", 30)+"TAIL")
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
 	before := m.View()
@@ -69,7 +69,7 @@ func TestRawLogHorizontalScrollRespectsFocusAndResize(t *testing.T) {
 		t.Fatal("wide layout did not scroll to the line end")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 240, Height: 24})
-	if !strings.Contains(unstyled(m.View()), "prefixprefix") {
+	if !strings.Contains(unstyled(m.View()), "STARTprefix") {
 		t.Fatal("resize left a now-fitting line scrolled out of view")
 	}
 }
@@ -107,5 +107,37 @@ func TestRawLogSearchArrowsEditQueryAndSearchRestoresLineStart(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := unstyled(m.renderRawLog(20, 5)); !strings.HasPrefix(got, "012") {
 		t.Fatalf("successful search left its line start hidden: %q", got)
+	}
+}
+
+func TestRawLogHorizontalBoundsFollowVerticalScrolling(t *testing.T) {
+	m := horizontalLog(t, "0123456789abcdefghijklmnopqrst\nshort")
+	for i := 0; i < 10; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	}
+	if got := unstyled(m.renderRawLog(20, 5)); !strings.HasPrefix(got, "abcdefghijklmnopqrst") {
+		t.Fatalf("l did not reveal the line end: %q", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := unstyled(m.renderRawLog(20, 5)); got != "short" {
+		t.Fatalf("vertical scrolling hid a shorter line: %q", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if got := unstyled(m.renderRawLog(20, 5)); !strings.HasPrefix(got, "0123456789abcdefghij") {
+		t.Fatalf("h did not clamp against the shorter line: %q", got)
+	}
+}
+
+func TestOpeningACallRestoresTheLeftEdge(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	for i := 0; i < 100; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := unstyled(m.renderRawLog(60, 5)); !strings.HasPrefix(got, "2022-") {
+		t.Fatalf("opening a call kept the line context off-screen: %q", got)
 	}
 }
