@@ -875,12 +875,9 @@ func layoutCentreWidth(m Model, w int) int {
 // a quarter is 17, which renders "(nothing selected" with the closing paren
 // cut off, a pane too narrow to label itself.
 //
-// The raw log is the view that reaches the placeholder: it has no rows of
-// its own, so there is nothing for the pane to describe. Every other view
-// describes whatever row the cursor is on.
+// An empty calls view has no selection for the detail pane to describe.
 func TestDetailPaneFitsItsPlaceholderAtTheNarrowestSupportedWidth(t *testing.T) {
-	m := update(t, New(testLog(t, "two-providers.log"), "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
+	m := update(t, New(&model.Log{}, "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
 	if got := detailPaneWidth(m.detailPaneNatural, detailInlineWidth); got < minDetailPaneWidth {
 		t.Errorf("detail pane is %d columns at width %d, below its own minimum of %d", got, detailInlineWidth, minDetailPaneWidth)
 	}
@@ -1860,7 +1857,6 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 		{'1', rollupDetailTitle}, // every providers row is a group
 		{'2', rollupDetailTitle}, // every types row is a group
 		{'4', spanDetailTitle},   // every calls row is one span
-		{'6', noSelectionTitle},  // the raw log has no row to describe
 	} {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
 		title := paneTitlesOf(t, m.View())[detailPaneIndex]
@@ -1915,7 +1911,16 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	for _, b := range views {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
-		title := paneTitlesOf(t, m.View())[centrePaneIndex]
+		var title string
+		if b.view == ViewRawLog {
+			segments := strings.Split(strings.Split(unstyled(m.View()), "\n")[1], paneRuleTopSep)
+			if len(segments) != 2 {
+				t.Fatalf("raw log has %d panes, want 2", len(segments))
+			}
+			title = strings.TrimSpace(strings.Trim(segments[centrePaneIndex], paneRule+"▶"))
+		} else {
+			title = paneTitlesOf(t, m.View())[centrePaneIndex]
+		}
 		want := b.title
 		if b.view == ViewTimeline {
 			// The timeline's rendered title names the TIER it draws (see

@@ -684,6 +684,7 @@ func (m *Model) toggleFacetFocus() {
 func (m *Model) setView(v View) {
 	m.viewSelected[m.view] = m.selected
 	m.view = v
+	m.keepFocusOnADrawnPane()
 	m.selected = m.viewSelected[v]
 	m.hasReturn = false
 	m.raw.scope = nil
