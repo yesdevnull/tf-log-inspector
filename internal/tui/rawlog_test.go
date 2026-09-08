@@ -737,6 +737,23 @@ func TestRawLogFilterMovesToAnAdmittedEntry(t *testing.T) {
 	}
 }
 
+func TestDroppingAnEmptyScopeRevealsEarlierFilterMatches(t *testing.T) {
+	data := []byte("first\nsecond\nthird\n")
+	l := &model.Log{Data: data, Entries: []logfmt.Entry{
+		{Off: 0, Len: 6, Level: logfmt.LevelInfo},
+		{Off: 6, Len: 7, Level: logfmt.LevelWarn},
+		{Off: 13, Len: 6, Level: logfmt.LevelWarn},
+	}}
+	m := New(l, "x.log")
+	m.setView(ViewRawLog)
+	m.raw.scope, m.raw.top = []int{1, 2}, 2
+	showOnly(t, &m, dimLevel, "INFO")
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+	if out := unstyled(m.renderRawLog(80, 3)); out != "first" {
+		t.Errorf("widened raw log = %q, want the earlier INFO entry", out)
+	}
+}
+
 // The same emptiness with no filter to blame is a log with no entries at
 // all -- the raw log's top entry is clamped inside the log, so there is no
 // other way to reach it -- and saying "nothing matches the filter" there

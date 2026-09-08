@@ -33,21 +33,21 @@ var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "tfli:", err)
+		fmt.Fprintln(os.Stderr, "tfli:", logfmt.DisplayText(err.Error()))
 		os.Exit(1)
 	}
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("tfli", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(io.Discard)
 	var (
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		outPath    = fs.String("o", "", "write the --diagnose or --profile report to this file instead of standard output")
 		showVer    = fs.Bool("version", false, "print the version and exit")
 	)
-	fs.Usage = func() {
+	usage := func() {
 		fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
 		fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n\n")
 		fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
@@ -57,13 +57,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "\"What each mode discloses\" before sharing a session.\n\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		// Asking for help is not a failure. fs.Parse has already written the
-		// usage text to stderr by this point, so returning the sentinel would
-		// print "tfli: flag: help requested" beneath it and exit 1.
+	// Flag errors embed raw arguments. Print their escaped text separately
+	// from trusted usage formatting so an argument cannot inject commands
+	// or diagnostic rows. Flag parsing itself must remain silent.
+	fs.Usage = func() {}
+	parseErr := fs.Parse(args)
+	fs.SetOutput(stderr)
+	fs.Usage = usage
+	if err := parseErr; err != nil {
+		// Asking for help is not a failure.
 		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
 			return nil
 		}
+		fmt.Fprintln(stderr, logfmt.DisplayText(err.Error()))
+		fs.Usage()
 		return err
 	}
 
