@@ -61,6 +61,7 @@ var helpGroups = func() []helpGroup {
 		{title: "THE LIST", entries: []helpEntry{
 			{keys: "↑ ↓ j k", what: "move the cursor in the focused pane"},
 			{keys: "← → h l", what: "step within a timeline lane -- the footer's ↔"},
+			{keys: "← → h l", what: "scroll horizontally in the raw log"},
 			{keys: "PgUp PgDn", what: "page through the raw log"},
 			{keys: "⏎ Enter", what: "open the selected call in the raw log"},
 			{keys: "s", what: "sort by the next column, in the table views"},

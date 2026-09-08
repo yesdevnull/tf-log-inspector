@@ -620,6 +620,9 @@ const sortHint = "s sort"
 // a pane that is not drawn is not somewhere the reader can look.
 func (m *Model) actionKeys(w int) string {
 	keys := []string{"⇥ pane", "␣ facet"}
+	if m.view == ViewRawLog && !m.facetOverlayShowing(w) {
+		keys = append(keys, "↔ scroll")
+	}
 	if m.selectedRowOpens() {
 		keys = append(keys, openHint)
 	}

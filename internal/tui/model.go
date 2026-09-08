@@ -496,17 +496,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "left", "h":
-			// Left/right step through the selected lane's spans, in start
-			// order. Bound only in the timeline, with the list pane
-			// focused, the same way pgup/pgdown are bound only in the raw
-			// log: elsewhere there is no within-lane cursor for them to
-			// move.
+			// Arrows act on the focused timeline or raw log. Search input
+			// captures these keys before view navigation.
 			if m.view == ViewTimeline && m.pane == PaneList {
 				m.moveTimelineSpan(-1)
+			} else if m.view == ViewRawLog && m.pane == PaneList {
+				m.scrollRawLogHorizontally(-1)
 			}
 		case "right", "l":
 			if m.view == ViewTimeline && m.pane == PaneList {
 				m.moveTimelineSpan(1)
+			} else if m.view == ViewRawLog && m.pane == PaneList {
+				m.scrollRawLogHorizontally(1)
 			}
 		case "pgdown":
 			if m.view == ViewRawLog {

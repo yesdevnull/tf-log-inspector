@@ -95,7 +95,8 @@ The bottom tab bar highlights the active view; its number keys switch views.
 input. The filter title counts hidden values. `?` opens the complete key guide
 when a narrow terminal cannot show every shortcut.
 
-While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
+In Raw Log, `←`/`→` (or `h`/`l`) scroll horizontally one display column at a
+time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
 to edit the query. Long queries scroll with the cursor. `Enter` searches,
 `Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
 
