@@ -836,6 +836,13 @@ func (m *Model) renderPanes(w, h int) string {
 	switch {
 	case w >= facetInlineWidth:
 		facetW := facetPaneWidth(m.facetPaneNatural, w)
+		if !m.detailPaneDrawn(w) {
+			listW := w - facetW - paneSepWidth
+			return framePanes(h,
+				pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(facetW, bodyH), width: facetW},
+				pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
+			)
+		}
 		detailW := detailPaneWidth(m.detailPaneNatural, w)
 		listW := w - facetW - detailW - 2*paneSepWidth
 		detailTitle, detail := m.renderDetail(detailW, bodyH)
@@ -902,7 +909,7 @@ func (m *Model) facetOverlayShowing(w int) bool {
 // Two copies of the rule are what let the footer and the renderer drift
 // apart, so there is one.
 func (m *Model) detailPaneDrawn(w int) bool {
-	return !m.facetOverlayShowing(w) && w >= detailInlineWidth
+	return m.view != ViewRawLog && !m.facetOverlayShowing(w) && w >= detailInlineWidth
 }
 
 // paneWidth is the width the pane row is composed at: the terminal's own
