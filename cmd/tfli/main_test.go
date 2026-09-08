@@ -157,6 +157,47 @@ func TestRunWritesToOutputFile(t *testing.T) {
 	}
 }
 
+func TestReportsPreserveTheirInputFile(t *testing.T) {
+	for _, mode := range []string{"--diagnose", "--profile"} {
+		for _, alias := range []string{"same path", "hard link", "symbolic link"} {
+			t.Run(mode+"/"+alias, func(t *testing.T) {
+				dir := t.TempDir()
+				input := filepath.Join(dir, "capture.log")
+				original := []byte("2026-09-08T00:00:00.000Z [INFO] Terraform started\n")
+				if err := os.WriteFile(input, original, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				output := input
+				if alias != "same path" {
+					output = filepath.Join(dir, "report.txt")
+					link := os.Link
+					if alias == "symbolic link" {
+						link = os.Symlink
+					}
+					if err := link(input, output); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var stdout, stderr strings.Builder
+				err := run([]string{mode, "-o", output, input}, &stdout, &stderr)
+				if err == nil || !strings.Contains(err.Error(), "same file") {
+					t.Errorf("run error = %v, want same-file rejection", err)
+				}
+				got, readErr := os.ReadFile(input)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if string(got) != string(original) {
+					t.Errorf("input file was overwritten: %q", got)
+				}
+				if stdout.Len() != 0 || stderr.Len() != 0 {
+					t.Errorf("unexpected output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+			})
+		}
+	}
+}
+
 // The -o file is the one artefact meant to leave the machine, so a failure
 // to create it must be reported rather than silently falling back to
 // standard output -- which would look like success while writing the report
