@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -410,7 +411,7 @@ func (m *Model) footer(w int) string {
 	// View's own comment says the footer exists to prevent, and the reason
 	// renderHelp is allowed to cut without a mark.
 	if m.showHelp {
-		return styleHintKeys(m.keyHints(w))
+		return m.renderKeyHints(w)
 	}
 	if m.blockedJump {
 		return styles.alert.Render(jumpBlockedNote)
@@ -422,12 +423,12 @@ func (m *Model) footer(w int) string {
 		// treatment of this interface's own would make their own text look
 		// like part of the furniture.
 		case m.raw.searching:
-			return "/" + logfmt.DisplayText(m.raw.query)
+			return m.searchPrompt(w)
 		case m.raw.notFound:
 			return styles.alert.Render("/" + logfmt.DisplayText(m.raw.lastQuery) + "  pattern not found")
 		}
 	}
-	return styleHintKeys(m.keyHints(w))
+	return m.renderKeyHints(w)
 }
 
 // styleHintKeys accents the KEY at the head of every hint on a composed hint
@@ -457,7 +458,7 @@ func styleHintKeys(line string) string {
 			if !ok {
 				continue
 			}
-			hints[j] = styles.key.Render(key) + " " + rest
+			hints[j] = helpBinding(key, rest)
 		}
 		lines[i] = strings.Join(hints, hintSep)
 	}
@@ -506,7 +507,7 @@ func (m *Model) keyHints(w int) string {
 	if m.showHelp {
 		return clipWidth(helpCloseHint, w) + "\n" + clipWidth(quitHint, w)
 	}
-	return clipWidth(viewKeyHints(m.view), w) + "\n" + clipWidth(m.actionKeys(w), w)
+	return ansi.Strip(m.navigation(w)) + "\n" + ansi.Strip(m.actionHelp(w))
 }
 
 // The help and quit hints, named because the footer composes them two ways:
@@ -830,7 +831,7 @@ func (m *Model) renderPanes(w, h int) string {
 		return framePanes(h, pane{title: helpTitle, content: renderHelp(w, bodyH), width: w})
 	}
 	if m.facetOverlayShowing(w) {
-		return framePanes(h, pane{title: facetPaneTitle, content: m.renderFacets(w, bodyH), width: w})
+		return framePanes(h, pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(w, bodyH), width: w})
 	}
 	switch {
 	case w >= facetInlineWidth:
@@ -839,8 +840,8 @@ func (m *Model) renderPanes(w, h int) string {
 		listW := w - facetW - detailW - 2*paneSepWidth
 		detailTitle, detail := m.renderDetail(detailW, bodyH)
 		return framePanes(h,
-			pane{title: facetPaneTitle, content: m.renderFacets(facetW, bodyH), width: facetW},
-			pane{title: m.centreTitle(), content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(facetW, bodyH), width: facetW},
+			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	case m.detailPaneDrawn(w):
@@ -848,7 +849,7 @@ func (m *Model) renderPanes(w, h int) string {
 		listW := w - detailW - paneSepWidth
 		detailTitle, detail := m.renderDetail(detailW, bodyH)
 		return framePanes(h,
-			pane{title: m.centreTitle(), content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	default:
@@ -858,7 +859,7 @@ func (m *Model) renderPanes(w, h int) string {
 		// height it was given. framePanes holds it to the row regardless,
 		// the same way it holds every other pane, which is why the one
 		// layout with no second pane beside it needs no clamp of its own.
-		return framePanes(h, pane{title: m.centreTitle(), content: m.renderCentre(w, bodyH), width: w})
+		return framePanes(h, pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(w, bodyH), width: w})
 	}
 }
 
@@ -1126,7 +1127,11 @@ func titledRule(p pane) string {
 	if p.focused {
 		style = styles.selected
 	}
-	return styles.chrome.Render(paneTitleLead) + style.Render(label) + styles.chrome.Render(strings.Repeat(paneRule, fill))
+	lead := paneTitleLead
+	if p.focused {
+		lead = "▶─"
+	}
+	return styles.chrome.Render(lead) + style.Render(label) + styles.chrome.Render(strings.Repeat(paneRule, fill))
 }
 
 // joinPanes composes panes' BODIES side by side into one h-line block. Each

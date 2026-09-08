@@ -293,7 +293,7 @@ func TestSearchPromptShowsTheQueryBeingTyped(t *testing.T) {
 	m := rawLogView(t, "provider-rpc.log")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "aws")
-	if got := footerOf(m.View()); got != "/aws" {
+	if got := strings.TrimSpace(footerOf(m.View())); got != "/aws" {
 		t.Errorf("footer while searching = %q, want the prompt %q", got, "/aws")
 	}
 }
@@ -434,7 +434,7 @@ func TestSearchPromptEditsTheQuery(t *testing.T) {
 	m = typeQuery(t, m, "s")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	m = typeQuery(t, m, "subnet")
-	if got, want := footerOf(m.View()), "/aws subnet"; got != want {
+	if got, want := strings.TrimSpace(footerOf(m.View())), "/aws subnet"; got != want {
 		t.Errorf("prompt = %q, want %q", got, want)
 	}
 }

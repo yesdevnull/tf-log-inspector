@@ -522,6 +522,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.raw.searching = true
 				m.raw.query = ""
 				m.raw.notFound = false
+				m.raw.input = newSearchInput()
 			}
 		case "n":
 			if m.view == ViewRawLog {
