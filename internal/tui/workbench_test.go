@@ -7,7 +7,19 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
+
+func TestWorkbenchHeaderPreservesFilenameSeparators(t *testing.T) {
+	for _, capped := range []uint64{0, 1} {
+		m := New(&model.Log{UISaturatedDurations: capped}, "prod · trace.log")
+		m.width, m.height = 100, 24
+		head := strings.Split(ansi.Strip(m.View()), "\n")[0]
+		if !strings.Contains(head, "prod · trace.log") {
+			t.Fatalf("header split the filename: %q", head)
+		}
+	}
+}
 
 func TestWorkbenchKeepsNavigationAboveContentAndActionsLast(t *testing.T) {
 	m := New(testLog(t, "provider-rpc.log"), "capture.log")
@@ -69,7 +81,7 @@ func TestWorkbenchRawStatusAndSearchRemainVisible(t *testing.T) {
 	}
 	m.showHelp = true
 	view := ansi.Strip(m.workbenchView())
-	if strings.Contains(view, "pattern not found") || strings.Contains(view, "under logging") || !strings.Contains(view, "close help") {
+	if strings.Contains(view, "pattern not found") || strings.Contains(view, "under logging") || !strings.Contains(view, "close help") || !strings.Contains(strings.Split(view, "\n")[22], "scroll") {
 		t.Fatalf("help chrome leaks underlying state: %s", view)
 	}
 }

@@ -28,7 +28,9 @@ func (m *Model) workbenchView() string {
 	}
 	identity := strings.TrimPrefix(header(m), "tfli "+headerSep+" ")
 	head := styles.selected.Render(" tfli ") + "  "
-	if name, counts, ok := strings.Cut(identity, " "+headerSep+" "); ok {
+	separator := " " + headerSep + " "
+	if split := strings.LastIndex(identity, separator); split >= 0 {
+		name, counts := identity[:split], identity[split+len(separator):]
 		gap := max(2, w-lipgloss.Width(head+name+counts))
 		head += styles.title.Render(name) + strings.Repeat(" ", gap) + styles.note.Render(counts)
 	} else {
@@ -65,7 +67,7 @@ func (m *Model) workbenchView() string {
 		status := shortLoggingCaveat
 		switch {
 		case m.showHelp:
-			status = "? / Esc close help"
+			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.view == ViewRawLog:
 			scope := "all entries"
 			if m.raw.scope != nil {
