@@ -46,3 +46,13 @@ separator bug for filenames containing ` · `; a red-green regression and
 final-separator split resolved it. Independent test cleanup retained the
 meaningful coverage and corrected one content-width assertion. TUI coverage
 is 97.0%, with no outstanding review findings.
+
+## PR #2 review fixes
+
+Verified both Copilot findings with failing regression tests. Four-column
+panels now keep their rounded top border and focus marker. Empty Raw Log
+status retains its count and scope without claiming a line or column.
+The TUI suite, full race suite, build and vet pass. Independent review found
+no remaining issues in these fixes.
+Independent test cleanup retained all 53 added or modified test functions;
+TUI coverage remains 97.0%.
