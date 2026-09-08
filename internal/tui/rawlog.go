@@ -211,6 +211,7 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	from := m.view
 	m.setView(ViewRawLog)
 	m.returnTo, m.hasReturn = from, true
+	m.raw.column = 0
 	if len(scope) > 0 {
 		// jumpContextLines is NOT applied here: the scope already supplies
 		// what led to the call, and backing up from the admitted member
