@@ -1,11 +1,27 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+func TestFourColumnPanelKeepsRoundedFrame(t *testing.T) {
+	for _, focused := range []bool{false, true} {
+		t.Run(fmt.Sprint(focused), func(t *testing.T) {
+			out := unstyled(framePanes(3, pane{title: "CALLS", content: "12ms", width: 4, focused: focused}))
+			want := "╭──╮\n│  │\n╰──╯"
+			if focused {
+				want = "╭▶─╮\n│  │\n╰──╯"
+			}
+			if out != want {
+				t.Fatalf("four-column panel = %q, want %q", out, want)
+			}
+		})
+	}
+}
 
 func TestWorkbenchPanelsHaveIndependentFramesAndGutters(t *testing.T) {
 	out := unstyled(framePanes(4,

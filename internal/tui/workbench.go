@@ -73,13 +73,13 @@ func (m *Model) workbenchView() string {
 			if m.raw.scope != nil {
 				scope = "call scope"
 			}
-			entry := 0
-			if len(m.log.Entries) > 0 {
-				entry = m.raw.top + 1
+			if len(m.log.Entries) == 0 {
+				status = "Entry 0/0 · " + scope
+				break
 			}
 			visible := m.rawLogLines(paneBodyHeight(workbenchPaneHeight(h)))
 			column := min(m.raw.column, rawLogMaxColumn(visible, m.rawLogViewportWidth()))
-			status = fmt.Sprintf("Entry %d/%d · line %d · column %d · %s", entry, len(m.log.Entries), m.raw.topLine+1, column+1, scope)
+			status = fmt.Sprintf("Entry %d/%d · line %d · column %d · %s", m.raw.top+1, len(m.log.Entries), m.raw.topLine+1, column+1, scope)
 		}
 		lines = append(lines, styles.note.Render(clipWidth(status, w)))
 	}

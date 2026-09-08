@@ -949,12 +949,15 @@ func bottomRule(panes []pane) string {
 // "TIMELINE (ui, whole seconds)" goes unnamed below 32 columns where
 // "RAW LOG" survives to 11.
 func titledRule(p pane) string {
-	if p.width < 5 {
+	if p.width < 4 {
 		return clipWidth(panelTitle(p.title), p.width)
 	}
 	lead := "╭─"
 	if p.focused {
 		lead = "╭▶"
+	}
+	if p.width == 4 {
+		return panelBorder(p).Render(lead + "─╮")
 	}
 	label := " " + clipValueEnd(panelTitle(p.title), p.width-5) + " "
 	fill := max(0, p.width-3-lipgloss.Width(label))
