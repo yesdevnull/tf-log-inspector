@@ -90,6 +90,15 @@ right, and the raw log with `/` search. `q` quits. Read
 [What each mode discloses](#what-each-mode-discloses) before you share a
 session — the interface shows more of your log than either report does.
 
+The bottom tab bar highlights the active view; its number keys switch views.
+`Tab` moves the arrow and highlighted title to the pane receiving keyboard
+input. The filter title counts hidden values. `?` opens the complete key guide
+when a narrow terminal cannot show every shortcut.
+
+While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
+to edit the query. Long queries scroll with the cursor. `Enter` searches,
+`Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
+
 Key `5` swaps the centre table for a timeline: one bar per lane of concurrent
 work, shaded by how busy each column of it was, with the idle time between
 calls left as the blank space it is. Beneath it sit how much of the run had

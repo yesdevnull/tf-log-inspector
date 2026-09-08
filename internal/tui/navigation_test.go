@@ -11,10 +11,10 @@ import (
 func TestNavigationShowsTheActiveViewAfterSwitching(t *testing.T) {
 	m := New(testLog(t, "mixed-hcp.log"), "plan.log")
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	for _, key := range []string{"1", "2", "4", "5", "6"} {
+	for key, name := range map[string]string{"1": "providers", "2": "types", "4": "calls", "5": "timeline", "6": "raw log"} {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 		line := strings.Split(m.footer(100), "\n")[0]
-		if !strings.Contains(unstyled(line), key+" ") || !strings.Contains(line, "\x1b[7m") {
+		if !strings.Contains(line, "\x1b[7m"+key+" "+name+"\x1b[0m") {
 			t.Errorf("view %s lacks an active tab: %q", key, line)
 		}
 		for _, other := range []string{"1 providers", "2 types", "4 calls", "5 timeline", "6 raw log", "? help"} {
@@ -62,6 +62,10 @@ func TestFocusMarkerFollowsTheKeyboardAcrossPanes(t *testing.T) {
 		out := unstyled(m.View())
 		if strings.Count(out, "▶") != 1 {
 			t.Errorf("pane %v lacks a unique focus marker:\n%s", m.pane, out)
+		}
+		segments := strings.Split(strings.Split(out, "\n")[1], "─┬─")
+		if len(segments) != 3 || !strings.Contains(segments[int(m.pane)], "▶") {
+			t.Errorf("focus marker does not identify pane %v: %q", m.pane, segments)
 		}
 		m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	}
