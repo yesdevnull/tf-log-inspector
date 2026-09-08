@@ -30,9 +30,6 @@ func mutationCheckout(t *testing.T) (string, string, []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wrapper := "/Users/dan/.codex/bin/codex-git"; exists(wrapper) {
-		git = wrapper
-	}
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
 	cmd := exec.Command(git, "clone", "--quiet", "--local", "--no-hardlinks", source, repo)
@@ -48,11 +45,6 @@ func mutationCheckout(t *testing.T) (string, string, []string) {
 	}
 	env := append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "TMPDIR="+dir)
 	return repo, filepath.Join(source, "scripts", "mutate.sh"), env
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func mutationCommand(t *testing.T, repo, script string, env []string, mutations []mutation, args ...string) *exec.Cmd {
@@ -97,6 +89,40 @@ func TestMutationRejectsUnrestorableTargetsBeforeWriting(t *testing.T) {
 			}
 			if strings.Contains(string(out), "SURVIVED") || strings.Contains(string(out), "CAUGHT") {
 				t.Errorf("applied a mutation before validating every target:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestMutationPathSpellingsPreserveSource(t *testing.T) {
+	repo, script, env := mutationCheckout(t)
+	path := filepath.Join(repo, "internal/model/rollup.go")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		file     string
+		rejected bool
+	}{
+		{"internal/../internal/model/rollup.go", true},
+		{"./internal/model/rollup.go", false},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			cmd := mutationCommand(t, repo, script, env, []mutation{
+				{tc.file, "return noKey", "return \"missing\"", "path spelling"},
+			}, "./internal/model")
+			out, err := cmd.CombinedOutput()
+			if tc.rejected {
+				if err == nil || !strings.Contains(string(out), "target must be a tracked regular file") || strings.Contains(string(out), "CAUGHT") {
+					t.Errorf("want rejection before mutation, got %v\n%s", err, out)
+				}
+			} else if err != nil || !strings.Contains(string(out), "CAUGHT") {
+				t.Errorf("want caught mutation and successful restoration, got %v\n%s", err, out)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Errorf("path spelling damaged source: %v", err)
 			}
 		})
 	}

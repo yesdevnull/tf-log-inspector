@@ -27,6 +27,7 @@
 #
 # Usage:
 #   scripts/mutate.sh <table.json> [package...]
+# Requires Bash, Python 3.9 or later, Git and the project's Go toolchain.
 #
 # One line per mutation: CAUGHT (with the first test that failed) or
 # SURVIVED. Full output per run is kept under the directory the summary
@@ -40,6 +41,8 @@ usage: scripts/mutate.sh <table.json> [package...]
 
   <table.json>  JSON array of {file, find, replace, what}
   [package...]  packages to test (default: ./...)
+
+Requires Bash, Python 3.9 or later, Git and the project's Go toolchain.
 USAGE
 	exit 2
 }
