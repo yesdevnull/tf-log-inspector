@@ -10,6 +10,7 @@
 [1;36mTHE LIST[0m                                                                                            
   [36m↑ ↓ j k[0m    move the cursor in the focused pane                                                    
   [36m← → h l[0m    step within a timeline lane -- the footer's ↔                                          
+  [36m← → h l[0m    scroll horizontally in the raw log                                                     
   [36mPgUp PgDn[0m  page through the raw log                                                               
   [36m⏎ Enter[0m    open the selected call in the raw log                                                  
   [36ms[0m          sort by the next column, in the table views                                            
@@ -27,7 +28,6 @@
   [36m⇥ Tab[0m      move focus between panes                                                               
   [36m?[0m          open or close this help (Esc closes it too)                                            
   [36mq[0m          quit                                                                                   
-                                                                                                    
                                                                                                     
                                                                                                     
                                                                                                     

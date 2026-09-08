@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -50,6 +52,7 @@ type rawLogState struct {
 	// meaningful only alongside it; every move sets the two together.
 	top     int
 	topLine int
+	column  int
 
 	// searching is true while '/' gives input the keyboard; query holds
 	// its current text. lastQuery is what n/N repeat after submission.
@@ -412,7 +415,7 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 // one a jump or a search put there, and its lines are cut to h by the pane
 // row that composes them (framePanes, at every width) rather than being
 // allowed to push the caveat off the frame.
-func (m Model) renderRawLog(w, h int) string {
+func (m Model) rawLogLines(h int) []string {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 
@@ -449,12 +452,21 @@ func (m Model) renderRawLog(w, h int) string {
 			}
 			var plain string
 			plain, scratch = logfmt.StripANSI(ln, scratch)
-			line := clipWidth(logfmt.DisplayText(plain), w)
+			line := logfmt.DisplayText(plain)
 			if marked {
 				line = style.Render(line)
 			}
 			lines = append(lines, line)
 		}
+	}
+	return lines
+}
+
+func (m Model) renderRawLog(w, h int) string {
+	lines := m.rawLogLines(h)
+	column := min(m.raw.column, rawLogMaxColumn(lines, w))
+	for i, line := range lines {
+		lines[i] = clipWidth(ansi.Cut(line, column, column+w), w)
 	}
 	if len(lines) == 0 {
 		// An empty pane is the same pane a parse failure or the wrong file
@@ -470,6 +482,29 @@ func (m Model) renderRawLog(w, h int) string {
 		return styles.note.Render(clipWidth(noEntriesNote, w))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// rawLogMaxColumn leaves a full viewport of the longest visible line.
+func rawLogMaxColumn(lines []string, w int) int {
+	longest := 0
+	for _, line := range lines {
+		longest = max(longest, lipgloss.Width(line))
+	}
+	return max(0, longest-w)
+}
+
+func (m *Model) scrollRawLogHorizontally(delta int) {
+	w, h := m.paneWidth(), m.height
+	if h <= 0 {
+		h = defaultHeight
+	}
+	footerLines := min(len(strings.Split(m.footer(w), "\n")), max(0, h-1))
+	bodyH := paneBodyHeight(paneHeight(h, len(loggingCaveat(h, footerLines)), footerLines))
+	if w >= facetInlineWidth {
+		w -= facetPaneWidth(m.facetPaneNatural, w) + paneSepWidth
+	}
+	limit := rawLogMaxColumn(m.rawLogLines(bodyH), w)
+	m.raw.column = max(0, min(limit, min(m.raw.column, limit)+delta))
 }
 
 // searchAgain repeats the last submitted search, forward for n or backward
@@ -551,7 +586,7 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 				// taller entry opens above the matched text -- a search
 				// reported as found over a pane that does not hold the
 				// pattern.
-				m.raw.top, m.raw.topLine = i, 0
+				m.raw.top, m.raw.topLine, m.raw.column = i, 0, 0
 				return true
 			}
 		}
@@ -570,7 +605,7 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 			// skipped by renderRawLog altogether and one on a taller entry
 			// opens above the matched text -- a search reported as found
 			// over a pane that does not hold the pattern.
-			m.raw.top, m.raw.topLine = i, 0
+			m.raw.top, m.raw.topLine, m.raw.column = i, 0, 0
 			return true
 		}
 	}
