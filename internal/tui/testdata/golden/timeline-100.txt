@@ -1,5 +1,5 @@
 [1;36mtfli · plan.log · 3 RPC spans, 0 UI spans[0m
-[2m──[0m[1;36m FILTERS [0m[2m──────────────[0m[2m─┬─[0m[2m──[0m[1;36m TIMELINE (rpc) [0m[2m──────────────────────────[0m[2m─┬─[0m[2m──[0m[1;36m SPAN DETAIL [0m[2m──────────[0m
+[2m──[0m[1;36m FILTERS [0m[2m──────────────[0m[2m─┬─[0m[2m▶─[0m[7m TIMELINE (rpc) [0m[2m──────────────────────────[0m[2m─┬─[0m[2m──[0m[1;36m SPAN DETAIL [0m[2m──────────[0m
 [1;36mPROVIDERS[0m                [2m │ [0m[7maws/1    [0m[32m   ░███████▓   ▒███████████████████[0m[2m │ [0m[2;36mRPC[0m                      
 [7;2m[x] ….io/hashicorp/aws  2[0m[2m │ [0mgoogle/1 [34m     ░███████▒                     [0m[2m │ [0m  ApplyResourceChange    
 [x] …/hashicorp/google  1[2m │ [0m         0s                             9.0s[2m │ [0m[2;36mresource type[0m            
@@ -36,5 +36,5 @@
 [2mis inflated more than one that waits, so rankings are[0m
 [2mapproximate and absolute times do not transfer.[0m
 
-[36m1[0m providers  [36m2[0m types  [36m4[0m calls  [36m6[0m raw log  [36m?[0m help
+[36m1[0m providers  [36m2[0m types  [36m4[0m calls  [7m5 timeline[0m  [36m6[0m raw log  [36m?[0m help
 [36m⇥[0m pane  [36m␣[0m facet  [36m⏎[0m open  [36m↔[0m span  [36mf[0m facets  [36m/[0m search  [36mEsc[0m clear  [36mq[0m quit

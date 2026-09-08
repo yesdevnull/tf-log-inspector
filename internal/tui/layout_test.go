@@ -1038,7 +1038,7 @@ func TestTheSearchPromptSurvivesAShortTerminal(t *testing.T) {
 		if len(lines) > h {
 			t.Errorf("height %d: View() is %d lines", h, len(lines))
 		}
-		if got := lines[len(lines)-1]; got != "/zz" {
+		if got := strings.TrimSpace(unstyled(lines[len(lines)-1])); got != "/zz" {
 			t.Errorf("height %d: last line is %q, want the search prompt %q -- '/' has taken the keyboard with nothing on screen to say so:\n%s", h, got, "/zz", m.View())
 		}
 	}
@@ -1885,7 +1885,7 @@ func paneTitlesOf(t *testing.T, view string) []string {
 	}
 	var titles []string
 	for _, segment := range strings.Split(lines[1], paneRuleTopSep) {
-		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule)))
+		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule+"▶")))
 	}
 	// Callers index this by position, so a rule that did not split into the
 	// three panes they expect has to stop the test HERE. Returning the short
@@ -1954,20 +1954,7 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 	}
 }
 
-// The footer has to say which number keys switch views, at 100 and 160
-// columns -- 100 is what this tool is actually run at. It must name only
-// the keys that WORK: 3 (resource addresses) is specified but
-// unimplemented, and a hint for a key that does nothing is worse than no
-// hint. The key for the view already showing
-// is left out for the same reason -- Update ignores it -- and the centre
-// pane's title names that view instead.
-//
-// Both halves of that rule are swept from EVERY view, with the wanted and
-// unwanted hints derived from the views table rather than written out. Run
-// from one view only, the test cannot tell "leaves out the current view's
-// key" from "always leaves out that one view's key": a footer omitting a
-// working key while in another view, and advertising a dead one, satisfies
-// a fixed expectation just as well.
+// Navigation names all implemented views, including the active tab.
 func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{100, 160} {
@@ -1980,12 +1967,6 @@ func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 			got := footerOf(m.View())
 			for _, b := range views {
 				hint := b.key + " " + b.name
-				if b.view == current.view {
-					if strings.Contains(got, hint) {
-						t.Errorf("width %d, %s view: footer %q offers %q, the key for the view already showing, which does nothing when pressed", w, current.name, got, hint)
-					}
-					continue
-				}
 				if !strings.Contains(got, hint) {
 					t.Errorf("width %d, %s view: footer %q does not offer %q", w, current.name, got, hint)
 				}
@@ -2345,13 +2326,8 @@ func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
 	if got, want := lipgloss.Width(withSpan)-lipgloss.Width(withoutSpan), lipgloss.Width(spanCursorHint)+lipgloss.Width("  "); got != want {
 		t.Errorf("dropping the span hint below %d columns saves %d display columns, want the %d the hint and its separator cost: %q against %q", detailInlineWidth, got, want, withSpan, withoutSpan)
 	}
-	// Asserted as the line's own ENDING, not as a substring: "q qu" is a
-	// substring of "q quit" too, so a containment check passes in both of
-	// the states this is about -- the hint clipped to its last two letters,
-	// and the hint whole. What is pinned is that the clip lands exactly
-	// where actionKeys' 62 columns say it does at 60.
-	if !strings.HasSuffix(action(narrow), "q qu") {
-		t.Errorf("at %d columns the action line %q does not end on the clipped quit hint %q", narrowW, action(narrow), "q qu")
+	if !strings.HasSuffix(action(narrow), "q quit") {
+		t.Errorf("at %d columns the action line clips quit: %q", narrowW, action(narrow))
 	}
 
 	big := update(t, m, tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -2779,7 +2755,7 @@ func TestThePaneRowIsRuledTopAndBottom(t *testing.T) {
 	for _, w := range []int{70, 100, 160} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		top, bottom := frameRules(t, m.View())
-		if !strings.HasPrefix(top, "──") {
+		if !strings.HasPrefix(top, "──") && !strings.HasPrefix(top, "▶─") {
 			t.Errorf("width %d: top rule does not open with a rule: %q", w, top)
 		}
 		if got := lipgloss.Width(bottom); got != w {
@@ -2833,9 +2809,9 @@ func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 // leaves no mark anywhere on the frame.
 func TestTheFocusedDetailPaneIsMarkedInTheTopRule(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "plan.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
-	unfocused := strings.Split(base.View(), "\n")[1]
+	unfocused := strings.Split(strings.Split(base.View(), "\n")[1], paneRuleTopSep)[detailPaneIndex]
 	if strings.Contains(unfocused, "\x1b[7m") {
-		t.Errorf("top rule is marked with the keyboard on the list pane: %q", unfocused)
+		t.Errorf("detail title is marked with the keyboard on the list pane: %q", unfocused)
 	}
 	m := base
 	for range focusablePaneCount(&m, 160) {

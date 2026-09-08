@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -51,12 +51,12 @@ type rawLogState struct {
 	top     int
 	topLine int
 
-	// searching is true while '/' is capturing a query one key at a time;
-	// query accumulates what has been typed so far. lastQuery is what n/N
-	// repeat once a search has been submitted with enter.
+	// searching is true while '/' gives input the keyboard; query holds
+	// its current text. lastQuery is what n/N repeat after submission.
 	searching bool
 	query     string
 	lastQuery string
+	input     textinput.Model
 
 	// notFound records that the last search ran off the end of the log
 	// without a match. A miss leaves the position unchanged, which on its
@@ -470,40 +470,6 @@ func (m Model) renderRawLog(w, h int) string {
 		return styles.note.Render(clipWidth(noEntriesNote, w))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// handleSearchKey routes one keystroke while a search query is being typed:
-// runes and space extend the query, backspace removes its last rune, enter
-// submits it and jumps to the first match, esc cancels without searching,
-// and ctrl+c quits.
-func (m *Model) handleSearchKey(msg tea.KeyMsg) {
-	switch msg.Type {
-	case tea.KeyCtrlC:
-		// In the alt screen Ctrl+C arrives as a key rather than a signal, so
-		// the quit binding has to be honoured here too: a prompt that
-		// swallows every key would otherwise trap a user who opened it by
-		// accident until they guessed Esc.
-		m.raw.searching = false
-		m.quitting = true
-	case tea.KeyEnter:
-		m.raw.searching = false
-		if m.raw.query != "" {
-			m.raw.lastQuery = m.raw.query
-			m.raw.notFound = !m.searchFrom(m.raw.top, true, true)
-		}
-	case tea.KeyEsc:
-		m.raw.searching = false
-		m.raw.query = ""
-		m.raw.notFound = false
-	case tea.KeyBackspace:
-		if r := []rune(m.raw.query); len(r) > 0 {
-			m.raw.query = string(r[:len(r)-1])
-		}
-	case tea.KeySpace:
-		m.raw.query += " "
-	case tea.KeyRunes:
-		m.raw.query += string(msg.Runes)
-	}
 }
 
 // searchAgain repeats the last submitted search, forward for n or backward
