@@ -26,3 +26,23 @@ covered cursor positions in CJK, combining-accent and emoji queries at widths
 3–20. Independent test cleanup retained all 16 touched tests; TUI coverage
 was 96.9%. Two assertions were strengthened to associate the highlight and
 focus marker with their intended targets.
+
+## Modern workbench redesign
+
+Dan selected a modern workbench direction for a broader structural update.
+Navigation sits above independent rounded panels, with inset content,
+sentence-case titles and an accented border on the focused panel. File
+identity and span counts have separate visual weight. A compact status bar
+qualifies timings or reports the Raw Log position.
+
+Bubbles viewport makes the help guide scrollable, including the full timing
+explanation. Persistent scroll hints make this discoverable on short screens.
+Raw Log retains horizontal scrolling and omits the Detail panel.
+
+All ten terminal goldens were regenerated and reviewed. A colour-rendered
+preview and live PTY checks covered the panel layout and help paging.
+The full race suite, build and vet passed. Independent review found a header
+separator bug for filenames containing ` · `; a red-green regression and
+final-separator split resolved it. Independent test cleanup retained the
+meaningful coverage and corrected one content-width assertion. TUI coverage
+is 97.0%, with no outstanding review findings.
