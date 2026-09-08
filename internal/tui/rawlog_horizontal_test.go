@@ -23,7 +23,7 @@ func horizontalLog(t *testing.T, text string) *Model {
 		t.Fatal(err)
 	}
 	m := New(l, path)
-	m.Update(tea.WindowSizeMsg{Width: 20, Height: 24})
+	m.Update(tea.WindowSizeMsg{Width: 24, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
 	return &m
 }

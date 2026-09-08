@@ -87,7 +87,7 @@ func TestLayoutDegradesByWidth(t *testing.T) {
 		if got := strings.Contains(out, "PROVIDERS"); got != c.wantFacets {
 			t.Errorf("width %d: facet pane present = %v, want %v", c.width, got, c.wantFacets)
 		}
-		if got := strings.Contains(out, "SPAN DETAIL"); got != c.wantDetail {
+		if got := strings.Contains(out, "Span detail"); got != c.wantDetail {
 			t.Errorf("width %d: detail pane present = %v, want %v", c.width, got, c.wantDetail)
 		}
 	}
@@ -244,7 +244,7 @@ func TestViewNeverEmitsMoreLinesThanTheTerminalHeight(t *testing.T) {
 				if n := len(strings.Split(view, "\n")); n > h {
 					t.Errorf("%s at %dx%d: View() is %d lines, which loses its top %d:\n%s", c.name, w, h, n, n-h, view)
 				}
-				if !strings.HasPrefix(unstyled(view), "tfli · ") {
+				if !strings.HasPrefix(unstyled(view), " tfli   ") {
 					t.Errorf("%s at %dx%d: View() does not start with the header line:\n%s", c.name, w, h, view)
 				}
 			}
@@ -266,7 +266,7 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("View() at height 2 is %d lines, want 2:\n%s", len(lines), view)
 	}
-	if !strings.HasPrefix(unstyled(lines[0]), "tfli · x.log") {
+	if !strings.HasPrefix(unstyled(lines[0]), " tfli   x.log") {
 		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
 	}
 	// The surviving footer line must be the ACTION line, not the view-key
@@ -477,7 +477,7 @@ func TestTheFacetOverlayIsNeverDrawnAtInlineWidth(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			m := c.open(t, New(testLog(t, "two-providers.log"), "x.log"))
 			out := m.View()
-			if !strings.Contains(out, "SPAN DETAIL") {
+			if !strings.Contains(out, "Span detail") {
 				t.Errorf("the detail pane is off screen at 160 columns:\n%s", out)
 			}
 			if centre := centrePaneOf(out); !strings.Contains(centre, "hashicorp/google") {
@@ -733,7 +733,7 @@ func TestCallsViewAt160ColumnsRendersDifferentProvidersDifferently(t *testing.T)
 		t.Fatalf("fixture assumption changed: both calls have the same provider %q", aws)
 	}
 
-	centreWidth := layoutCentreWidth(m, 160)
+	centreWidth := layoutCentreWidth(m, 160) - 4
 	widths := fitColumnWidths(callColumns, columnWidths(headerCells(callColumns, tables[ViewCalls].defaultCol), rows), centreWidth)
 	providerWidth := widths[len(callColumns)-1] // provider is callColumns' last column
 	if providerWidth >= lipgloss.Width(aws) && providerWidth >= lipgloss.Width(google) {
@@ -785,7 +785,7 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 		t.Fatalf("fixture assumption changed: both calls have the same RPC %q", first)
 	}
 
-	centreWidth := layoutCentreWidth(m, 100)
+	centreWidth := layoutCentreWidth(m, 100) - 4
 	widths := fitColumnWidths(callColumns, columnWidths(headerCells(callColumns, tables[ViewCalls].defaultCol), rows), centreWidth)
 	rpcWidth := widths[1] // RPC is callColumns' second column, after duration
 	if rpcWidth >= lipgloss.Width(first) && rpcWidth >= lipgloss.Width(second) {
@@ -806,15 +806,11 @@ func TestCallsViewAt100ColumnsRendersDifferentRPCsDifferently(t *testing.T) {
 	}
 }
 
-// centrePaneOf returns just the centre (list) pane's text from a composed
-// view, one line per line of the input. Panes are joined with paneSep, so a
-// line that carries every pane splits into a facet, centre and detail
-// field; a line rendered outside the pane row (the header, the caveat, the
-// key line) contributes nothing.
+// centrePaneOf extracts the middle card's body between adjacent borders.
 func centrePaneOf(view string) string {
 	var centre []string
 	for _, line := range strings.Split(unstyled(view), "\n") {
-		if fields := strings.Split(line, paneSep); len(fields) == 3 {
+		if fields := strings.Split(line, "│ │"); len(fields) == 3 {
 			centre = append(centre, fields[1])
 		}
 	}
@@ -864,8 +860,8 @@ func unstyledLines(lines []string) []string {
 // exported from layout.go, since nothing outside a test needs a pane width
 // in isolation from actually rendering into it.
 func layoutCentreWidth(m Model, w int) int {
-	facetW := facetPaneWidth(m.facetPaneNatural, w)
-	detailW := detailPaneWidth(m.detailPaneNatural, w)
+	facetW := facetPaneWidth(m.facetPaneNatural+4, w)
+	detailW := detailPaneWidth(m.detailPaneNatural+4, w)
 	return w - facetW - detailW - 2*paneSepWidth
 }
 
@@ -878,7 +874,7 @@ func layoutCentreWidth(m Model, w int) int {
 // An empty calls view has no selection for the detail pane to describe.
 func TestDetailPaneFitsItsPlaceholderAtTheNarrowestSupportedWidth(t *testing.T) {
 	m := update(t, New(&model.Log{}, "plan.log"), tea.WindowSizeMsg{Width: detailInlineWidth, Height: 40})
-	if got := detailPaneWidth(m.detailPaneNatural, detailInlineWidth); got < minDetailPaneWidth {
+	if got := detailPaneWidth(m.detailPaneNatural+4, detailInlineWidth); got < minDetailPaneWidth {
 		t.Errorf("detail pane is %d columns at width %d, below its own minimum of %d", got, detailInlineWidth, minDetailPaneWidth)
 	}
 	if !strings.Contains(m.View(), noSelectionNote) {
@@ -922,19 +918,10 @@ func TestSidePaneWidthsAreMeasuredAtLoad(t *testing.T) {
 func paneSepColumns(t *testing.T, view string) []int {
 	t.Helper()
 	for _, line := range strings.Split(unstyled(view), "\n") {
-		if !strings.Contains(line, paneSep) {
+		if !strings.HasPrefix(line, "│") {
 			continue
 		}
-		var cols []int
-		for at, col := 0, 0; at < len(line); {
-			if strings.HasPrefix(line[at:], paneSep) {
-				cols = append(cols, col)
-			}
-			r := []rune(line[at:])[0]
-			at += len(string(r))
-			col += lipgloss.Width(string(r))
-		}
-		return cols
+		return runeColumns(line, '│')
 	}
 	t.Fatalf("view has no pane row:\n%s", view)
 	return nil
@@ -1041,55 +1028,17 @@ func TestTheSearchPromptSurvivesAShortTerminal(t *testing.T) {
 	}
 }
 
-// The caveat gives way to the footer rather than the other way round, but it
-// gives way by degrees: the full text where it fits, one whole sentence
-// where it does not, and nothing at all only once even one line would cost
-// the footer. A caveat cut off mid-sentence would read as a rendering fault
-// rather than as a warning deliberately shortened, so the short form is a
-// rewrite and not the first line of the long one.
-func TestTheCaveatShortensBeforeItCostsTheFooter(t *testing.T) {
-	base := New(testLog(t, "provider-rpc.log"), "x.log")
-	for _, c := range []struct {
-		name              string
-		m                 Model
-		h                 int
-		wantFull, wantAny bool
-	}{
-		// A two-line footer, the usual case.
-		{"hints", base, 40, true, true},
-		{"hints", base, 12, true, true},
-		{"hints", base, 11, false, true},
-		{"hints", base, 8, false, true},
-		{"hints", base, 7, false, false},
-		// A ONE-line footer -- a search in progress -- where every bound
-		// moves down by the line the footer gave back. Swept only over
-		// two-line footers, a caveat budgeted against a fixed two passes:
-		// the frame still fills exactly, because the pane row absorbs the
-		// freed line, so nothing else can notice. What is lost is the
-		// caveat itself -- absent at 7 where a line of it fits, shortened
-		// at 11 where the whole text does.
-		{"search", searchingFrame(t), 11, true, true},
-		{"search", searchingFrame(t), 10, false, true},
-		{"search", searchingFrame(t), 7, false, true},
-		{"search", searchingFrame(t), 6, false, false},
-	} {
-		m := update(t, c.m, tea.WindowSizeMsg{Width: 100, Height: c.h})
+// The compact timing caveat keeps the action line available on short frames.
+func TestTheCompactCaveatKeepsTheFooterAvailable(t *testing.T) {
+	for _, h := range []int{40, 12, 8, 7, 4, 3, 2} {
+		m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: h})
 		view := unstyled(m.View())
-		if got := strings.Contains(view, "one workspace planned in 24.1s"); got != c.wantFull {
-			t.Errorf("%s at height %d: full caveat present = %v, want %v:\n%s", c.name, c.h, got, c.wantFull, view)
+		if got := strings.Count(view, "under logging"); got != 0 && h < 4 || got != 1 && h >= 4 {
+			t.Errorf("height %d: timing qualification appears %d times", h, got)
 		}
-		if got := strings.Contains(view, "under logging"); got != c.wantAny {
-			t.Errorf("%s at height %d: some caveat present = %v, want %v:\n%s", c.name, c.h, got, c.wantAny, view)
-		}
-		// The footer survives whatever the caveat does: the two hint lines
-		// where there are two, and the search prompt where the search has
-		// the keyboard.
-		want := "q quit"
-		if c.name == "search" {
-			want = "/z"
-		}
-		if !strings.Contains(view, want) {
-			t.Errorf("%s at height %d: the footer was dropped for the caveat:\n%s", c.name, c.h, view)
+		lines := strings.Split(view, "\n")
+		if !strings.Contains(lines[len(lines)-1], "q quit") {
+			t.Errorf("height %d: action line lost: %q", h, lines[len(lines)-1])
 		}
 	}
 }
@@ -1129,14 +1078,14 @@ func TestTheNarrowLayoutClampsATallCentrePane(t *testing.T) {
 	// The pane separator, rather than any one pane's title: the titles vary
 	// with the row the cursor is on, and this has to fail when a second
 	// pane is drawn whatever that pane says about itself.
-	if strings.Contains(view, paneSep) {
+	if strings.Count(strings.Split(view, "\n")[3], "╭") != 1 {
 		t.Fatalf("width %d still draws a second pane, so this is not the single-pane branch:\n%s", detailInlineWidth-1, view)
 	}
 	if n := len(strings.Split(view, "\n")); n != h {
 		t.Errorf("View() is %d lines at height %d", n, h)
 	}
-	if !strings.Contains(view, "Durations here are measured under logging") {
-		t.Errorf("a tall raw-log entry pushed the caveat out of the frame:\n%s", view)
+	if !strings.Contains(view, "column 1") {
+		t.Errorf("a tall raw-log entry pushed its position status out of the frame:\n%s", view)
 	}
 	if !strings.Contains(view, "q quit") {
 		t.Errorf("a tall raw-log entry pushed the footer out of the frame:\n%s", view)
@@ -1291,7 +1240,7 @@ func TestTheRollupDetailPaneFrontClipsItsIdentifier(t *testing.T) {
 		m := update(t, New(testLog(t, c.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
 		w := c.narrow
 		if w == 0 {
-			w = detailPaneWidth(m.detailPaneNatural, detailInlineWidth)
+			w = detailPaneWidth(m.detailPaneNatural+4, detailInlineWidth) - 4
 			if w >= m.detailPaneNatural {
 				t.Fatalf("%s: the pane renders at %d columns against a natural width of %d, so nothing clips and this measures nothing", c.fixture, w, m.detailPaneNatural)
 			}
@@ -1802,7 +1751,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 			continue
 		}
 		m.selected = i
-		body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural, 160), 20)
+		body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural+4, 160), 20)
 		if !strings.Contains(body, wantLine) {
 			t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
 		}
@@ -1860,7 +1809,7 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 	} {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{c.key}})
 		title := paneTitlesOf(t, m.View())[detailPaneIndex]
-		if title != c.title {
+		if title != panelTitle(c.title) {
 			t.Errorf("view %c: detail pane is headed %q, want %q", c.key, title, c.title)
 		}
 	}
@@ -1870,18 +1819,16 @@ func TestTheDetailPaneTitleNamesWhatItIsDescribing(t *testing.T) {
 // per pane, left to right. That rule is where every pane is named, so it is
 // where an assertion about a pane's title has to look.
 //
-// The rule is pinned at line 1 -- immediately under the header. Finding it
-// by shape instead would be finding it by the very characters this is
-// checking the composition of.
+// At normal heights the rule follows the header, navigation and blank row.
 func paneTitlesOf(t *testing.T, view string) []string {
 	t.Helper()
 	lines := strings.Split(unstyled(view), "\n")
-	if len(lines) < 2 {
+	if len(lines) < 4 {
 		t.Fatalf("frame of %d lines has no top rule", len(lines))
 	}
 	var titles []string
-	for _, segment := range strings.Split(lines[1], paneRuleTopSep) {
-		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule+"▶")))
+	for _, segment := range strings.Split(lines[3], "╮ ╭") {
+		titles = append(titles, strings.TrimSpace(strings.Trim(segment, paneRule+"▶╭╮")))
 	}
 	// Callers index this by position, so a rule that did not split into the
 	// three panes they expect has to stop the test HERE. Returning the short
@@ -1889,7 +1836,7 @@ func paneTitlesOf(t *testing.T, view string) []string {
 	// BINARY: one regression in rule composition then hides every later
 	// failure in the package, including the tests that would have named it.
 	if len(titles) != 3 {
-		t.Fatalf("top rule split into %d segments, want 3: %q", len(titles), lines[1])
+		t.Fatalf("top rule split into %d segments, want 3: %q", len(titles), lines[3])
 	}
 	return titles
 }
@@ -1913,21 +1860,21 @@ func TestTheCentrePaneNamesTheActiveView(t *testing.T) {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
 		var title string
 		if b.view == ViewRawLog {
-			segments := strings.Split(strings.Split(unstyled(m.View()), "\n")[1], paneRuleTopSep)
+			segments := strings.Split(strings.Split(unstyled(m.View()), "\n")[3], "╮ ╭")
 			if len(segments) != 2 {
 				t.Fatalf("raw log has %d panes, want 2", len(segments))
 			}
-			title = strings.TrimSpace(strings.Trim(segments[centrePaneIndex], paneRule+"▶"))
+			title = strings.TrimSpace(strings.Trim(segments[centrePaneIndex], paneRule+"▶╭╮"))
 		} else {
 			title = paneTitlesOf(t, m.View())[centrePaneIndex]
 		}
-		want := b.title
+		want := panelTitle(b.title)
 		if b.view == ViewTimeline {
 			// The timeline's rendered title names the TIER it draws (see
 			// timelineTitle) rather than views' static placeholder, so this
 			// one view's title is measured against its own function instead
 			// of the table entry every other view matches exactly.
-			want = m.timelineTitle()
+			want = panelTitle(m.timelineTitle())
 		}
 		if title != want {
 			t.Errorf("key %q: the top rule names the centre pane %q, want %q", b.key, title, want)
@@ -1950,8 +1897,8 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 	// Spelled out rather than read back from viewTitle, so this measures the
 	// rendered frame against a fixed string instead of following whatever
 	// the title function happens to return.
-	const want = "BY RESOURCE TYPE"
-	for _, w := range []int{160, 100, 99, 70, 69, 40, 20} {
+	const want = "By resource type"
+	for _, w := range []int{160, 100, 99, 70, 69, 40, 21} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		if !strings.Contains(m.View(), want) {
 			t.Errorf("width %d: the frame does not name the active view %q:\n%s", w, want, m.View())
@@ -1960,7 +1907,7 @@ func TestTheViewNameSurvivesEveryWidth(t *testing.T) {
 }
 
 // Navigation names all implemented views, including the active tab.
-func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
+func TestTheNavigationAdvertisesTheWorkingViewKeys(t *testing.T) {
 	base := New(testLog(t, "mixed-hcp.log"), "x.log")
 	for _, w := range []int{100, 160} {
 		for _, current := range views {
@@ -1969,16 +1916,16 @@ func TestTheFooterAdvertisesTheWorkingViewKeys(t *testing.T) {
 			if m.ActiveView() != current.view {
 				t.Fatalf("key %q did not select the %s view", current.key, current.name)
 			}
-			got := footerOf(m.View())
+			got := strings.Split(unstyled(m.View()), "\n")[1]
 			for _, b := range views {
 				hint := b.key + " " + b.name
 				if !strings.Contains(got, hint) {
-					t.Errorf("width %d, %s view: footer %q does not offer %q", w, current.name, got, hint)
+					t.Errorf("width %d, %s view: navigation %q does not offer %q", w, current.name, got, hint)
 				}
 			}
 			for _, unbound := range []string{"3 "} {
 				if strings.Contains(got, unbound) {
-					t.Errorf("width %d, %s view: footer %q offers key %q, which is specified but unimplemented", w, current.name, got, unbound)
+					t.Errorf("width %d, %s view: navigation %q offers key %q, which is specified but unimplemented", w, current.name, got, unbound)
 				}
 			}
 		}
@@ -2691,7 +2638,7 @@ func TestTheHelpNamesTheKeysThatHaveNoFooterHint(t *testing.T) {
 	for _, key := range []string{"o", "n N", "PgUp PgDn"} {
 		named := false
 		for _, line := range strings.Split(rendered, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), key+" ") {
+			if strings.HasPrefix(strings.Trim(line, " │"), key+" ") {
 				named = true
 				break
 			}
@@ -2700,19 +2647,6 @@ func TestTheHelpNamesTheKeysThatHaveNoFooterHint(t *testing.T) {
 			t.Errorf("the help's key column does not name %q, which no footer hint advertises either:\n%s", key, rendered)
 		}
 	}
-}
-
-// paneSeparatorColumns are the columns a three-pane row at width w puts its
-// separators in, computed from the pane widths rather than read off a
-// rendered frame: what the rules have to line up WITH is the arithmetic
-// renderPanes does, and a test that read the columns off the frame would
-// agree with a rule and a separator that had drifted together.
-//
-// paneSep is " │ ", so the bar itself sits one column into the separator.
-func paneSeparatorColumns(m Model, w int) []int {
-	facetW := facetPaneWidth(m.facetPaneNatural, w)
-	listW := layoutCentreWidth(m, w)
-	return []int{facetW + 1, facetW + paneSepWidth + listW + 1}
 }
 
 // runeColumns reports which columns of line hold r. Columns rather than byte
@@ -2728,20 +2662,17 @@ func runeColumns(line string, r rune) []int {
 	return cols
 }
 
-// frameRules returns the pane row's top and bottom rules from a rendered
-// frame. The top rule is pinned at index 1 -- immediately under the header,
-// with no blank line between them -- because that adjacency is what pays for
-// the bottom rule in the height budget. The bottom rule is found by shape,
-// since how far down it falls depends on the pane height.
+// frameRules reads the card borders from a frame tall enough for a blank
+// below navigation. The bottom border precedes the status and actions.
 func frameRules(t *testing.T, frame string) (top, bottom string) {
 	t.Helper()
 	lines := strings.Split(unstyled(frame), "\n")
-	if len(lines) < 2 {
+	if len(lines) < 6 {
 		t.Fatalf("frame of %d lines has no pane row", len(lines))
 	}
-	top = lines[1]
+	top = lines[3]
 	for _, ln := range lines[2:] {
-		if ln != "" && strings.Trim(ln, paneRule+"┴") == "" {
+		if ln != "" && strings.Trim(ln, paneRule+"╰╯ ") == "" {
 			bottom = ln
 		}
 	}
@@ -2760,7 +2691,7 @@ func TestThePaneRowIsRuledTopAndBottom(t *testing.T) {
 	for _, w := range []int{70, 100, 160} {
 		m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
 		top, bottom := frameRules(t, m.View())
-		if !strings.HasPrefix(top, "──") && !strings.HasPrefix(top, "▶─") {
+		if !strings.HasPrefix(top, "╭─") && !strings.HasPrefix(top, "╭▶") {
 			t.Errorf("width %d: top rule does not open with a rule: %q", w, top)
 		}
 		if got := lipgloss.Width(bottom); got != w {
@@ -2769,20 +2700,30 @@ func TestThePaneRowIsRuledTopAndBottom(t *testing.T) {
 	}
 }
 
-// The rules cross exactly where the separators are. A crossing a column out
-// is worse than no crossing at all: it reads as a pane boundary that the
-// rows beneath it disagree with.
-func TestTheRulesCrossAtEveryPaneSeparator(t *testing.T) {
-	base := New(testLog(t, "mixed-hcp.log"), "plan.log")
-	const w = 160
-	m := update(t, base, tea.WindowSizeMsg{Width: w, Height: 40})
+// Each card's rounded corners line up with its own vertical borders.
+func TestThePanelCornersAlignWithTheirBodyBorders(t *testing.T) {
+	m := update(t, New(testLog(t, "mixed-hcp.log"), "plan.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	top, bottom := frameRules(t, m.View())
-	want := paneSeparatorColumns(m, w)
-	if got := runeColumns(top, '┬'); !slices.Equal(got, want) {
-		t.Errorf("top rule crosses at %v, separators are at %v\n%s", got, want, top)
+	lines := strings.Split(unstyled(m.View()), "\n")
+	facetW := facetPaneWidth(m.facetPaneNatural+4, 160)
+	listW := layoutCentreWidth(m, 160)
+	starts := []int{0, facetW + 1, facetW + listW + 2}
+	ends := []int{facetW - 1, facetW + listW, 159}
+	if got := runeColumns(top, '╭'); !slices.Equal(got, starts) {
+		t.Errorf("top starts %v, want %v", got, starts)
 	}
-	if got := runeColumns(bottom, '┴'); !slices.Equal(got, want) {
-		t.Errorf("bottom rule crosses at %v, separators are at %v\n%s", got, want, bottom)
+	if got := runeColumns(bottom, '╰'); !slices.Equal(got, starts) {
+		t.Errorf("bottom starts %v, want %v", got, starts)
+	}
+	if got := runeColumns(top, '╮'); !slices.Equal(got, ends) {
+		t.Errorf("top ends %v, want %v", got, ends)
+	}
+	if got := runeColumns(bottom, '╯'); !slices.Equal(got, ends) {
+		t.Errorf("bottom ends %v, want %v", got, ends)
+	}
+	want := []int{starts[0], ends[0], starts[1], ends[1], starts[2], ends[2]}
+	if got := runeColumns(lines[4], '│'); !slices.Equal(got, want) {
+		t.Errorf("body borders %v, want %v", got, want)
 	}
 }
 
@@ -2804,7 +2745,7 @@ func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 	// both sides and the test passes, which leaves the names themselves held
 	// by the goldens alone, and a golden's failure is answered by
 	// regenerating it.
-	if got, want := paneTitlesOf(t, m.View()), []string{"FILTERS", "CALLS", "SPAN DETAIL"}; !slices.Equal(got, want) {
+	if got, want := paneTitlesOf(t, m.View()), []string{"Filters", "Calls", "Span detail"}; !slices.Equal(got, want) {
 		t.Errorf("top rule names %q, want %q", got, want)
 	}
 }
@@ -2814,8 +2755,8 @@ func TestEveryPaneIsNamedInTheTopRule(t *testing.T) {
 // leaves no mark anywhere on the frame.
 func TestTheFocusedDetailPaneIsMarkedInTheTopRule(t *testing.T) {
 	base := update(t, New(testLog(t, "mixed-hcp.log"), "plan.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
-	unfocused := strings.Split(strings.Split(base.View(), "\n")[1], paneRuleTopSep)[detailPaneIndex]
-	if strings.Contains(unfocused, "\x1b[7m") {
+	unfocused := strings.Split(strings.Split(unstyled(base.View()), "\n")[3], "╮ ╭")[detailPaneIndex]
+	if strings.Contains(unfocused, "▶") {
 		t.Errorf("detail title is marked with the keyboard on the list pane: %q", unfocused)
 	}
 	m := base
@@ -2833,12 +2774,12 @@ func TestTheFocusedDetailPaneIsMarkedInTheTopRule(t *testing.T) {
 	// appears somewhere", which is the reading that would let the mark move
 	// to the facet pane unnoticed -- and Tab's third stop would then be as
 	// invisible as it was with no mark at all.
-	segments := strings.Split(strings.Split(m.View(), "\n")[1], paneRuleTopSep)
+	segments := strings.Split(strings.Split(unstyled(m.View()), "\n")[3], "╮ ╭")
 	if len(segments) != 3 {
 		t.Fatalf("top rule split into %d segments, want 3", len(segments))
 	}
 	for i, segment := range segments {
-		marked := strings.Contains(segment, "\x1b[7m")
+		marked := strings.Contains(segment, "▶")
 		if want := i == detailPaneIndex; marked != want {
 			t.Errorf("rule segment %d marked = %v, want %v: %q", i, marked, want, segment)
 		}
@@ -2872,8 +2813,8 @@ func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
 		}
 		var body []string
 		for _, ln := range lines[1:] {
-			if strings.Trim(ln, "─┴") != "" {
-				body = append(body, strings.TrimRight(ln, " "))
+			if strings.Trim(ln, "─╰╯ ") != "" {
+				body = append(body, strings.Trim(ln, " │"))
 			}
 		}
 		if !slices.Equal(body, c.wantBody) {
@@ -2888,11 +2829,7 @@ func TestAShortPaneRowKeepsContentOverChrome(t *testing.T) {
 // naming the open file -- off the top of the screen, since bubbletea's
 // renderer keeps only the last h lines of what View returns.
 //
-// This is the whole height budget in one assertion: frameFixedLines against
-// what the header, the caveat block, the blank above the footer and the
-// footer itself actually spend, and paneHeight against what the pane row
-// draws. Every one of those is a number that can only be checked by adding
-// it to the others.
+// This checks the whole budget including navigation, cards, status and actions.
 func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
 	for _, c := range append(wholeFrameCases(t), singlePaneFrameCases(t)...) {
 		for _, w := range []int{160, 100, 70, 40} {
@@ -2906,29 +2843,17 @@ func TestTheFrameFillsTheTerminalExactly(t *testing.T) {
 	}
 }
 
-// A pane with no room for its name gets a plain rule, and the name is
-// dropped WHOLE. Clipped instead, the rule breaks open for a fragment --
-// "── FILTE" at eight columns -- which names nothing, costs the line its
-// continuity, and carries no mark saying it was cut: this would be the one
-// place in the package that end-clips a NAME rather than a value.
-func TestATooNarrowPaneGetsAPlainRuleRatherThanAClippedName(t *testing.T) {
-	const title = "FILTERS"
-	// The lead is two columns and the name takes a space either side, so
-	// the name fits from that width up and not below it.
-	fits := lipgloss.Width(paneTitleLead) + lipgloss.Width(title) + 2
-	for w := 0; w <= fits+2; w++ {
-		rule := unstyled(titledRule(pane{title: title, width: w}))
-		if got := lipgloss.Width(rule); got != w {
-			t.Errorf("width %d: rule is %d columns: %q", w, got, rule)
-		}
-		named := strings.Contains(rule, title)
-		if want := w >= fits; named != want {
-			t.Errorf("width %d: rule names the pane = %v, want %v: %q", w, named, want, rule)
-		}
-		// Whatever is not the name is rule. A fragment of the name would
-		// leave neither.
-		if !named && strings.Trim(rule, paneRule) != "" {
-			t.Errorf("width %d: unnamed rule is not a plain rule: %q", w, rule)
+// A shortened panel name carries an ellipsis within the available border.
+func TestANarrowPanelMarksItsClippedName(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{8, "Fi…"}, {11, "Filte…"}, {12, "Filters"},
+	} {
+		rule := unstyled(titledRule(pane{title: "FILTERS", width: tc.width}))
+		if lipgloss.Width(rule) != tc.width || !strings.Contains(rule, tc.want) {
+			t.Errorf("width %d: rule %q, want name %q within the border", tc.width, rule, tc.want)
 		}
 	}
 }

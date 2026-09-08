@@ -90,10 +90,14 @@ right, and the raw log with `/` search. `q` quits. Read
 [What each mode discloses](#what-each-mode-discloses) before you share a
 session — the interface shows more of your log than either report does.
 
-The bottom tab bar highlights the active view; its number keys switch views.
-`Tab` moves the arrow and highlighted title to the pane receiving keyboard
-input. The filter title counts hidden values. `?` opens the complete key guide
-when a narrow terminal cannot show every shortcut.
+The top tab bar highlights the active view; its number keys switch views.
+`Tab` moves the arrow and accented panel border to the pane receiving keyboard
+input. The filter title counts hidden values. Raw Log uses the available width
+without a Detail panel and reports its position in the status bar.
+
+`?` opens the complete key guide. Scroll it with arrows, `j`/`k` or
+`PgUp`/`PgDn`; the timing explanation follows the shortcuts. The main views
+keep a compact timing qualification beside their action hints.
 
 In Raw Log, `←`/`→` (or `h`/`l`) scroll horizontally one display column at a
 time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
