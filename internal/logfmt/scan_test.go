@@ -8,8 +8,34 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
+
+func TestScanTimestampOffsetLimit(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, delta := range []int64{math.MaxUint32, math.MaxUint32 + 1} {
+		in := base.Format(tsLayout) + " [INFO] first\n" +
+			base.Add(time.Duration(delta)*time.Millisecond).Format(tsLayout) + " [INFO] last\n"
+		var c collector
+		_, err := Scan(strings.NewReader(in), &Interner{}, &Interner{}, &c)
+		if delta > math.MaxUint32 {
+			if err == nil || !strings.Contains(err.Error(), "timestamp offset") {
+				t.Fatalf("Scan offset %d: got %v, want timestamp offset error", delta, err)
+			}
+			if len(c.entries) != 1 {
+				t.Fatalf("got %d entries, want only the valid first entry", len(c.entries))
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(c.entries) != 2 || c.entries[1].TSms != math.MaxUint32 {
+			t.Fatalf("boundary entries = %+v, want exact maximum offset retained", c.entries)
+		}
+	}
+}
 
 type collector struct {
 	ords    []uint32

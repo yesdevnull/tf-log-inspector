@@ -15,27 +15,27 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
-// ctxLine is the subset of Terraform's structured-output line schema this
-// package needs. Like span.uiLine it deliberately has no field for
-// "@message", "id_key" or "id_value": encoding/json ignores unknown keys
-// rather than erroring on them, so those three -- which between them carry a
-// resource's real id value -- are never materialised at all. The disclosure
-// guarantee is a property of this struct's shape, not of code elsewhere
-// remembering not to read them.
+// ctxLine reads the envelope independently of the hook's schema. Action
+// hooks carry an object in hook.action where resource hooks carry a string;
+// both contribute timestamps even though only resource hooks bound contexts.
 type ctxLine struct {
-	Timestamp string `json:"@timestamp"`
-	Type      string `json:"type"`
-	Hook      *struct {
-		Resource *struct {
-			Addr         string          `json:"addr"`
-			Module       string          `json:"module"`
-			Resource     string          `json:"resource"`
-			ResourceType string          `json:"resource_type"`
-			ResourceName string          `json:"resource_name"`
-			ResourceKey  json.RawMessage `json:"resource_key"`
-		} `json:"resource"`
-		Action string `json:"action"`
-	} `json:"hook"`
+	Timestamp string          `json:"@timestamp"`
+	Type      string          `json:"type"`
+	Hook      json.RawMessage `json:"hook"`
+}
+
+// ctxHook decodes only resource lifecycle fields. Message and resource ID
+// values are never decoded or retained in a Context.
+type ctxHook struct {
+	Resource *struct {
+		Addr         string          `json:"addr"`
+		Module       string          `json:"module"`
+		Resource     string          `json:"resource"`
+		ResourceType string          `json:"resource_type"`
+		ResourceName string          `json:"resource_name"`
+		ResourceKey  json.RawMessage `json:"resource_key"`
+	} `json:"resource"`
+	Action string `json:"action"`
 }
 
 // Context is one window during which Terraform was working on one resource
@@ -152,11 +152,22 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 		c.lastTS = ts
 	}
 
-	if cl.Hook == nil || cl.Hook.Resource == nil {
+	if !opensContext(cl.Type) && !closesContext(cl.Type) {
 		return
 	}
-	r := cl.Hook.Resource
-	key := r.Addr + "\x00" + cl.Hook.Action
+	var hook *ctxHook
+	if len(cl.Hook) == 0 {
+		return
+	}
+	if err := json.Unmarshal(cl.Hook, &hook); err != nil {
+		c.malformed++
+		return
+	}
+	if hook == nil || hook.Resource == nil {
+		return
+	}
+	r := hook.Resource
+	key := r.Addr + "\x00" + hook.Action
 
 	switch {
 	case opensContext(cl.Type):
@@ -178,7 +189,7 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 			Name:         r.ResourceName,
 			Key:          decodeKey(r.ResourceKey),
 			ResourceType: r.ResourceType,
-			Action:       cl.Hook.Action,
+			Action:       hook.Action,
 			IsData:       strings.HasPrefix(r.Resource, "data."),
 			Start:        ts,
 			End:          ts,

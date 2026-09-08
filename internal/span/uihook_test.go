@@ -9,6 +9,19 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
+func TestActionHookTimestampSetsUIBaseline(t *testing.T) {
+	const action = `{"@level":"info","@timestamp":"2026-09-04T09:15:00+10:00","type":"action_complete","hook":{"action":{"addr":"action.aws_lambda_invoke.test","module":"","action":"action.aws_lambda_invoke.test","implied_provider":"aws","action_type":"aws_lambda_invoke","action_name":"test","action_key":null}}}`
+	var b UIHookBuilder
+	scanUIInto(t, action+"\n"+uiLineWith("2026-09-04T09:15:05+10:00", "apply_complete", 2, true)+"\n", &b)
+	if b.Malformed() != 0 {
+		t.Fatalf("valid action hook counted malformed: %d", b.Malformed())
+	}
+	got := b.Spans()
+	if len(got) != 1 || got[0].StartMs != 3000 || got[0].EndMs != 5000 || got[0].StartClamped {
+		t.Fatalf("spans = %+v, want one resource span from 3s to 5s", got)
+	}
+}
+
 // scanUIInto scans in through a UIHookBuilder, exactly as
 // span.ReportedBuilder's tests scan through a ReportedBuilder.
 func scanUIInto(t *testing.T, in string, b *UIHookBuilder) {

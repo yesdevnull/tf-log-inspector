@@ -1,6 +1,7 @@
 package attrib
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -8,6 +9,25 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
+
+func TestActionHooksExtendUnclosedContext(t *testing.T) {
+	const start = `{"@level":"info","@timestamp":"2026-01-01T00:00:00Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.a","resource":"aws_instance.a","resource_type":"aws_instance"},"action":"create"}}`
+	for _, typ := range []string{"action_start", "action_progress", "action_complete", "action_errored"} {
+		t.Run(typ, func(t *testing.T) {
+			line := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-01-01T00:00:10Z","type":%q,"hook":{"action":{"addr":"action.aws_lambda_invoke.test","module":"","action":"action.aws_lambda_invoke.test","implied_provider":"aws","action_type":"aws_lambda_invoke","action_name":"test","action_key":null}}}`, typ)
+			c, ctxs := collectLines(t, start+"\n"+line+"\n")
+			if c.Malformed() != 0 {
+				t.Fatalf("valid action hook counted malformed: %d", c.Malformed())
+			}
+			if c.TypeCounts()[typ] != 1 {
+				t.Errorf("action hook missing from type counts: %v", c.TypeCounts())
+			}
+			if len(ctxs) != 1 || ctxs[0].End.Sub(ctxs[0].Start) != 10*time.Second || !ctxs[0].Unclosed {
+				t.Fatalf("contexts = %+v, want the open resource window extended to 10s", ctxs)
+			}
+		})
+	}
+}
 
 // collect runs the collector over a fixture and returns its contexts.
 func collect(t *testing.T, path string) (*ContextCollector, []Context) {
