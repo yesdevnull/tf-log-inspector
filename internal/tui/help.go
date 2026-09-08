@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"math"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// The help screen: every key this interface binds, on one page, reached with
+// The help screen: every key this interface binds, reached with
 // '?' and dismissed with '?' or Esc.
 //
 // It exists because the footer cannot be the answer. The footer's action
@@ -21,10 +24,10 @@ type helpEntry struct {
 	what string
 }
 
-// helpGroup is a titled block of bindings. Groups are the unit a short
-// terminal drops whole (see fitPaneSections), so each one is a complete
+// helpGroup is a titled block of bindings. Each group is a complete
 // answer to a question a reader might have -- how do I move, how do I
-// filter -- rather than an arbitrary slice of the key table.
+// filter -- rather than an arbitrary slice of the key table. The viewport
+// scrolls through them; bounded renderHelp callers drop groups whole.
 type helpGroup struct {
 	title   string
 	entries []helpEntry
@@ -78,6 +81,7 @@ var helpGroups = func() []helpGroup {
 		{title: "EVERYWHERE", entries: []helpEntry{
 			{keys: "⇥ Tab", what: "move focus between panes"},
 			{keys: "?", what: "open or close this help (Esc closes it too)"},
+			{keys: "↑ ↓ j k", what: "scroll help; PgUp/PgDn move a page"},
 			{keys: "q", what: "quit"},
 		}},
 	}
@@ -148,5 +152,27 @@ func renderHelp(w, h int) string {
 		}
 		sections = append(sections, lines)
 	}
+	timing := paneSection{"", styles.title.Render(clipWidth("TIMING", w))}
+	for _, line := range fullLoggingCaveat {
+		for _, wrapped := range strings.Split(ansi.Wrap(line, max(1, w), ""), "\n") {
+			timing = append(timing, styles.note.Render(clipWidth(wrapped, w)))
+		}
+	}
+	sections = append(sections, timing)
 	return strings.Join(fitPaneSections(sections, w, h), "\n")
+}
+
+// renderWorkbenchHelp keeps the complete guide reachable in a short pane.
+func (m *Model) renderWorkbenchHelp(w, h int) string {
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+	if m.helpViewport.Width == 0 {
+		m.helpViewport = viewport.New(w, h)
+		m.helpViewport.MouseWheelEnabled = false
+	}
+	m.helpViewport.Width, m.helpViewport.Height = w, h
+	m.helpViewport.SetContent(renderHelp(w, math.MaxInt))
+	m.helpViewport.SetYOffset(m.helpViewport.YOffset)
+	return m.helpViewport.View()
 }

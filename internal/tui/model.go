@@ -7,6 +7,7 @@ package tui
 import (
 	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -287,7 +288,8 @@ type Model struct {
 	// leave it is inert (see Update), the same treatment a search in
 	// progress gets, so a reader who opened it cannot move the view or the
 	// filter underneath it without seeing that they have.
-	showHelp bool
+	showHelp     bool
+	helpViewport viewport.Model
 
 	// showFacetOverlay is whether the facet pane is open as an overlay, in
 	// place of the list and detail panes, below the width it would otherwise
@@ -421,9 +423,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// happens to render it as " " too, but dispatching on Type is the
 		// documented, unambiguous way to recognise it.
 		// The help is modal, so it is answered before any other binding --
-		// the same precedence a search in progress takes above. Only the
-		// keys that LEAVE it do anything: ? and Esc close it, q quits, and
-		// every other key is swallowed rather than acting on a view the
+		// the same precedence a search in progress takes above. Scrolling
+		// moves the guide, ? and Esc close it, and q quits. Every other
+		// key is swallowed rather than acting on a view the
 		// reader cannot see. Quit is the exception because help is the
 		// screen a lost reader opens, and being unable to leave the program
 		// from it is the worst place to strand them.
@@ -434,6 +436,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "?", "esc":
 				m.showHelp = false
+			case "up", "down", "j", "k", "pgup", "pgdown":
+				// View sizes the viewport before it receives scrolling keys.
+				m.View()
+				m.helpViewport, _ = m.helpViewport.Update(msg)
 			}
 			return m, nil
 		}
@@ -553,6 +559,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "?":
 			m.showHelp = true
+			m.helpViewport = viewport.Model{}
 		case "s":
 			m.cycleSort()
 		case "f":

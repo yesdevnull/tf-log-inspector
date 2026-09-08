@@ -495,17 +495,18 @@ func rawLogMaxColumn(lines []string, w int) int {
 }
 
 func (m *Model) scrollRawLogHorizontally(delta int) {
-	w, h := m.paneWidth(), m.height
-	if h <= 0 {
-		h = defaultHeight
-	}
-	footerLines := min(len(strings.Split(m.footer(w), "\n")), max(0, h-1))
-	bodyH := paneBodyHeight(paneHeight(h, len(loggingCaveat(h, footerLines)), footerLines))
-	if w >= facetInlineWidth {
-		w -= facetPaneWidth(m.facetPaneNatural, w) + paneSepWidth
-	}
+	w := m.rawLogViewportWidth()
+	bodyH := paneBodyHeight(workbenchPaneHeight(m.height))
 	limit := rawLogMaxColumn(m.rawLogLines(bodyH), w)
 	m.raw.column = max(0, min(limit, min(m.raw.column, limit)+delta))
+}
+
+func (m *Model) rawLogViewportWidth() int {
+	w := m.paneWidth()
+	if w >= facetInlineWidth {
+		w -= facetPaneWidth(m.facetPaneNatural+4, w) + paneSepWidth
+	}
+	return panelContentWidth(w)
 }
 
 // searchAgain repeats the last submitted search, forward for n or backward

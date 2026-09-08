@@ -399,7 +399,7 @@ func TestTheFooterStillNamesAWorkingKeyOverAFailedSearch(t *testing.T) {
 func TestTheHelpKeepsItsTableOnAShortFrame(t *testing.T) {
 	short := helpModel(t, 100, 12)
 	frame := short.View()
-	if !strings.Contains(frame, helpTitle) {
+	if !strings.Contains(frame, "Keys") {
 		t.Fatalf("the help title is gone at height 12:\n%s", frame)
 	}
 	if !strings.Contains(frame, "VIEWS") {
@@ -481,7 +481,7 @@ func TestTheHelpTakesThePaneRowFromAnOpenFacetOverlay(t *testing.T) {
 
 	open := update(t, m, helpKey)
 	frame := open.View()
-	if !strings.Contains(frame, helpTitle) {
+	if !strings.Contains(frame, "Keys") {
 		t.Errorf("? over an open facet overlay drew no key table:\n%s", frame)
 	}
 	if strings.Contains(frame, "PROVIDERS") {

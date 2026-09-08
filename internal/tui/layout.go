@@ -30,8 +30,8 @@ const (
 // half, which tells the reader less than the couple of columns it hands
 // back to the centre pane are worth.
 const (
-	minFacetPaneWidth  = 15
-	minDetailPaneWidth = 19
+	minFacetPaneWidth  = 19
+	minDetailPaneWidth = 23
 )
 
 // maxFacetPaneWidth and maxDetailPaneWidth cap how wide the side panes are
@@ -183,7 +183,7 @@ func capPaneWidth(width, terminalWidth, minWidth, maxWidth int) int {
 
 // paneSep separates adjacent panes when composing a row. It is one visible
 // column (the │ itself) plus a space of breathing room on each side.
-const paneSep = " │ "
+const paneSep = " "
 
 // paneSepWidth is how many terminal columns paneSep costs a pane row, which
 // is what the width arithmetic in renderPanes has to subtract. It is
@@ -223,117 +223,9 @@ const (
 	defaultHeight = 24
 )
 
-// View composes the three-pane layout: facets left, list centre, detail
-// right, degrading by width per the design spec's width-degradation rules.
-// The header naming the file is the top line of every frame and the footer
-// the last of every frame two lines or taller; the observer-effect caveat
-// between them is the part that gives way, shortening to one sentence and
-// then dropping out as the terminal loses height (see loggingCaveat).
-//
-// None of the three is exempt from the width clip: at a narrow enough w the
-// header loses the tail of the file name and the caveat is cut mid-sentence,
-// the same as any other line. What they never do is collapse or trade places
-// the way the panes do.
-//
-// The result carries no trailing newline and never exceeds h lines.
-// bubbletea's renderer keeps only the LAST h lines of what View returns --
-// it cannot scroll the cursor back into the terminal's scrollback buffer --
-// so a view even one line too tall loses its topmost line off the top of
-// the screen, and the topmost line here is the header naming the open file.
-//
-// h is a target rather than a ceiling, at every width: framePanes composes
-// one pane the same way it composes three, padding each out to the row's
-// height and closing the row with a rule, so the frame fills the terminal
-// exactly whether the layout is the full three panes, the facet overlay, or
-// a full-width raw log. A row that stopped wherever its content ran out
-// would leave its bottom rule floating in the middle of the screen, which
-// says the content ended somewhere it did not.
-//
-// The footer is composed onto the END of an already-trimmed frame rather
-// than trimmed along with everything else, because a frame trimmed from
-// the bottom takes the footer first. The footer is the only channel the
-// search prompt, the "pattern not found" report and the quit hint have: at
-// a height that dropped it, '/' captured every keystroke with nothing on
-// screen to say so -- the query invisible, 'q' no longer quitting -- which
-// is the trap the Ctrl+C handling in handleSearchKey exists to escape.
-//
-// m.footer(w) returns one line for the search and blocked-jump messages and
-// two for the ordinary key hints, so the room reserved for it and the number
-// of lines appended both follow len(footerLines) rather than assuming
-// either count. Each line is clipped on its own rather than the joined
-// block being clipped as one string: clipWidth measures display columns
-// across a "\n" as it would across any other character, so clipping the
-// two-line block whole would spend the SECOND line's width budget
-// continuing from wherever the first line left off, cutting "q quit" away
-// on exactly the terminals the two-line footer exists to keep it on.
-//
-// The footer is never given more than h-1 of those lines, so the header
-// always keeps at least one -- the h == 1 guard above already refuses to
-// let the footer push the header off the only line there is, and a
-// two-line footer must not undo that one line later at h == 2. What gives
-// way is the view-key line, not the action line: a footer trimmed to one
-// line keeps its LAST line, which is the one carrying "q quit" -- as far as
-// WIDTH allows, that line being clipped from its end like any other (see
-// actionKeys), so a narrow terminal can still lose the hint off the right.
+// View renders the workbench shell and its active content panels.
 func (m *Model) View() string {
-	w, h := m.paneWidth(), m.height
-	if h <= 0 {
-		h = defaultHeight
-	}
-	head := styles.title.Render(clipWidth(header(m), w))
-	// One line of terminal is the header's: it names the file the reader is
-	// looking at, and a frame that showed only key hints could belong to any
-	// file at all.
-	if h == 1 {
-		return head
-	}
-
-	// The footer is composed FIRST, because how many lines it takes is what
-	// the pane row is budgeted against and it is not a constant: the two
-	// hint lines are the usual answer, but a search prompt, a miss report
-	// and a refused jump each replace the whole footer with ONE line (see
-	// footer). Budgeted at two regardless, those three states leave the
-	// frame a line short of the terminal, and the pane row's closing rule
-	// floating a line above the bottom of the screen.
-	footerLines := strings.Split(m.footer(w), "\n")
-	if avail := h - 1; len(footerLines) > avail {
-		footerLines = footerLines[len(footerLines)-avail:]
-	}
-
-	// The caveat qualifies DURATIONS, and the help pane shows none. Leaving
-	// it up spends six of a short frame's lines -- its five and the blank
-	// above them -- on numbers that are not on screen, and takes them from
-	// the only content that is: at h of 12 it leaves the key table its first
-	// heading and nothing beneath it, one line being the whole of the pane
-	// row's body. Suppressing it is the
-	// same "what is DRAWN decides" rule actionKeys applies through
-	// detailPaneDrawn, and it withholds no qualification, because there is
-	// no figure on this frame to qualify.
-	var caveat []string
-	if !m.showHelp {
-		caveat = loggingCaveat(h, len(footerLines))
-	}
-	// No blank line between the header and the pane row: the row opens with
-	// its own rule, which separates the two as well as a blank would and
-	// says something besides. That line is what pays for the rule closing
-	// the row at the bottom, so the frame gains both rules for nothing.
-	lines := []string{head}
-	lines = append(lines, strings.Split(m.renderPanes(w, paneHeight(h, len(caveat), len(footerLines))), "\n")...)
-	if len(caveat) > 0 {
-		lines = append(lines, "")
-		for _, line := range caveat {
-			lines = append(lines, styles.note.Render(clipWidth(line, w)))
-		}
-	}
-	lines = append(lines, "")
-
-	if room := h - len(footerLines); len(lines) > room {
-		lines = lines[:room]
-	}
-	for _, line := range footerLines {
-		lines = append(lines, clipWidth(line, w))
-	}
-	return strings.Join(lines, "\n")
+	return m.workbenchView()
 }
 
 // headerSep divides the header's three fields. A middle dot rather than the
@@ -694,54 +586,6 @@ func viewKeyHints(v View) string {
 	return strings.Join(append(hints, helpHint), hintSep)
 }
 
-// frameFixedLines is what a frame spends on everything but the pane row, the
-// caveat block and the footer: the header, and the blank line above the
-// footer.
-//
-// The footer is not counted here because it is not a fixed height -- it is
-// two hint lines usually and one line in the three states that replace it
-// (see View) -- so every caller passes its measured height in beside this.
-//
-// The pane row's own rules are not counted here either. They are drawn by
-// framePanes, which needs the pane widths to cross them at the separators,
-// so they belong to the row rather than to the frame around it.
-const frameFixedLines = 2
-
-// minPaneRowHeight is the least a pane row can be given before the caveat
-// starts taking lines from it: its top rule, which names the panes, and one
-// line of content beneath. A row of one line is a rule over nothing.
-const minPaneRowHeight = 2
-
-// paneHeight is how many lines the pane row itself gets in a frame h lines
-// tall carrying caveatLines lines of caveat. The caveat block costs one line
-// more than its text, for the blank line above it, and costs nothing at all
-// when there is no caveat to separate.
-//
-// It never goes below 1: a terminal too short to show everything still shows
-// something rather than an empty pane, and View then trims the surplus out
-// from ABOVE its footer.
-func paneHeight(h, caveatLines, footerLines int) int {
-	if paneH := h - frameFixedLines - footerLines - caveatBlockLines(caveatLines); paneH > 0 {
-		return paneH
-	}
-	return 1
-}
-
-// caveatBlockLines is what n lines of caveat cost a frame: the lines
-// themselves plus the blank separating them from the pane row, and nothing
-// at all when there is no caveat to separate.
-//
-// It is named because two callers need it and they must not disagree --
-// paneHeight, budgeting the pane row against it, and loggingCaveat, deciding
-// which caveat there is room for. Spelled out at the second of those it
-// reads "+1+1", two ones that are different things.
-func caveatBlockLines(n int) int {
-	if n == 0 {
-		return 0
-	}
-	return n + 1
-}
-
 // fullLoggingCaveat states that every duration this interface renders was
 // measured under logging. Terraform re-logs each line of a provider's stderr
 // through its own logger, so a provider that dumps HTTP bodies at DEBUG pays
@@ -789,29 +633,6 @@ const caveatWidth = 56
 // either, and a short frame is no excuse for a shorter truth.
 const shortLoggingCaveat = "Durations measured under logging; rankings approximate."
 
-// loggingCaveat is the caveat's lines for a frame h lines tall: the full
-// text where it fits, one sentence where it does not, and nothing at all
-// below the height where even one line would cost the footer.
-//
-// The footer is budgeted ahead of the caveat, not after it. The caveat is a
-// fixed warning a reader can take in once; the footer carries live state --
-// the search query being typed, the miss report, and the reminder that 'q'
-// quits -- that exists nowhere else on screen, so it is the one line that
-// must survive a short terminal.
-func loggingCaveat(h, footerLines int) []string {
-	// Each bound is frameFixedLines and the footer, plus the least a pane
-	// row can be worth drawing at, plus what that caveat's own block costs.
-	fixed := frameFixedLines + footerLines + minPaneRowHeight
-	switch {
-	case h >= fixed+caveatBlockLines(len(fullLoggingCaveat)):
-		return fullLoggingCaveat
-	case h >= fixed+caveatBlockLines(1):
-		return []string{shortLoggingCaveat}
-	default:
-		return nil
-	}
-}
-
 // renderPanes composes the pane row for width w and height h, applying the
 // spec's width degradation:
 //
@@ -831,35 +652,35 @@ func (m *Model) renderPanes(w, h int) string {
 	// of the five sites that would otherwise each have to subtract.
 	bodyH := paneBodyHeight(h)
 	if m.showHelp {
-		return framePanes(h, pane{title: helpTitle, content: renderHelp(w, bodyH), width: w})
+		return framePanes(h, pane{title: helpTitle, content: m.renderWorkbenchHelp(panelContentWidth(w), bodyH), width: w})
 	}
 	if m.facetOverlayShowing(w) {
-		return framePanes(h, pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(w, bodyH), width: w})
+		return framePanes(h, pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(w), bodyH), width: w})
 	}
 	switch {
 	case w >= facetInlineWidth:
-		facetW := facetPaneWidth(m.facetPaneNatural, w)
+		facetW := facetPaneWidth(m.facetPaneNatural+4, w)
 		if !m.detailPaneDrawn(w) {
 			listW := w - facetW - paneSepWidth
 			return framePanes(h,
-				pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(facetW, bodyH), width: facetW},
-				pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
+				pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(facetW), bodyH), width: facetW},
+				pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			)
 		}
-		detailW := detailPaneWidth(m.detailPaneNatural, w)
+		detailW := detailPaneWidth(m.detailPaneNatural+4, w)
 		listW := w - facetW - detailW - 2*paneSepWidth
-		detailTitle, detail := m.renderDetail(detailW, bodyH)
+		detailTitle, detail := m.renderDetail(panelContentWidth(detailW), bodyH)
 		return framePanes(h,
-			pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(facetW, bodyH), width: facetW},
-			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(facetW), bodyH), width: facetW},
+			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	case m.detailPaneDrawn(w):
-		detailW := detailPaneWidth(m.detailPaneNatural, w)
+		detailW := detailPaneWidth(m.detailPaneNatural+4, w)
 		listW := w - detailW - paneSepWidth
-		detailTitle, detail := m.renderDetail(detailW, bodyH)
+		detailTitle, detail := m.renderDetail(panelContentWidth(detailW), bodyH)
 		return framePanes(h,
-			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(listW, bodyH), width: listW},
+			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	default:
@@ -869,7 +690,7 @@ func (m *Model) renderPanes(w, h int) string {
 		// height it was given. framePanes holds it to the row regardless,
 		// the same way it holds every other pane, which is why the one
 		// layout with no second pane beside it needs no clamp of its own.
-		return framePanes(h, pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(w, bodyH), width: w})
+		return framePanes(h, pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(w), bodyH), width: w})
 	}
 }
 
@@ -1087,7 +908,7 @@ func topRule(panes []pane) string {
 	for i, p := range panes {
 		segments[i] = titledRule(p)
 	}
-	return strings.Join(segments, styles.chrome.Render(paneRuleTopSep))
+	return strings.Join(segments, paneSep)
 }
 
 // bottomRule is the pane row's closing line: a plain rule at each pane's
@@ -1096,9 +917,9 @@ func topRule(panes []pane) string {
 func bottomRule(panes []pane) string {
 	segments := make([]string, len(panes))
 	for i, p := range panes {
-		segments[i] = strings.Repeat(paneRule, max(p.width, 0))
+		segments[i] = panelBorder(p).Render(clipWidth("╰"+strings.Repeat(paneRule, max(0, p.width-2))+"╯", p.width))
 	}
-	return styles.chrome.Render(strings.Join(segments, paneRuleBottomSep))
+	return strings.Join(segments, paneSep)
 }
 
 // titledRule is one pane's share of the top rule: the lead, the pane's name
@@ -1128,20 +949,16 @@ func bottomRule(panes []pane) string {
 // "TIMELINE (ui, whole seconds)" goes unnamed below 32 columns where
 // "RAW LOG" survives to 11.
 func titledRule(p pane) string {
-	label := " " + p.title + " "
-	fill := p.width - lipgloss.Width(paneTitleLead) - lipgloss.Width(label)
-	if fill < 0 {
-		return styles.chrome.Render(strings.Repeat(paneRule, max(p.width, 0)))
+	if p.width < 5 {
+		return clipWidth(panelTitle(p.title), p.width)
 	}
-	style := styles.title
+	lead := "╭─"
 	if p.focused {
-		style = styles.selected
+		lead = "╭▶"
 	}
-	lead := paneTitleLead
-	if p.focused {
-		lead = "▶─"
-	}
-	return styles.chrome.Render(lead) + style.Render(label) + styles.chrome.Render(strings.Repeat(paneRule, fill))
+	label := " " + clipValueEnd(panelTitle(p.title), p.width-5) + " "
+	fill := max(0, p.width-3-lipgloss.Width(label))
+	return panelBorder(p).Render(lead) + styles.title.Render(label) + panelBorder(p).Render(strings.Repeat(paneRule, fill)+"╮")
 }
 
 // joinPanes composes panes' BODIES side by side into one h-line block. Each
@@ -1168,7 +985,11 @@ func joinPanes(h int, panes ...pane) string {
 			lines = append(lines, "")
 		}
 		for j, ln := range lines {
-			lines[j] = padRight(clipWidth(ln, p.width), p.width)
+			if p.width < 4 {
+				lines[j] = padRight(clipWidth(ln, p.width), p.width)
+				continue
+			}
+			lines[j] = panelBorder(p).Render("│") + " " + padRight(clipWidth(ln, panelContentWidth(p.width)), panelContentWidth(p.width)) + " " + panelBorder(p).Render("│")
 		}
 		columns[i] = lines
 	}

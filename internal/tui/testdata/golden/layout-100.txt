@@ -1,40 +1,40 @@
-[1;36mtfli · plan.log · 2 RPC spans, 0 UI spans[0m
-[2m──[0m[1;36m FILTERS [0m[2m──────────────[0m[2m─┬─[0m[2m▶─[0m[7m CALLS [0m[2m───────────────────────────────────[0m[2m─┬─[0m[2m──[0m[1;36m SPAN DETAIL [0m[2m──────────[0m
-[1;36mPROVIDERS[0m                [2m │ [0m[1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m[2m │ [0m[2;36mRPC[0m                      
-[7;2m[x] ….io/hashicorp/aws  1[0m[2m │ [0m[7m      8ms  ApplyReso…  …_instance  …p/google[0m[2m │ [0m  ApplyResourceChange    
-[x] …/hashicorp/google  1[2m │ [0m      5ms  ApplyReso…  aws_subnet  …corp/aws[2m │ [0m[2;36mresource type[0m            
-[1;36mRPCS[0m                     [2m │ [0m                                            [2m │ [0m  google_compute_instance
-[x] ApplyResourceChan…  2[2m │ [0m                                            [2m │ [0m[2;36mprovider[0m                 
-[1;36mRESOURCE TYPES[0m           [2m │ [0m                                            [2m │ [0m  …rm.io/hashicorp/google
-[x] aws_subnet          1[2m │ [0m                                            [2m │ [0m[2;36mduration[0m                 
-[x] …_compute_instance  1[2m │ [0m                                            [2m │ [0m  8ms                    
-[1;36mLEVELS[0m                   [2m │ [0m                                            [2m │ [0m[2;36mresource[0m                 
-[x] TRACE               2[2m │ [0m                                            [2m │ [0m  no address context in …
-[x] UNKNOWN             1[2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-                         [2m │ [0m                                            [2m │ [0m                         
-[2m──────────────────────────┴──────────────────────────────────────────────┴──────────────────────────[0m
+[7m tfli [0m  [1;36mplan.log[0m                                                             [2m2 RPC spans, 0 UI spans[0m
+ [36m1[0m providers    [36m2[0m types   [7m 4 calls [0m   [36m5[0m timeline    [36m6[0m raw log   [36m?[0m help
 
-[2mDurations here are measured under logging, which is not[0m
-[2mfree: one workspace planned in 24.1s unlogged and 522.2s[0m
-[2mwith debug plus provider TRACE. A call that logs heavily[0m
-[2mis inflated more than one that waits, so rankings are[0m
-[2mapproximate and absolute times do not transfer.[0m
-
-[36m1[0m providers  [36m2[0m types  [7m4 calls[0m  [36m5[0m timeline  [36m6[0m raw log  [36m?[0m help
+[2m╭─[0m[1;36m Filters [0m[2m─────────────╮[0m [36m╭▶[0m[1;36m Calls [0m[36m──────────────────────────────────────╮[0m [2m╭─[0m[1;36m Span detail [0m[2m─────────╮[0m
+[2m│[0m [1;36mPROVIDERS[0m             [2m│[0m[2m [0m[36m│[0m [1;36mduration▾[0m  [1mRPC       [0m  [1mresource …[0m  [1mprovider [0m [36m│[0m[2m [0m[2m│[0m [2;36mRPC[0m                   [2m│[0m
+[2m│[0m [7;2m[x] …hashicorp/aws  1[0m [2m│[0m[2m [0m[36m│[0m [7m      8ms  ApplyReso…  …_instance  …p/google[0m [36m│[0m[2m [0m[2m│[0m   ApplyResourceChange [2m│[0m
+[2m│[0m [x] …hicorp/google  1 [2m│[0m[2m [0m[36m│[0m       5ms  ApplyReso…  aws_subnet  …corp/aws [36m│[0m[2m [0m[2m│[0m [2;36mresource type[0m         [2m│[0m
+[2m│[0m [1;36mRPCS[0m                  [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   …e_compute_instance [2m│[0m
+[2m│[0m [x] ApplyResource…  2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mprovider[0m              [2m│[0m
+[2m│[0m [1;36mRESOURCE TYPES[0m        [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   …o/hashicorp/google [2m│[0m
+[2m│[0m [x] aws_subnet      1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mduration[0m              [2m│[0m
+[2m│[0m [x] …pute_instance  1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   8ms                 [2m│[0m
+[2m│[0m [1;36mLEVELS[0m                [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mresource[0m              [2m│[0m
+[2m│[0m [x] TRACE           2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   no address context… [2m│[0m
+[2m│[0m [x] UNKNOWN         1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m╰───────────────────────╯[0m [36m╰──────────────────────────────────────────────╯[0m [2m╰───────────────────────╯[0m
+[2mDurations measured under logging; rankings approximate.[0m
 [36m⇥[0m pane  [36m␣[0m facet  [36m⏎[0m open  [36ms[0m sort  [36mf[0m facets  [36m/[0m search  [36mEsc[0m clear  [36mq[0m quit

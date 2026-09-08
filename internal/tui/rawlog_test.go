@@ -258,13 +258,10 @@ func TestSlashSearchHonoursActiveFilter(t *testing.T) {
 // instead. That assumes the view-key line itself is never clipped down to
 // nothing, which holds at every width these tests render at.
 func footerOf(view string) string {
-	// Stripped, because every caller asks what the footer SAYS. The keys in
-	// a rendered hint line carry the accent, so a hint's key and its words
-	// are not adjacent in the frame and a search for "q quit" finds nothing.
 	lines := strings.Split(unstyled(view), "\n")
-	last := lines[len(lines)-1]
-	if n := len(lines); n >= 2 && lines[n-2] != "" {
-		return lines[n-2] + "\n" + last
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if len(lines) > 2 && strings.HasSuffix(last, "q quit") {
+		return lines[1] + "\n" + last
 	}
 	return last
 }

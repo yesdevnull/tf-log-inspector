@@ -30,12 +30,12 @@ func (m *Model) filterTitle() string {
 func (m *Model) navigation(w int) string {
 	labels := make([]string, len(views))
 	for i, b := range views {
-		labels[i] = b.key + " " + b.name
+		labels[i] = " " + b.key + " " + b.name + " "
 	}
 	if lipgloss.Width(strings.Join(labels, hintSep)+hintSep+helpHint) > w {
-		short := []string{"providers", "types", "calls", "time", "log"}
+		short := []string{"prov", "types", "calls", "time", "log"}
 		for i, b := range views {
-			labels[i] = b.key + " " + short[i]
+			labels[i] = " " + b.key + " " + short[i] + " "
 		}
 	}
 	if lipgloss.Width(strings.Join(labels, hintSep)+hintSep+helpHint) > w {
@@ -49,7 +49,7 @@ func (m *Model) navigation(w int) string {
 		if b.view == m.view {
 			labels[i] = styles.selected.Render(labels[i])
 		} else {
-			labels[i] = styleHintKeys(labels[i])
+			labels[i] = " " + styleHintKeys(strings.TrimSpace(labels[i])) + " "
 		}
 	}
 	return strings.Join(labels, hintSep) + hintSep + styleHintKeys(helpHint)

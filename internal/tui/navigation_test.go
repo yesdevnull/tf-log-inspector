@@ -14,7 +14,7 @@ func TestNavigationShowsTheActiveViewAfterSwitching(t *testing.T) {
 	for key, name := range map[string]string{"1": "providers", "2": "types", "4": "calls", "5": "timeline", "6": "raw log"} {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 		line := strings.Split(m.footer(100), "\n")[0]
-		if !strings.Contains(line, "\x1b[7m"+key+" "+name+"\x1b[0m") {
+		if !strings.Contains(line, "\x1b[7m "+key+" "+name+" \x1b[0m") {
 			t.Errorf("view %s lacks an active tab: %q", key, line)
 		}
 		for _, other := range []string{"1 providers", "2 types", "4 calls", "5 timeline", "6 raw log", "? help"} {
@@ -63,7 +63,7 @@ func TestFocusMarkerFollowsTheKeyboardAcrossPanes(t *testing.T) {
 		if strings.Count(out, "▶") != 1 {
 			t.Errorf("pane %v lacks a unique focus marker:\n%s", m.pane, out)
 		}
-		segments := strings.Split(strings.Split(out, "\n")[1], "─┬─")
+		segments := strings.Split(strings.Split(out, "\n")[3], "╮ ╭")
 		if len(segments) != 3 || !strings.Contains(segments[int(m.pane)], "▶") {
 			t.Errorf("focus marker does not identify pane %v: %q", m.pane, segments)
 		}
@@ -76,11 +76,11 @@ func TestFilterIndicatorTracksExclusions(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
 	m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	if !strings.Contains(unstyled(m.View()), "FILTERS (1)") {
+	if !strings.Contains(unstyled(m.View()), "Filters (1)") {
 		t.Fatalf("excluded value is not counted in the filter title:\n%s", m.View())
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if strings.Contains(unstyled(m.View()), "FILTERS (") {
+	if strings.Contains(unstyled(m.View()), "Filters (") {
 		t.Fatal("clearing filters left an active filter indicator")
 	}
 }
