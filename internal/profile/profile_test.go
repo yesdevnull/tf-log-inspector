@@ -1,12 +1,70 @@
 package profile
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+func TestReportEscapesDecodedTerminalControls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "controls.log")
+	line := `{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-04T09:15:03Z","type":"apply_complete","hook":{"action":"read\r","elapsed_seconds":1,"resource":{"addr":"aws_instance.東京\u001b[2J\u0007\u009b\b\n","resource_type":"aws_instance\u001b[2J","implied_provider":"aws\u001b[2J"}}}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, path)
+	for _, r := range out {
+		if unicode.IsControl(r) && r != '\n' {
+			t.Errorf("report contains terminal control %U", r)
+		}
+	}
+	if !strings.Contains(out, `aws_instance.東京\x1b[2J\a\u009b\b\n`) {
+		t.Errorf("report does not display the address safely: %q", out)
+	}
+}
+
+func TestReportEscapesRPCFields(t *testing.T) {
+	for _, malicious := range []string{"\x1b]52;c;U0VDUkVU\a", "\x9b2J"} {
+		t.Run(fmt.Sprintf("%q", malicious), func(t *testing.T) {
+			l := &model.Log{RPCSpans: []span.Span{{
+				DurationMs: 1, EndMs: 1, RPC: malicious, Provider: malicious, ResourceType: malicious,
+			}}}
+			var out strings.Builder
+			if err := Render(&out, l); err != nil {
+				t.Fatal(err)
+			}
+			if strings.ContainsAny(out.String(), "\x1b\a") || strings.Contains(out.String(), "\x9b") {
+				t.Errorf("report emits controls from RPC fields: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestReportQualifiesSaturatedDurations(t *testing.T) {
+	for _, seconds := range []int{1, 5000000} {
+		t.Run(fmt.Sprint(seconds), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "duration.log")
+			line := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-09-04T09:15:03Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":%d,"resource":{"addr":"aws_instance.example","resource_type":"aws_instance"}}}`, seconds)
+			if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out := render(t, path)
+			if seconds == 5000000 {
+				if !strings.Contains(out, "1 UI-hook duration") || !strings.Contains(out, "lower bounds") {
+					t.Errorf("report presents saturated timing as a measurement: %q", out)
+				}
+			} else if strings.Contains(out, "lower bounds") {
+				t.Error("ordinary durations are incorrectly marked saturated")
+			}
+		})
+	}
+}
 
 func render(t *testing.T, path string) string {
 	t.Helper()

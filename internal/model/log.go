@@ -34,6 +34,10 @@ type Log struct {
 	UISpans  []span.Span
 	Caps     span.Capabilities
 
+	// UISaturatedDurations counts UI timings capped at the storage limit.
+	// Consumers must qualify these values and their totals as lower bounds.
+	UISaturatedDurations uint64
+
 	// Contexts and Attribs are the address-attribution layer. Attribs is
 	// parallel to RPCSpans specifically -- never to a concatenation of
 	// RPCSpans and UISpans, which are kept apart above. UISpans need no
@@ -100,15 +104,16 @@ func Load(path string) (*Log, error) {
 	}
 
 	return &Log{
-		Data:     data,
-		Entries:  idx.entries,
-		Comps:    comps,
-		Stats:    stats,
-		RPCSpans: rpcSpans,
-		UISpans:  ub.Spans(),
-		Caps:     sniffer.Report(),
-		Contexts: ctxs,
-		Attribs:  attribs,
+		Data:                 data,
+		Entries:              idx.entries,
+		Comps:                comps,
+		Stats:                stats,
+		RPCSpans:             rpcSpans,
+		UISpans:              ub.Spans(),
+		UISaturatedDurations: ub.Saturated(),
+		Caps:                 sniffer.Report(),
+		Contexts:             ctxs,
+		Attribs:              attribs,
 	}, nil
 }
 

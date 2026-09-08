@@ -962,7 +962,7 @@ func (r Report) Render(w io.Writer) error {
 		if name == "" {
 			name = "(none)"
 		}
-		fmt.Fprintf(b, "  %8d  %s\n", t.Count, name)
+		fmt.Fprintf(b, "  %8d  %s\n", t.Count, logfmt.DisplayText(name))
 	}
 	if len(r.TopComponents) == 0 {
 		fmt.Fprintf(b, "  none\n")
@@ -986,7 +986,7 @@ func (r Report) Render(w io.Writer) error {
 
 	fmt.Fprintf(b, "MESSAGE TEMPLATES (content masked, recurring only, top %d)\n", len(r.TopTemplates))
 	for _, t := range r.TopTemplates {
-		fmt.Fprintf(b, "  %8d  %s\n", t.Count, t.Text)
+		fmt.Fprintf(b, "  %8d  %s\n", t.Count, logfmt.DisplayText(t.Text))
 	}
 	if len(r.TopTemplates) == 0 {
 		fmt.Fprintf(b, "  none\n")

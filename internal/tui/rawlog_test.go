@@ -692,28 +692,48 @@ func TestEntryVisibleMatchesAComponentlessEntryAgainstTheNoneFacet(t *testing.T)
 	}
 }
 
-// The raw log rendered nothing at all when the filter hid every entry from
-// the top of the pane down -- an empty pane that looks exactly like a parse
-// failure or the wrong file, in the one view whose whole content is the
-// file's own bytes.
-//
-// The top entry is moved off the fixture's UNKNOWN-level comment header
-// first, so that narrowing to UNKNOWN leaves nothing visible below it: at
-// the top of the log that header is itself a match and the pane is not
-// empty.
 func TestTheRawLogSaysWhenAFilterHasHiddenEverything(t *testing.T) {
 	m := update(t, New(testLog(t, "provider-rpc.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
-	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if m.TopEntry() != 1 {
-		t.Fatalf("TopEntry = %d, want 1 -- the UNKNOWN comment header must be above the pane", m.TopEntry())
-	}
-	showOnly(t, &m, dimLevel, "UNKNOWN")
+	m.setFacetExclusions(dimLevel, map[string]bool{"UNKNOWN": true, "TRACE": true})
+	m.invalidateRows()
 
 	out := m.renderRawLog(200, 40)
 	for _, want := range []string{"nothing matches the filter", "Esc"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("an emptied raw log does not say %q, so it looks like a parse failure: %q", want, out)
 		}
+	}
+}
+
+func TestRawLogFilterMovesToAnAdmittedEntry(t *testing.T) {
+	data := []byte("first\nsecond\nthird\n")
+	l := &model.Log{Data: data, Entries: []logfmt.Entry{
+		{Off: 0, Len: 6, Level: logfmt.LevelWarn},
+		{Off: 6, Len: 7, Level: logfmt.LevelInfo},
+		{Off: 13, Len: 6, Level: logfmt.LevelWarn},
+	}}
+	for _, tc := range []struct {
+		name  string
+		scope []int
+		top   int
+		level string
+		want  string
+	}{
+		{name: "match before cursor", top: 2, level: "INFO", want: "second"},
+		{name: "match after cursor", top: 0, level: "INFO", want: "second"},
+		{name: "current entry still admitted", top: 2, level: "WARN", want: "third"},
+		{name: "scoped earlier match", scope: []int{0, 1}, top: 1, level: "WARN", want: "first"},
+		{name: "all scoped entries hidden", scope: []int{0, 2}, top: 2, level: "INFO", want: "no filter match in this call"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(l, "x.log")
+			m.setView(ViewRawLog)
+			m.raw.scope, m.raw.top = tc.scope, tc.top
+			showOnly(t, &m, dimLevel, tc.level)
+			if out := unstyled(m.renderRawLog(80, 1)); !strings.HasPrefix(out, tc.want) {
+				t.Errorf("filtered raw log starts with %q, want %q", out, tc.want)
+			}
+		})
 	}
 }
 

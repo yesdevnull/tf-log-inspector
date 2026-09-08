@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -1092,7 +1093,7 @@ func columnWidths(headers []string, data []row) []int {
 	}
 	for _, r := range data {
 		for i, c := range r.cells {
-			widths[i] = max(widths[i], lipgloss.Width(c))
+			widths[i] = max(widths[i], lipgloss.Width(logfmt.DisplayText(c)))
 		}
 	}
 	return widths
@@ -1153,6 +1154,7 @@ func formatHeaderRow(headers []string, kinds []columnKind, widths []int, sortCol
 // width a header was reserved and the width it was drawn into could differ
 // for any cell that was not plain ASCII.
 func formatCell(c string, kind columnKind, w int) string {
+	c = logfmt.DisplayText(c)
 	if kind == numericColumn {
 		return padLeft(c, w)
 	}
