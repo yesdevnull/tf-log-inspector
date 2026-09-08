@@ -10,6 +10,19 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
+func TestEmptyRawLogStatusOmitsPosition(t *testing.T) {
+	m := New(&model.Log{}, "empty.log")
+	m.width, m.height = 100, 24
+	m.setView(ViewRawLog)
+	status := strings.Split(ansi.Strip(m.View()), "\n")[22]
+	if !strings.Contains(status, "Entry 0/0") || !strings.Contains(status, "all entries") {
+		t.Fatalf("empty raw log loses count or scope: %q", status)
+	}
+	if strings.Contains(status, "line") || strings.Contains(status, "column") {
+		t.Fatalf("empty raw log claims a position: %q", status)
+	}
+}
+
 func TestWorkbenchHeaderPreservesFilenameSeparators(t *testing.T) {
 	for _, capped := range []uint64{0, 1} {
 		m := New(&model.Log{UISaturatedDurations: capped}, "prod · trace.log")
