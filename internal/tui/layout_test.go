@@ -1751,7 +1751,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 			continue
 		}
 		m.selected = i
-		body := detailBody(t, m, rollupDetailTitle, detailPaneWidth(m.detailPaneNatural+4, 160), 20)
+		body := detailBody(t, m, rollupDetailTitle, panelContentWidth(detailPaneWidth(m.detailPaneNatural+4, 160)), 20)
 		if !strings.Contains(body, wantLine) {
 			t.Errorf("detail pane does not show %q whole at the width it was measured for:\n%s", wantLine, body)
 		}

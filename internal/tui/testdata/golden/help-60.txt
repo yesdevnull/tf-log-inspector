@@ -36,5 +36,5 @@
 [2m│[0m [2mDurations here are measured under logging, which is not[0m  [2m│[0m
 [2m│[0m [2mfree: one workspace planned in 24.1s unlogged and 522.2s[0m [2m│[0m
 [2m╰──────────────────────────────────────────────────────────╯[0m
-[2m? / Esc close help[0m
+[2m↑↓ scroll  PgUp/PgDn page  ?/Esc close help[0m
 [36mq[0m quit
