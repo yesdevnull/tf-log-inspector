@@ -21,6 +21,9 @@
 # restored from git after each one and the restore is VERIFIED before the
 # next -- an unchecked revert lets mutations accumulate, and a "caught"
 # result is then an earlier mutation's failure rather than this one's.
+# Targets must be tracked regular files within the repository. The original
+# tests must pass before any mutation runs; errors and catchable interrupts
+# restore the active target before exiting.
 #
 # Usage:
 #   scripts/mutate.sh <table.json> [package...]
@@ -59,15 +62,67 @@ if ! git diff --quiet || ! git diff --quiet --cached; then
 	exit 1
 fi
 
-count=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$table")
+# Validate the entire table before changing any file: a clean diff says
+# nothing about untracked files, which checkout cannot restore.
+count=$(python3 - "$table" <<'PY'
+import json, pathlib, subprocess, sys
+mutations = json.load(open(sys.argv[1]))
+root = pathlib.Path.cwd()
+tracked = {}
+for entry in subprocess.check_output(["git", "ls-files", "--stage", "-z"]).split(b"\0"):
+    if entry:
+        metadata, name = entry.split(b"\t", 1)
+        mode, _, stage = metadata.split()
+        if stage == b"0" and mode in (b"100644", b"100755"):
+            tracked[name.decode()] = True
+for m in mutations:
+    target = root / m["file"]
+    resolved = target.resolve()
+    if (not resolved.is_relative_to(root) or resolved != target.absolute()
+            or not target.is_file() or str(resolved.relative_to(root)) not in tracked):
+        sys.exit(f"mutate.sh: target must be a tracked regular file within the repository: {m['file']}")
+print(len(mutations))
+PY
+)
 logs=$(mktemp -d)
+if ! go test "$@" >"$logs/baseline.log" 2>&1; then
+	echo "mutate.sh: baseline tests failed; no mutations applied. Full output: $logs/baseline.log" >&2
+	exit 1
+fi
 survived=0
 refused=0
+active=""
+
+restore_active() {
+	[ -n "$active" ] || return 0
+	if ! git --literal-pathspecs checkout -- "$active" || ! git --literal-pathspecs diff --quiet -- "$active"; then
+		echo "mutate.sh: $active did not revert cleanly; stopping before results become untrustworthy" >&2
+		return 1
+	fi
+	active=""
+}
+
+cleanup() {
+	local result=$?
+	trap - EXIT
+	# A second interrupt must not interrupt restoration itself.
+	trap '' HUP INT TERM
+	if ! restore_active; then
+		result=1
+	fi
+	exit "$result"
+}
+
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 i=0
 while [ "$i" -lt "$count" ]; do
 	file=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[int(sys.argv[2])]["file"])' "$table" "$i")
 	what=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[int(sys.argv[2])]["what"])' "$table" "$i")
+	active=$file
 	if python3 - "$table" "$i" <<'PY'
 import json, sys
 m = json.load(open(sys.argv[1]))[int(sys.argv[2])]
@@ -84,18 +139,21 @@ PY
 			echo "SURVIVED $what"
 			survived=$((survived + 1))
 		else
+			# A persistent tool or environment failure is not evidence that
+			# the mutation was caught. Check the restored source as a control.
+			restore_active
+			if ! go test "$@" >"$logs/baseline-after-$i.log" 2>&1; then
+				echo "mutate.sh: restored baseline failed; mutation result is inconclusive. Full output: $logs/baseline-after-$i.log" >&2
+				exit 1
+			fi
 			first=$(grep -m1 -E '^[[:space:]]*--- FAIL' "$out" | sed 's/^ *//' || true)
 			echo "CAUGHT   $what  <-  ${first:-build failure}"
 		fi
-		git checkout -- "$file"
-		git diff --quiet -- "$file" || {
-			echo "mutate.sh: $file did not revert cleanly; stopping before results become untrustworthy" >&2
-			exit 1
-		}
 	else
 		echo "REFUSED  $what -- its find text does not appear exactly once in $file"
 		refused=$((refused + 1))
 	fi
+	restore_active
 	i=$((i + 1))
 done
 
