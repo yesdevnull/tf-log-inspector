@@ -3,12 +3,43 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
+
+func TestCommandDiagnosticsCannotControlTheTerminal(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tfli")
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, out)
+	}
+	control := "\x1b]52;c;U0VDUkVU\a"
+	for name, args := range map[string][]string{
+		"input path":   {"--diagnose", filepath.Join(t.TempDir(), control+".log")},
+		"output path":  {"--diagnose", "-o", filepath.Join(t.TempDir(), control, "report.txt"), "../../testdata/provider-rpc.log"},
+		"flag":         {"--unknown-" + control},
+		"flag newline": {"--unknown-\nFORGED" + control},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := exec.Command(binary, args...).CombinedOutput()
+			if err == nil {
+				t.Fatal("invalid invocation succeeded")
+			}
+			if strings.ContainsAny(string(out), "\x1b\a") {
+				t.Errorf("diagnostic emits terminal controls: %q", out)
+			}
+			if strings.Contains(string(out), "\nFORGED") {
+				t.Errorf("argument injected a diagnostic row: %q", out)
+			}
+			if !strings.Contains(string(out), `\x1b]52;c;U0VDUkVU\a`) {
+				t.Errorf("diagnostic does not identify the escaped argument: %q", out)
+			}
+		})
+	}
+}
 
 func TestRunDiagnoseOnFixture(t *testing.T) {
 	var sb strings.Builder

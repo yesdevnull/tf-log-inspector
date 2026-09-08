@@ -532,9 +532,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchAgain(-1)
 			}
 		case "\\":
-			// Backslash drops the scope and leaves the position, so the
-			// entry on the pane's first line stays there and the rest of
-			// the log resumes beneath it. Bound in the raw log only:
+			// Backslash drops the scope and keeps an admitted position,
+			// so the log resumes beneath the current entry. An empty
+			// scope instead finds a match in the wider log. Bound here only:
 			// nowhere else has a scope to drop, and a key that acts
 			// invisibly elsewhere is worse than one that does nothing.
 			//
@@ -547,6 +547,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.raw.scope = nil
 				m.raw.notFound = false
+				m.reconcileRawCursor()
 			}
 		case "?":
 			m.showHelp = true
