@@ -24,12 +24,14 @@ func (s *session) parseProviderFragments(input string) (physical, logical []*vie
 		return nil, nil, nil, "", err
 	}
 	mask := []byte(input)
+	validation := []byte(input)
 	for index, message := range messages {
 		v := &view{text: message.Text, line: message.Fragments[0].Line, responseJSON: true}
 		v.cuts = append(v.cuts, sourceCut{})
 		pos := 0
 		for piece, fragment := range message.Fragments {
 			fragments = append(fragments, providerFragment{region{fragment.Start, fragment.End}, index, piece})
+			copy(validation[fragment.Start:fragment.End], providerMetadataMask(input[fragment.Start:fragment.End]))
 			for at := fragment.Start; at < fragment.End; at++ {
 				if mask[at] != '\n' && mask[at] != '\r' {
 					mask[at] = ' '
@@ -59,7 +61,20 @@ func (s *session) parseProviderFragments(input string) (physical, logical []*vie
 		}
 		pos = end
 	}
-	return physical, logical, fragments, masked, nil
+	return physical, logical, fragments, string(validation), nil
+}
+
+// Validation excludes body tokens without changing byte positions or the
+// leading spaces trimmed by the header parser. This mask must never enter
+// discovery: its filler is not a source identifier.
+func providerMetadataMask(body string) string {
+	mask := []byte(body)
+	for i, b := range mask {
+		if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+			mask[i] = 'x'
+		}
+	}
+	return string(mask)
 }
 
 func (s *session) renderProviderFragments(physical, logical []*view, fragments []providerFragment) (string, string, error) {
@@ -81,17 +96,20 @@ func (s *session) renderProviderFragments(physical, logical []*view, fragments [
 		if err != nil {
 			return "", "", err
 		}
-		masked.WriteString(text)
 		pos := 0
 		for i := 0; i < len(v.cuts); i += 2 {
 			output.WriteString(text[pos:v.cuts[i].output])
+			masked.WriteString(text[pos:v.cuts[i].output])
 			fragment := fragments[fragmentIndex]
 			cuts := logical[fragment.message].cuts
-			output.WriteString(rendered[fragment.message][cuts[fragment.piece].output:cuts[fragment.piece+1].output])
+			piece := rendered[fragment.message][cuts[fragment.piece].output:cuts[fragment.piece+1].output]
+			output.WriteString(piece)
+			masked.WriteString(providerMetadataMask(piece))
 			pos = v.cuts[i+1].output
 			fragmentIndex++
 		}
 		output.WriteString(text[pos:])
+		masked.WriteString(text[pos:])
 	}
 	return output.String(), masked.String(), nil
 }

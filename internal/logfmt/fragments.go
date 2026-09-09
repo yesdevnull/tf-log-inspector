@@ -24,6 +24,8 @@ type providerJSONPending struct {
 	body            strings.Builder
 	stack           []byte
 	quoted, escaped bool
+	last            byte
+	ranges          []JSONFragment
 }
 
 // ReconstructProviderJSON joins timestamped fragments by exact provider
@@ -60,11 +62,10 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 				}
 			}
 		} else if len(pending) != 0 {
+			// Physical continuations belong to the most recent entry, even
+			// when only a different component has unfinished JSON.
 			comp = active
 			p = pending[comp]
-			if p == nil {
-				return nil, fmt.Errorf("provider JSON at line %d: ambiguous continuation", line)
-			}
 		}
 		if p != nil {
 			message := &messages[p.index]
@@ -78,19 +79,29 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 				firstBytes = message.Fragments[0].End - message.Fragments[0].Start
 			}
 			if reason != "" {
-				// The failed fragment has not been appended by consume. Inspect
-				// the candidate through the failure, never its parser error text.
-				p.body.WriteString(raw[offset : offset+consumed])
 				return nil, providerJSONFailure(reason, line, startLine, len(message.Fragments)+1, p.body.Len(), firstBytes, consumed, providerJSONSyntaxOffset(p.body.String()))
 			}
-			message.Fragments = append(message.Fragments, JSONFragment{Start: start + offset, End: start + offset + consumed, Line: line})
+			for _, fragment := range p.ranges {
+				message.Fragments = append(message.Fragments, JSONFragment{Start: start + offset + fragment.Start, End: start + offset + fragment.End, Line: line})
+			}
 			if complete {
 				message.Text = p.body.String()
 				if !utf8.ValidString(message.Text) {
 					return nil, providerJSONFailure("UTF-8", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, 0)
 				}
 				if !json.Valid([]byte(message.Text)) {
-					return nil, providerJSONFailure("JSON syntax", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, providerJSONSyntaxOffset(message.Text))
+					syntaxOffset := providerJSONSyntaxOffset(message.Text)
+					err := providerJSONFailure("JSON syntax", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, syntaxOffset)
+					// Syntax offsets are one-based payload bytes; source ranges
+					// exclude transport headers and interleaved UI events.
+					remaining := syntaxOffset
+					for _, fragment := range message.Fragments {
+						if remaining > 0 && remaining <= int64(fragment.End-fragment.Start) {
+							return nil, fmt.Errorf("%w; syntax source line %d", err, fragment.Line)
+						}
+						remaining -= int64(fragment.End - fragment.Start)
+					}
+					return nil, err
 				}
 				delete(pending, comp)
 			}
@@ -202,8 +213,32 @@ func providerDiagnosticLabel(label string) bool {
 
 // Scan each byte once; structural validation runs only on a completed body.
 func (p *providerJSONPending) consume(payload string) (int, bool, string) {
+	p.ranges = nil
+	start := 0
+	failure := func(end int, reason string) (int, bool, string) {
+		p.body.WriteString(payload[start:end])
+		return end, false, reason
+	}
 	for i := 0; i < len(payload); i++ {
 		c := payload[i]
+		// An object cannot start within a string, including after an escape,
+		// where an object key is expected, or after a completed value/key.
+		// Objects at valid value positions stay in the body even when their
+		// fields resemble a UI event.
+		objectKey := len(p.stack) > 0 && p.stack[len(p.stack)-1] == '{' && (p.last == '{' || p.last == ',')
+		if c == '{' && (p.quoted || objectKey || p.last == '"' || p.last == '}' || p.last == ']') {
+			if n := terraformUIBytes(payload[i:]); n > 0 {
+				p.appendRange(payload, start, i)
+				i += n - 1
+				start = i + 1
+				continue
+			} else if n < 0 {
+				return failure(i+1, "invalid inline UI envelope")
+			}
+		}
+		if !isSpace(c) {
+			p.last = c
+		}
 		if p.quoted {
 			if p.escaped {
 				p.escaped = false
@@ -221,19 +256,27 @@ func (p *providerJSONPending) consume(payload string) (int, bool, string) {
 			p.stack = append(p.stack, c)
 		case '}', ']':
 			if len(p.stack) == 0 || (c == '}' && p.stack[len(p.stack)-1] != '{') || (c == ']' && p.stack[len(p.stack)-1] != '[') {
-				return i + 1, false, "delimiter mismatch"
+				return failure(i+1, "delimiter mismatch")
 			}
 			p.stack = p.stack[:len(p.stack)-1]
 			if len(p.stack) == 0 {
-				if !providerJSONSuffix(payload[i+1:]) {
-					return i + 1, false, "suffix grammar"
+				suffix := payload[i+1:]
+				for {
+					n := terraformUIBytes(strings.TrimLeft(suffix, " \t\r\n"))
+					if n <= 0 {
+						break
+					}
+					suffix = strings.TrimLeft(suffix, " \t\r\n")[n:]
 				}
-				p.body.WriteString(payload[:i+1])
+				if !providerJSONSuffix(suffix) {
+					return failure(i+1, "suffix grammar")
+				}
+				p.appendRange(payload, start, i+1)
 				return i + 1, true, ""
 			}
 		}
 	}
-	p.body.WriteString(payload)
+	p.appendRange(payload, start, len(payload))
 	return len(payload), false, ""
 }
 
@@ -271,4 +314,41 @@ func providerJSONSuffix(suffix string) bool {
 		i = next
 	}
 	return true
+}
+
+func (p *providerJSONPending) appendRange(payload string, start, end int) {
+	if start == end && len(p.ranges) != 0 {
+		return
+	}
+	p.body.WriteString(payload[start:end])
+	p.ranges = append(p.ranges, JSONFragment{Start: start, End: end})
+}
+
+// Terraform UI envelopes start with a root annotation. A raw annotation quote
+// inside a provider string cannot be escaped JSON data. Decode each candidate
+// once, and reject malformed candidates rather than scanning their nested bytes.
+func terraformUIBytes(text string) int {
+	if len(text) == 0 || text[0] != '{' {
+		return 0
+	}
+	rest := strings.TrimLeft(text[1:], " \t\r\n")
+	if !strings.HasPrefix(rest, `"@`) {
+		return 0
+	}
+	dec := json.NewDecoder(strings.NewReader(text))
+	var fields map[string]json.RawMessage
+	if dec.Decode(&fields) != nil {
+		return -1
+	}
+	var module string
+	if json.Unmarshal(fields["@module"], &module) != nil || module != "terraform.ui" {
+		return -1
+	}
+	for _, key := range []string{"@level", "@message", "@timestamp", "type"} {
+		var value string
+		if json.Unmarshal(fields[key], &value) != nil || value == "" {
+			return -1
+		}
+	}
+	return int(dec.InputOffset())
 }
