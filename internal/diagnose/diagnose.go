@@ -217,15 +217,11 @@ type Report struct {
 	UISlowestMs    uint32
 	UITotalSpanMs  uint64
 	UIClampedSpans int
-	// UIWallClockMs is the later of two figures: the UI-hook spans' own
-	// EndMs offsets, and attrib.ContextCollector's FirstTS/LastTS span over
-	// EVERY structured line this log carries. The second term is what
-	// covers a log whose last event is a provision_*/refresh_* completion --
-	// span.isCompletionType builds no span for either, so the first term
-	// alone would understate the log by whatever came after the last
-	// span-building completion. 0 if there is neither a UI-hook span nor a
-	// parseable structured-line timestamp.
-	UIWallClockMs uint64
+	// UIWallClockMs spans the first and last parseable timestamps on structured
+	// lines. UIWallClockAvailable distinguishes coincident parsed endpoints
+	// from a capture with no usable clock.
+	UIWallClockMs        uint64
+	UIWallClockAvailable bool
 
 	SlowestResources      []ResourceRow       // ranked by duration descending, top 10
 	ByResourceType        []ResourceTypeTotal // ranked by total duration descending, top 10
@@ -386,16 +382,12 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		}
 	}
 
-	// cc parses every structured line's timestamp unconditionally (see
-	// attrib.ContextCollector.LastTS), so its span covers a trailing
-	// provision_*/refresh_* completion that built no UI-hook span of its
-	// own. Taken as a floor under the span-derived figure below, not a
-	// replacement for it: a log with UI-hook spans but no address-context
-	// hooks at all (structured output below the hook-carrying types) still
-	// wants the span-derived figure, and cc.FirstTS/LastTS cover only lines
-	// this same scan fed to it.
+	// cc parses every structured line's timestamp independently of whether
+	// that line builds a UI span. Its endpoints therefore describe observed
+	// capture time without deriving a clock from reported durations.
 	if !cc.FirstTS().IsZero() {
 		r.UIWallClockMs = uint64(cc.LastTS().Sub(cc.FirstTS()).Milliseconds())
+		r.UIWallClockAvailable = true
 	}
 
 	r.UISpanCount = len(uiSpans)
@@ -410,10 +402,6 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		if s.StartClamped {
 			r.UIClampedSpans++
 		}
-		if uint64(s.EndMs) > r.UIWallClockMs {
-			r.UIWallClockMs = uint64(s.EndMs)
-		}
-
 		// ResourceType and Action come straight from a structured-output
 		// line's JSON, with nothing upstream constraining their shape --
 		// unlike a field key, which logfmt.ValidKey already restricts to an
@@ -693,14 +681,8 @@ func (r Report) Render(w io.Writer) error {
 	switch {
 	case !r.Stats.FirstTS.IsZero():
 		fmt.Fprintf(b, "  log wall-clock       %.1fs\n", r.Stats.LastTS.Sub(r.Stats.FirstTS).Seconds())
-	case r.UISpanCount > 0:
-		// Structured-output lines carry no scanner-visible timestamp (see
-		// span.Span's StartMs/EndMs doc comment), so Stats.FirstTS/LastTS
-		// stay zero for a pure UI-hook log. UIWallClockMs is derived instead
-		// (see its own doc comment), from the UI-hook spans' EndMs offsets
-		// and attrib.ContextCollector's own timestamp span -- labelled as
-		// derived rather than left silently absent.
-		fmt.Fprintf(b, "  log wall-clock       %.1fs (derived from UI-hook resource timings)\n", float64(r.UIWallClockMs)/1000)
+	case r.UIWallClockAvailable:
+		fmt.Fprintf(b, "  log wall-clock       %.1fs (derived from structured timestamps)\n", float64(r.UIWallClockMs)/1000)
 	default:
 		fmt.Fprintf(b, "  log wall-clock       unavailable\n")
 	}

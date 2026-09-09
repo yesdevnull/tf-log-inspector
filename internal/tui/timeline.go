@@ -606,6 +606,7 @@ func (m *Model) renderTimeline(w, h int) string {
 	if len(spans) == 0 {
 		lines := wrapToWidth(fmt.Sprintf("Timeline positions unavailable: %d admitted observations; %dms retained in duration totals.", timing.AdmittedCount, timing.AdmittedMs), w)
 		lines = append(lines, timingExclusionNotes(timing, w)...)
+		lines = fitPaneSections([]paneSection{lines}, w, h)
 		return styles.note.Render(strings.Join(lines, "\n"))
 	}
 
@@ -901,7 +902,7 @@ func (m *Model) timelineNarrowed() bool {
 // laneBar and timeAxis take theirs: the frame measures the window once and
 // every part of it drawn against that scale is given the same number. A
 // zero window -- every span zero-extent, which the UI tier can produce --
-// reports 0%, there being no window for anything to be a fraction of.
+// reports the fraction as unavailable because there is no denominator.
 //
 // The percentage truncates rather than rounding, so it never reports 100%
 // for a window with idle time in it, and never rounds a run that was 0.4%

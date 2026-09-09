@@ -803,6 +803,33 @@ func TestReportWallClockUnavailableWhenNeitherSourceExists(t *testing.T) {
 	}
 }
 
+func TestReportWallClockUnavailableWhenUIDurationHasNoParsedTimestamp(t *testing.T) {
+	const in = `{"@level":"info","@timestamp":"bad","type":"apply_complete","hook":{"elapsed_seconds":1}}`
+	r := build(t, in+"\n")
+	if r.UISpanCount != 1 || r.UITotalSpanMs != 1000 {
+		t.Fatalf("UI timing = %d spans/%dms, want one admitted 1000ms duration", r.UISpanCount, r.UITotalSpanMs)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "log wall-clock       unavailable") {
+		t.Errorf("report inferred a capture clock from a duration with no parsed timestamp:\n%s", out)
+	}
+}
+
+func TestReportWallClockPreservesCoincidentParsedEndpoints(t *testing.T) {
+	const in = `{"@level":"info","@timestamp":"2026-09-04T09:15:03Z","type":"apply_complete","hook":{"elapsed_seconds":1}}`
+	r := build(t, in+"\n")
+	if r.UISpanCount != 1 {
+		t.Fatalf("UISpanCount = %d, want one admitted duration", r.UISpanCount)
+	}
+	out := render(t, r)
+	if !strings.Contains(out, "log wall-clock       0.0s") {
+		t.Errorf("report did not preserve the genuine zero between coincident parsed endpoints:\n%s", out)
+	}
+	if strings.Contains(out, "log wall-clock       unavailable") {
+		t.Errorf("report treated parsed coincident endpoints as unavailable:\n%s", out)
+	}
+}
+
 // --- Task 2 fix round 1. ---
 
 // Finding 1: SLOWEST RESOURCES' address column must show real, differing

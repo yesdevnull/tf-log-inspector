@@ -523,6 +523,19 @@ func TestTimelineExplainsExcludedPositionReasonsWithoutClippingTotals(t *testing
 	}
 }
 
+func TestUnavailableTimelineMarksAHeightCut(t *testing.T) {
+	m := New(&model.Log{RPCSpans: []span.Span{{
+		DurationMs: 20, TimestampStatus: logfmt.TimestampBeforeOrigin, Fidelity: span.FidelityReported,
+	}}}, "x.log")
+	lines := strings.Split(unstyled(m.renderTimeline(60, 2)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("timeline rendered %d lines at height 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if strings.TrimRight(lines[1], " ") != moreBelowMark {
+		t.Errorf("short unavailable timeline ends on %q, want marked cut %q", lines[1], moreBelowMark)
+	}
+}
+
 func TestLoadedMixedTimingKeepsAdmittedTotalsAndChoosesRPC(t *testing.T) {
 	l := loadedMixedPositionLog(t)
 	if len(l.RPCSpans) != 2 || len(l.UISpans) != 1 {
