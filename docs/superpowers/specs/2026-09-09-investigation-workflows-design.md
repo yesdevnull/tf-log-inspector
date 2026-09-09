@@ -1,0 +1,620 @@
+# Investigation workflows, evidence quality and run comparison
+
+## Status and purpose
+
+Draft for Dan's review, 9 September 2026. This document covers all eight
+improvements identified in the application assessment. It proposes behaviour
+and boundaries for later implementation plans; it does not authorise application
+changes or represent an implemented feature set.
+
+The goal is to make an investigation flow naturally from a slow provider or
+resource type to a resource, its calls and the supporting log text, while making
+the limits of the captured evidence visible. Reports and comparisons should
+support the same reasoning without requiring the terminal interface.
+
+The working proposal for comparison is a CLI report over two raw logs, with text
+and JSON output. Dan was asked whether comparison should instead consume JSON
+exports or include an interactive TUI. The proposed default is used throughout
+this draft and remains a scope decision for review.
+
+## Evidence and relationship to existing designs
+
+The assessment inspected the CLI, model, profiling, attribution, response
+reconstruction and TUI code, exercised the application, and ran the full Go test
+suite and build successfully at commit `524e757`. Those checks establish the
+starting point, not validation of the proposed behaviour.
+
+Two defects were observed:
+
+- Raw-log search finds a query inside a logical entry but returns to the entry's
+  first line. A synthetic entry with 50 continuation lines before two matching
+  lines left both matches off-screen; pressing `n` then reported no match.
+- The profile report promises that rankings hold because spans incur the same
+  logging cost. The README repeats that claim. The TUI already states that
+  rankings are approximate because logging overhead varies between calls.
+
+The original [application design](2026-09-03-tf-log-inspector-design.md) records
+an important constraint: an inferred address-ranking view was withheld after
+only 15.9% of RPC time in the measured capture resolved to Contained or Likely,
+against its 50% gate. This draft does not silently remove that gate. The new
+Resources view is grounded in observed Terraform UI resource timings; inferred
+RPC associations are supplementary evidence, visibly separated from those
+timings. Ranking resources by inferred RPC totals remains outside this proposal.
+
+The [provider reconstruction design](2026-09-09-provider-fragments-design.md)
+requires complete reconstruction before scrubbing can publish output. That
+requirement remains. This draft changes the viewer's ability to retain verified
+messages around failures, without relaxing the scrubber's acceptance rules.
+
+Approval of this design would explicitly expand the original design's scope to
+include JSON profile export and CLI run comparison. Historical design documents
+remain historical; this document records the proposed changes in policy.
+
+## Approaches considered
+
+1. **Shared investigation data with separate consumers — recommended.** Add
+   focused model functions for resource summaries, capture quality and report
+   data. The TUI, text reports and JSON use the same calculations. Navigation,
+   search positions and response recovery remain local to their domains. This
+   reduces inconsistent results while allowing independent delivery.
+2. **Eight independent enhancements.** This makes individual changes easier to
+   start but encourages different definitions of coverage, missing values and
+   timing totals in each output. Repeated calculations would need reconciliation
+   before reliable comparison could ship.
+3. **A unified interactive comparison workspace.** This could support side by
+   side investigation, but introduces two active logs, paired selection state,
+   separate clocks and considerably more navigation. Its additional design
+   cost is unnecessary for the first useful comparison report.
+
+Use the existing Go toolchain and dependencies. Avoid a new query language,
+storage layer, plugin system or general report framework.
+
+## Shared rules
+
+### Measurements and identity
+
+- UI-hook duration measures a resource operation. RPC duration measures a
+  provider call. They overlap and must never be added, subtracted to claim
+  unexplained time, or represented as interchangeable measurements.
+- UI and RPC timeline offsets have different origins. Every exported timing
+  identifies its tier and clock origin when known. Comparisons use durations
+  and aggregates, not alignment of raw offsets between captures.
+- Whole-second UI measurements retain their rounding qualification. Clamped
+  starts and saturated durations retain their flags; saturated totals are
+  lower bounds, not exact rankings.
+- Source bytes and scanner entry identities remain authoritative. Derived
+  views, reconstructed text and filters never modify either.
+- An inferred address always retains its confidence. Ambiguous calls never
+  acquire a chosen address, and their duration is never divided among candidates.
+- Distinguish observed zero, absent observations and unavailable measurement
+  tiers. A missing tier cannot become a zero-duration run.
+
+### Disclosure and diagnostics
+
+Text profiles, JSON exports and comparisons contain unmasked resource addresses
+and are for local investigation. JSON contains structured timing and source
+references, not raw log bodies or credential fields. This limits its content but
+does not make it an anonymised artefact.
+
+Terminal rendering escapes untrusted controls. Machine output uses valid JSON
+encoding and leaves identifier values intact. Diagnostics use fixed reason codes,
+counts and locations; they do not embed source text or JSON parser snippets.
+`--diagnose` continues to avoid resource names and captured field values.
+
+### Scope and reproducibility
+
+Whole-log quality facts remain labelled as whole-log facts. Filtered tables and
+timeline summaries report their selection scope. Filtering cannot make an input
+anomaly disappear from the capture summary or turn an unavailable tier into an
+available one.
+
+Every ranking has a deterministic tie-break: domain identity, then source entry
+and occurrence where needed. Stable ordering is a presentation guarantee, not
+an assertion that nearly equal durations differ meaningfully.
+
+## 1. Search that lands on the matching text
+
+### Behaviour
+
+Keep literal, case-sensitive search with `/`, `Enter`, `Esc`, `n` and `N`.
+Do not introduce regular expressions, wraparound or a new search language.
+
+Represent a raw-log match by entry, physical line within the entry and position
+within that line. Search the same safe display text the pane renders: remove
+ANSI sequences, then apply the existing visible escaping of controls. Translate
+the match's text position into display columns before setting horizontal scroll.
+Byte offsets must not be mistaken for terminal cell widths.
+
+A submitted query includes the current top line from the current horizontal
+position. If it has no match there, continue forward through visible lines.
+Successful search brings the matched line and the start of the match into view.
+An over-wide match need not fit in full. A failed search leaves the viewport
+unchanged and reports failure.
+
+`n` and `N` advance between non-overlapping occurrences, including multiple
+occurrences on the same line and inside the same logical entry. Search stays
+within active filters and request scope. It stops at the boundary without
+wrapping. Manual scrolling invalidates the previous match anchor; the next
+search begins at the new visible position rather than an abandoned match.
+
+Use the same occurrence semantics in the reconstructed-response viewer so its
+search keys do not behave differently on repeated text. Reuse a small literal
+match helper if useful; do not merge the two view-state implementations.
+
+### Acceptance
+
+- A query after hundreds of continuation lines opens the actual matching line.
+- Forward and backward repetition visit multiple matches within an entry and
+  within one line, then correctly report the end of the search.
+- Horizontal positioning works with Unicode, wide characters and ANSI-coloured
+  source text. Text rendered as visible control escapes is searchable as shown.
+- Hidden entries and other request scopes never satisfy the active search.
+- Empty queries, cancellation and failed searches preserve the appropriate
+  position. Reconstructing and closing a response restores the raw position.
+
+## 2. Consistent qualification of timing results
+
+Replace the false equal-cost statement in the profile and README with the
+existing TUI's meaning: logging can disproportionately inflate chatty calls;
+rankings are approximate; absolute times do not transfer to an unlogged run.
+
+Keep UI rounding, start clamping, saturation and logging overhead distinct.
+They describe different limitations and must not collapse into a generic warning
+whose cause the reader cannot identify.
+
+Carry the same meaning into profile JSON and comparison output using explicit
+qualification codes plus readable explanations. The empirical timing example
+may remain as an example, never as a correction factor. Do not estimate unlogged
+durations or adjust observed rankings by log volume.
+
+### Acceptance
+
+Inspect the README, CLI help, profile output, TUI help and compact caveat for
+contradictions. Exercise report paths with and without spans. Tests verify that
+qualifications survive relevant paths and that the false guarantee is absent;
+they need not pin every incidental sentence.
+
+## 3. Resources view and resource/module filtering
+
+### Resource rows
+
+Use the reserved `3` key for Resources. Its primary rows group observed UI-hook
+operations by exact Terraform resource address. Show operation count, summed
+observed UI duration and longest observed UI operation. Use “operations”, not
+“resources”, for repeated completions on one address.
+
+Rank by observed UI total, then exact address. Preserve operation-level detail
+so repeated reads/applies of one address remain inspectable. Do not collapse
+their distinct source locations or lifecycle actions.
+
+Supplement each resource with associated RPC count and total, separated into
+Contained/Likely and weaker Overlapping evidence. Label these as inferred and
+partial. Do not imply that all calls made by that resource have been recovered.
+Do not assign a provider to a UI resource from a type-name prefix.
+
+An evidence summary outside the ranked rows accounts for all RPC time. Classify
+calls without resource type as provider-level first. Among remaining calls,
+absence of collected address context means no-context; otherwise use Contained,
+Likely, Overlapping, Ambiguous or Unattributed. These reporting buckets are
+disjoint and reconcile with the RPC total. Preserve the existing full confidence
+distribution alongside them, clearly labelled with its own denominator. Do not
+treat either distribution as UI resource time.
+
+When there are no observed UI timings, show an explanation and routes to Calls,
+Types and capture quality. The view does not substitute a misleading inferred
+ranking. An address present only in context or RPC attribution can still be
+selected as a filter, but has no invented UI duration row.
+
+### Filters and interaction
+
+Add exact resource-address selection and module-subtree selection to the
+existing structured filtering model. Alternatives within one dimension are OR;
+different dimensions are AND. Root module is an explicit choice. Match module
+segments and instance keys, not naive string prefixes: `module.app` must not
+match `module.application`, and dots inside quoted keys are not separators.
+
+Module selection means the selected module instance and its descendants. A
+parameterised module instance remains distinct from another instance. Use
+observed module metadata where available; validate any address decomposition
+with Terraform address examples already represented in the repository.
+
+High-cardinality resource choices need a literal narrowing input in the facet
+pane. It narrows available choices, not the results until a choice is selected.
+Do not add a second implicit filter by typing into the chooser.
+
+For UI operations, resource/module filters use observed metadata. For RPC calls,
+they use named attribution and display its confidence. Ambiguous and unattributed
+calls do not silently match a named resource. Show excluded RPC time alongside
+the resource selection so the reader can see the incomplete association.
+
+Provider and RPC-method filters apply only to RPC evidence; they cannot infer a
+provider or method for a UI operation. Resource/type/module filters apply where
+their metadata exists. The Resources view labels those separate scopes; RPC-only
+filters narrow its supplementary RPC figures without altering observed UI rows.
+
+Raw-log provider and severity filtering retains its existing meaning. Resource,
+type and RPC dimensions do not suddenly discard surrounding raw text. Entering
+a particular RPC still uses its request scope. Opening a UI operation jumps to
+its observed completion entry with surrounding context; it does not present
+inferred related text as a complete resource-specific raw log.
+
+### Acceptance
+
+Cover UI-only, RPC-only and mixed logs; repeated operations; root and nested
+modules; numeric and string instance keys; low and zero attribution coverage;
+ambiguous calls; and resource selections with no matching RPCs. UI totals and
+RPC totals reconcile independently. Review terminal layouts at existing golden
+widths, including availability of evidence qualifications on narrow screens.
+
+## 4. Drill down from aggregates and return predictably
+
+Enter on a provider or resource-type row opens Calls with that value added to
+the current selection. It preserves other active filters, so drill-down is a
+narrowing action rather than a hidden reset. A type with only UI operations opens
+its Resources view instead; the footer names the available action.
+
+Enter on a resource opens its observed operation list. From there, the reader
+can open an operation's source entry or switch to the associated RPC call list.
+Association confidence remains visible. A resource with no named RPCs states
+that fact rather than implying that it made no provider calls.
+
+Maintain navigation history only for explicit drill-down actions. Each frame
+captures the prior view, selection, sort, filters and viewport state. Esc returns
+one frame and restores it. Once there is no frame, existing Esc filter clearing
+applies. Modal search/help/response dismissal takes precedence over history.
+
+Explicit numbered view changes end the current drill-down chain, matching the
+existing distinction between opening a call and independently changing views.
+`\` expands a request-scoped raw log to the whole log without consuming its
+return destination. Facet edits inside a drill-down affect that child view;
+returning restores the parent snapshot.
+
+Store identities rather than assuming a row index survives a rebuild. If a
+restored selection is unavailable, select the nearest valid row and preserve
+the rest of the snapshot. Never dereference stale filtered-slice positions.
+
+### Acceptance
+
+Exercise provider → calls → raw log → response → back, type → resources →
+operation → raw log, and resource → associated calls. Cover child filter edits,
+sorting, empty results, terminal resizing, manual view changes and every Esc
+precedence. Returning must restore the investigation the reader actually left.
+
+## 5. Actionable text profiles
+
+Retain current provider/type rankings and the separate UI/RPC measurements.
+Extend slowest RPC rows with source location and named attribution where
+available, always qualified by confidence. Ambiguous calls show a candidate
+count, never a guessed address. UI operation rows include source locations too.
+
+For text output, long addresses may occupy a following indented line rather
+than becoming indistinguishable truncated labels. Source references identify
+one-based physical lines in the original log. Keep scanner entry ordinals as
+internal identifiers; compute exact physical locations from source offsets,
+not the saturating `Entry.Lines` counter.
+
+Add observed busy time and longest low-concurrency/idle intervals, using the
+model calculations already used by the timeline. Use the same tier selection,
+window definition and thresholds as the current timeline. A UI-only log gets
+UI-tier analysis rather than no concurrency section. Never mix the two clocks.
+
+Say “no observed RPC work” or “no observed UI work”, as appropriate, for gaps.
+Such a gap does not prove Terraform was idle, nor does a long active span prove
+it caused all other work to wait. Distinguish longest observed active work from
+a dependency-critical path, which these logs have not established.
+
+Proposed `--limit N` controls text ranking and interval lists: default 20,
+`0` means all, negative values are errors. Summary totals always cover all
+eligible observations; headings show truncation. This flag applies to text
+profile and comparison output only.
+
+### Acceptance
+
+Check untruncated source/address identity, deterministic ties, UI-only analysis,
+clamped starts, zero-duration observations, lower bounds, full versus limited
+lists, and propagation of writer errors. Terminal controls in addresses and
+paths must not create additional diagnostic rows or execute terminal sequences.
+
+## 6. Capture-quality summary
+
+### Shared facts
+
+Introduce a focused model value retaining quality facts that current collectors
+already expose, plus narrowly scoped rejection counters where an input can
+currently be skipped without explanation. Collect facts during the existing
+scan; do not load a second diagnose report just to display its text.
+
+Include available measurement tiers and counts; RPC response observations versus
+successfully built spans; missing or invalid duration values; malformed UI data;
+backwards timestamps; saturated durations/line counts; clamped span starts;
+request-ID/component interning overflow; capped capability tracking; incomplete
+resource contexts; unmatched terminators; and attribution counts and time totals.
+
+Tier availability means at least one valid timing observation was built for that
+tier. A separate evidence state records relevant markers or rejected observations
+when no valid timing exists. A missing tier therefore cannot falsely claim the
+log contains no provider traffic or no structured stream.
+
+Keep missing timestamps or schema fields separate from JSON syntax errors.
+Counters at different processing stages may overlap and must not be summed into
+a fabricated “bad lines” total. Rejection categories within one stage should be
+mutually exclusive where a total is presented. Document each denominator.
+
+Nameable RPC share retains the existing definition, Contained plus Likely over
+all RPC span time, and also shows the actual numerator and denominator. An
+additional eligible-resource-call share may be shown only with its distinct
+denominator. Zero denominator means unavailable, not 0% or 100% coverage.
+
+Incomplete context means an observed start lacked a matching terminator. It is
+not proof the resource failed: capture truncation, cancellation and unsupported
+events may look similar. Do not manufacture completion durations for these
+contexts. End-of-capture context bounds remain attribution aids only.
+
+### Presentation
+
+The TUI header exposes a compact quality indicator and `i` opens a scrollable
+capture-quality panel. Keep limitations visible even when filters hide affected
+spans. The panel distinguishes unavailable timing, degraded observations and
+attribution uncertainty; it does not assign an arbitrary health score.
+
+Text profiles include a short summary before rankings. JSON carries the facts
+and qualification codes. Diagnose keeps its content restrictions and can consume
+the shared definitions without requiring the whole-file model-loading path.
+Introduce common calculations incrementally, preserving its streaming scan.
+
+Response reconstruction is lazy. Until requested, its quality state is “not
+checked”, not “valid”. Viewing a response can add reconstruction diagnostics to
+the TUI panel; ordinary profile generation does not reconstruct every body.
+
+### Acceptance
+
+Use controlled malformed, truncated and mixed fixtures to verify each fact and
+its denominator. Check that normal TUI loading and profile output disclose
+rejected timing evidence, that no-data guidance names the actual limitation,
+and that diagnose remains free of addresses and captured values.
+
+## 7. JSON profiles and CLI run comparison
+
+### CLI contract — proposed new options
+
+These are proposed interfaces, not existing flags:
+
+```text
+tfli --profile --format json -o profile.json run.log
+tfli --profile --limit 0 run.log
+tfli --compare [--format text|json] [--limit N] before.log after.log
+tfli --compare --format json -o comparison.json before.log after.log
+```
+
+`--format` defaults to `text` and applies only to profile and comparison modes.
+`--compare` is mutually exclusive with profile, diagnose and scrub, and requires
+exactly two raw-log paths. Other modes retain their current arity. Explicit
+`--limit` with JSON is rejected because JSON always exports the complete data.
+Unknown formats, invalid limits and irrelevant options fail before output opens.
+
+For comparison, protect both input files from output aliasing, including symbolic
+and hard links. Read and validate both inputs before rendering. Use the existing
+report writing policy for unrelated output files; do not introduce a hidden
+change to overwrite semantics in this feature.
+
+### Profile data contract
+
+Add a concrete profile data structure assembled from model calculations. Text
+and JSON renderers consume that structure; neither parses the other's output.
+Keep presentation width, formatted duration strings and row truncation outside
+the calculation model.
+
+The first JSON schema includes:
+
+| Field group | Required meaning |
+| --- | --- |
+| Identity | `schema_version: 1`, `kind: "profile"`, tool version, input basename and byte size |
+| Tiers | Availability, observation counts, duration unit `ms`, clock origins when known |
+| Quality | Measured counters, attribution distribution, reconstruction status and qualifications |
+| RPC observations | Local source entry identity, physical line/byte reference, method, provider, type, duration, offsets, clamping and attribution |
+| UI observations | Local source identity, exact resource address, action, duration, offsets and saturation |
+| Aggregates | Complete provider/type/resource rows with separate UI and RPC measurements |
+| Timeline summary | Analysed tier, window definition, observed busy duration, peak concurrency and complete qualifying interval list |
+
+Use source-entry identifiers local to each capture. Do not export internal
+interned request-ID numbers as portable identities or invent a request-ID string
+the model has not retained. Exact source byte offsets remain available even if
+displayed physical line counters exceed existing compact index fields.
+
+Unavailable values are explicit nulls or absent tier objects according to the
+schema; present numerical observations, including zero, are numbers. Arrays
+have deterministic order. Do not include current generation timestamps or
+absolute input paths by default, so repeated exports of the same input with the
+same tool version are reproducible.
+
+Schema versioning identifies the format; it does not authorise compatibility
+adapters or promises to preserve old schemas indefinitely. No JSON import or
+backward-compatibility layer is included. A later plan defines exact field names
+within these groups before implementation and keeps the schema in tests/docs.
+
+### Comparison behaviour
+
+Load both raw logs with the same parser/model version. Label them before and
+after in all text and JSON. Compare separately by provider, resource type and
+provider/resource-type/RPC-method tuple. These stable domain keys do not depend
+on request IDs or source line numbers changing between runs.
+
+For each group show before/after observation count, summed duration, mean
+duration and maximum duration, plus signed absolute and percentage deltas where
+defined. Mean is unavailable for zero observations. Percentage change from zero
+is unavailable, not infinity. Sort duration changes deterministically, with
+increases first and explicit added/removed rows.
+
+Added/removed means present in only one capture's observed data. It does not
+assert that a Terraform resource was created or destroyed. If both tiers are
+available, absence from a group may use zero observations for that side; if a
+whole tier is unavailable, comparisons for that tier are unavailable instead.
+
+Offer exact-address UI comparison as a separate section, matching address and
+action and aggregating repeated observations. Do not match by inferred RPC
+address, alias similarity or fuzzy resource names. Independent scrub runs may
+produce different aliases; the tool cannot infer cross-file identity. Explain
+that limitation without attempting to deanonymise either input.
+
+The report separates call-volume changes from per-call mean changes. It does
+not claim a causal explanation for either. UI rounding and saturation survive
+into deltas. If either side's timing is a lower bound, retain both observations
+and their flags but make the timing delta and percentage unavailable; subtracting
+two lower bounds does not establish a bound on their difference. Keep such rows
+outside the exact timing-change ranking. Their observation-count deltas remain
+available when the counts themselves are complete.
+
+Both captures' quality summaries accompany the comparison. Missing tiers,
+incomplete contexts and differing observable provider identities are explicit.
+Logging configuration equivalence is “unknown” unless directly established by
+captured evidence; similarity of line counts cannot certify comparability.
+
+Comparisons produce observations, not pass/fail performance judgements. Exit
+status remains success for a rendered report, including unavailable sections;
+input/argument/render failures remain errors. CI regression thresholds, workload
+normalisation, provider-version reconciliation and an interactive comparison
+workspace are separate future proposals.
+
+### Acceptance
+
+Verify JSON round trips through the standard decoder, all rows survive export,
+text and JSON agree on underlying totals, output is deterministic, and failures
+never leave a successful-looking JSON stream. Test identical logs, added and
+removed groups, changed call counts, equal totals with different counts, zero
+baselines, empty logs, disjoint tiers, repeated UI actions, lower bounds and
+independently renamed inputs. Protect both comparison inputs from `-o` aliasing.
+
+## 8. Partial response recovery for inspection
+
+### Reconstruction outcome
+
+Separate structural reconstruction results from consumer policy. A result can
+contain verified complete messages and content-free diagnostics with affected
+source ranges. The viewer consumes usable messages; the scrubber requires a
+diagnostic-free complete reconstruction before transformation and publication.
+
+Use one parser and one definition of message ownership. Do not fork a lenient
+parser for viewing or add a permissive switch that the scrubber could enable
+accidentally. Preserve exact component isolation and source-fragment mapping.
+
+After malformed JSON, retain completed messages already verified. Continue
+independently tracked components where ownership remains provable. Once a
+component's stream loses a trustworthy boundary, mark that component unavailable
+for the remainder of the capture; do not guess that a later `{` begins a new
+message. A valid-looking prefix can be payload inside an unfinished string.
+
+If ownership failure cannot be confined to one component, stop recovery at that
+point and retain only earlier verified messages. Incomplete messages at EOF get
+diagnostics; they do not invalidate independently verified completed messages.
+This intentionally recovers fewer responses than speculative resynchronisation.
+The existing limitation still applies: unrelated same-component text inserted
+inside an unfinished JSON string can be indistinguishable from genuine payload.
+Recovery does not claim to detect that unobservable mixing.
+
+### Viewer behaviour
+
+Resolve the selected raw physical position to its fragment range, rather than
+returning an unrelated first response that merely overlaps the same logical
+entry. Opening a fragment of a recovered response shows its full verified body
+and a notice that other responses could not be reconstructed.
+
+Distinguish “no response at this position”, “this response is incomplete or
+invalid” and “this stream is unavailable after an earlier failure”. Show safe
+source locations and reasons, with Raw Log always available. Preserve scrolling,
+search and exact return position. The quality panel reports reconstruction as
+complete, partial or failed only after it has actually run.
+
+Scrubbing continues to reject any reconstruction diagnostic and create no output.
+Neither the existence of some valid messages nor successful viewer inspection
+changes that condition. Existing scrub privacy and metadata-preservation tests
+must remain intact.
+
+### Acceptance
+
+Exercise good A / malformed B / good A, malformed A / later apparent A start,
+completed A / incomplete A at EOF, multiple responses associated with one entry,
+interleaved providers, inline UI envelopes, invalid UTF-8 and ambiguous ownership.
+Verify retained source mapping, deterministic diagnostic ordering, no unsafe
+same-stream resynchronisation, and rejection without output by the scrubber for
+every partially recoverable input.
+
+## Architecture and delivery boundaries
+
+Keep parsing in `internal/logfmt`, timing extraction in `internal/span`, address
+evidence in `internal/attrib`, and reusable investigation calculations in
+`internal/model`. `internal/profile` owns report assembly/rendering and the CLI
+owns option validation and input/output handling. A small comparison package is
+justified only if its domain calculations outgrow a focused model file.
+
+Do not rewrite these packages wholesale. Introduce the minimum shared values
+needed by the next consumer, migrate duplicate calculations with parity tests,
+and preserve the streaming diagnose path. Index source lines and response ranges
+only when needed; avoid rescanning all source bytes for every exported row or
+TUI keypress. Benchmark new projections on sanitised large fixtures before
+introducing parallel loading or a new storage strategy.
+
+The following are implementation-plan boundaries, not implementation plans:
+
+| Boundary | Includes | Depends on |
+| --- | --- | --- |
+| A. Timing qualifications | Item 2, report/README consistency | None |
+| B. Search positions | Item 1, response occurrence parity | None |
+| C. Capture evidence | Item 6 facts, quality presentation and location support | A for wording |
+| D. Resources and filters | Item 3, observed operation projection and typed selection | C for coverage presentation |
+| E. Investigation navigation | Item 4, history and resource operation drill-down | D for resource paths; aggregate-to-call path can ship earlier |
+| F. Profile data and text | Item 5, common report data, complete interval analysis | C; D for shared resource aggregates |
+| G. JSON export | Item 7 schema and profile encoding | F |
+| H. Run comparison | Item 7 comparison model, CLI and encoders | G; shares F's data |
+| I. Response recovery | Item 8 parser outcomes and strict scrub policy | C only for quality-panel integration |
+
+Items A, B and the reconstruction core of I can proceed independently. Do not
+make small correctness fixes wait for Resources or comparison. Each boundary
+must leave a runnable application and have its own acceptance evidence.
+
+## Validation and review requirements
+
+Every later feature or fix follows TDD using real parsing, model and rendering
+behaviour. Fixtures are synthetic or sanitised. Test observable contracts and
+important failure boundaries, not copied implementation details or mocked
+behaviour. Capture and assert expected error output.
+
+Each implementation plan includes focused regression cases from its section,
+the full Go suite and build, the repository's required CI checks, independent
+review and the separate test-cleanup pass required by project conventions.
+TUI changes include intentional golden updates, inspection through the existing
+golden-reading script, raw styling diffs and real terminal interaction.
+
+Cross-feature review must verify that filtered resource evidence never changes
+whole-log quality, that text and JSON calculations agree, that history restores
+selection scope, that repeated operation identities survive drill-down/export,
+and that partial response recovery cannot weaken scrubbing.
+
+For this document, review all eight sections against their original requests,
+check the existing attribution gate and reconstruction requirements explicitly,
+and resolve conflicting semantics before marking the design approved.
+
+## Scope reserved for later proposals
+
+No live tailing, remote log fetching, database, persistent bookmarks, interactive
+run comparison, JSON import, CSV export, fuzzy identity matching, automatic
+performance thresholds, inferred critical path, new attribution mechanism or
+inferred resource-time ranking is included. These are possible extensions, not
+dependencies concealed inside the eight agreed areas for exploration.
+
+## Review decisions
+
+The draft recommends these decisions for Dan's review:
+
+1. Resources ranks observed UI operations and shows inferred RPC evidence
+   separately, retaining the existing restriction on inferred rankings.
+2. Explicit drill-down restores parent filters and positions through Esc;
+   manual numbered view changes end the history chain.
+3. JSON exports complete structured results; text alone has an explicit limit.
+4. Comparison initially accepts two raw logs and emits text/JSON, with no
+   automatic pass/fail verdict or claim that logging configurations match.
+5. Response recovery quarantines a damaged component instead of guessing a
+   same-stream restart; scrubbing remains strict for every reconstruction error.
+
+Once these behaviours are agreed, revise this document to approved status and
+split it into the smaller implementation plans Dan requests. No implementation
+plans or application changes are part of this drafting task.
