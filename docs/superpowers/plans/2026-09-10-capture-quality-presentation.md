@@ -43,6 +43,8 @@ the capture-quality builder. Confidence partitions cover all admitted RPCs,
 including missing resource type and unavailable positions. No-context is a
 capture property; it does not claim failed inference for each resource.
 
+C1 execution confirmed the existing structured recognition boundary: the scanner requires literal `@level` and `@timestamp` keys, but the timestamp value need not parse. Null/empty values can produce recognised missing-timestamp evidence; entirely absent keys do not. Include this alongside the malformed-hclog-header limitation in the panel. Do not broaden scanner recognition or invent counts for unrecognised records.
+
 ## File responsibilities
 
 | Files | Responsibility |

@@ -91,7 +91,7 @@ func RelativePosition(at, origin time.Time) ClockPosition {
 }
 ```
 
-- [ ] **Step 1: Add a real scanner regression before production edits.** Extend the existing offset-boundary tests: a normal first header and a header at MaxUint32+1 must both be emitted, with no scan error. Keep the exact-boundary case and add a third normal header to prove scanning continues.
+- [x] **Step 1: Add a real scanner regression before production edits.** Extend the existing offset-boundary tests: a normal first header and a header at MaxUint32+1 must both be emitted, with no scan error. Keep the exact-boundary case and add a third normal header to prove scanning continues.
 
 ```go
 func TestScanRetainsEntriesBeyondClockRange(t *testing.T) {
@@ -107,8 +107,8 @@ func TestScanRetainsEntriesBeyondClockRange(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run `go test ./internal/logfmt -run TestScanRetainsEntriesBeyondClockRange -count=1`.** Record the current offset-error RED. Then add a recording sink exercising the real callback, not mocked behaviour: every Entry call must have a matching preceding EntryClock ordinal; structured and untimestamped entries report TimestampMissing.
-- [ ] **Step 3: Implement the classifier and scanner callback.** Keep one `curClock ClockPosition` beside `cur`. Initialise it on every new entry, including structured and untimestamped branches. In `flush`, call the optional clock callback immediately before the same sink's Entry callback. Do not call it once per continuation.
+- [x] **Step 2: Run `go test ./internal/logfmt -run TestScanRetainsEntriesBeyondClockRange -count=1`.** Record the current offset-error RED. Then add a recording sink exercising the real callback, not mocked behaviour: every Entry call must have a matching preceding EntryClock ordinal; structured and untimestamped entries report TimestampMissing.
+- [x] **Step 3: Implement the classifier and scanner callback.** Keep one `curClock ClockPosition` beside `cur`. Initialise it on every new entry, including structured and untimestamped branches. In `flush`, call the optional clock callback immediately before the same sink's Entry callback. Do not call it once per continuation.
 
 ```go
 position := RelativePosition(h.TS, baseTS)
@@ -123,8 +123,8 @@ if cs, ok := s.(ClockSink); ok { cs.EntryClock(ord, curClock) }
 
 Unavailable `OffsetMs` is zero; it is a sentinel guarded by status, not a measured endpoint. Preserve FirstTS/LastTS capture timestamps and bytes/ordinals, including the original source timestamp even when its relative offset is unusable. Existing I/O, byte-size and structural scan failures remain errors. Replace the former oversized-offset error expectation with status and entry-retention assertions; retain the rationale and boundary coverage.
 
-- [ ] **Step 4: Verify clock delivery, monotonic-origin policy and index invariants.** Cases: missing, genuine zero, before-origin by 1ns, MaxUint32, MaxUint32+1, very distant dates, structured lines between headers and multiple continuations. `go test ./internal/logfmt -count=1` and `go test ./...` must pass, including `TestEntryStaysTwentyFourBytes`.
-- [ ] **Step 5: Self-review, signed commit and independent task review.** Commit exact changed files with subject `Preserve per-entry clock validity during scanning`.
+- [x] **Step 4: Verify clock delivery, monotonic-origin policy and index invariants.** Cases: missing, genuine zero, before-origin by 1ns, MaxUint32, MaxUint32+1, very distant dates, structured lines between headers and multiple continuations. `go test ./internal/logfmt -count=1` and `go test ./...` must pass, including `TestEntryStaysTwentyFourBytes`.
+- [x] **Step 5: Self-review, signed commit and independent task review.** Commit exact changed files with subject `Preserve per-entry clock validity during scanning`.
 
 ### Task 2: Admit explicit durations and retain observation evidence
 
@@ -167,7 +167,7 @@ Timestamp reason codes: `timestamp_missing`, `timestamp_invalid`, `timestamp_bef
 
 Within one record, accumulate schema failures into one local flag and increment SchemaErrors once, even when several metadata fields have bad types. A rejected duration has exactly one rejection reason. Separate timestamp/decoding stages may still overlap, with their denominators documented.
 
-- [ ] **Step 1: Add admission regressions using the real scanner and builders.** Pin the mutation each assertion detects: absent elapsed fields must cease producing zero spans, and a genuine explicit zero must remain admitted.
+- [x] **Step 1: Add admission regressions using the real scanner and builders.** Pin the mutation each assertion detects: absent elapsed fields must cease producing zero spans, and a genuine explicit zero must remain admitted.
 
 ```go
 func TestUIAdmissionDistinguishesMissingAndZero(t *testing.T) {
@@ -182,8 +182,8 @@ func TestUIAdmissionDistinguishesMissingAndZero(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Observe RED with `go test ./internal/span -run TestUIAdmissionDistinguishesMissingAndZero -count=1`.** Add cases before the corresponding production logic: null, negative, quoted number, object/array/bool, positive rounding to zero, malformed JSON, schema mismatch and missing resource metadata.
-- [ ] **Step 3: Implement explicit UI parsing.** Decode the envelope's timestamp/type/hook as RawMessages so a bad timestamp field cannot discard an otherwise usable duration. Distinguish syntax failure with `json.Valid` from schema failure. Parse the type independently, establishing Records only for existing completion types; progress/provision/refresh events remain non-duration events. A parseable timestamp from any valid envelope establishes the UI origin, as today. A valid timestamp in an envelope with a bad type can still establish that origin.
+- [x] **Step 2: Observe RED with `go test ./internal/span -run TestUIAdmissionDistinguishesMissingAndZero -count=1`.** Add cases before the corresponding production logic: null, negative, quoted number, object/array/bool, positive rounding to zero, malformed JSON, schema mismatch and missing resource metadata.
+- [x] **Step 3: Implement explicit UI parsing.** Decode the envelope's timestamp/type/hook as RawMessages so a bad timestamp field cannot discard an otherwise usable duration. Distinguish syntax failure with `json.Valid` from schema failure. Parse the type independently, establishing Records only for existing completion types; progress/provision/refresh events remain non-duration events. A parseable timestamp from any valid envelope establishes the UI origin, as today. A valid timestamp in an envelope with a bad type can still establish that origin.
 
 ```go
 func uiDuration(raw json.RawMessage) (uint32, bool, string) {
@@ -213,7 +213,7 @@ This helper receives one field extracted from a validated JSON object, so it can
 
 Classify timestamp independently: absent/null/empty string is missing, wrong type/unparseable text is invalid, parsed timestamps go through RelativePosition. Store offsets only when HasPosition; otherwise both are zero storage sentinels and StartClamped is false. With valid position, derive start from end and full duration, retaining the existing start-at-zero clamp. A saturated UI duration is admitted and flagged but has no usable position even with a valid end timestamp.
 
-- [ ] **Step 4: Implement RPC admission/evidence.** Remember the latest callback ordinal/position; consume it once in Entry, including non-response entries, so stale state cannot leak. A direct Entry call without the matching callback has TimestampMissing. Update direct builder tests to deliver explicit clock evidence rather than adding a fallback that invents it. Count recognised markers before reading duration. Use ParseUint(raw,10,32); absent, negative, invalid and overflow are distinct rejections, with negative recognised before unsigned parsing. Only valid unsigned decimal values, including zero, produce spans. Preserve existing metadata/provider/ReqID handling.
+- [x] **Step 4: Implement RPC admission/evidence.** Remember the latest callback ordinal/position; consume it once in Entry, including non-response entries, so stale state cannot leak. A direct Entry call without the matching callback has TimestampMissing. Update direct builder tests to deliver explicit clock evidence rather than adding a fallback that invents it. Count recognised markers before reading duration. Use ParseUint(raw,10,32); absent, negative, invalid and overflow are distinct rejections, with negative recognised before unsigned parsing. Only valid unsigned decimal values, including zero, produce spans. Preserve existing metadata/provider/ReqID handling.
 
 ```go
 // For every admitted span in either builder:
@@ -226,12 +226,12 @@ if s.HasPosition() {
 }
 ```
 
-- [ ] **Step 5: Store evidence in model.Load and test the full admission matrix.** Set RPCEvidence/UIEvidence from the builders and UIOrigin from Origin(); zero time means no origin. Keep UISaturatedDurations populated for existing consumers until C2 replaces its readers. This retained field is an existing interface, not a new compatibility feature.
+- [x] **Step 5: Store evidence in model.Load and test the full admission matrix.** Set RPCEvidence/UIEvidence from the builders and UIOrigin from Origin(); zero time means no origin. Keep UISaturatedDurations populated for existing consumers until C2 replaces its readers. This retained field is an existing interface, not a new compatibility feature.
 
 Required assertions: record count equals admitted+rejected; invalid timestamp does not dilute duration means; genuine zero is positioned; before-origin and beyond-range records retain full durations; UI saturation is a per-span lower bound; missing metadata leaves durations in totals; invalid timestamp is not a JSON syntax error; raw bytes/entry identities remain unchanged. Use a RPC 10ms valid + 20ms before-origin pair and a rejected negative record: admitted count2, total30ms, mean15ms. UI explicit 0 plus missing/null/negative values admits only the zero. Add combined timestamp-invalid and duration-saturated evidence and retain both reasons.
 
-- [ ] **Step 6: Run focused tests, `go test ./internal/span ./internal/model ./internal/diagnose ./cmd/tfli`, then `go test ./...`.** Migrate legacy tests that intentionally asserted missing elapsed as zero; retain the zero-extent rendering contract with explicit zero fixtures. Update misleading comments about absent elapsed values.
-- [ ] **Step 7: Self-review, signed commit and independent review.** Subject `Separate admitted durations from timing positions`.
+- [x] **Step 6: Run focused tests, `go test ./internal/span ./internal/model ./internal/diagnose ./cmd/tfli`, then `go test ./...`.** Migrate legacy tests that intentionally asserted missing elapsed as zero; retain the zero-extent rendering contract with explicit zero fixtures. Update misleading comments about absent elapsed values.
+- [x] **Step 7: Self-review, signed commit and independent review.** Subject `Separate admitted durations from timing positions`.
 
 ### Task 3: Project positioned evidence and protect temporal attribution
 
@@ -257,7 +257,7 @@ PositionUnavailable bool
 
 PreferredTiming selects RPC if any RPC duration is admitted, then UI, else unavailable. SelectTiming preserves input order/Entry identities, retains all admitted durations in totals, and counts excluded observations once even when Exclusions records two reasons. It does not mix fidelities or calculate new report intervals.
 
-- [ ] **Step 1: Add a failing temporal-attribution test before changing consumers.** Build an invalid-timestamp span with a duration and offset-zero sentinels, plus an otherwise matching context spanning origin. Correlate must return Unattributed, zero candidates/no address and PositionUnavailable=true. Use direct HasPosition tests only for the domain primitive; end-to-end checks must load real text.
+- [x] **Step 1: Add a failing temporal-attribution test before changing consumers.** Build an invalid-timestamp span with a duration and offset-zero sentinels, plus an otherwise matching context spanning origin. Correlate must return Unattributed, zero candidates/no address and PositionUnavailable=true. Use direct HasPosition tests only for the domain primitive; end-to-end checks must load real text.
 
 ```go
 func TestUnavailablePositionCannotAcquireAnAddress(t *testing.T) {
@@ -272,7 +272,7 @@ func TestUnavailablePositionCannotAcquireAnAddress(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Observe RED; implement exclusion and model projection.** Add the HasPosition guard before correlateOne converts offsets to absolute time. Do not filter the parallel Attribs slice; retain one result per admitted RPC. Preserve no-context as a log-level state and the endpoint rule/confidence cap for valid start-clamped spans.
+- [x] **Step 2: Observe RED; implement exclusion and model projection.** Add the HasPosition guard before correlateOne converts offsets to absolute time. Do not filter the parallel Attribs slice; retain one result per admitted RPC. Preserve no-context as a log-level state and the endpoint rule/confidence cap for valid start-clamped spans.
 
 ```go
 if !s.HasPosition() {
@@ -294,8 +294,8 @@ if s.HasPosition() {
 }
 ```
 
-- [ ] **Step 3: Verify projection and attribution together.** Use valid 10ms and unpositioned 20ms spans: count2, admitted30ms, positioned10ms, excluded20ms, one excluded observation. Add an excluded saturated span with a bad timestamp: it counts once in ExcludedCount and once under each reason. Check all-unpositioned and empty selections and mixed-tier preference without merging clocks. Migrate direct attribution fixtures to explicit TimestampValid; unknown status must never acquire a name. Run `go test ./internal/model ./internal/attrib ./internal/diagnose`, then the full suite.
-- [ ] **Step 4: Self-review, signed commit `Separate positioned evidence from duration totals`, and independent task review.**
+- [x] **Step 3: Verify projection and attribution together.** Use valid 10ms and unpositioned 20ms spans: count2, admitted30ms, positioned10ms, excluded20ms, one excluded observation. Add an excluded saturated span with a bad timestamp: it counts once in ExcludedCount and once under each reason. Check all-unpositioned and empty selections and mixed-tier preference without merging clocks. Migrate direct attribution fixtures to explicit TimestampValid; unknown status must never acquire a name. Run `go test ./internal/model ./internal/attrib ./internal/diagnose`, then the full suite.
+- [x] **Step 4: Self-review, signed commit `Separate positioned evidence from duration totals`, and independent task review.**
 
 ### Task 4: Switch existing timeline and report consumers together
 
@@ -305,8 +305,8 @@ if s.HasPosition() {
 
 **Produces:** `model.ErrUnavailablePosition`; an admission-aware existing TUI/profile/diagnose experience. Keep profile.Render and existing temporal function signatures; change diagnose.Build's evidence parameters and every caller together.
 
-- [ ] **Step 1: Write a failing real-model timeline regression.** Load a log with admitted but entirely unpositioned RPC durations and valid UI positions. `renderTimeline` must show positions unavailable while Calls retains the RPC durations; it must neither draw an offset-zero RPC lane nor fall back to UI. Add partial and filtered-empty cases before switching the renderer. Run the focused test and record behavioural RED.
-- [ ] **Step 2: Make low-level temporal functions reject invalid input explicitly.** Add `ErrUnavailablePosition` alongside ErrMixedTimelines; PackLanes, PeakConcurrency, BusyMs and Stalls validate input before computing. They must not silently drop values and corrupt returned indices. Their consumers pass SelectTiming.Positioned. Preserve mixed-fidelity rejection and all existing half-open/zero-extent semantics. Update synthetic temporal fixtures to state TimestampValid explicitly; do not let zero-valued status mean valid for old tests.
+- [x] **Step 1: Write a failing real-model timeline regression.** Load a log with admitted but entirely unpositioned RPC durations and valid UI positions. `renderTimeline` must show positions unavailable while Calls retains the RPC durations; it must neither draw an offset-zero RPC lane nor fall back to UI. Add partial and filtered-empty cases before switching the renderer. Run the focused test and record behavioural RED.
+- [x] **Step 2: Make low-level temporal functions reject invalid input explicitly.** Add `ErrUnavailablePosition` alongside ErrMixedTimelines; PackLanes, PeakConcurrency, BusyMs and Stalls validate input before computing. They must not silently drop values and corrupt returned indices. Their consumers pass SelectTiming.Positioned. Preserve mixed-fidelity rejection and all existing half-open/zero-extent semantics. Update synthetic temporal fixtures to state TimestampValid explicitly; do not let zero-valued status mean valid for old tests.
 Put the position check in a shared validation helper used by the four temporal functions. Preserve mixed-fidelity validation before position validation so mixed-clock misuse remains explicit.
 
 ```go
@@ -315,7 +315,7 @@ for _, s := range spans {
 }
 ```
 
-- [ ] **Step 3: Switch TUI timeline to the selected positioned subset.** Cache TimingSelection alongside the existing timeline slice; invalidate it in invalidateRows. Choose tier from whole-log admitted durations before applying the existing filter. SelectTiming runs on that filtered tier; lanes, selection indices, detail lookup, busy/window/stall calculations all use the same Positioned slice. The original Entry remains the raw-jump/attribution identity. `timelineNarrowed` compares admitted selection counts, not excluded counts, so invalid positions alone do not imply a user filter.
+- [x] **Step 3: Switch TUI timeline to the selected positioned subset.** Cache TimingSelection alongside the existing timeline slice; invalidate it in invalidateRows. Choose tier from whole-log admitted durations before applying the existing filter. SelectTiming runs on that filtered tier; lanes, selection indices, detail lookup, busy/window/stall calculations all use the same Positioned slice. The original Entry remains the raw-jump/attribution identity. `timelineNarrowed` compares admitted selection counts, not excluded counts, so invalid positions alone do not imply a user filter.
 
 ```go
 selected := m.filter().SpansMatching(m.log.RPCSpans)
@@ -326,22 +326,35 @@ timing := model.SelectTiming(selected)
 
 Render states in this order: no admitted tier (capture guidance); admitted selected count0 (no matches); admitted selected count>0 and Positioned empty (positions unavailable); otherwise draw positioned lanes and qualify partial analysis. Required text: `Timeline positions unavailable: N admitted observations; Mms retained in duration totals.` For partial data: `Positioned X of N observations; excluded Y (Mms).` Expose fixed exclusion reasons in notes/detail and retain lower-bound wording. Do not switch an all-unpositioned RPC tier to available UI positions. No busy percentage for a zero-length window; a genuine positioned zero remains numerical zero and can still be selected/jumped to.
 
-- [ ] **Step 4: Update existing profile and diagnose paths.** Profile duration tables keep all admitted spans. Its existing RPC concurrency block uses the positioned subset for peak/window and names both the selected positioned duration sum and excluded count/time; all-unpositioned is unavailable. Extending profile to UI busy/interval lists remains boundary F. Add a concise admission line before rankings and no-data guidance based on recognised/rejected evidence, not `len(spans)==0` alone. Calls/Types/TUI guidance must not claim no provider traffic when Caps.ProviderEntries or response markers exist, nor no structured stream when Stats.StructuredLines>0.
+- [x] **Step 4: Update existing profile and diagnose paths.** Profile duration tables keep all admitted spans. Its existing RPC concurrency block uses the positioned subset for peak/window and names both the selected positioned duration sum and excluded count/time; all-unpositioned is unavailable. Extending profile to UI busy/interval lists remains boundary F. Add a concise admission line before rankings and no-data guidance based on recognised/rejected evidence, not `len(spans)==0` alone. Calls/Types/TUI guidance must not claim no provider traffic when Caps.ProviderEntries or response markers exist, nor no structured stream when Stats.StructuredLines>0.
 
 Pass RPCEvidence/UIEvidence to diagnose.Build as two explicit parameters and update all callers/tests in this task. Its advertised selected usable timing tier is based on admitted observations; capability hints may still describe potential paired/sequential evidence but never claim those unimplemented tiers produced measurements. Diagnose keeps streaming Scan, and uses the same HasPosition exclusion for temporal attribution. Keep capture wall-clock (parsed timestamps) distinct from a span-analysis window. Codes/counts replace raw parse errors in admission output; retain writer error propagation.
 
-- [ ] **Step 5: Verify integration with real mixed fixtures.** Cover: valid RPC+unpositioned RPC+valid UI (RPC still chosen); all-unpositioned RPC with valid UI (no fallback); filter selecting only unpositioned data versus no matches; zero denominator coverage unavailable; unpositioned RPC retained in coverage denominator; valid start clamp; missing metadata; scan past oversized timestamps; no admitted durations despite observed markers. Assert profile/TUI totals agree, attribution stays parallel and duration means exclude rejections. Run `go test ./...`, inspect intentional golden changes, and independently review before proceeding.
-- [ ] **Step 6: Signed commit.** Subject `Keep unavailable positions out of temporal analysis`.
+- [x] **Step 5: Verify integration with real mixed fixtures.** Cover: valid RPC+unpositioned RPC+valid UI (RPC still chosen); all-unpositioned RPC with valid UI (no fallback); filter selecting only unpositioned data versus no matches; zero denominator coverage unavailable; unpositioned RPC retained in coverage denominator; valid start clamp; missing metadata; scan past oversized timestamps; no admitted durations despite observed markers. Assert profile/TUI totals agree, attribution stays parallel and duration means exclude rejections. Run `go test ./...`, inspect intentional golden changes, and independently review before proceeding.
+- [x] **Step 6: Signed commit.** Subject `Keep unavailable positions out of temporal analysis`.
 
 ## Final validation and handoff
 
-- [ ] Separate test-cleanup subagent after implementation; retain every admission/position/denominator boundary. Review any cleanup diff and rerun affected tests.
-- [ ] Real terminal checks with mixed and entirely unpositioned fixtures: Calls retains durations; Timeline states partial/unavailable; filter changes distinguish no matches; raw jumps still land on original entries.
-- [ ] Run `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`, `go test -race -count=1 ./...`, `go build ./...`. Require pristine output. Inspect goldens using `scripts/read-golden.sh` and raw styling diffs if updated.
-- [ ] Whole-branch review, resolve findings, record RED/GREEN/terminal evidence here, verify all signatures and leave integration to Dan. Remote integration still requires existing CI.
-- [ ] C2 consumes the exact evidence/projection interfaces above. Its quality panel, complete anomaly aggregation, source-line lookup and lazy reconstruction status are deliberately not claimed complete by C1. JSON encoding remains boundary G.
+- [x] Separate test-cleanup subagent after implementation; retain every admission/position/denominator boundary. Review any cleanup diff and rerun affected tests.
+- [x] Real terminal checks with mixed and entirely unpositioned fixtures: Calls retains durations; Timeline states partial/unavailable; filter changes distinguish no matches; raw jumps still land on original entries.
+- [x] Run `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`, `go test -race -count=1 ./...`, `go build ./...`. Require pristine output. Inspect goldens using `scripts/read-golden.sh` and raw styling diffs if updated.
+- [x] Whole-branch review, resolve findings, record RED/GREEN/terminal evidence here, verify all signatures and leave integration to Dan. Remote integration still requires existing CI.
+- [x] C2 consumes the exact evidence/projection interfaces above. Its quality panel, complete anomaly aggregation, source-line lookup and lazy reconstruction status are deliberately not claimed complete by C1. JSON encoding remains boundary G.
 
-## Plan self-review
+## Execution evidence — 10 September 2026
+
+C1 is implemented and verified through signed commit `f5b4165` on `wip/capture-evidence`. C2 remains the next implementation phase. The checked steps above record completed behaviour and verification; the chronology qualifications below are part of that record.
+
+- Signed implementation commits: `1c64820` scanner clock validity; `3bf9254` explicit duration admission; `6999b5e` null-string schema accounting; `b5f3b27` positioned projection and attribution; `d06d86f` temporal consumers; `bc2558a` evidence presentation and denominator fixes; `3844db3` real-log integration coverage; `f5b4165` capture-clock availability and short-pane disclosure.
+- Behavioural regressions reproduced scanner range truncation, missing elapsed admitted as zero, invalid-position attribution, unavailable spans entering timelines, zero-window percentages, clipped summaries and fabricated capture-clock zero. The initial duration test failed to compile before exercising behaviour; the actual missing-duration failure was subsequently demonstrated against preserved baseline production. The diagnose denominator regression was added after its correction, then proved against the restored faulty projection (`1 span / 10ms`) before confirming the fixed `2 spans / 30ms`. These later checks are not claimed as original test-first chronology.
+- Independent task reviews found and resolved null-string schema undercounting, absent reason/count output, missing integration boundaries, no-data guidance and a diagnose denominator that excluded unavailable positions. Whole-branch review found and resolved the UI-only capture-clock availability gate, short-height disclosure and stale documentation. Final scoped review found no new breakage or unresolved finding.
+- Separate cleanup agents classified all changed tests, including review-fix additions, and retained them: no removals or coverage reduction. Final fix cleanup retained three distinct clock/height boundary tests.
+- Fresh final checks passed at `f5b4165`: `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, golangci-lint 2.13.2, `go test -race -count=1 ./...`, and `go build ./...`. All ten packages passed race tests; lint reported zero issues. All implementation signatures verified good. No golden files changed.
+- Actual PTY checks at 110×34 showed Calls retaining 30ms, Timeline positioning 10ms and excluding 20ms with `timestamp_before_origin`, and diagnose reporting 10ms contained / 20ms unattributed (33.3%). Facet selection distinguished unavailable-only from no matches; clearing and opening the positioned call returned to original Entry 4/7. At 60×25 the unavailable message retained the duration and reason; at 60×9 the established `… more` marker disclosed omitted content. A real invalid-timestamp UI capture retained 1000ms while reporting wall-clock unavailable.
+- Implementation decisions: migrate the scrubber's obsolete oversized-timestamp rejection test to supported retention plus real secret scrubbing (no scrub production change); add `@level` to the plan's scanner fixtures so they exercise recognised UI input. If either boundary were changed later, its admission/privacy fixtures would need revisiting.
+- Existing recognition is preserved: structured lines require literal `@level` and `@timestamp` keys, although the timestamp value may be invalid, null or empty. An entirely absent key is outside scanner recognition. Missing/invalid outer hclog timestamps likewise do not create independent RPC records. C2 will disclose these limits without fabricated counts.
+
+### Original plan self-review
 
 Clock delivery precedes builder use; both builders precede consumer exclusion. Tasks 3–4 include synthetic-fixture migration and all existing temporal consumers, so adding status cannot silently fabricate zero positions. C1 retains diagnostics needed to distinguish recognised-but-rejected evidence; C2 supplies the full shared capture summary. Scanner entry layout/identity and the diagnose streaming path stay intact. Unknown hclog-header recovery is explicitly outside the recognised-record boundary.
 
