@@ -76,7 +76,7 @@ No new source files or fixtures are required. No TUI goldens should change.
 - Retains: `Render(w io.Writer, l *model.Log) error` and `writeLoggingCaveat(b *strings.Builder)` unchanged in signature.
 - Produces: corrected report/documentation wording and regression coverage. No new API.
 
-- [ ] **Step 1: Establish a clean topic branch and baseline.**
+- [x] **Step 1: Establish a clean topic branch and baseline.**
 
 At execution time, use the worktree skill to determine whether isolation is
 needed. Check status before editing; resolve any pre-existing changes with Dan.
@@ -92,7 +92,7 @@ go test ./internal/profile ./internal/tui
 Expected: both packages pass. Inspect all output. Baseline failures must be
 understood and resolved before starting the red/green cycle.
 
-- [ ] **Step 2: Strengthen the report tests before changing production copy.**
+- [x] **Step 2: Strengthen the report tests before changing production copy.**
 
 Replace the body and preceding explanatory comment of
 `TestReportStatesDurationsAreMeasuredUnderLogging` with this table-driven test.
@@ -151,7 +151,7 @@ func TestLoggingCaveatSurvivesTheNoSpansPath(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the focused tests and observe the intended failure.**
+- [x] **Step 3: Run the focused tests and observe the intended failure.**
 
 ```bash
 go test ./internal/profile -run 'TestReportStatesDurationsAreMeasuredUnderLogging|TestLoggingCaveatSurvivesTheNoSpansPath' -count=1
@@ -161,7 +161,7 @@ Expected: the table-driven test fails on the current false guarantee and missing
 approximation/differential-overhead explanations. The placement test should
 already pass. A compilation or fixture-loading failure is not a valid red phase.
 
-- [ ] **Step 4: Correct the production caveat and its comment.**
+- [x] **Step 4: Correct the production caveat and its comment.**
 
 Replace `writeLoggingCaveat` and its preceding comment with:
 
@@ -183,7 +183,7 @@ package: importing the TUI for copy or adding a shared package for one paragraph
 would create unnecessary coupling. Retain its call before the no-spans branch
 and leave existing rounding, saturation and clamped-start warnings intact.
 
-- [ ] **Step 5: Correct the README's ranking paragraph.**
+- [x] **Step 5: Correct the README's ranking paragraph.**
 
 Replace the paragraph beginning “Rankings within a log therefore hold” with:
 
@@ -197,7 +197,7 @@ between a chatty provider and a quiet one are particularly unreliable.
 Retain the preceding empirical example as an example, with no extrapolation or
 correction factor. Do not change capture instructions or the disclosure guidance.
 
-- [ ] **Step 6: Format and confirm the green phase.**
+- [x] **Step 6: Format and confirm the green phase.**
 
 ```bash
 gofmt -w internal/profile/profile.go internal/profile/profile_test.go
@@ -209,7 +209,7 @@ Expected: all pass. Existing tests still protect UI-hook resolution, saturated
 duration warnings, clamped starts, unmasked-output warnings and TUI caveat layout.
 Inspect the diff to ensure gofmt did not reveal unrelated changes.
 
-- [ ] **Step 7: Review the actual copy on all existing surfaces.**
+- [x] **Step 7: Review the actual copy on all existing surfaces.**
 
 ```bash
 go run ./cmd/tfli --profile testdata/provider-rpc.log
@@ -226,7 +226,7 @@ TUI full/compact constants and the help path that renders them; existing TUI
 tests cover these unchanged surfaces. Historical quotations in TUI comments are
 expected search results, not justification to rewrite the file or its goldens.
 
-- [ ] **Step 8: Run independent review and the separate test-cleanup pass.**
+- [x] **Step 8: Run independent review and the separate test-cleanup pass.**
 
 Request an independent reviewer to inspect the three-file diff against this
 task and spec section 2. Require checks that the false guarantee is removed,
@@ -239,7 +239,7 @@ warning precedes the early-return explanation. It may remove redundant tests
 only while preserving that coverage. The implementer must not clean up its own
 tests. Resolve substantive findings before final validation.
 
-- [ ] **Step 9: Run the repository checks after review changes.**
+- [x] **Step 9: Run the repository checks after review changes.**
 
 ```bash
 gofmt -d .
@@ -256,7 +256,7 @@ version (CI currently uses 2.13.2); do not install a new tool without discussion
 Inspect all output and report any blocked check explicitly. Existing GitHub CI
 also cross-compiles Linux/macOS amd64/arm64; confirm those jobs before integration.
 
-- [ ] **Step 10: Commit the completed task with signing and intact hooks.**
+- [x] **Step 10: Commit the completed task with signing and intact hooks.**
 
 ```bash
 /Users/dan/.codex/bin/codex-git status --short --branch
@@ -285,6 +285,8 @@ output contracts are designed.
 
 ## Plan self-review
 
+This section records the review at planning time; execution evidence follows.
+
 - Scope: section 2's existing-profile/README correction maps to steps 2–7;
   unchanged TUI/help and separate timing limitations map to steps 6–7.
 - Future JSON/comparison qualifications belong to boundaries G/H and are
@@ -293,3 +295,24 @@ output contracts are designed.
   fixture or dependency. No exact wrapping or full-report snapshot is pinned.
 - Review, test cleanup, full verification and signed commits map to steps 8–10.
 - No application code has been changed or tests added merely by writing this plan.
+
+## Execution evidence — 9 September 2026
+
+- Implemented on `wip/app-gap-review` in signed commit `b5b3cba`
+  (`G` signature verification). The initial clean branch was rebased against
+  `origin/main`, which was already up to date.
+- TDD: the strengthened qualification test failed on all three fixtures with
+  the old equal-cost guarantee; the no-span placement test passed. After the
+  copy correction, the focused tests and full suite passed.
+- Inspected RPC, UI-only and no-span CLI reports plus CLI help. The no-span
+  caveat precedes `NO SPANS`; TUI full/compact caveats and help remain consistent.
+- Independent task review and final whole-branch review found no issues.
+  A separate test-cleanup subagent kept all four touched cases: each protects
+  a distinct report path or warning placement. No tests were removed.
+- Final checks passed: `gofmt -d .`, `go mod tidy -diff`, `go mod verify`,
+  `golangci-lint run --timeout=5m` (2.13.2), `go test -race -count=1 ./...`
+  and `go build ./...`. Formatting/module checks produced no diff; lint
+  reported zero issues. No code changed after these checks.
+- GitHub CI, including its Linux/macOS amd64/arm64 build matrix, remains
+  pending a push/PR and must pass before integration. No push or merge was
+  performed as part of this implementation.
