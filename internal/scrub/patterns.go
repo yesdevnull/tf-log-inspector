@@ -170,6 +170,13 @@ func (s *session) discoverPatterns(v *view) {
 	}
 	for _, m := range s.cachedPatternMatches(urlPattern, text, ":") {
 		value := strings.TrimRight(v.text[m[0]:m[1]], ",;)}")
+		// A surrounding field's closing bracket is not part of its URL.
+		// Keep balanced brackets, including an IPv6 authority's closing one.
+		if strings.HasSuffix(value, "]") && !(v.whole && m[0] == 0) {
+			for excess := strings.Count(value, "]") - strings.Count(value, "["); excess > 0 && strings.HasSuffix(value, "]"); excess-- {
+				value = strings.TrimSuffix(value, "]")
+			}
+		}
 		s.discoverURL(value)
 		s.markComposite(v, value, m[0])
 	}

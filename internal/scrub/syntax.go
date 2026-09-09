@@ -469,6 +469,11 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			i++
 			continue
 		}
+		// Terraform progress encloses its identifier assignment in brackets.
+		bracketed := v.text[i] == '['
+		if bracketed {
+			i++
+		}
 		start := i
 		for i < len(v.text) && !space(v.text[i]) && v.text[i] != '=' && v.text[i] != ':' && v.text[i] != '"' {
 			i++
@@ -495,7 +500,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		planAssignment := sep > i || valueStart > sep+1
 		// Hclog metadata requires adjacent key=value bytes; spaced assignments
 		// remain useful for discovery but are not parser-recognised fields.
-		metadataField := metadata && sep == i && valueStart == sep+1
+		metadataField := metadata && !bracketed && sep == i && valueStart == sep+1
 		protected := metadataField && preservedField(key)
 		for valueStart < len(v.text) {
 			if v.text[valueStart] == '"' {
@@ -537,7 +542,18 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					}
 				}
 				end := valueStart
-				for end < len(v.text) && !space(v.text[end]) {
+				brackets := 0
+				for end < len(v.text) && (!space(v.text[end]) || bracketed && v.text[end] != '\r' && v.text[end] != '\n') {
+					if bracketed {
+						if v.text[end] == ']' {
+							if brackets == 0 {
+								break
+							}
+							brackets--
+						} else if v.text[end] == '[' {
+							brackets++
+						}
+					}
 					if v.text[end] == '"' {
 						quoteEnd, decoded, ok := readString(v.text, end)
 						if ok {
