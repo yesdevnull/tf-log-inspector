@@ -269,10 +269,10 @@ stderr through its own logger, so a provider that dumps HTTP bodies at DEBUG
 pays that cost per line — in one measured case a single API response
 accounted for 49% of a 30MB log.
 
-Rankings within a log therefore hold: every span paid the same tax, so the
-slowest call really was the slowest. Absolute durations do not transfer to a
-run without logging, and comparisons between a chatty provider and a quiet one
-are the least reliable reading.
+Rankings within a log are approximate. A call that logs heavily is inflated
+more than one that waits, so the logging overhead can change their order.
+Absolute durations do not transfer to a run without logging, and comparisons
+between a chatty provider and a quiet one are particularly unreliable.
 
 `--profile` reports where the plan spent its time: resource types and
 providers ranked by total duration, the slowest individual calls and
