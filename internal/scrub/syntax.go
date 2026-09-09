@@ -49,13 +49,23 @@ func (v *view) protect(start, end int) { v.protected = append(v.protected, regio
 
 var fieldAssignment = regexp.MustCompile(`(?:^|[ \t])([^ \t=]+)[ \t]*=[ \t]*`)
 
-func responseBodyStart(text string) int {
-	// Normalising a response-body key preserves the contiguous letters in
+func httpBodyKind(key string) string {
+	switch keyWords(key) {
+	case "http/request/body":
+		return "request"
+	case "http/response/body":
+		return "response"
+	}
+	return ""
+}
+
+func httpBodyStart(text string) (int, string) {
+	// Normalising an HTTP body key preserves the contiguous letters in
 	// "body". Most metadata has no such key and needs no assignment parsing.
 	for start := 0; ; {
 		at := strings.IndexAny(text[start:], "bB")
 		if at < 0 || start+at+4 > len(text) {
-			return -1
+			return -1, ""
 		}
 		at += start
 		if strings.EqualFold(text[at:at+4], "body") {
@@ -65,11 +75,11 @@ func responseBodyStart(text string) int {
 	}
 	for _, m := range fieldAssignment.FindAllStringSubmatchIndex(text, -1) {
 		key := text[m[2]:m[3]]
-		if logfmt.ValidKey(key) && keyWords(key) == "http/response/body" {
-			return m[1]
+		if kind := httpBodyKind(key); logfmt.ValidKey(key) && kind != "" {
+			return m[1], kind
 		}
 	}
-	return -1
+	return -1, ""
 }
 
 // Providers can log a JSON body directly as their message, without an HTTP
@@ -132,12 +142,13 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 		trim := strings.TrimLeft(v.text, " \t\r\n")
 		jsonStart := start
 		bodyStart := providerJSONStart(v.text)
+		bodyKind := "response"
 		if bodyStart < 0 {
-			bodyStart = responseBodyStart(v.text)
+			bodyStart, bodyKind = httpBodyStart(v.text)
 		}
 		if bodyStart >= 0 {
-			trim = strings.TrimSpace(v.text[bodyStart:])
 			jsonStart += bodyStart
+			trim = strings.TrimLeft(text[jsonStart:], " \t\r\n")
 		}
 		if (strings.HasPrefix(trim, "{") || strings.HasPrefix(trim, "[")) && !json.Valid([]byte(strings.TrimSpace(v.text))) {
 			decoder := json.NewDecoder(strings.NewReader(text[jsonStart:]))
@@ -185,7 +196,7 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 		if h.HasTS {
 			framing = strings.TrimSpace(h.Msg)
 		}
-		responseJSON = responseJSON || bodyStart >= 0
+		responseJSON = responseJSON || bodyKind == "response"
 		lifecycle := !responseJSON && lifecycleEnvelope(trimmed)
 		if strings.HasPrefix(framing, "HTTP/") {
 			responseJSON = true
@@ -469,6 +480,11 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			break
 		}
 		category := fieldCategory(key)
+		bodyKind := httpBodyKind(key)
+		responseJSON := v.responseJSON
+		if bodyKind != "" {
+			responseJSON = bodyKind == "response"
+		}
 		planAssignment := sep > i || valueStart > sep+1
 		// Hclog metadata requires adjacent key=value bytes; spaced assignments
 		// remain useful for discovery but are not parser-recognised fields.
@@ -482,7 +498,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					i = len(v.text)
 					break
 				}
-				child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON || keyWords(key) == "http/response/body", jsonBody: keyWords(key) == "http/response/body"}
+				child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON, jsonBody: bodyKind != ""}
 				if metadataField && key == "tf_provider_addr" {
 					child.mandatory = true
 					s.provider(child, 0, len(decoded), false)
@@ -501,12 +517,12 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				v.children = append(v.children, quoted{region{valueStart, end}, child, false})
 				i = end
 			} else {
-				if keyWords(key) == "http/response/body" && strings.ContainsAny(v.text[valueStart:valueStart+1], "{[") {
+				if bodyKind != "" && strings.ContainsAny(v.text[valueStart:valueStart+1], "{[") {
 					decoder := json.NewDecoder(strings.NewReader(v.text[valueStart:]))
 					var raw json.RawMessage
 					if decoder.Decode(&raw) == nil {
 						end := valueStart + int(decoder.InputOffset())
-						child := &view{text: v.text[valueStart:end], line: v.line, whole: true, responseJSON: true, jsonBody: true}
+						child := &view{text: v.text[valueStart:end], line: v.line, whole: true, responseJSON: responseJSON, jsonBody: true}
 						s.parseView(child, false, false)
 						v.children = append(v.children, quoted{region{valueStart, end}, child, true})
 						i = end
@@ -574,7 +590,10 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 	*i = skipSpace(v.text, *i)
 	start := *i
 	category := fieldCategory(key)
-	responseJSON = responseJSON || keyWords(key) == "http/response/body"
+	bodyKind := httpBodyKind(key)
+	if bodyKind != "" {
+		responseJSON = bodyKind == "response"
+	}
 	if responseJSON && key == "value" {
 		category = "secret"
 	}
@@ -621,7 +640,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 		*i++
 	case '"':
 		end, decoded, _ := readString(v.text, start)
-		child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON, jsonBody: keyWords(key) == "http/response/body"}
+		child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON, jsonBody: bodyKind != ""}
 		if resourceField && (key == "addr" || key == "module" || key == "resource") {
 			child.mandatory = true
 			child.addressContext = true

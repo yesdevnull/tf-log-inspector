@@ -184,6 +184,9 @@ HTTP/JSON bodies, including escaped JSON strings:
 - Credential fields and HTTP headers, including passwords, tokens, API/access
   keys, Authorization and cookies, plus PEM private-key payloads. Whole
   credentials receive one opaque alias even when also used in another field.
+- JSON HTTP request bodies in `http.request.body` fields are inspected for
+  credential fields, including quoted, unquoted and multiline bodies. Ordinary
+  request `value` fields are preserved unless otherwise identified as sensitive.
 - JSON HTTP response bodies treat scalar `value` fields as secrets. Arrays and
   objects retain their structure and are inspected recursively; null and empty
   values remain unchanged. This includes escaped and unquoted

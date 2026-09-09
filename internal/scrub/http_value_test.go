@@ -125,6 +125,58 @@ func TestUnquotedHTTPResponseBodyValuesAreSecrets(t *testing.T) {
 	}
 }
 
+func TestHTTPRequestBodyFieldsRetainCredentialClassification(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] provider.aws: "
+	const body = `{"password":"private-credential","value":"ordinary-request"}`
+	for _, key := range []string{"http.request.body", "httpRequestBody", "http_request_body", "http-request-body"} {
+		for _, tc := range []struct{ name, prefix, body string }{
+			{"compact", "", body},
+			{"multiline", header, "{\n\"password\":\"private-credential\",\n\"value\":\"ordinary-request\"\n}"},
+			{"quoted", header, strconv.Quote(body)},
+			{"response context", header + "HTTP Response: ", body},
+			{"response context next line", header + "HTTP Response: ", "\n" + body},
+		} {
+			t.Run(key+"/"+tc.name, func(t *testing.T) {
+				input := tc.prefix + key + "=" + tc.body + " tf_req_id=scope\n"
+				got, err := Scrub([]byte(input), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, output, ok := strings.Cut(string(got.Data), key+"=")
+				if !ok || strings.Contains(output, "private-credential") || got.Unsupported != 0 {
+					t.Fatalf("request body lost credential classification: %s", got.Data)
+				}
+				var raw json.RawMessage
+				if err := json.NewDecoder(strings.NewReader(output)).Decode(&raw); err != nil {
+					t.Fatalf("request body lost JSON syntax: %s %v", got.Data, err)
+				}
+				if raw[0] == '"' {
+					var decoded string
+					if err := json.Unmarshal(raw, &decoded); err != nil {
+						t.Fatal(err)
+					}
+					raw = []byte(decoded)
+				}
+				var fields map[string]string
+				if json.Unmarshal(raw, &fields) != nil || !strings.HasPrefix(fields["password"], "secret_") || fields["value"] != "ordinary-request" {
+					t.Fatalf("request field scope changed: %s", got.Data)
+				}
+				if tc.prefix != "" && !strings.HasSuffix(string(got.Data), " tf_req_id=scope\n") {
+					t.Fatalf("genuine request metadata changed: %s", got.Data)
+				}
+			})
+		}
+	}
+}
+
+func TestHTTPRequestBodyOverridesEnclosingResponseContext(t *testing.T) {
+	const input = `{"http.response.body":{"value":"response-credential","http.request.body":{"password":"request-credential","value":"ordinary-request"}}}`
+	got, err := Scrub([]byte(input), nil)
+	if err != nil || strings.Contains(string(got.Data), "response-credential") || strings.Contains(string(got.Data), "request-credential") || !strings.Contains(string(got.Data), `"value":"ordinary-request"`) || !json.Valid(got.Data) {
+		t.Fatalf("request body inherited response scalar classification: %s %v", got.Data, err)
+	}
+}
+
 func TestFragmentedHTTPResponseJSONFailsClosed(t *testing.T) {
 	const input = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n9\r\n{\"value\":\r\n11\r\n\"private-content\"\r\n1\r\n}\r\n0\r\n\r\n"
 	got, err := Scrub([]byte(input), nil)

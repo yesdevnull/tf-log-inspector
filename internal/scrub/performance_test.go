@@ -108,7 +108,7 @@ func TestRepeatedGUIDDiscoveryAllocation(t *testing.T) {
 func TestResponseBodySearchSkipsUnrelatedFields(t *testing.T) {
 	text := strings.Repeat(`tf_rpc=ReadResource tf_resource_type=example_instance `, 10)
 	allocations := testing.AllocsPerRun(100, func() {
-		if responseBodyStart(text) != -1 {
+		if start, _ := httpBodyStart(text); start != -1 {
 			t.Fatal("unrelated metadata was treated as a response body")
 		}
 	})
