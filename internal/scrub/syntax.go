@@ -2,7 +2,9 @@ package scrub
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -21,6 +23,7 @@ type view struct {
 	whole, mandatory bool
 	addressContext   bool
 	resourceKey      bool
+	responseJSON     bool
 	chunk            *chunkFrame
 	addresses        []region
 	composites       []region
@@ -28,6 +31,7 @@ type view struct {
 	keys             []region
 	wholeValues      []region
 	credentials      []region
+	emails           []region
 	nulls            []region
 	numeric          []region
 	allowed          []region
@@ -36,14 +40,27 @@ type view struct {
 
 func (v *view) protect(start, end int) { v.protected = append(v.protected, region{start, end}) }
 
+var fieldAssignment = regexp.MustCompile(`(?:^|[ \t])([^ \t=]+)[ \t]*=[ \t]*`)
+
+func responseBodyStart(text string) int {
+	for _, m := range fieldAssignment.FindAllStringSubmatchIndex(text, -1) {
+		key := text[m[2]:m[3]]
+		if logfmt.ValidKey(key) && keyWords(key) == "http/response/body" {
+			return m[1]
+		}
+	}
+	return -1
+}
+
 func (s *session) parseLines(text string) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
+	responseJSON := false
 	chunked := false
 	chunkEnd := 0
 	for line, start := 1, 0; start < len(text); line++ {
 		if chunked && start < chunkEnd {
-			views = append(views, s.parseChunks(text[start:chunkEnd], line)...)
+			views = append(views, s.parseChunks(text[start:chunkEnd], line, responseJSON)...)
 			line += strings.Count(text[start:chunkEnd], "\n") - 1
 			start = chunkEnd
 			continue
@@ -67,15 +84,28 @@ func (s *session) parseLines(text string) []*view {
 			}
 		}
 		trim := strings.TrimLeft(v.text, " \t\r\n")
+		jsonStart := start
+		bodyStart := responseBodyStart(v.text)
+		if bodyStart >= 0 {
+			trim = strings.TrimSpace(v.text[bodyStart:])
+			jsonStart += bodyStart
+		}
 		if (strings.HasPrefix(trim, "{") || strings.HasPrefix(trim, "[")) && !json.Valid([]byte(strings.TrimSpace(v.text))) {
-			decoder := json.NewDecoder(strings.NewReader(text[start:]))
+			decoder := json.NewDecoder(strings.NewReader(text[jsonStart:]))
 			var raw json.RawMessage
 			if decoder.Decode(&raw) == nil {
-				jsonEnd := start + int(decoder.InputOffset())
+				jsonEnd := jsonStart + int(decoder.InputOffset())
 				for jsonEnd < len(text) && (text[jsonEnd] == ' ' || text[jsonEnd] == '\t' || text[jsonEnd] == '\r') {
 					jsonEnd++
 				}
-				if jsonEnd == len(text) || text[jsonEnd] == '\n' {
+				if bodyStart >= 0 {
+					if newline := strings.IndexByte(text[jsonEnd:], '\n'); newline >= 0 {
+						end = jsonEnd + newline + 1
+					} else {
+						end = len(text)
+					}
+					v.text = text[start:end]
+				} else if jsonEnd == len(text) || text[jsonEnd] == '\n' {
 					if jsonEnd < len(text) {
 						jsonEnd++
 					}
@@ -87,6 +117,7 @@ func (s *session) parseLines(text string) []*view {
 		h := logfmt.ParseHeader(strings.TrimRight(v.text, "\r\n"))
 		if h.HasTS {
 			metadata, body, httpHeaders = true, false, false
+			responseJSON = strings.HasPrefix(h.Msg, "HTTP Response")
 			chunked = false
 			prefix := strings.Index(v.text, h.Msg)
 			if prefix >= 0 {
@@ -101,7 +132,13 @@ func (s *session) parseLines(text string) []*view {
 			}
 		}
 		trimmed := strings.TrimSpace(v.text)
-		lifecycle := lifecycleEnvelope(trimmed)
+		responseJSON = responseJSON || bodyStart >= 0
+		lifecycle := !responseJSON && lifecycleEnvelope(trimmed)
+		if strings.HasPrefix(trimmed, "HTTP/") {
+			responseJSON = true
+		} else if httpRequestLine(trimmed) {
+			responseJSON = false
+		}
 		if httpRequestLine(trimmed) || strings.HasPrefix(trimmed, "HTTP/") || strings.HasPrefix(strings.ToLower(trimmed), "content-type:") || strings.HasPrefix(strings.ToLower(trimmed), "content-length:") {
 			httpHeaders = true
 		}
@@ -122,6 +159,7 @@ func (s *session) parseLines(text string) []*view {
 		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 			body = !lifecycle
 		}
+		v.responseJSON = responseJSON && !lifecycle
 		s.parseView(v, metadata && !body, lifecycle)
 		views = append(views, v)
 		line += strings.Count(v.text, "\n") - 1
@@ -135,7 +173,7 @@ type chunkFrame struct {
 }
 
 // parseChunks receives only framing already validated by chunkedBodyLength.
-func (s *session) parseChunks(text string, line int) []*view {
+func (s *session) parseChunks(text string, line int, responseJSON bool) []*view {
 	var views []*view
 	for pos := 0; pos < len(text); {
 		start := pos
@@ -158,7 +196,12 @@ func (s *session) parseChunks(text string, line int) []*view {
 		if strings.HasPrefix(text[pos:], "\r\n") {
 			endingLength = 2
 		}
-		child := &view{text: text[dataStart:pos], line: line + 1}
+		child := &view{text: text[dataStart:pos], line: line + 1, responseJSON: responseJSON}
+		trimmed := strings.TrimSpace(child.text)
+		if responseJSON && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && !json.Valid([]byte(trimmed)) {
+			s.parseErr = fmt.Errorf("HTTP at line %d: fragmented JSON response unsupported", line+1)
+			return nil
+		}
 		s.parseView(child, false, false)
 		v := &view{text: text[start : pos+endingLength], line: line, chunk: &chunkFrame{len(size), dataStart - start, int(n), endingLength}}
 		v.children = append(v.children, quoted{region{0, dataStart - start}, head, true})
@@ -294,7 +337,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				v.protectJSONSyntax()
 			}
 			i := skipSpace(v.text, 0)
-			s.jsonValue(v, &i, "", nil, lifecycle)
+			s.jsonValue(v, &i, "", nil, lifecycle, v.responseJSON)
 			return
 		}
 		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
@@ -320,7 +363,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				s.unsupported++
 				break
 			}
-			child := &view{text: decoded, line: v.line, whole: true}
+			child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON}
 			s.parseView(child, false, false)
 			v.children = append(v.children, quoted{region{i, end}, child, false})
 			i = end
@@ -361,7 +404,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					i = len(v.text)
 					break
 				}
-				child := &view{text: decoded, line: v.line, whole: true}
+				child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON || keyWords(key) == "http/response/body"}
 				if metadataField && key == "tf_provider_addr" {
 					child.mandatory = true
 					s.provider(child, 0, len(decoded), false)
@@ -380,12 +423,24 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				v.children = append(v.children, quoted{region{valueStart, end}, child, false})
 				i = end
 			} else {
+				if keyWords(key) == "http/response/body" && strings.ContainsAny(v.text[valueStart:valueStart+1], "{[") {
+					decoder := json.NewDecoder(strings.NewReader(v.text[valueStart:]))
+					var raw json.RawMessage
+					if decoder.Decode(&raw) == nil {
+						end := valueStart + int(decoder.InputOffset())
+						child := &view{text: v.text[valueStart:end], line: v.line, whole: true, responseJSON: true}
+						s.parseView(child, false, false)
+						v.children = append(v.children, quoted{region{valueStart, end}, child, true})
+						i = end
+						break
+					}
+				}
 				end := valueStart
 				for end < len(v.text) && !space(v.text[end]) {
 					if v.text[end] == '"' {
 						quoteEnd, decoded, ok := readString(v.text, end)
 						if ok {
-							child := &view{text: decoded, line: v.line, whole: true}
+							child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON}
 							s.parseView(child, false, false)
 							v.children = append(v.children, quoted{region{end, quoteEnd}, child, false})
 							end = quoteEnd
@@ -437,10 +492,14 @@ func wholeValueEnd(values []region, pos int) int {
 	return pos
 }
 
-func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycle bool) {
+func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycle, responseJSON bool) {
 	*i = skipSpace(v.text, *i)
 	start := *i
 	category := fieldCategory(key)
+	responseJSON = responseJSON || keyWords(key) == "http/response/body"
+	if responseJSON && key == "value" {
+		category = "secret"
+	}
 	protect := lifecycle && (len(path) == 0 && (key == "@level" || key == "@timestamp" || key == "@module" || key == "type") || len(path) == 1 && path[0] == "hook" && (key == "id_key" || key == "action" || key == "elapsed_seconds"))
 	if lifecycle && len(path) == 1 && path[0] == "hook" && key == "id_value" {
 		category = "id"
@@ -462,7 +521,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 			end, k, _ := readString(v.text, ks)
 			v.keys = append(v.keys, region{ks, end})
 			*i = skipSpace(v.text, end) + 1
-			s.jsonValue(v, i, k, childPath, lifecycle)
+			s.jsonValue(v, i, k, childPath, lifecycle, responseJSON)
 			*i = skipSpace(v.text, *i)
 			if v.text[*i] == ',' {
 				*i++
@@ -474,7 +533,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 		*i++
 		*i = skipSpace(v.text, *i)
 		for v.text[*i] != ']' {
-			s.jsonValue(v, i, key, path, lifecycle)
+			s.jsonValue(v, i, key, path, lifecycle, responseJSON)
 			*i = skipSpace(v.text, *i)
 			if v.text[*i] == ',' {
 				*i++
@@ -484,7 +543,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 		*i++
 	case '"':
 		end, decoded, _ := readString(v.text, start)
-		child := &view{text: decoded, line: v.line, whole: true}
+		child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON}
 		if resourceField && (key == "addr" || key == "module" || key == "resource") {
 			child.mandatory = true
 			child.addressContext = true

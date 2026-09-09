@@ -31,6 +31,9 @@ func Scrub(data []byte, extra []string) (Result, error) {
 	}
 	input := string(data)
 	views := s.parseLines(input)
+	if s.parseErr != nil {
+		return Result{}, s.parseErr
+	}
 	s.sources = make(map[string]bool)
 	var reserve func(*view)
 	reserve = func(v *view) {
@@ -104,6 +107,7 @@ type session struct {
 	index            candidateIndex
 	counts           map[string]int
 	unsupported      int
+	parseErr         error
 	sources          map[string]bool
 	resourceTypes    map[string]bool
 	blocked          map[string]bool
