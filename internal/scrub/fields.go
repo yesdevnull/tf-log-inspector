@@ -50,6 +50,8 @@ func fieldCategory(key string) string {
 	switch w {
 	case "requestid", "correlationid":
 		return "id"
+	case "host", "hostname", "host/name":
+		return "hostname"
 	}
 	if strings.HasSuffix(w, "/name") {
 		return "name"

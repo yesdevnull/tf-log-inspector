@@ -20,6 +20,7 @@ type view struct {
 	addressContext   bool
 	resourceKey      bool
 	addresses        []region
+	composites       []region
 	protected        []region
 	keys             []region
 	wholeValues      []region
@@ -42,6 +43,17 @@ func (s *session) parseLines(text string) []*view {
 			end += start + 1
 		}
 		v := &view{text: text[start:end], line: line}
+		if strings.Contains(v.text, "-----BEGIN ") {
+			if m := privatePEMPattern.FindStringIndex(text[start:]); m != nil && m[0] < len(v.text) {
+				pemEnd := start + m[1]
+				if newline := strings.IndexByte(text[pemEnd:], '\n'); newline >= 0 {
+					end = pemEnd + newline + 1
+				} else {
+					end = len(text)
+				}
+				v.text = text[start:end]
+			}
+		}
 		trim := strings.TrimLeft(v.text, " \t\r\n")
 		if (strings.HasPrefix(trim, "{") || strings.HasPrefix(trim, "[")) && !json.Valid([]byte(strings.TrimSpace(v.text))) {
 			decoder := json.NewDecoder(strings.NewReader(text[start:]))

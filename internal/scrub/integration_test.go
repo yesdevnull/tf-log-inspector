@@ -24,9 +24,26 @@ name=data
 {"id":["aa000000-0000-4000-8000-000000000000","aA000000-0000-4000-8000-000000000000"]}
 `
 	in := strings.Replace(fixture, "LONG_SECRET", strings.Repeat("z", 70000), 1)
+	in += `2026-09-08T00:00:05.000Z [DEBUG] provider.terraform-provider-privateplugin_v1.2.3_x5: HTTP Response: tf_provider_addr=registry.terraform.io/privateorg/privateplugin
+{"email":"synthetic-person@private-mail.test","ip":"192.0.2.45","ipv6":"2001:db8::123","endpoint":"https://synthetic-person:private-password@private-host.internal:8443/users/synthetic-person?username=synthetic-person&count=5","hostname":"private-host.internal","arn":"arn:aws:iam::123456789012:user/synthetic-person","azure":"/subscriptions/abcdefab-1234-4234-8234-123456789abc/resourceGroups/private-group/providers/Microsoft.Compute/virtualMachines/private-vm","gcp":"//compute.googleapis.com/projects/private-project/zones/private-zone/instances/private-instance","posix":"/home/synthetic-person/private-state.tfstate","windows":"C:\\Users\\synthetic-person\\private-state.tfstate"}
+http.response.body="{\"email\":\"synthetic-person@private-mail.test\",\"name\":\"synthetic-person\",\"token\":\"private-body-token\"}"
+-----BEGIN PRIVATE KEY-----
+U1lOVEhFVElDX1BSSVZBVEVfS0VZ
+-----END PRIVATE KEY-----
+`
 	got, err := Scrub([]byte(in), nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, target := range []string{"synthetic-person", "private-mail", "192.0.2.45", "2001:db8::123", "private-password", "private-host", "123456789012", "abcdefab-1234-4234-8234-123456789abc", "private-group", "private-vm", "private-project", "private-zone", "private-instance", "private-state", "private-body-token", "U1lOVEhFVElDX1BSSVZBVEVfS0VZ", "privateplugin", "privateorg"} {
+		if strings.Contains(string(got.Data), target) {
+			t.Fatalf("mixed detector target remains: %s", target)
+		}
+	}
+	for _, category := range []string{"name", "guid", "network", "email", "cloud", "path", "secret"} {
+		if got.Replacements[category] == 0 {
+			t.Fatalf("missing mixed replacement category: %s", category)
+		}
 	}
 	before := loadFixture(t, "original.log", []byte(in))
 	after := loadFixture(t, "scrubbed.log", got.Data)
