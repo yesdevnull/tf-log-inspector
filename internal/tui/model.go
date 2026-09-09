@@ -201,6 +201,7 @@ type Model struct {
 	// invalidateRows, along with everything derived from them below.
 	timelineTierCache   timelineTier
 	timelineSpansCache  []span.Span
+	timelineTimingCache model.TimingSelection
 	timelineSpansCached bool
 	timelineLanesCache  []model.Lane
 	timelineLanesCached bool
@@ -762,6 +763,7 @@ func (m *Model) invalidateRows() {
 	m.rowsCached = false
 	m.timelineTierCache = tierNone
 	m.timelineSpansCache = nil
+	m.timelineTimingCache = model.TimingSelection{}
 	m.timelineSpansCached = false
 	m.timelineLanesCache = nil
 	m.timelineLanesCached = false

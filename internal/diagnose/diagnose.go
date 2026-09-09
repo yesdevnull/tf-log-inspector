@@ -9,6 +9,7 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -190,6 +191,8 @@ type ResourceTypeTotal struct {
 type Report struct {
 	Stats              logfmt.Stats
 	Caps               span.Capabilities
+	RPCEvidence        span.TimingEvidence
+	UIEvidence         span.TimingEvidence
 	Tier               span.Fidelity
 	TierUsable         bool
 	SpanCount          int
@@ -320,10 +323,10 @@ const maxResourceRows = 10
 // cc is the same scan's attrib.ContextCollector: its hook-type histogram and
 // address contexts are what let this report measure attribution coverage
 // without ever naming an address itself.
-func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span,
+func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span, rpcEvidence, uiEvidence span.TimingEvidence,
 	uiMalformed, uiBackwards, uiSaturated uint64, cc *attrib.ContextCollector,
 	c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
-	tier, usable := caps.BestFidelity()
+	tier, usable := model.PreferredTiming(&model.Log{RPCSpans: spans, UISpans: uiSpans})
 	topFieldKeys, withheldFieldKeys := recurringTopN(c.fieldKeys, maxFieldKeys)
 	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
 	topTemplates, withheldTemplates := recurringTopN(c.templates, maxTemplates)
@@ -351,6 +354,8 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	r := Report{
 		Stats:              st,
 		Caps:               caps,
+		RPCEvidence:        rpcEvidence,
+		UIEvidence:         uiEvidence,
 		Tier:               tier,
 		TierUsable:         usable,
 		SpanCount:          len(spans),
@@ -500,9 +505,10 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 			}
 		}
 		r.ZeroExtentContexts = int(cc.ZeroExtentContexts())
-		if len(spans) > 0 {
+		positioned := model.SelectTiming(spans).Positioned
+		if len(positioned) > 0 {
 			r.HasSpans = true
-			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, ctxs))
+			r.Coverage = attrib.Summarise(positioned, attrib.Correlate(positioned, st.FirstTS, ctxs))
 			r.CandidateBreakdown = candidateBreakdown(r.Coverage.Candidates)
 		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
@@ -757,9 +763,15 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  most likely hclog output interleaved with it. Its\n")
 		fmt.Fprintf(b, "  per-resource timings, from Terraform's own UI hooks, appear\n")
 		fmt.Fprintf(b, "  in SLOWEST RESOURCES when this log has any.\n")
+	case !r.TierUsable && hasRPCEvidence:
+		fmt.Fprintf(b, "  Provider RPC evidence was observed, but no admitted duration\n")
+		fmt.Fprintf(b, "  was available to profile.\n")
+		writeRPCCaptureHint(b)
+	case !r.TierUsable && r.Stats.StructuredLines > 0:
+		fmt.Fprintf(b, "  A structured-output stream was observed, but no admitted\n")
+		fmt.Fprintf(b, "  UI-hook duration was available to profile.\n")
 	case !r.TierUsable:
-		fmt.Fprintf(b, "  This log contains no provider RPC entries, so there is\n")
-		fmt.Fprintf(b, "  nothing to profile.\n")
+		fmt.Fprintf(b, "  This log contains no provider RPC timing evidence to profile.\n")
 		writeRPCCaptureHint(b)
 	}
 	fmt.Fprintf(b, "  %-25s %d\n", "response entries", r.Caps.ResponseEntries)
@@ -779,6 +791,8 @@ func (r Report) Render(w io.Writer) error {
 		r.Stats.ContinuationOnlyReqIDEntries, plural(r.Stats.ContinuationOnlyReqIDEntries, "y", "ies"))
 
 	fmt.Fprintf(b, "SPANS\n")
+	fmt.Fprintf(b, "  RPC timing records    %d\n", r.RPCEvidence.Records)
+	fmt.Fprintf(b, "  UI timing records     %d\n", r.UIEvidence.Records)
 	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)
 	fmt.Fprintf(b, "  slowest span         %d ms\n", r.SlowestMs)
 	fmt.Fprintf(b, "  total span time (sum, overlaps) %d ms\n", r.TotalSpanMs)

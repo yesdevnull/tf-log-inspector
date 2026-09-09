@@ -6,11 +6,19 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func timed(start, end uint32, f span.Fidelity) span.Span {
-	return span.Span{StartMs: start, EndMs: end, DurationMs: end - start, Fidelity: f}
+	return span.Span{StartMs: start, EndMs: end, DurationMs: end - start, Fidelity: f, TimestampStatus: logfmt.TimestampValid}
+}
+
+func positioned(spans []span.Span) []span.Span {
+	for i := range spans {
+		spans[i].TimestampStatus = logfmt.TimestampValid
+	}
+	return spans
 }
 
 func TestPackLanesPutsOverlappingSpansInSeparateLanes(t *testing.T) {
@@ -19,7 +27,7 @@ func TestPackLanesPutsOverlappingSpansInSeparateLanes(t *testing.T) {
 		timed(500, 1500, span.FidelityReported),
 		timed(2000, 2500, span.FidelityReported),
 	}
-	lanes, err := PackLanes(spans)
+	lanes, err := PackLanes(positioned(spans))
 	if err != nil {
 		t.Fatalf("PackLanes: %v", err)
 	}
@@ -38,7 +46,7 @@ func TestPackLanesKeepsEverySpan(t *testing.T) {
 		timed(10, 200, span.FidelityReported),
 		timed(20, 300, span.FidelityReported),
 	}
-	lanes, err := PackLanes(spans)
+	lanes, err := PackLanes(positioned(spans))
 	if err != nil {
 		t.Fatalf("PackLanes: %v", err)
 	}
@@ -66,8 +74,24 @@ func TestPackLanesRejectsMixedFidelity(t *testing.T) {
 		timed(0, 1000, span.FidelityReported),
 		timed(0, 1000, span.FidelityUIReported),
 	}
-	if _, err := PackLanes(spans); err == nil {
+	if _, err := PackLanes(positioned(spans)); err == nil {
 		t.Fatal("PackLanes accepted spans from two different timelines")
+	}
+}
+
+func TestTemporalFunctionsRejectUnavailablePositions(t *testing.T) {
+	spans := []span.Span{{Fidelity: span.FidelityReported}}
+	for name, call := range map[string]func() error{
+		"PackLanes":       func() error { _, err := PackLanes(spans); return err },
+		"PeakConcurrency": func() error { _, err := PeakConcurrency(spans); return err },
+		"BusyMs":          func() error { _, err := BusyMs(spans); return err },
+		"Stalls":          func() error { _, err := Stalls(spans, 0); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := call(); !errors.Is(err, ErrUnavailablePosition) {
+				t.Errorf("error = %v, want ErrUnavailablePosition", err)
+			}
+		})
 	}
 }
 
@@ -78,7 +102,7 @@ func TestPeakConcurrency(t *testing.T) {
 		timed(200, 800, span.FidelityReported),
 		timed(5000, 6000, span.FidelityReported),
 	}
-	got, err := PeakConcurrency(spans)
+	got, err := PeakConcurrency(positioned(spans))
 	if err != nil {
 		t.Fatalf("PeakConcurrency: %v", err)
 	}
@@ -96,7 +120,7 @@ func TestPeakConcurrencyRejectsMixedFidelity(t *testing.T) {
 		timed(0, 1000, span.FidelityReported),
 		timed(0, 1000, span.FidelityUIReported),
 	}
-	if _, err := PeakConcurrency(spans); err == nil {
+	if _, err := PeakConcurrency(positioned(spans)); err == nil {
 		t.Fatal("PeakConcurrency accepted spans from two different timelines")
 	}
 }
@@ -119,7 +143,7 @@ func TestPeakConcurrencyHandoverBoundary(t *testing.T) {
 		timed(0, 500, span.FidelityReported),
 		timed(500, 1000, span.FidelityReported),
 	}
-	got, err := PeakConcurrency(spans)
+	got, err := PeakConcurrency(positioned(spans))
 	if err != nil {
 		t.Fatalf("PeakConcurrency: %v", err)
 	}
@@ -143,7 +167,7 @@ func TestPeakConcurrencyIgnoresZeroDurationSpans(t *testing.T) {
 		timed(200, 800, span.FidelityReported),
 		timed(500, 500, span.FidelityReported), // zero-duration, nested inside both
 	}
-	got, err := PeakConcurrency(spans)
+	got, err := PeakConcurrency(positioned(spans))
 	if err != nil {
 		t.Fatalf("PeakConcurrency: %v", err)
 	}
@@ -151,7 +175,7 @@ func TestPeakConcurrencyIgnoresZeroDurationSpans(t *testing.T) {
 		t.Errorf("PeakConcurrency = %d, want 2 (the zero-duration span's empty interval overlaps nothing)", got)
 	}
 
-	lanes, err := PackLanes(spans)
+	lanes, err := PackLanes(positioned(spans))
 	if err != nil {
 		t.Fatalf("PackLanes: %v", err)
 	}
@@ -171,7 +195,7 @@ func TestStallsFindsTheWindowWhereOnlyOneSpanRan(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
 		{StartMs: 0, EndMs: 100, DurationMs: 100, RPC: "ReadResource"},
 	}
-	got, err := Stalls(spans, 50)
+	got, err := Stalls(positioned(spans), 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -186,7 +210,7 @@ func TestStallsIgnoresWindowsBelowTheThreshold(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 		{StartMs: 0, EndMs: 90, DurationMs: 90},
 	}
-	got, err := Stalls(spans, 50)
+	got, err := Stalls(positioned(spans), 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -200,7 +224,7 @@ func TestStallsRefusesMixedTimelines(t *testing.T) {
 		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityReported},
 		{StartMs: 0, EndMs: 100, Fidelity: span.FidelityUIReported},
 	}
-	if _, err := Stalls(spans, 0); !errors.Is(err, ErrMixedTimelines) {
+	if _, err := Stalls(positioned(spans), 0); !errors.Is(err, ErrMixedTimelines) {
 		t.Errorf("Stalls over mixed fidelities = %v, want ErrMixedTimelines", err)
 	}
 }
@@ -210,7 +234,7 @@ func TestStallsReportsNoStallWhenEverySpanRunsThroughout(t *testing.T) {
 		{StartMs: 0, EndMs: 500, DurationMs: 500},
 		{StartMs: 0, EndMs: 500, DurationMs: 500},
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -235,7 +259,7 @@ func TestStallsReportsWindowsWhereNothingWasRunning(t *testing.T) {
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 		{StartMs: 200, EndMs: 260, DurationMs: 60},
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -265,7 +289,7 @@ func TestStallsNeverMergesAcrossTheBlockedAndAllIdleBoundary(t *testing.T) {
 		{StartMs: 0, EndMs: 50, DurationMs: 50},
 		{StartMs: 150, EndMs: 200, DurationMs: 50},
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -296,11 +320,11 @@ func TestStallsMergesAWaitWhoseDepthChanges(t *testing.T) {
 		{StartMs: 0, EndMs: 20000, DurationMs: 20000}, // google
 		{StartMs: 0, EndMs: 40000, DurationMs: 40000}, // azurerm
 	}
-	peak, err := PeakConcurrency(spans)
+	peak, err := PeakConcurrency(positioned(spans))
 	if err != nil {
 		t.Fatalf("PeakConcurrency: %v", err)
 	}
-	got, err := Stalls(spans, 1000)
+	got, err := Stalls(positioned(spans), 1000)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -332,7 +356,7 @@ func TestStallsMergesAdjacentSegmentsBeforeThresholding(t *testing.T) {
 		{StartMs: 30, EndMs: 60, DurationMs: 30},
 		{StartMs: 0, EndMs: 10, DurationMs: 10},
 	}
-	got, err := Stalls(spans, 50)
+	got, err := Stalls(positioned(spans), 50)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -365,7 +389,7 @@ func TestStallsIgnoresElapsedZeroDurationSpansWhenChoosingBlocking(t *testing.T)
 		{StartMs: 0, EndMs: 100, DurationMs: 0}, // genuinely running throughout
 		{StartMs: 0, EndMs: 20, DurationMs: 20}, // the second lane's work
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -384,7 +408,7 @@ func TestStallsBreaksDurationTiesTowardsTheLowerIndex(t *testing.T) {
 		{StartMs: 0, EndMs: 200, DurationMs: 200},
 		{StartMs: 0, EndMs: 100, DurationMs: 100},
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -408,21 +432,21 @@ func TestStallsDoesNotCountTheLaneAZeroDurationSpanOpens(t *testing.T) {
 		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
 		{StartMs: 0, EndMs: 30000, DurationMs: 30000},
 	}
-	if got, err := Stalls(busy, 1000); err != nil {
+	if got, err := Stalls(positioned(busy), 1000); err != nil {
 		t.Fatalf("Stalls: %v", err)
 	} else if len(got) != 0 {
 		t.Fatalf("Stalls over three spans that all run throughout = %+v, want none", got)
 	}
 
 	withZero := []span.Span{busy[0], busy[1], busy[2], {StartMs: 5000, EndMs: 5000, DurationMs: 0}}
-	lanes, err := PackLanes(withZero)
+	lanes, err := PackLanes(positioned(withZero))
 	if err != nil {
 		t.Fatalf("PackLanes: %v", err)
 	}
 	if len(lanes) != 4 {
 		t.Fatalf("PackLanes packed %d lanes, want 4 -- this test's premise is that the zero-duration span opens a fourth", len(lanes))
 	}
-	got, err := Stalls(withZero, 1000)
+	got, err := Stalls(positioned(withZero), 1000)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -450,14 +474,14 @@ func TestStallsMergesOneWaitAcrossHandoversInsideTheBlockingLane(t *testing.T) {
 		{StartMs: 14000, EndMs: 18000, DurationMs: 4000}, // aws
 		{StartMs: 18000, EndMs: 20000, DurationMs: 2000}, // aws
 	}
-	lanes, err := PackLanes(spans)
+	lanes, err := PackLanes(positioned(spans))
 	if err != nil {
 		t.Fatalf("PackLanes: %v", err)
 	}
 	if len(lanes) != 2 {
 		t.Fatalf("PackLanes packed %d lanes, want 2 -- every aws span reuses lane 0", len(lanes))
 	}
-	got, err := Stalls(spans, 1000)
+	got, err := Stalls(positioned(spans), 1000)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -484,7 +508,7 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
 		{StartMs: 8000, EndMs: 10000, DurationMs: 2000},
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -497,7 +521,7 @@ func TestStallsReportsTheIdleWindowBeforeTheFirstSpan(t *testing.T) {
 		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
 		{StartMs: 0, EndMs: 10000, DurationMs: 10000},
 	}
-	if got, err := Stalls(atZero, 0); err != nil {
+	if got, err := Stalls(positioned(atZero), 0); err != nil {
 		t.Fatalf("Stalls: %v", err)
 	} else if len(got) != 0 {
 		t.Errorf("Stalls = %+v, want none: work starts at the log's zero point, so there is no window before it", got)
@@ -520,7 +544,7 @@ func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 		dur := uint32(r.IntN(400))
 		spans[i] = span.Span{StartMs: start, EndMs: start + dur, DurationMs: dur}
 	}
-	got, err := Stalls(spans, 0)
+	got, err := Stalls(positioned(spans), 0)
 	if err != nil {
 		t.Fatalf("Stalls: %v", err)
 	}
@@ -547,7 +571,7 @@ func TestStallsBlockingNamesTheLongestSpanRunningInTheWindow(t *testing.T) {
 			t.Fatalf("stall %+v names span %d, which does not run anywhere in that window", w, w.Blocking)
 		}
 	}
-	peak, err := PeakConcurrency(spans)
+	peak, err := PeakConcurrency(positioned(spans))
 	if err != nil {
 		t.Fatalf("PeakConcurrency: %v", err)
 	}
@@ -576,7 +600,7 @@ func TestBusyMsCountsOverlappingSpansOnce(t *testing.T) {
 		timed(0, 10, span.FidelityReported),
 		timed(5, 15, span.FidelityReported),
 	}
-	got, err := BusyMs(spans)
+	got, err := BusyMs(positioned(spans))
 	if err != nil {
 		t.Fatalf("BusyMs: %v", err)
 	}
@@ -590,7 +614,7 @@ func TestBusyMsLeavesOutTheGapsBetweenSpans(t *testing.T) {
 		timed(0, 40, span.FidelityReported),
 		timed(3000, 3040, span.FidelityReported),
 	}
-	got, err := BusyMs(spans)
+	got, err := BusyMs(positioned(spans))
 	if err != nil {
 		t.Fatalf("BusyMs: %v", err)
 	}
@@ -606,7 +630,7 @@ func TestBusyMsCountsANestedSpanOnce(t *testing.T) {
 		timed(0, 100, span.FidelityReported),
 		timed(20, 30, span.FidelityReported),
 	}
-	got, err := BusyMs(spans)
+	got, err := BusyMs(positioned(spans))
 	if err != nil {
 		t.Fatalf("BusyMs: %v", err)
 	}
@@ -623,7 +647,7 @@ func TestBusyMsIgnoresZeroDurationSpans(t *testing.T) {
 		timed(50, 50, span.FidelityUIReported),
 		timed(60, 60, span.FidelityUIReported),
 	}
-	got, err := BusyMs(spans)
+	got, err := BusyMs(positioned(spans))
 	if err != nil {
 		t.Fatalf("BusyMs: %v", err)
 	}
@@ -639,7 +663,7 @@ func TestBusyMsKeepsARunningSpanBusyAcrossAZeroDurationOne(t *testing.T) {
 		timed(0, 100, span.FidelityReported),
 		timed(50, 50, span.FidelityReported),
 	}
-	got, err := BusyMs(spans)
+	got, err := BusyMs(positioned(spans))
 	if err != nil {
 		t.Fatalf("BusyMs: %v", err)
 	}
@@ -653,7 +677,7 @@ func TestBusyMsRefusesAMixedFidelitySlice(t *testing.T) {
 		timed(0, 100, span.FidelityReported),
 		timed(0, 100, span.FidelityUIReported),
 	}
-	if _, err := BusyMs(spans); !errors.Is(err, ErrMixedTimelines) {
+	if _, err := BusyMs(positioned(spans)); !errors.Is(err, ErrMixedTimelines) {
 		t.Errorf("BusyMs over mixed fidelities = %v, want ErrMixedTimelines", err)
 	}
 }

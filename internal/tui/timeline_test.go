@@ -22,6 +22,18 @@ func timelineModel(t *testing.T) Model {
 	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 }
 
+// positionedTimelineModel marks synthetic coordinates as intentional. Real
+// scanner fixtures retain their recorded timestamp status.
+func positionedTimelineModel(l *model.Log, name string) Model {
+	for i := range l.RPCSpans {
+		l.RPCSpans[i].TimestampStatus = logfmt.TimestampValid
+	}
+	for i := range l.UISpans {
+		l.UISpans[i].TimestampStatus = logfmt.TimestampValid
+	}
+	return New(l, name)
+}
+
 func TestTimelineCursorStopsAtTheLastLane(t *testing.T) {
 	m := timelineModel(t)
 	for i := 0; i < 50; i++ {
@@ -81,7 +93,7 @@ func TestTheSpanCursorDoesNotMoveWhileTheFacetPaneHasFocus(t *testing.T) {
 		{Provider: aws, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: aws, RPC: "ReadResource", StartMs: 4000, EndMs: 5000, DurationMs: 1000, Fidelity: span.FidelityReported},
 	}
-	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m := update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
 	was := m.timeline.span
@@ -141,7 +153,7 @@ func TestAFilterThatEmptiesTheTimelineSelectsNothing(t *testing.T) {
 func mixedFidelityModel(t *testing.T) Model {
 	t.Helper()
 	const aws = "registry.terraform.io/hashicorp/aws"
-	return New(&model.Log{RPCSpans: []span.Span{
+	return positionedTimelineModel(&model.Log{RPCSpans: []span.Span{
 		{Provider: aws, RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: aws, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelitySequential},
 	}}, "x.log")
@@ -208,7 +220,7 @@ func TestAFilterThatNarrowsTheTimelineKeepsALiveCursor(t *testing.T) {
 		{Provider: google, RPC: "ReadResource", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: google, RPC: "ReadResource", StartMs: 4000, EndMs: 5000, DurationMs: 1000, Fidelity: span.FidelityReported},
 	}
-	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m := update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRight})
@@ -359,7 +371,7 @@ func TestLaneLabelsNumberEachProviderIndependently(t *testing.T) {
 // whole justification for naming lanes at all, so the packing has to keep
 // a lane nameable.
 func TestTimelineLanesPackEachProviderSeparately(t *testing.T) {
-	m := New(&model.Log{RPCSpans: []span.Span{
+	m := positionedTimelineModel(&model.Log{RPCSpans: []span.Span{
 		{Provider: "registry.terraform.io/hashicorp/aws", RPC: "PlanResourceChange", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: "registry.terraform.io/hashicorp/google", RPC: "PlanResourceChange", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
 	}}, "x.log")
@@ -386,7 +398,7 @@ func TestTimelineLanesPackEachProviderSeparately(t *testing.T) {
 // leaves the two google calls non-overlapping so google's own lane holds
 // two of them.
 func TestTimelineLanesKeepEveryLaneIndexPointingAtItsOwnSpan(t *testing.T) {
-	m := New(&model.Log{RPCSpans: []span.Span{
+	m := positionedTimelineModel(&model.Log{RPCSpans: []span.Span{
 		{Provider: "registry.terraform.io/hashicorp/google", RPC: "ReadResource", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: "registry.terraform.io/hashicorp/aws", RPC: "PlanResourceChange", StartMs: 0, EndMs: 1000, DurationMs: 1000, Fidelity: span.FidelityReported},
 		{Provider: "registry.terraform.io/hashicorp/google", RPC: "ApplyResourceChange", StartMs: 2000, EndMs: 3000, DurationMs: 1000, Fidelity: span.FidelityReported},
@@ -437,6 +449,44 @@ func TestTimelineFallsBackToTheUITierWhenThereAreNoRPCSpans(t *testing.T) {
 		if s.Fidelity != span.FidelityUIReported {
 			t.Fatalf("span %+v is not UI fidelity; PackLanes will refuse this slice", s)
 		}
+	}
+}
+
+// TestTimelineKeepsRPCDurationsWhenTheirPositionsAreUnavailable catches the
+// tempting but false fallback from unavailable RPC positions to UI timings.
+// The RPC tier remains the selected evidence tier, and its admitted duration
+// remains available to totals even though it cannot draw a temporal lane.
+func TestTimelineKeepsRPCDurationsWhenTheirPositionsAreUnavailable(t *testing.T) {
+	m := New(&model.Log{
+		RPCSpans: []span.Span{{
+			Entry: 1, DurationMs: 250, TimestampStatus: logfmt.TimestampMissing,
+			Fidelity: span.FidelityReported,
+		}},
+		UISpans: []span.Span{{
+			Entry: 2, StartMs: 0, EndMs: 100, DurationMs: 100,
+			TimestampStatus: logfmt.TimestampValid, Fidelity: span.FidelityUIReported,
+		}},
+	}, "x.log")
+
+	tier, positioned := m.timelineSpans()
+	if tier != tierRPC {
+		t.Fatalf("tier = %v, want RPC", tier)
+	}
+	if len(positioned) != 0 {
+		t.Fatalf("positioned spans = %d, want no drawable RPC spans", len(positioned))
+	}
+	if got := unstyled(m.renderTimeline(100, 10)); !strings.Contains(got, "Timeline positions unavailable: 1 admitted observations; 250ms retained in duration totals.") {
+		t.Fatalf("timeline = %q, want unavailable-position explanation", got)
+	}
+}
+
+func TestTimelineQualifiesPartialPositionCoverage(t *testing.T) {
+	m := New(&model.Log{RPCSpans: []span.Span{
+		{Entry: 1, StartMs: 0, EndMs: 100, DurationMs: 100, TimestampStatus: logfmt.TimestampValid, Fidelity: span.FidelityReported},
+		{Entry: 2, DurationMs: 50, TimestampStatus: logfmt.TimestampMissing, Fidelity: span.FidelityReported},
+	}}, "x.log")
+	if got := unstyled(m.renderTimeline(120, 10)); !strings.Contains(got, "Positioned 1 of 2 observations; excluded 1 (50ms).") {
+		t.Fatalf("timeline = %q, want partial-position qualification", got)
 	}
 }
 
@@ -1196,7 +1246,7 @@ func TestNoStallsSaysSoRatherThanRenderingNothing(t *testing.T) {
 func longLabelStallModel(t *testing.T) Model {
 	t.Helper()
 	const provider = "registry.terraform.io/hashicorp/googleworkspace"
-	return update(t, New(&model.Log{RPCSpans: []span.Span{
+	return update(t, positionedTimelineModel(&model.Log{RPCSpans: []span.Span{
 		{Provider: provider, StartMs: 0, EndMs: 1000, DurationMs: 1000, RPC: "PlanResourceChange", Fidelity: span.FidelityReported},
 		{Provider: provider, StartMs: 0, EndMs: 1000, DurationMs: 1000, RPC: "PlanResourceChange", Fidelity: span.FidelityReported},
 		{Provider: provider, StartMs: 5000, EndMs: 15000, DurationMs: 10000, RPC: "ApplyResourceChange", Fidelity: span.FidelityReported},
@@ -1307,7 +1357,7 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 func everyKindOfWaitModel(t *testing.T) Model {
 	t.Helper()
 	const aws, google = "registry.terraform.io/hashicorp/aws", "registry.terraform.io/hashicorp/google"
-	return update(t, New(&model.Log{RPCSpans: []span.Span{
+	return update(t, positionedTimelineModel(&model.Log{RPCSpans: []span.Span{
 		{Provider: aws, RPC: "PlanResourceChange", StartMs: 3000, EndMs: 9000, DurationMs: 6000, Fidelity: span.FidelityReported},
 		{Provider: google, RPC: "PlanResourceChange", StartMs: 3000, EndMs: 9000, DurationMs: 6000, Fidelity: span.FidelityReported},
 		{Provider: aws, RPC: "ApplyResourceChange", StartMs: 20000, EndMs: 30000, DurationMs: 10000, Fidelity: span.FidelityReported},
@@ -1355,7 +1405,7 @@ func drainingLanesModel(t *testing.T) Model {
 		{Provider: base + "google", RPC: "ReadResource", StartMs: 0, EndMs: 20000, DurationMs: 20000, Fidelity: span.FidelityReported},
 		{Provider: base + "azurerm", RPC: "ReadResource", StartMs: 0, EndMs: 40000, DurationMs: 40000, Fidelity: span.FidelityReported},
 	}
-	return update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	return update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 }
 
 // TestAWaitWhoseDepthChangesReportsBothEnds covers the window a merge
@@ -1411,7 +1461,7 @@ func TestARangeClipsItsOwnTailAtTheCommonPaneWidth(t *testing.T) {
 // instead of being filtered out the way testdata/structured-ui.log's own
 // 886ms leading window is.
 func TestALeadingWindowContainingACompletedCallIsNotTheLeadingGap(t *testing.T) {
-	m := update(t, New(&model.Log{UISpans: []span.Span{
+	m := update(t, positionedTimelineModel(&model.Log{UISpans: []span.Span{
 		{Provider: "aws", ResourceType: "aws_instance", Address: "aws_instance.web", StartMs: 500, EndMs: 500, DurationMs: 0, Fidelity: span.FidelityUIReported},
 		{Provider: "aws", ResourceType: "aws_vpc", Address: "aws_vpc.main", StartMs: 3000, EndMs: 13000, DurationMs: 10000, Fidelity: span.FidelityUIReported},
 	}}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
@@ -1473,7 +1523,7 @@ func TestALongWindowsPercentageDecidesWhichWaitsAreNamed(t *testing.T) {
 	for _, g := range [][2]uint32{{0, 2000}, {15000, 17000}} {
 		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: g[0], EndMs: g[1], DurationMs: g[1] - g[0], Fidelity: span.FidelityReported})
 	}
-	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m := update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 
 	if _, got := m.timelineSpans(); timelineWallClockMs(got) != 200000 {
 		t.Fatalf("the window is %dms, want 200000", timelineWallClockMs(got))
@@ -1509,7 +1559,7 @@ func topStallsModel(t *testing.T) Model {
 	for _, g := range [][2]uint32{{0, 2000}, {12000, 14000}, {22000, 24000}, {30000, 32000}, {36000, 38000}} {
 		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: g[0], EndMs: g[1], DurationMs: g[1] - g[0], Fidelity: span.FidelityReported})
 	}
-	return update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	return update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 }
 
 // TestStallAnnotationShowsAtMostTheTopFewByDuration checks the two things
@@ -2194,7 +2244,7 @@ func unevenLanesModel(t *testing.T) Model {
 	for _, at := range []uint32{0, 10000, 20000, 30000} {
 		spans = append(spans, span.Span{Provider: google, RPC: "ReadResource", StartMs: at, EndMs: at + 1000, DurationMs: 1000, Fidelity: span.FidelityReported})
 	}
-	m := update(t, New(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m := update(t, positionedTimelineModel(&model.Log{RPCSpans: spans}, "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
 	return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
 }
 

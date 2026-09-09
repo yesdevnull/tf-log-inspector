@@ -21,6 +21,10 @@ type Lane struct{ Spans []int }
 // there is no signal in the output that would let a reader notice.
 var ErrMixedTimelines = errors.New("model: cannot pack lanes across spans of different fidelity")
 
+// ErrUnavailablePosition is returned when a temporal calculation receives a
+// duration whose timestamp or extent could not be established safely.
+var ErrUnavailablePosition = errors.New("model: cannot analyse spans without usable positions")
+
 // sameFidelity reports ErrMixedTimelines when spans holds more than one
 // span.Fidelity. Both PackLanes and PeakConcurrency sweep StartMs/EndMs, so
 // both need this guard: those fields are comparable only within spans built
@@ -29,6 +33,21 @@ func sameFidelity(spans []span.Span) error {
 	for _, s := range spans[1:] {
 		if s.Fidelity != spans[0].Fidelity {
 			return ErrMixedTimelines
+		}
+	}
+	return nil
+}
+
+// usablePositions rejects unpositioned durations before any temporal sweep.
+// Fidelity is checked first so mixing unrelated clocks retains its dedicated
+// error even when one of those spans is also unpositioned.
+func usablePositions(spans []span.Span) error {
+	if err := sameFidelity(spans); err != nil {
+		return err
+	}
+	for _, s := range spans {
+		if !s.HasPosition() {
+			return ErrUnavailablePosition
 		}
 	}
 	return nil
@@ -44,7 +63,7 @@ func PackLanes(spans []span.Span) ([]Lane, error) {
 	if len(spans) == 0 {
 		return nil, nil
 	}
-	if err := sameFidelity(spans); err != nil {
+	if err := usablePositions(spans); err != nil {
 		return nil, err
 	}
 
@@ -151,7 +170,7 @@ func PeakConcurrency(spans []span.Span) (int, error) {
 	if len(spans) == 0 {
 		return 0, nil
 	}
-	if err := sameFidelity(spans); err != nil {
+	if err := usablePositions(spans); err != nil {
 		return 0, err
 	}
 
@@ -311,7 +330,7 @@ func Stalls(spans []span.Span, minMs uint32) ([]Stall, error) {
 	if len(spans) == 0 {
 		return nil, nil
 	}
-	if err := sameFidelity(spans); err != nil {
+	if err := usablePositions(spans); err != nil {
 		return nil, err
 	}
 
@@ -476,7 +495,7 @@ func BusyMs(spans []span.Span) (uint32, error) {
 	if len(spans) == 0 {
 		return 0, nil
 	}
-	if err := sameFidelity(spans); err != nil {
+	if err := usablePositions(spans); err != nil {
 		return 0, err
 	}
 

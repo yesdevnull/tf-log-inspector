@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -221,7 +222,7 @@ func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
 func TestReportNotesClampedStartsUnderConcurrency(t *testing.T) {
 	l := &model.Log{
 		RPCSpans: []span.Span{
-			{DurationMs: 45000, StartMs: 0, EndMs: 2000, StartClamped: true, RPC: "GetProviderSchema", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_instance"},
+			{DurationMs: 45000, StartMs: 0, EndMs: 2000, StartClamped: true, TimestampStatus: logfmt.TimestampValid, RPC: "GetProviderSchema", Provider: "registry.terraform.io/hashicorp/aws", ResourceType: "aws_instance"},
 		},
 	}
 	var sb strings.Builder

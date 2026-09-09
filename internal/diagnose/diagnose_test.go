@@ -35,7 +35,7 @@ func build(t *testing.T, in string) Report {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	return Build(st, sn.Report(), b.Spans(), ui.Spans(),
+	return Build(st, sn.Report(), b.Spans(), ui.Spans(), b.Evidence(), ui.Evidence(),
 		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
 		c, &comps, 5*time.Millisecond)
 }
@@ -74,7 +74,7 @@ func renderFixture(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	r := Build(st, sn.Report(), b.Spans(), ui.Spans(),
+	r := Build(st, sn.Report(), b.Spans(), ui.Spans(), b.Evidence(), ui.Evidence(),
 		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
 		c, &comps, 5*time.Millisecond)
 	return render(t, r)
@@ -914,7 +914,7 @@ func TestReportMasksHostileResourceTypeAndAction(t *testing.T) {
 	var comps logfmt.Interner
 	c := NewCollector(&comps)
 	var cc attrib.ContextCollector
-	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, 0, 0, 0, &cc, c, &comps, 0)
+	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, span.TimingEvidence{}, span.TimingEvidence{}, 0, 0, 0, &cc, c, &comps, 0)
 
 	if len(r.SlowestResources) != 1 {
 		t.Fatalf("SlowestResources has %d rows, want 1", len(r.SlowestResources))

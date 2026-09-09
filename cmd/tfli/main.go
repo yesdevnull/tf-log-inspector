@@ -208,7 +208,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	}
 	elapsed := time.Since(started)
 
-	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(),
+	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(), builder.Evidence(), uiBuilder.Evidence(),
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 

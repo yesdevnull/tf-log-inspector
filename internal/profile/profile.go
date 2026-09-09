@@ -112,6 +112,11 @@ func Render(w io.Writer, l *model.Log) error {
 	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n")
 	fmt.Fprintf(b, "--diagnose, this report is not safe to share.\n\n")
 	writeLoggingCaveat(b)
+	rpcTiming := model.SelectTiming(l.RPCSpans)
+	uiTiming := model.SelectTiming(l.UISpans)
+	fmt.Fprintf(b, "TIMING ADMISSION\n")
+	fmt.Fprintf(b, "  RPC admitted          %d observations, %s total\n", rpcTiming.AdmittedCount, formatMs(rpcTiming.AdmittedMs))
+	fmt.Fprintf(b, "  UI admitted           %d observations, %s total\n\n", uiTiming.AdmittedCount, formatMs(uiTiming.AdmittedMs))
 	if l.UISaturatedDurations > 0 {
 		fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", l.UISaturatedDurations)
 		fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\n")
@@ -120,9 +125,13 @@ func Render(w io.Writer, l *model.Log) error {
 
 	if len(l.RPCSpans) == 0 && len(l.UISpans) == 0 {
 		fmt.Fprintf(b, "NO SPANS\n")
-		fmt.Fprintf(b, "  This log has no spans to profile: no provider RPC\n")
-		fmt.Fprintf(b, "  entries, and no terraform.ui structured-output stream\n")
-		fmt.Fprintf(b, "  to read UI-hook spans from.\n")
+		fmt.Fprintf(b, "  This log has no spans to profile: no admitted timing observations.\n")
+		if l.Caps.ProviderEntries > 0 || l.Caps.ResponseEntries > 0 || l.Stats.StructuredLines > 0 {
+			fmt.Fprintf(b, "  Provider or structured-output evidence was observed, but\n")
+			fmt.Fprintf(b, "  it did not yield an admitted duration.\n")
+		} else {
+			fmt.Fprintf(b, "  Capture provider TRACE logs or terraform.ui completion hooks.\n")
+		}
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -131,7 +140,7 @@ func Render(w io.Writer, l *model.Log) error {
 	writeProviderRollup(b, l.RPCSpans)
 	writeSlowestCalls(b, l.RPCSpans)
 	writeSlowestResources(b, l.UISpans)
-	if err := writeConcurrency(b, l.RPCSpans); err != nil {
+	if err := writeConcurrency(b, rpcTiming); err != nil {
 		return err
 	}
 
@@ -278,10 +287,16 @@ func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
 // disagree (see the doc comment on PeakConcurrency), so printing both here
 // invites exactly the "these two numbers should match" reading that is
 // wrong.
-func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) error {
-	if len(rpcSpans) == 0 {
+func writeConcurrency(b *strings.Builder, timing model.TimingSelection) error {
+	if timing.AdmittedCount == 0 {
 		return nil
 	}
+	if len(timing.Positioned) == 0 {
+		fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
+		fmt.Fprintf(b, "  unavailable: %d admitted observations (%s) have no usable positions\n\n", timing.AdmittedCount, formatMs(timing.AdmittedMs))
+		return nil
+	}
+	rpcSpans := timing.Positioned
 
 	var summed uint64
 	var wallClock uint32
@@ -302,6 +317,7 @@ func writeConcurrency(b *strings.Builder, rpcSpans []span.Span) error {
 	}
 
 	fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
+	fmt.Fprintf(b, "  positioned duration   %s (%d excluded, %s)\n", formatMs(timing.PositionedMs), timing.ExcludedCount, formatMs(timing.ExcludedMs))
 	fmt.Fprintf(b, "  peak concurrency     %d\n", peak)
 	if clamped {
 		// A span whose reported duration exceeds its offset from the log's

@@ -62,23 +62,29 @@ const (
 // rowsCache's own doc comment describes.
 func (m *Model) timelineSpans() (timelineTier, []span.Span) {
 	if !m.timelineSpansCached {
-		m.timelineTierCache, m.timelineSpansCache = m.filteredTimelineSpans()
+		m.timelineTierCache, m.timelineTimingCache = m.filteredTimelineTiming()
+		m.timelineSpansCache = m.timelineTimingCache.Positioned
 		m.timelineSpansCached = true
 	}
 	return m.timelineTierCache, m.timelineSpansCache
 }
 
+func (m *Model) timelineTiming() (timelineTier, model.TimingSelection) {
+	m.timelineSpans()
+	return m.timelineTierCache, m.timelineTimingCache
+}
+
 // filteredTimelineSpans is timelineSpans' answer built from scratch. It is
 // separate only so the cache above it is one branch rather than three
 // returns each having to remember to fill it.
-func (m *Model) filteredTimelineSpans() (timelineTier, []span.Span) {
+func (m *Model) filteredTimelineTiming() (timelineTier, model.TimingSelection) {
 	switch tier := timelineTierFor(m.log); tier {
 	case tierRPC:
-		return tier, m.filter().SpansMatching(m.log.RPCSpans)
+		return tier, model.SelectTiming(m.filter().SpansMatching(m.log.RPCSpans))
 	case tierUI:
-		return tier, m.uiFilter().SpansMatching(m.log.UISpans)
+		return tier, model.SelectTiming(m.uiFilter().SpansMatching(m.log.UISpans))
 	default:
-		return tierNone, nil
+		return tierNone, model.SelectTiming(nil)
 	}
 }
 
@@ -593,8 +599,12 @@ func (m *Model) renderTimeline(w, h int) string {
 	if tier == tierNone {
 		return fitCaptureGuidance(w, h)
 	}
-	if len(spans) == 0 {
+	_, timing := m.timelineTiming()
+	if timing.AdmittedCount == 0 {
 		return styles.note.Render(clipWidth(noMatchNote, w))
+	}
+	if len(spans) == 0 {
+		return styles.note.Render(clipWidth(fmt.Sprintf("Timeline positions unavailable: %d admitted observations; %dms retained in duration totals.", timing.AdmittedCount, timing.AdmittedMs), w))
 	}
 
 	lanes := m.timelineLanes()
@@ -765,12 +775,16 @@ const clampedStartNote = "Note: a clamped start -- duration exceeding the offset
 // work rather than on the longest of the waits (see busyNote).
 func (m *Model) timelineNotes(w int) []string {
 	_, spans := m.timelineSpans()
+	_, timing := m.timelineTiming()
 	var lines []string
 	if slices.ContainsFunc(spans, func(s span.Span) bool { return s.StartClamped }) {
 		lines = wrapToWidth(clampedStartNote, w)
 	}
 	if m.timelineNarrowed() {
 		lines = append(lines, wrapToWidth(timelineFilterNote, w)...)
+	}
+	if timing.ExcludedCount > 0 {
+		lines = append(lines, clipValueEnd(fmt.Sprintf("Positioned %d of %d observations; excluded %d (%dms).", len(spans), timing.AdmittedCount, timing.ExcludedCount, timing.ExcludedMs), w))
 	}
 	lines = append(lines, clipValueEnd(busyNote(spans, m.timelineWallClock()), w))
 	return append(lines, strings.Split(m.stallAnnotation(w), "\n")...)
@@ -815,12 +829,12 @@ const timelineFilterNote = "Note: a filter is active -- everything below covers 
 // same map. Counting what survived answers all three at once, over slices
 // both already computed.
 func (m *Model) timelineNarrowed() bool {
-	tier, spans := m.timelineSpans()
+	tier, timing := m.timelineTiming()
 	switch tier {
 	case tierRPC:
-		return len(spans) < len(m.log.RPCSpans)
+		return timing.AdmittedCount < len(m.log.RPCSpans)
 	case tierUI:
-		return len(spans) < len(m.log.UISpans)
+		return timing.AdmittedCount < len(m.log.UISpans)
 	}
 	return false
 }
