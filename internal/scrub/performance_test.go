@@ -22,6 +22,132 @@ func TestScrubLongWhitespace(t *testing.T) {
 	}
 }
 
+func TestDiscoverySkipsProviderMaskPadding(t *testing.T) {
+	v := &view{text: "name=plain " + strings.Repeat(" ", 30*1024*1024)}
+	s := &session{candidates: make(map[string]*candidate)}
+	start := time.Now()
+	s.discoverPatterns(v)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("pattern discovery over provider padding took %s; expected under 2 seconds", elapsed)
+	}
+}
+
+func TestPlainQuotedValuesNeedNoDecodingAllocation(t *testing.T) {
+	const input = `"a plain UTF-8 value: café"`
+	allocations := testing.AllocsPerRun(100, func() {
+		end, value, ok := readString(input, 0)
+		if !ok || end != len(input) || value != "a plain UTF-8 value: café" {
+			t.Fatal("plain quoted value changed")
+		}
+	})
+	if allocations != 0 {
+		t.Fatalf("plain quoted value allocated %.0f times; want no decoding allocation", allocations)
+	}
+}
+
+func TestNonNumericValuesNeedNoParsingAllocation(t *testing.T) {
+	for _, value := range []string{"private-person", "https://private.example/path", "", " 12", "null", "true"} {
+		allocations := testing.AllocsPerRun(100, func() {
+			if isNumber(value) {
+				t.Fatalf("non-numeric value accepted: %q", value)
+			}
+		})
+		if allocations != 0 {
+			t.Errorf("numeric check for %q allocated %.0f times", value, allocations)
+		}
+	}
+}
+
+func TestJSONSyntaxProtectionAllocation(t *testing.T) {
+	text := "[" + strings.TrimSuffix(strings.Repeat(`"plain",`, 2000), ",") + "]"
+	allocations := testing.AllocsPerRun(3, func() {
+		v := &view{text: text}
+		v.protectJSONSyntax()
+		if len(v.protected) != 6001 || v.protected[0] != (region{0, 1}) || v.protected[1] != (region{1, 2}) || v.protected[2] != (region{7, 8}) || v.protected[3] != (region{8, 9}) || v.protected[6000] != (region{len(text) - 1, len(text)}) {
+			t.Fatal("JSON delimiter protection changed")
+		}
+	})
+	if allocations > 2 {
+		t.Fatalf("JSON delimiter protection allocated %.0f times; expected at most 2", allocations)
+	}
+}
+
+func TestJSONSyntaxProtectionDoesNotDecodeValues(t *testing.T) {
+	text := `{"value":"` + strings.Repeat(`\n\u0041\"`, 1000) + `"}`
+	allocations := testing.AllocsPerRun(3, func() {
+		v := &view{text: text}
+		v.protectJSONSyntax()
+		if len(v.protected) != 7 || v.protected[5] != (region{len(text) - 2, len(text) - 1}) || v.protected[6] != (region{len(text) - 1, len(text)}) {
+			t.Fatal("escaped string delimiter protection changed")
+		}
+	})
+	if allocations > 2 {
+		t.Fatalf("delimiter protection decoded values: %.0f allocations", allocations)
+	}
+}
+
+func TestRepeatedGUIDDiscoveryAllocation(t *testing.T) {
+	const value = "12345678-1234-1234-1234-123456789abc"
+	s := &session{candidates: make(map[string]*candidate)}
+	s.discoverPatterns(&view{text: value})
+	cold := testing.AllocsPerRun(100, func() {
+		s.patterns = nil
+		s.discoverPatterns(&view{text: value})
+	})
+	allocations := testing.AllocsPerRun(100, func() {
+		s.discoverPatterns(&view{text: value})
+	})
+	if len(s.ordered) != 1 || s.candidates[value] == nil || s.candidates[value].category != "guid" {
+		t.Fatal("repeated GUID discovery changed identity")
+	}
+	if allocations*2 >= cold {
+		t.Fatalf("repeated GUID discovery allocated %.0f times versus %.0f cold; expected less than half", allocations, cold)
+	}
+}
+
+func TestResponseBodySearchSkipsUnrelatedFields(t *testing.T) {
+	text := strings.Repeat(`tf_rpc=ReadResource tf_resource_type=example_instance `, 10)
+	allocations := testing.AllocsPerRun(100, func() {
+		if responseBodyStart(text) != -1 {
+			t.Fatal("unrelated metadata was treated as a response body")
+		}
+	})
+	if allocations != 0 {
+		t.Fatalf("searching unrelated metadata allocated %.0f times", allocations)
+	}
+}
+
+func TestRenderLargeLiteralAllocation(t *testing.T) {
+	v := &view{text: strings.Repeat(" ", 64*1024)}
+	s := &session{}
+	allocations := testing.AllocsPerRun(3, func() {
+		output, err := s.render(v)
+		if err != nil || output != v.text {
+			t.Fatalf("literal rendering changed: %v", err)
+		}
+	})
+	if allocations > 5 {
+		t.Fatalf("rendering a 64 KiB literal allocated %.0f times; expected at most 5", allocations)
+	}
+}
+
+func TestResourceTrackingAllocationWithoutAddresses(t *testing.T) {
+	s := &session{candidates: make(map[string]*candidate), counts: make(map[string]int), used: make(map[*candidate]bool)}
+	v := s.parseLines("[" + strings.TrimSuffix(strings.Repeat(`"ordinary",`, 100), ",") + "]")[0]
+	render := func() {
+		output, err := s.render(v)
+		if err != nil || output != v.text {
+			t.Fatalf("non-resource rendering changed: %v", err)
+		}
+	}
+	plain := testing.AllocsPerRun(3, render)
+	s.collectResources = true
+	tracking := testing.AllocsPerRun(3, render)
+	if tracking > plain+5 {
+		t.Fatalf("resource tracking added %.0f allocations for fields without addresses", tracking-plain)
+	}
+}
+
 func TestProtectedRegionLookup(t *testing.T) {
 	index := indexRegions([]region{{8, 12}, {2, 10}, {4, 5}, {2, 3}})
 	for _, tc := range []struct {

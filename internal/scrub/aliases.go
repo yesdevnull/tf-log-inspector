@@ -400,12 +400,17 @@ func (s *session) render(v *view) (string, error) {
 		}
 	}
 	var out strings.Builder
+	// Bound spare capacity when a large credential collapses to a short alias.
+	out.Grow(min(len(v.text), 64*1024))
 	positions := make(map[int]int)
 	if v.chunk != nil {
 		positions[v.chunk.headerLength] = -1
 		positions[v.chunk.headerLength+v.chunk.dataLength] = -1
 	}
 	var edits []resourceEdit
+	// Only enclosing addresses need per-edit attribution. Other views can
+	// record candidates directly in their ancestor's tracking set.
+	collectEdits := s.collectResources && len(v.addresses) > 0
 	if s.collectResources {
 		for _, address := range v.addresses {
 			positions[address.start] = -1
@@ -465,7 +470,7 @@ func (s *session) render(v *view) (string, error) {
 				}
 				out.WriteString(winner.alias)
 				s.record(winner)
-				if s.collectResources {
+				if collectEdits {
 					edits = append(edits, resourceEdit{region: region{i, end}, used: map[*candidate]bool{winner: true}, secret: winner.category == "secret"})
 				}
 				for childIndex < len(v.children) && v.children[childIndex].end <= end {
@@ -485,11 +490,11 @@ func (s *session) render(v *view) (string, error) {
 				child.view.mandatory = true
 			}
 			previousUsed := s.used
-			if s.collectResources {
+			if collectEdits {
 				s.used = make(map[*candidate]bool)
 			}
 			rendered, err := s.render(child.view)
-			if s.collectResources {
+			if collectEdits {
 				childUsed := s.used
 				s.used = previousUsed
 				for c := range childUsed {

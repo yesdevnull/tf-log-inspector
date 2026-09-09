@@ -19,9 +19,14 @@ type resourceEdit struct {
 	secret bool
 }
 
+type renderedLog struct {
+	text   map[*view]string
+	counts map[string]int
+}
+
 // ensureDistinctResources validates identities recorded by full rendering, so a
 // credential that replaces an enclosing value suppresses its incidental addresses.
-func (s *session) ensureDistinctResources(views []*view) error {
+func (s *session) ensureDistinctResources(views []*view) (renderedLog, error) {
 	type identityKey struct {
 		value string
 		key   bool
@@ -32,9 +37,9 @@ func (s *session) ensureDistinctResources(views []*view) error {
 	}
 	retried := make(map[collisionKey]bool)
 	for {
-		emitted, err := s.renderResources(views)
+		rendered, emitted, err := s.renderResources(views)
 		if err != nil {
-			return err
+			return renderedLog{}, err
 		}
 		sources := make(map[identityKey]bool)
 		for _, identity := range emitted {
@@ -48,7 +53,7 @@ func (s *session) ensureDistinctResources(views []*view) error {
 			if sources[key] || exists && previous != identity.source {
 				failed := collisionKey{identity.source, identity.rendered, identity.key}
 				if len(identity.used) == 0 || retried[failed] {
-					return fmt.Errorf("name at line %d: resource syntax collision", identity.line)
+					return renderedLog{}, fmt.Errorf("name at line %d: resource syntax collision", identity.line)
 				}
 				retried[failed] = true
 				if s.blocked == nil {
@@ -61,7 +66,7 @@ func (s *session) ensureDistinctResources(views []*view) error {
 					}
 				}
 				if err := s.allocate(); err != nil {
-					return err
+					return renderedLog{}, err
 				}
 				collision = true
 				break
@@ -69,24 +74,27 @@ func (s *session) ensureDistinctResources(views []*view) error {
 			seen[key] = identity.source
 		}
 		if !collision {
-			return nil
+			return rendered, nil
 		}
 	}
 }
 
-func (s *session) renderResources(views []*view) ([]resourceEmission, error) {
+func (s *session) renderResources(views []*view) (renderedLog, []resourceEmission, error) {
 	counts, used, collect, emitted := s.counts, s.used, s.collectResources, s.emitted
 	s.counts = make(map[string]int)
 	s.used = make(map[*candidate]bool)
 	s.collectResources = true
 	s.emitted = nil
 	defer func() { s.counts, s.used, s.collectResources, s.emitted = counts, used, collect, emitted }()
+	rendered := renderedLog{text: make(map[*view]string, len(views)), counts: s.counts}
 	for _, v := range views {
-		if _, err := s.render(v); err != nil {
-			return nil, err
+		text, err := s.render(v)
+		if err != nil {
+			return renderedLog{}, nil, err
 		}
+		rendered.text[v] = text
 	}
-	return s.emitted, nil
+	return rendered, s.emitted, nil
 }
 
 func (s *session) emitResources(v *view, output string, positions map[int]int, edits []resourceEdit) {

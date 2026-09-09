@@ -47,14 +47,10 @@ func Scrub(data []byte, extra []string) (Result, error) {
 		return Result{}, s.parseErr
 	}
 	s.sources = make(map[string]bool)
-	for _, token := range sourceToken.FindAllString(input, -1) {
-		s.sources[token] = true
-	}
+	s.reserveTokens(input)
 	var reserve func(*view)
 	reserve = func(v *view) {
-		for _, token := range sourceToken.FindAllString(v.text, -1) {
-			s.sources[token] = true
-		}
+		s.reserveTokens(v.text)
 		for _, child := range v.children {
 			reserve(child.view)
 		}
@@ -75,17 +71,44 @@ func Scrub(data []byte, extra []string) (Result, error) {
 	if err := s.allocate(); err != nil {
 		return Result{}, err
 	}
-	if err := s.ensureDistinctResources(views); err != nil {
+	rendered, err := s.ensureDistinctResources(views)
+	if err != nil {
 		return Result{}, err
 	}
-	output, renderedMasked, err := s.renderProviderFragments(physical, logical, fragments)
+	output, renderedMasked, err := renderProviderFragments(physical, logical, fragments, rendered.text)
 	if err != nil {
 		return Result{}, err
 	}
 	if err := s.validate(masked, renderedMasked); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: []byte(output), Replacements: s.counts, Unsupported: s.unsupported, UnsupportedInputs: unsupportedLocations(input, physical, logical, fragments)}, nil
+	return Result{Data: []byte(output), Replacements: rendered.counts, Unsupported: s.unsupported, UnsupportedInputs: unsupportedLocations(input, physical, logical, fragments)}, nil
+}
+
+// Reserve maximal letter/number/underscore/hyphen runs directly, avoiding
+// temporary match slices for every occurrence in the input and decoded views.
+func (s *session) reserveTokens(text string) {
+	start := -1
+	for i := 0; i < len(text); {
+		c, size := rune(text[i]), 1
+		match := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+		if c >= utf8.RuneSelf {
+			c, size = utf8.DecodeRuneInString(text[i:])
+			match = unicode.IsLetter(c) || unicode.IsNumber(c)
+		}
+		if match {
+			if start < 0 {
+				start = i
+			}
+		} else if start >= 0 {
+			s.sources[text[start:i]] = true
+			start = -1
+		}
+		i += size
+	}
+	if start >= 0 {
+		s.sources[text[start:]] = true
+	}
 }
 
 type candidate struct {
@@ -111,6 +134,7 @@ type compositePart struct {
 }
 
 type session struct {
+	patterns         map[patternKey][][]int
 	candidates       map[string]*candidate
 	compositeOrigins map[string]string
 	ordered          []*candidate

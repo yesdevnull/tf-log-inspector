@@ -43,3 +43,65 @@ restore the reported 5–10-second baseline. No capture or output contents were
 read during this investigation; CPU profiles used synthetic data only.
 Separate test cleanup retained all 169 branch tests and both benchmarks, with
 no removals or follow-up findings.
+
+## Follow-up: under ten seconds
+
+Further profiling identified repeated pattern searches, decoded-string and
+token allocations, and duplicate rendering as the remaining costs. Required
+character checks and quote-delimited searches narrow regex inputs without
+changing their match coordinates. Trailing provider-mask whitespace is excluded
+from discovery searches. Plain quoted strings reuse their existing bytes, and
+source-token reservation inserts maximal Unicode tokens directly into the set.
+
+Address discovery locates dots and their preceding identifier before applying
+the existing grammar. IP discovery scans maximal address-shaped runs, consuming
+optional zones even when the preceding run is not an IP, and leaves validation
+to `netip`. Differential fuzzing compared both searches with their original
+regexes: 610,242 address inputs and 315,480 IP inputs passed.
+
+The successful resource-collision validation pass now supplies final rendered
+text and replacement counts to fragment assembly. Failed retries discard their
+results; cuts remain paired with the successful rendering. Logical JSON and
+final structural validation still run. Only enclosing addresses allocate edit
+attribution maps, and output preallocation is capped for collapsing credentials.
+
+The authorised 30 MB capture completed in **9.64 and 9.29 seconds**, including
+`go run`, without profiling or concurrent tests. Counts remained unchanged:
+197,844 names, 1,294 IDs, 25,457 GUIDs, 31,201 network values, 1,059 cloud values,
+1,141 paths and 33,824 secrets. There were no unsupported inputs. Capture and
+output contents were not read: temporary instrumentation around the authorised
+scrub command collected function-level CPU samples only.
+
+The richer 10,000-object synthetic benchmark improved from 1.98 to 0.51 seconds
+per operation. Full tests, race tests, separate coverage, build and vet passed;
+scrub statement coverage is 96.7%. Independent review checked the scanners,
+render reuse and edit attribution. Timing results are local measurements, not
+a guarantee for every capture or machine.
+
+## Bounded allocation follow-up
+
+The next pass retained four small optimisations: reject non-numeric first bytes
+before JSON validation, reserve exact JSON delimiter storage, reuse bounded
+regex results for short repeated values, and skip response-body assignment
+searches when the required `body` marker is absent. Delimiter scanning shares
+quote-boundary handling with string decoding but does not decode values.
+Cache entries own their short strings and preserve occurrence-specific
+discovery; their number and input length are bounded.
+
+Independent review identified and resolved duplicate decoding of escaped
+strings and retention of large backing strings through short cache keys.
+Allocation regressions cover both cases. Warm-cache allocation checks compare
+against cold discovery under the same race instrumentation.
+
+Final capture runs took **8.67 and 8.81 seconds**, including `go run`, with the
+same replacement counts and zero unsupported inputs. This is a modest gain
+over 9.29–9.64 seconds; the pass did not reach five seconds. The synthetic
+10,000-object benchmark improved from 0.516 to 0.423 seconds, from 215.5 to
+178.3 MB allocated per operation, and from 1.51 to 1.06 million allocations.
+These allocation figures describe the synthetic benchmark, not peak capture
+memory. Full tests, race tests, separate coverage, build and vet passed;
+scrub statement coverage is 96.8%.
+
+Private input remained accessible only through authorised scrub commands.
+Temporary instrumentation emitted function-level CPU profiles and aggregate
+stage timings and allocation counters, with no log or memory contents read.

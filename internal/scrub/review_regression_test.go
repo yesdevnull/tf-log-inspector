@@ -196,7 +196,7 @@ func TestResourceCollisionWithoutProgressIsRejected(t *testing.T) {
 	if err := s.allocate(); err != nil {
 		t.Fatal(err)
 	}
-	err := s.ensureDistinctResources(views)
+	_, err := s.ensureDistinctResources(views)
 	if err == nil || strings.Contains(err.Error(), "alice") {
 		t.Fatalf("unresolvable collision accepted or disclosed identity: %v", err)
 	}
