@@ -55,21 +55,25 @@ func runScrub(inputPath, outputPath, valuesPath string, stderr io.Writer) error 
 	if closeErr := out.Close(); closeErr != nil {
 		return removePartialScrubOutput(outputPath, fmt.Errorf("closing %s: %w", outputPath, closeErr))
 	}
-	fmt.Fprintln(stderr, "Replacement counts:")
+	var summary strings.Builder
+	fmt.Fprintln(&summary, "Replacement counts:")
 	for _, category := range scrubCategories {
-		fmt.Fprintf(stderr, "  %s: %d\n", category, result.Replacements[category])
+		fmt.Fprintf(&summary, "  %s: %d\n", category, result.Replacements[category])
 	}
-	fmt.Fprintf(stderr, "Unsupported structured or quoted inputs: %d\n", result.Unsupported)
+	fmt.Fprintf(&summary, "Unsupported structured or quoted inputs: %d\n", result.Unsupported)
 	if len(result.UnsupportedInputs) > 0 {
-		fmt.Fprintf(stderr, "Locations in the original input (showing first %d; 1-based character columns):\n", len(result.UnsupportedInputs))
+		fmt.Fprintf(&summary, "Locations in the original input (showing first %d; 1-based character columns):\n", len(result.UnsupportedInputs))
 		for _, input := range result.UnsupportedInputs {
-			fmt.Fprintf(stderr, "  line %d, column %d: %s\n", input.Line, input.Column, input.Reason)
+			fmt.Fprintf(&summary, "  line %d, column %d: %s\n", input.Line, input.Column, input.Reason)
 		}
 		if remaining := result.Unsupported - len(result.UnsupportedInputs); remaining > 0 {
-			fmt.Fprintf(stderr, "%d additional instances omitted.\n", remaining)
+			fmt.Fprintf(&summary, "%d additional instances omitted.\n", remaining)
 		}
 	}
-	fmt.Fprintln(stderr, "Review the scrubbed log before sharing it.")
+	fmt.Fprintln(&summary, "Review the scrubbed log before sharing it.")
+	if _, err := io.WriteString(stderr, summary.String()); err != nil {
+		return fmt.Errorf("writing scrub summary (output saved to %s): %w", outputPath, err)
+	}
 	return nil
 }
 

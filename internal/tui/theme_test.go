@@ -149,7 +149,9 @@ func TestNoColourIsHonouredOnlyWhenItIsActuallySet(t *testing.T) {
 				t.Setenv("NO_COLOR", tc.value)
 			} else {
 				t.Setenv("NO_COLOR", "")
-				os.Unsetenv("NO_COLOR")
+				if err := os.Unsetenv("NO_COLOR"); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if got := colourWanted(); got != tc.colour {
 				t.Errorf("colourWanted() = %v with NO_COLOR %s, want %v", got, tc.what, tc.colour)
@@ -389,7 +391,9 @@ func withColourPreference(t *testing.T, noColour string, fn func()) {
 	t.Helper()
 	if noColour == "" {
 		t.Setenv("NO_COLOR", "")
-		os.Unsetenv("NO_COLOR")
+		if err := os.Unsetenv("NO_COLOR"); err != nil {
+			t.Fatal(err)
+		}
 	} else {
 		t.Setenv("NO_COLOR", noColour)
 	}

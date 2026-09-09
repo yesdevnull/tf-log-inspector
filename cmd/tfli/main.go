@@ -52,14 +52,15 @@ func run(args []string, stdout, stderr io.Writer) error {
 		showVer    = fs.Bool("version", false, "print the version and exit")
 	)
 	usage := func() {
-		fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
-		fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n")
-		fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
-		fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
-		fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
-		fmt.Fprintf(stderr, "With no mode flag tfli opens the full-screen interface, which shows\n")
-		fmt.Fprintf(stderr, "real resource addresses and the log's own lines: see the README's\n")
-		fmt.Fprintf(stderr, "\"What each mode discloses\" before sharing a session.\n\n")
+		// Usage is best-effort, matching flag.PrintDefaults' error handling.
+		_, _ = fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
+		_, _ = fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
+		_, _ = fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
+		_, _ = fmt.Fprintf(stderr, "With no mode flag tfli opens the full-screen interface, which shows\n")
+		_, _ = fmt.Fprintf(stderr, "real resource addresses and the log's own lines: see the README's\n")
+		_, _ = fmt.Fprintf(stderr, "\"What each mode discloses\" before sharing a session.\n\n")
 		fs.PrintDefaults()
 	}
 	// Flag errors embed raw arguments. Print their escaped text separately
@@ -75,14 +76,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 			fs.Usage()
 			return nil
 		}
-		fmt.Fprintln(stderr, logfmt.DisplayText(err.Error()))
+		_, _ = fmt.Fprintln(stderr, logfmt.DisplayText(err.Error())) // Preserve the flag error if diagnostics fail.
 		fs.Usage()
 		return err
 	}
 
 	if *showVer {
-		fmt.Fprintln(stdout, "tfli", version)
-		return nil
+		_, err := fmt.Fprintln(stdout, "tfli", version)
+		return err
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
@@ -147,16 +148,16 @@ func writeReport(stdout io.Writer, inputPath, outPath string, render func(io.Wri
 		}
 		outputInfo, err := out.Stat()
 		if err != nil {
-			out.Close()
+			_ = out.Close() // Preserve the Stat error; no output has been written.
 			return fmt.Errorf("checking %s: %w", outPath, err)
 		}
 		if os.SameFile(inputInfo, outputInfo) {
-			out.Close()
+			_ = out.Close() // No output has been written to the input file.
 			return fmt.Errorf("input %s and output %s are the same file", inputPath, outPath)
 		}
 		if outputInfo.Mode().IsRegular() {
 			if err := out.Truncate(0); err != nil {
-				out.Close()
+				_ = out.Close() // Preserve the Truncate error.
 				return fmt.Errorf("truncating %s: %w", outPath, err)
 			}
 		}
@@ -183,7 +184,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Closing a read-only input cannot lose report data.
 
 	var comps, reqIDs logfmt.Interner
 	collector := diagnose.NewCollector(&comps)

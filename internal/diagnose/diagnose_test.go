@@ -58,7 +58,11 @@ func renderFixture(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("opening %s: %v", path, err)
 	}
-	defer f.Close()
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	var comps, reqIDs logfmt.Interner
 	c := NewCollector(&comps)

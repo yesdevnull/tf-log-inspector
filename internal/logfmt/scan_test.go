@@ -539,7 +539,9 @@ func TestScanRealFixtures(t *testing.T) {
 		var comps, reqIDs Interner
 		var col collector
 		st, err := Scan(f, &comps, &reqIDs, &col)
-		f.Close()
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
 		if err != nil {
 			t.Fatalf("Scan %s: %v", c.file, err)
 		}
