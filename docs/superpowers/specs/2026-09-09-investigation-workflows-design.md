@@ -12,10 +12,10 @@ resource type to a resource, its calls and the supporting log text, while making
 the limits of the captured evidence visible. Reports and comparisons should
 support the same reasoning without requiring the terminal interface.
 
-The working proposal for comparison is a CLI report over two raw logs, with text
-and JSON output. Dan was asked whether comparison should instead consume JSON
-exports or include an interactive TUI. The proposed default is used throughout
-this draft and remains a scope decision for review.
+Dan approved the raw-log CLI comparison scope on 9 September 2026: compare two
+raw logs and produce text or JSON output. JSON-profile imports and interactive
+TUI comparison remain outside scope. The remaining design decisions are still
+proposed for review.
 
 ## Evidence and relationship to existing designs
 
@@ -722,15 +722,16 @@ dependencies concealed inside the eight agreed areas for exploration.
 
 ## Review decisions
 
-The draft recommends these decisions for Dan's review:
+The following decisions are proposed for review unless marked approved:
 
 1. Resources ranks observed UI operations and shows inferred RPC evidence
    separately, retaining the existing restriction on inferred rankings.
 2. Explicit drill-down restores parent filters and positions through Esc;
    manual numbered view changes end the history chain.
 3. JSON exports complete structured results; text alone has an explicit limit.
-4. Comparison initially accepts two raw logs and emits text/JSON, with no
-   automatic pass/fail verdict or claim that logging configurations match.
+4. **Comparison scope approved by Dan, 9 September 2026:** accept two raw logs
+   and emit text/JSON. The comparison design proposes no automatic pass/fail
+   verdict or claim that logging configurations match.
 5. Response recovery quarantines a damaged component instead of guessing a
    same-stream restart; scrubbing remains strict for every reconstruction error.
 
