@@ -3,6 +3,7 @@ package scrub
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -74,11 +75,30 @@ func Scrub(data []byte, extra []string) (Result, error) {
 type candidate struct {
 	value, category, alias           string
 	caseSensitive, numeric, hostname bool
+	email                            bool
+	ip                               netip.Addr
+	parts                            []compositePart
+	suffix                           string
+	digits                           int
+	pem                              bool
+	format                           string
+	syntaxConflict                   bool
+	identity                         string
+	decodedStructure                 []string
+}
+
+type compositePart struct {
+	region
+	candidate *candidate
+	encoding  string
+	literal   string
 }
 
 type session struct {
 	candidates       map[string]*candidate
+	compositeOrigins map[string]string
 	ordered          []*candidate
+	index            candidateIndex
 	counts           map[string]int
 	unsupported      int
 	sources          map[string]bool
@@ -101,8 +121,14 @@ func (s *session) discover(value, category string, numeric bool) {
 	}
 	c.caseSensitive = c.caseSensitive || category == "name"
 	c.numeric = c.numeric || numeric
+	if len(value) == 12 && strings.Trim(value, "0123456789") == "" && (category == "id" || category == "name" || category == "cloud") {
+		c.numeric, c.digits = true, 12
+	}
 	if priority(category) > priority(c.category) {
 		c.category = category
+	}
+	if category == "hostname" {
+		s.discoverHost(value)
 	}
 }
 

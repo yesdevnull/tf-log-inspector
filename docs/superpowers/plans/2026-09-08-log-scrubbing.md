@@ -97,7 +97,7 @@ func TestShrinkingHeaderRejectsNewSpan(t *testing.T) {
 
 **Interfaces:** Consumes and retains `Scrub([]byte, []string) (Result, error)` and `Result` from Task 1. Detectors feed the same candidate/mapping system; they must not allocate separate aliases or rewrite already-transformed output.
 
-- [ ] First address measured matching cost: the synthetic scaling probe recorded 842 ms for 1 MiB/500 distinct names and 13.7 s for 4 MiB/2,000 names. Add a benchmark with generated names and prose repetitions and RED/GREEN contract tests for prefix overlaps, shorter secret precedence, protected spans and Unicode boundaries. Index candidates by their byte prefixes so rendering examines actual matches at a position rather than the entire candidate list. One small private trie is sufficient:
+- [x] First address measured matching cost: the synthetic scaling probe recorded 842 ms for 1 MiB/500 distinct names and 13.7 s for 4 MiB/2,000 names. Add a benchmark with generated names and prose repetitions and RED/GREEN contract tests for prefix overlaps, shorter secret precedence, protected spans and Unicode boundaries. Index candidates by their byte prefixes so rendering examines actual matches at a position rather than the entire candidate list. One small private trie is sufficient:
 
 ```go
 type candidateIndex struct {
@@ -108,7 +108,7 @@ type candidateIndex struct {
 
 Build the index after discovery and retain candidate pointers so allocation retries update aliases without stale copies. Enumerate matching terminals longest-first, preserving the existing secret priority and boundary/protection checks. Run the focused suite and the same scratch scaling probe before/after; record observed timings without machine-dependent timing assertions in unit tests. Keep public output contracts unchanged.
 
-- [ ] Add failing public-contract cases, one category at a time, for email, IPv4/IPv6, URL hosts/userinfo/query identifying values, hostname fields, AWS ARNs/account IDs, Azure resource paths, GCP resource paths, POSIX/Windows paths, and PEM private-key payloads. This example catches an independent ARN mapping:
+- [x] Add failing public-contract cases, one category at a time, for email, IPv4/IPv6, URL hosts/userinfo/query identifying values, hostname fields, AWS ARNs/account IDs, Azure resource paths, GCP resource paths, POSIX/Windows paths, and PEM private-key payloads. This example catches an independent ARN mapping:
 
 ```go
 func TestSecretARNUsesOneAlias(t *testing.T) {
@@ -122,12 +122,12 @@ func TestSecretARNUsesOneAlias(t *testing.T) {
 }
 ```
 
-- [ ] Run the relevant focused test and observe RED before each detector. Add minimal detection that validates candidates with standard-library parsers where available (`net/netip`, `net/url`), then GREEN. Preserve URL scheme/port and cloud service/type structure; identifying components use shared aliases everywhere. Syntax validity outranks retaining environment suffixes.
-- [ ] Allocate fake IPv4 within `10.0.0.0/8`, IPv6 within `fd00::/8`, email/host aliases under `example.invalid`; reserve original and generated identities and fail without output on exhaustion. Test syntax, distinction and linkage, not a particular random GUID.
-- [ ] Exercise raw and escaped repeated composite values, an ARN/URL also used as a secret, source/generated alias collisions, substrings such as `ann` versus `planning`, multiline PEM preserving framing, and private provider namespaces. Preserve only the exact public provider identities in the spec, including their recognised plugin labels and suffixes; retain the structural `provider.` prefix and bare `provider` sentinel.
-- [ ] Add a mixed synthetic integration fixture combining all categories with UI lifecycle events and RPC timings; compare model relationships before/after and assert no targeted identifying occurrences remain. Empty/malformed and unsupported encoded payloads must follow the documented error/count policy.
-- [ ] Run `go test ./internal/scrub`, format the changed Go files and rerun. Commit signed as `Scrub network cloud and path identifiers consistently`.
-- [ ] Complete independent task review and a separate test-cleanup pass; resolve significant findings with regression tests before Task 3.
+- [x] Run the relevant focused test and observe RED before each detector. Add minimal detection that validates candidates with standard-library parsers where available (`net/netip`, `net/url`), then GREEN. Preserve URL scheme/port and cloud service/type structure; identifying components use shared aliases everywhere. Syntax validity outranks retaining environment suffixes.
+- [x] Allocate fake IPv4 within `10.0.0.0/8`, IPv6 within `fd00::/8`, email/host aliases under `example.invalid`; reserve original and generated identities and fail without output on exhaustion. Test syntax, distinction and linkage, not a particular random GUID.
+- [x] Exercise raw and escaped repeated composite values, an ARN/URL also used as a secret, source/generated alias collisions, substrings such as `ann` versus `planning`, multiline PEM preserving framing, and private provider namespaces. Preserve only the exact public provider identities in the spec, including their recognised plugin labels and suffixes; retain the structural `provider.` prefix and bare `provider` sentinel.
+- [x] Add a mixed synthetic integration fixture combining all categories with UI lifecycle events and RPC timings; compare model relationships before/after and assert no targeted identifying occurrences remain. Empty/malformed and unsupported encoded payloads must follow the documented error/count policy.
+- [x] Run `go test ./internal/scrub`, format the changed Go files and rerun. Commit signed as `Scrub network cloud and path identifiers consistently`.
+- [x] Complete independent task review and a separate test-cleanup pass; resolve significant findings with regression tests before Task 3.
 
 ### Task 3: Safe CLI output and documentation
 
