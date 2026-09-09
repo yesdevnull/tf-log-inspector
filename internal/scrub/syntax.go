@@ -263,8 +263,8 @@ func (s *session) parseChunks(text string, line int, responseJSON bool) []*view 
 		}
 		child := &view{text: text[dataStart:pos], line: line + 1, responseJSON: responseJSON}
 		trimmed := strings.TrimSpace(child.text)
-		if responseJSON && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && !json.Valid([]byte(trimmed)) {
-			s.parseErr = fmt.Errorf("HTTP at line %d: fragmented JSON response unsupported", line+1)
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && !json.Valid([]byte(trimmed)) {
+			s.parseErr = fmt.Errorf("HTTP at line %d: fragmented JSON body unsupported", line+1)
 			return nil
 		}
 		s.parseView(child, false, false)

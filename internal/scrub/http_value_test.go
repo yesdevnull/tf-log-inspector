@@ -185,6 +185,36 @@ func TestFragmentedHTTPResponseJSONFailsClosed(t *testing.T) {
 	}
 }
 
+func TestFragmentedHTTPRequestJSONFailsClosed(t *testing.T) {
+	const body = `{"password":"private-credential"}`
+	for cut := 1; cut < len(body); cut++ {
+		input := fmt.Sprintf("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n%x\r\n%s\r\n0\r\n\r\n", cut, body[:cut], len(body)-cut, body[cut:])
+		got, err := Scrub([]byte(input), nil)
+		if err == nil || len(got.Data) != 0 || !strings.Contains(err.Error(), "fragmented JSON") || strings.Contains(err.Error(), "private-credential") {
+			t.Fatalf("request split at byte %d published data or disclosed content: %s %v", cut, got.Data, err)
+		}
+	}
+}
+
+func TestChunkedHTTPRequestCredentialsRemainReadable(t *testing.T) {
+	const body = `{"password":"private-credential","value":"ordinary-request"}`
+	input := fmt.Sprintf("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n0\r\n\r\n", len(body), body)
+	got, err := Scrub([]byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.ReadRequest(bufio.NewReader(strings.NewReader(string(got.Data))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(request.Body)
+	closeErr := request.Body.Close()
+	var fields map[string]string
+	if readErr != nil || closeErr != nil || json.Unmarshal(data, &fields) != nil || !strings.HasPrefix(fields["password"], "secret_") || fields["value"] != "ordinary-request" {
+		t.Fatalf("request lost credentials, scalar scope or chunk framing: %s %v %v", data, readErr, closeErr)
+	}
+}
+
 func TestStructuredHTTPResponseBodyValueScope(t *testing.T) {
 	const input = `{"http.response.body":{"value":"private-content","nested":{"value":"nested-content"}},"value":"ordinary-status"}`
 	got, err := Scrub([]byte(input), nil)

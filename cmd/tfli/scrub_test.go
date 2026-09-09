@@ -327,6 +327,26 @@ func TestRunScrubReportsInvalidOutputDirectory(t *testing.T) {
 	}
 }
 
+func TestRunScrubRejectsFragmentedHTTPRequestBeforeCreatingOutput(t *testing.T) {
+	dir := t.TempDir()
+	inputPath, outputPath := filepath.Join(dir, "source.log"), filepath.Join(dir, "out.log")
+	const input = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n{\"pass\r\n1b\r\nword\":\"private-credential\"}\r\n0\r\n\r\n"
+	if err := os.WriteFile(inputPath, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+	err := run([]string{"--scrub", "-o", outputPath, inputPath}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "fragmented JSON") || strings.Contains(err.Error(), "private-credential") {
+		t.Fatalf("fragmented request accepted or disclosed content: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("rejected request printed success output: %q %q", stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output exists after rejecting fragmented request: %v", err)
+	}
+}
+
 func TestRunScrubRejectsParserWindowChangesBeforeCreatingOutput(t *testing.T) {
 	prefix := "Received downstream response: name=a padding="
 	for name, message := range map[string]string{
