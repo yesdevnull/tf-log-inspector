@@ -468,7 +468,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			i = end
 			continue
 		}
-		if i > 0 && !space(v.text[i-1]) {
+		if i > 0 && !space(v.text[i-1]) && !(v.text[i] == '[' && v.text[i-1] == ']') {
 			i++
 			continue
 		}
@@ -490,14 +490,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			continue
 		}
 		if bracketed {
-			lineEnd := len(v.text)
-			if at := strings.IndexByte(v.text[start:], '\n'); at >= 0 {
-				lineEnd = start + at
-			}
-			// IDs are opaque and can contain literal, unmatched brackets.
-			if at := strings.LastIndexByte(v.text[start:lineEnd], ']'); at >= 0 {
-				bracketEnd = start + at
-			}
+			bracketEnd = bracketedFieldEnd(v.text, sep+1)
 		}
 		v.keys = append(v.keys, region{start, start + len(key)})
 		valueStart := skipSpace(v.text, sep+1)
@@ -557,10 +550,6 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				end := valueStart
 				for end < len(v.text) && end != bracketEnd && (!space(v.text[end]) || key == "id" && end < bracketEnd) {
 					if space(v.text[end]) && (end == valueStart || !space(v.text[end-1])) && assignmentAhead(v.text, end) {
-						if end > valueStart && v.text[end-1] == ']' {
-							end--
-							bracketEnd = end
-						}
 						break
 					}
 					if v.text[end] == '"' {
@@ -607,6 +596,23 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			metadataField, protected = false, false
 		}
 	}
+}
+
+// Field delimiters precede whitespace, another group, or the end of the
+// record. Brackets inside opaque IDs and IPv6 authorities need not balance.
+func bracketedFieldEnd(text string, start int) int {
+	for end := start; end < len(text) && text[end] != '\r' && text[end] != '\n'; end++ {
+		if text[end] == '"' {
+			if quoteEnd, _, ok := readString(text, end); ok {
+				end = quoteEnd - 1
+				continue
+			}
+		}
+		if text[end] == ']' && (end+1 == len(text) || space(text[end+1]) || text[end+1] == '[') {
+			return end
+		}
+	}
+	return -1
 }
 
 // Whitespace can belong to an opaque Terraform ID, but another assignment

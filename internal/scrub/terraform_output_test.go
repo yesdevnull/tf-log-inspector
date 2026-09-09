@@ -120,6 +120,30 @@ func TestBracketedFieldsDoNotHideCredentials(t *testing.T) {
 	}
 }
 
+func TestBracketedIDEndsBeforeOtherGroups(t *testing.T) {
+	for _, suffix := range []string{" blah [thing]", "[token=private-secret]", " [message=thing token=private-secret] [name=private-name]"} {
+		t.Run(suffix, func(t *testing.T) {
+			input := "message [id=private-instance]" + suffix + "\nEarlier private-instance private-secret private-name\n"
+			got, err := Scrub([]byte(input), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(string(got.Data), "\n")
+			id, _, ok := strings.Cut(strings.TrimPrefix(lines[0], "message [id="), "]")
+			if !ok || id == "private-instance" || !strings.HasPrefix(lines[1], "Earlier "+id+" ") {
+				t.Fatalf("ID swallowed later text or lost linkage: %s", got.Data)
+			}
+			if suffix == " blah [thing]" {
+				if !strings.HasSuffix(lines[0], suffix) {
+					t.Fatalf("diagnostic suffix changed: %s", got.Data)
+				}
+			} else if strings.Contains(string(got.Data), "private-secret") || !strings.Contains(lines[0], "token=secret_") || !strings.HasSuffix(lines[0], "]") {
+				t.Fatalf("later credential field lost structure or linkage: %s", got.Data)
+			}
+		})
+	}
+}
+
 func TestTerraformOutputScrubsKeyVaultURL(t *testing.T) {
 	for _, endpoint := range []string{
 		"https://privatevault.vault.azure.net/secrets/private-secret",
