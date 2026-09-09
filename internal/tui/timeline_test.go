@@ -490,6 +490,25 @@ func TestTimelineQualifiesPartialPositionCoverage(t *testing.T) {
 	}
 }
 
+func TestTimelineExplainsExcludedPositionReasonsWithoutClippingTotals(t *testing.T) {
+	m := New(&model.Log{RPCSpans: []span.Span{{
+		DurationMs: 20, TimestampStatus: logfmt.TimestampBeforeOrigin, Fidelity: span.FidelityReported,
+	}}}, "x.log")
+	out := unstyled(m.renderTimeline(60, 25))
+	for _, want := range []string{"20ms retained in duration totals.", "timestamp_before_origin"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("timeline missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBusyNoteMarksAZeroLengthWindowUnavailable(t *testing.T) {
+	spans := []span.Span{{TimestampStatus: logfmt.TimestampValid, Fidelity: span.FidelityReported}}
+	if got := busyNote(spans, 0); !strings.Contains(got, "unavailable") {
+		t.Errorf("busyNote = %q, want unavailable fraction", got)
+	}
+}
+
 // TestTimelineDrawsTheRPCTierForALogCarryingBoth pins the tier choice on
 // the one case the other tier tests cannot reach: a log carrying BOTH
 // tiers. timeline.log is RPC-only and structured-ui.log UI-only, so an

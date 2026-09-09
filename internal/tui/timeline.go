@@ -597,14 +597,16 @@ func (m *Model) renderTimeline(w, h int) string {
 	}
 	tier, spans := m.timelineSpans()
 	if tier == tierNone {
-		return fitCaptureGuidance(w, h)
+		return m.fitCaptureGuidance(w, h)
 	}
 	_, timing := m.timelineTiming()
 	if timing.AdmittedCount == 0 {
 		return styles.note.Render(clipWidth(noMatchNote, w))
 	}
 	if len(spans) == 0 {
-		return styles.note.Render(clipWidth(fmt.Sprintf("Timeline positions unavailable: %d admitted observations; %dms retained in duration totals.", timing.AdmittedCount, timing.AdmittedMs), w))
+		lines := wrapToWidth(fmt.Sprintf("Timeline positions unavailable: %d admitted observations; %dms retained in duration totals.", timing.AdmittedCount, timing.AdmittedMs), w)
+		lines = append(lines, timingExclusionNotes(timing, w)...)
+		return styles.note.Render(strings.Join(lines, "\n"))
 	}
 
 	lanes := m.timelineLanes()
@@ -784,10 +786,31 @@ func (m *Model) timelineNotes(w int) []string {
 		lines = append(lines, wrapToWidth(timelineFilterNote, w)...)
 	}
 	if timing.ExcludedCount > 0 {
-		lines = append(lines, clipValueEnd(fmt.Sprintf("Positioned %d of %d observations; excluded %d (%dms).", len(spans), timing.AdmittedCount, timing.ExcludedCount, timing.ExcludedMs), w))
+		lines = append(lines, wrapToWidth(fmt.Sprintf("Positioned %d of %d observations; excluded %d (%dms).", len(spans), timing.AdmittedCount, timing.ExcludedCount, timing.ExcludedMs), w)...)
+		lines = append(lines, timingExclusionNotes(timing, w)...)
 	}
 	lines = append(lines, clipValueEnd(busyNote(spans, m.timelineWallClock()), w))
 	return append(lines, strings.Split(m.stallAnnotation(w), "\n")...)
+}
+
+func timingExclusionNotes(timing model.TimingSelection, w int) []string {
+	if timing.ExcludedCount == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(timing.Exclusions))
+	for reason := range timing.Exclusions {
+		keys = append(keys, reason)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, reason := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", reason, timing.Exclusions[reason]))
+	}
+	lines := wrapToWidth("Excluded positions: "+strings.Join(parts, ", ")+".", w)
+	if timing.ExcludedLowerBound {
+		lines = append(lines, wrapToWidth("Excluded duration totals are lower bounds.", w)...)
+	}
+	return lines
 }
 
 // timelineFilterNote is what the notes block says when the figures beneath
@@ -891,10 +914,10 @@ func busyNote(spans []span.Span, window uint32) string {
 		// comment, including what would break it.
 		panic(fmt.Sprintf("tui: busyNote: %v", err))
 	}
-	var pct uint64
-	if window > 0 {
-		pct = uint64(busy) * 100 / uint64(window)
+	if window == 0 {
+		return fmt.Sprintf("busy %s of %s (fraction unavailable)", formatMs(uint64(busy)), formatMs(uint64(window)))
 	}
+	pct := uint64(busy) * 100 / uint64(window)
 	return fmt.Sprintf("busy %s of %s (%d%%)", formatMs(uint64(busy)), formatMs(uint64(window)), pct)
 }
 

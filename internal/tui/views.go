@@ -680,7 +680,7 @@ const noEntriesNote = "this log has no entries"
 // the same advice.
 func (m *Model) renderList(w, h int) string {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
-		return fitCaptureGuidance(w, h)
+		return m.fitCaptureGuidance(w, h)
 	}
 	empty := noRowsNote
 	if m.filterActive() {
@@ -704,6 +704,17 @@ func (m *Model) renderList(w, h int) string {
 		preamble = typesPreamble(m.uiFilter().SpansMatching(m.log.UISpans))
 	}
 	return renderTable(preamble, t.cols, m.sortCol[m.view], m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+}
+
+func (m *Model) fitCaptureGuidance(w, h int) string {
+	if m.log.Caps.ProviderEntries > 0 || m.log.Caps.ResponseEntries > 0 || m.log.Stats.StructuredLines > 0 {
+		if h <= 0 {
+			return ""
+		}
+		lines := wrapToWidth("Provider or structured-output evidence was observed, but it did not yield an admitted duration. Run tfli --diagnose on this file to inspect rejection counts.", w)
+		return strings.Join(lines[:min(h, len(lines))], "\n")
+	}
+	return fitCaptureGuidance(w, h)
 }
 
 // captureGuidance is what the centre pane shows for a log with no spans at

@@ -505,10 +505,9 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 			}
 		}
 		r.ZeroExtentContexts = int(cc.ZeroExtentContexts())
-		positioned := model.SelectTiming(spans).Positioned
-		if len(positioned) > 0 {
+		if len(spans) > 0 {
 			r.HasSpans = true
-			r.Coverage = attrib.Summarise(positioned, attrib.Correlate(positioned, st.FirstTS, ctxs))
+			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, ctxs))
 			r.CandidateBreakdown = candidateBreakdown(r.Coverage.Candidates)
 		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
@@ -791,8 +790,8 @@ func (r Report) Render(w io.Writer) error {
 		r.Stats.ContinuationOnlyReqIDEntries, plural(r.Stats.ContinuationOnlyReqIDEntries, "y", "ies"))
 
 	fmt.Fprintf(b, "SPANS\n")
-	fmt.Fprintf(b, "  RPC timing records    %d\n", r.RPCEvidence.Records)
-	fmt.Fprintf(b, "  UI timing records     %d\n", r.UIEvidence.Records)
+	writeTimingEvidence(b, "RPC", r.RPCEvidence)
+	writeTimingEvidence(b, "UI", r.UIEvidence)
 	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)
 	fmt.Fprintf(b, "  slowest span         %d ms\n", r.SlowestMs)
 	fmt.Fprintf(b, "  total span time (sum, overlaps) %d ms\n", r.TotalSpanMs)
@@ -1015,6 +1014,31 @@ func (r Report) Render(w io.Writer) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func writeTimingEvidence(b *strings.Builder, tier string, evidence span.TimingEvidence) {
+	fmt.Fprintf(b, "  %s timing records     %d\n", tier, evidence.Records)
+	if evidence.SyntaxErrors.Count > 0 {
+		fmt.Fprintf(b, "  %s timing syntax errors %d\n", tier, evidence.SyntaxErrors.Count)
+	}
+	if evidence.SchemaErrors.Count > 0 {
+		fmt.Fprintf(b, "  %s timing schema errors %d\n", tier, evidence.SchemaErrors.Count)
+	}
+	writeIssueCounts(b, tier+" timing rejected", evidence.Rejected)
+	writeIssueCounts(b, tier+" timing timestamps", evidence.TimestampIssues)
+}
+
+func writeIssueCounts(b *strings.Builder, label string, issues map[string]span.IssueCount) {
+	keys := make([]string, 0, len(issues))
+	for code, issue := range issues {
+		if issue.Count > 0 {
+			keys = append(keys, code)
+		}
+	}
+	sort.Strings(keys)
+	for _, code := range keys {
+		fmt.Fprintf(b, "  %s %s %d\n", label, code, issues[code].Count)
+	}
 }
 
 // writeRPCCaptureHint explains how to capture provider RPC entries. Debug

@@ -1300,6 +1300,35 @@ func TestReportRendersCoverageAndConfidence(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsUnavailablePositionsInAttributionCoverageDenominator(t *testing.T) {
+	in := "2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=10\n" +
+		"2021-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=20\n" +
+		structuredHookLine + "\n" + structuredCompleteLine + "\n"
+	r := build(t, in)
+	if !r.HasSpans {
+		t.Fatal("HasSpans = false, want admitted RPC evidence measured")
+	}
+	if r.Coverage.Spans != 2 || r.Coverage.TotalMs != 30 {
+		t.Fatalf("coverage = %+v, want 2 spans and 30ms; unavailable positions stay in the denominator", r.Coverage)
+	}
+}
+
+func TestReportRendersTimingEvidenceReasons(t *testing.T) {
+	r := Report{RPCEvidence: span.TimingEvidence{
+		Records:         2,
+		Rejected:        map[string]span.IssueCount{"duration_missing": {Count: 1}},
+		TimestampIssues: map[string]span.IssueCount{"timestamp_before_origin": {Count: 1}},
+		SyntaxErrors:    span.IssueCount{Count: 1},
+		SchemaErrors:    span.IssueCount{Count: 1},
+	}}
+	out := render(t, r)
+	for _, want := range []string{"RPC timing rejected duration_missing 1", "RPC timing timestamps timestamp_before_origin 1", "RPC timing syntax errors 1", "RPC timing schema errors 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestReportRendersBaselineOffsetAsAConstantNotACheck(t *testing.T) {
 	out := renderFixture(t, fixture(t, "two-tier.log"))
 	if !strings.Contains(out, "stream offset") {

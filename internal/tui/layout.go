@@ -1242,6 +1242,9 @@ func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) 
 	if s.StartClamped {
 		fields = append(fields, detailField{label: "start", value: clampedStartValue, kind: headIdentifierColumn})
 	}
+	if !s.HasPosition() {
+		fields = append(fields, detailField{label: "position", value: "unavailable: " + strings.Join(s.PositionReasons(), ", "), kind: headIdentifierColumn})
+	}
 	if s.Fidelity == span.FidelityUIReported {
 		// An observed address, stated by the log rather than inferred from
 		// it, so it carries no confidence marker.
