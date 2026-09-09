@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
@@ -21,10 +22,13 @@ import (
 // accessor, so swapping in ReadAt or mmap later is contained to this file if a
 // log ever turns up large enough to need it.
 type Log struct {
-	Data    []byte
-	Entries []logfmt.Entry
-	Comps   *logfmt.Interner
-	Stats   logfmt.Stats
+	responseOnce sync.Once
+	responses    []logfmt.ProviderJSON
+	responseErr  error
+	Data         []byte
+	Entries      []logfmt.Entry
+	Comps        *logfmt.Interner
+	Stats        logfmt.Stats
 
 	// RPCSpans and UISpans are kept apart rather than concatenated. Their
 	// StartMs/EndMs sit on different zero points -- see the doc comment on
@@ -120,6 +124,27 @@ func Load(path string) (*Log, error) {
 // Bytes returns every line of an entry, including its continuations.
 func (l *Log) Bytes(e logfmt.Entry) []byte {
 	return l.Data[e.Off : e.Off+uint64(e.Len)]
+}
+
+// ProviderResponse lazily reconstructs provider JSON without changing source
+// entries. Errors contain structural diagnostics only; raw inspection remains
+// available even when reconstruction fails. Empty Text means no matching body.
+func (l *Log) ProviderResponse(e logfmt.Entry) (logfmt.ProviderJSON, error) {
+	l.responseOnce.Do(func() {
+		l.responses, l.responseErr = logfmt.ReconstructProviderJSON(string(l.Data))
+	})
+	if l.responseErr != nil {
+		return logfmt.ProviderJSON{}, l.responseErr
+	}
+	for _, response := range l.responses {
+		for _, fragment := range response.Fragments {
+			if uint64(fragment.Start) < e.Off+uint64(e.Len) && uint64(fragment.End) > e.Off {
+				response.Fragments = append([]logfmt.JSONFragment(nil), response.Fragments...)
+				return response, nil
+			}
+		}
+	}
+	return logfmt.ProviderJSON{}, nil
 }
 
 // HasAddressContext reports whether this log carries any address context at

@@ -106,6 +106,22 @@ time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `
 to edit the query. Long queries scroll with the cursor. `Enter` searches,
 `Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
 
+With the Raw Log list focused, `r` opens the complete provider JSON response
+containing the entry at the top of the pane, joining timestamped fragments
+even when different providers are interleaved. The centre pane shows the
+fragment count, decoded multiline `@message` text and indented JSON. Terminal
+controls are displayed as visible escapes. Use arrows or `h`/`j`/`k`/`l` to
+scroll, `PgUp`/`PgDn` to page, `/` to search the displayed text and `n`/`N` for
+the next/previous matching line. `Esc` or `r` restores the exact raw position.
+
+Reconstruction runs lazily and leaves source bytes and entry identities intact.
+Malformed, incomplete or observably ambiguous provider JSON anywhere in the file
+makes reconstructed responses unavailable; ordinary loading and Raw Log still
+work. Ordered fragments from each exact provider component are required:
+unrelated same-component text inserted inside an unfinished JSON string cannot
+always be distinguished from payload. Scrubbing uses this same reconstruction
+and refuses to publish output on reconstruction failure.
+
 Key `5` swaps the centre table for a timeline: one bar per lane of concurrent
 work, shaded by how busy each column of it was, with the idle time between
 calls left as the blank space it is. Beneath it sit how much of the run had

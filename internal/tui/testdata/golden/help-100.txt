@@ -12,8 +12,10 @@
 [2m│[0m [1;36mTHE LIST[0m                                                                                         [2m│[0m
 [2m│[0m   [36m↑ ↓ j k[0m    move the cursor in the focused pane                                                 [2m│[0m
 [2m│[0m   [36m← → h l[0m    step within a timeline lane -- the footer's ↔                                       [2m│[0m
-[2m│[0m   [36m← → h l[0m    scroll horizontally in the raw log                                                  [2m│[0m
-[2m│[0m   [36mPgUp PgDn[0m  page through the raw log                                                            [2m│[0m
+[2m│[0m   [36m← → h l[0m    scroll horizontally in raw log or response                                          [2m│[0m
+[2m│[0m   [36mPgUp PgDn[0m  page through raw log or response                                                    [2m│[0m
+[2m│[0m   [36mr[0m          open reconstructed response; r or Esc returns                                       [2m│[0m
+[2m│[0m   [36m↑ ↓ j k[0m    scroll the reconstructed response                                                   [2m│[0m
 [2m│[0m   [36m⏎ Enter[0m    open the selected call in the raw log                                               [2m│[0m
 [2m│[0m   [36ms[0m          sort by the next column, in the table views                                         [2m│[0m
 [2m│[0m   [36m\[0m          show the whole log again, after opening a call                                      [2m│[0m
@@ -23,7 +25,7 @@
 [2m│[0m   [36mo[0m          show only that value -- again undoes it                                             [2m│[0m
 [2m│[0m   [36mf[0m          show the facets and give them the keyboard                                          [2m│[0m
 [2m│[0m   [36mEsc[0m        leave an opened call, then clear the filters                                        [2m│[0m
-[2m│[0m   [36m/[0m          search the raw log for a pattern                                                    [2m│[0m
+[2m│[0m   [36m/[0m          search raw log or reconstructed response                                            [2m│[0m
 [2m│[0m   [36mn N[0m        step to the next or previous match                                                  [2m│[0m
 [2m│[0m                                                                                                  [2m│[0m
 [2m│[0m [1;36mEVERYWHERE[0m                                                                                       [2m│[0m
@@ -33,8 +35,6 @@
 [2m│[0m   [36mq[0m          quit                                                                                [2m│[0m
 [2m│[0m                                                                                                  [2m│[0m
 [2m│[0m [1;36mTIMING[0m                                                                                           [2m│[0m
-[2m│[0m [2mDurations here are measured under logging, which is not[0m                                          [2m│[0m
-[2m│[0m [2mfree: one workspace planned in 24.1s unlogged and 522.2s[0m                                         [2m│[0m
 [2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯[0m
 [2m↑↓ scroll  PgUp/PgDn page  ?/Esc close help[0m
 [36mq[0m quit
