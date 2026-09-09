@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
 func TestFieldClassification(t *testing.T) {
@@ -58,6 +60,77 @@ func TestNestedJSONAndScalarTypes(t *testing.T) {
 	}
 }
 
+func TestNumericIdentifiersPreserveQuotedMeasurements(t *testing.T) {
+	for _, in := range []string{
+		`id=123 request_id="123" duration="123" count="123" elapsed=123 endpoint="https://private.internal/123"`,
+		`id="123" request_id="123" duration="123" count="123" elapsed=123 endpoint="https://private.internal/123"`,
+		`{"id":123,"request_id":"123","duration":"123","count":"123","elapsed":123,"endpoint":"https://private.internal/123"}`,
+		`{"id":"123","request_id":"123","duration":"123","count":"123","elapsed":123,"endpoint":"https://private.internal/123"}`,
+	} {
+		t.Run(in, func(t *testing.T) {
+			got, err := Scrub([]byte(in), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := make(map[string]any)
+			if strings.HasPrefix(in, "{") {
+				if err := json.Unmarshal(got.Data, &out); err != nil {
+					t.Fatal(err)
+				}
+				if out["elapsed"] != float64(123) {
+					t.Fatalf("numeric measurement changed: %s", got.Data)
+				}
+				if id, numeric := out["id"].(float64); numeric {
+					out["id"] = string(mustJSON(t, id))
+				} else if !strings.Contains(in, `"id":"123"`) {
+					t.Fatalf("numeric identifier lost its type: %s", got.Data)
+				}
+			} else {
+				for _, f := range logfmt.ParseFields(string(got.Data), nil) {
+					out[f.Key] = f.Val
+				}
+				if out["elapsed"] != "123" {
+					t.Fatalf("numeric measurement changed: %s", got.Data)
+				}
+			}
+			if out["duration"] != "123" || out["count"] != "123" {
+				t.Fatalf("quoted measurements changed: %s", got.Data)
+			}
+			if out["id"] == "123" || out["request_id"] != out["id"] || !strings.HasSuffix(out["endpoint"].(string), "/"+out["id"].(string)) {
+				t.Fatalf("numeric identifier linkage lost: %s", got.Data)
+			}
+		})
+	}
+}
+
+func TestNumericIdentifierStringResourceKeys(t *testing.T) {
+	got, err := Scrub([]byte(`id=123 addr='aws_instance.web["123"]' other='aws_instance.web[123]'`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := logfmt.ParseFields(string(got.Data), nil)
+	id, _ := fields.Get("id")
+	if id == "123" || !strings.Contains(string(got.Data), `["`+id+`"]`) || !strings.Contains(string(got.Data), "[123]") {
+		t.Fatalf("string key linkage or count index changed: %s", got.Data)
+	}
+}
+
+func TestNumericSecretsRetainPropagationAndMetadataConflicts(t *testing.T) {
+	for _, in := range []string{`token=123 duration="123"`, `{"token":123,"duration":"123"}`} {
+		got, err := Scrub([]byte(in), nil)
+		if err != nil || strings.Contains(string(got.Data), "123") || got.Replacements["secret"] != 2 {
+			t.Fatalf("numeric secret propagation: %s %#v %v", got.Data, got.Replacements, err)
+		}
+	}
+	for _, assignment := range []string{"tf_req_id=123", `tf_req_duration_ms="123"`} {
+		in := "2026-09-08T00:00:00.000Z [TRACE] provider.aws: Sending request downstream: " + assignment + "\ntoken=123\n"
+		got, err := Scrub([]byte(in), nil)
+		if err == nil || got.Data != nil || strings.Contains(err.Error(), "123") {
+			t.Fatalf("numeric secret metadata conflict published output or content: %s %v", got.Data, err)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -79,6 +152,39 @@ func TestMetadataPositionsAndBodyDecoys(t *testing.T) {
 	}
 	if !strings.Contains(out, "tf_rpc=ReadResource tf_resource_type=aws_instance") {
 		t.Fatal("structural metadata changed")
+	}
+}
+
+func TestRequestMetadataRequiresParserFieldSyntax(t *testing.T) {
+	const guid = "12345678-1234-4234-8234-123456789abc"
+	const header = "2026-09-08T00:00:00.000Z [TRACE] provider.aws: Sending request downstream: "
+	for _, prefix := range []string{header, header + "tf_req_id=scope\n  "} {
+		for _, assignment := range []string{"tf_req_id = ", "tf_req_id= ", "tf_req_id\t=\t", "tf_req_id="} {
+			for _, value := range []string{guid, `"` + guid + `"`} {
+				in := prefix + assignment + value + "\n"
+				t.Run(in, func(t *testing.T) {
+					got, err := Scrub([]byte(in), nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					preserved := assignment == "tf_req_id="
+					if strings.Contains(string(got.Data), guid) != preserved {
+						t.Fatalf("request-ID exemption outside parser value: %s", got.Data)
+					}
+					before := logfmt.ParseFields(assignment+value, nil)
+					outLine := strings.TrimSpace(strings.Split(strings.TrimSuffix(string(got.Data), "\n"), "\n")[strings.Count(prefix, "\n")])
+					if strings.HasPrefix(outLine, header) {
+						outLine = strings.TrimPrefix(outLine, header)
+					}
+					after := logfmt.ParseFields(outLine, nil)
+					beforeID, beforeOK := before.Get("tf_req_id")
+					afterID, afterOK := after.Get("tf_req_id")
+					if beforeID != afterID || beforeOK != afterOK {
+						t.Fatalf("parser metadata changed: before %q/%t after %q/%t", beforeID, beforeOK, afterID, afterOK)
+					}
+				})
+			}
+		}
 	}
 }
 

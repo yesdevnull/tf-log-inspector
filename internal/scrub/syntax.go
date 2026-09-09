@@ -182,7 +182,10 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			break
 		}
 		category := fieldCategory(key)
-		protected := metadata && preservedField(key)
+		// Hclog metadata requires adjacent key=value bytes; spaced assignments
+		// remain useful for discovery but are not parser-recognised fields.
+		metadataField := metadata && sep == i && valueStart == sep+1
+		protected := metadataField && preservedField(key)
 		if v.text[valueStart] == '"' {
 			end, decoded, ok := readString(v.text, valueStart)
 			if !ok {
@@ -190,7 +193,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				break
 			}
 			child := &view{text: decoded, line: v.line, whole: true}
-			if metadata && key == "tf_provider_addr" {
+			if metadataField && key == "tf_provider_addr" {
 				child.mandatory = true
 				s.provider(child, 0, len(decoded), false)
 			} else if protected {
@@ -212,7 +215,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			for end < len(v.text) && !space(v.text[end]) {
 				end++
 			}
-			if metadata && key == "tf_provider_addr" {
+			if metadataField && key == "tf_provider_addr" {
 				s.provider(v, valueStart, end, false)
 			} else if protected {
 				v.protect(valueStart, end)

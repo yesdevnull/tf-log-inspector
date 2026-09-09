@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
 func scrubObject(t *testing.T, input string) map[string]string {
@@ -73,6 +75,80 @@ func TestURLAndHostnameShareComponents(t *testing.T) {
 	}
 	if !strings.HasSuffix(out["host"], ".example.invalid") || strings.Contains(out["name"], "_") {
 		t.Fatal("hostname alias syntax")
+	}
+}
+
+func TestHostnameCountsUseNetworkCategory(t *testing.T) {
+	for _, host := range []string{"private-host", "private.internal"} {
+		for _, order := range []string{"hostname only", "hostname first", "URL first"} {
+			t.Run(host+"/"+order, func(t *testing.T) {
+				in := "hostname=" + host + "\n"
+				count := 1
+				if order == "hostname first" {
+					in += "endpoint=https://" + host + ":443\n"
+					count++
+				} else if order == "URL first" {
+					in = "endpoint=https://" + host + ":443\n" + in
+					count++
+				}
+				got, err := Scrub([]byte(in), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(got.Data), host) || got.Replacements["network"] != count || len(got.Replacements) != 1 {
+					t.Fatalf("hostname accounting: %s %#v", got.Data, got.Replacements)
+				}
+				fields := logfmt.ParseFields(string(got.Data), nil)
+				hostname, _ := fields.Get("hostname")
+				if endpoint, ok := fields.Get("endpoint"); ok {
+					u, err := url.Parse(endpoint)
+					if err != nil || u.Hostname() != hostname || u.Port() != "443" {
+						t.Fatalf("hostname mapping differs across discovery orders: %s", got.Data)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestScopedIPv6URLUsesRawSpansAndDecodedIdentity(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://[fe80::1%25en0]:443/path?count=5#fragment",
+		"https://alice:private-password@[fe80::1%25en%30]:443/path?count=5#fragment",
+	} {
+		for _, format := range []string{"hclog", "JSON"} {
+			t.Run(format+"/"+endpoint, func(t *testing.T) {
+				in := "endpoint=" + endpoint + " ip=fe80::1%en0 name=path\n"
+				if format == "JSON" {
+					in = `{"endpoint":"` + endpoint + `","ip":"fe80::1%en0","name":"path"}`
+				}
+				got, err := Scrub([]byte(in), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out := make(map[string]string)
+				if format == "JSON" {
+					if err := json.Unmarshal(got.Data, &out); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					for _, f := range logfmt.ParseFields(string(got.Data), nil) {
+						out[f.Key] = f.Val
+					}
+				}
+				u, err := url.Parse(out["endpoint"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				addr, err := netip.ParseAddr(u.Hostname())
+				if err != nil || !netip.MustParsePrefix("fd00::/8").Contains(addr) || u.Hostname() != out["ip"] || u.Scheme != "https" || u.Port() != "443" || u.Path != "/"+out["name"] || u.Query().Get("count") != "5" || u.Fragment != "fragment" {
+					t.Fatalf("scoped URL identity or structure lost: %s", got.Data)
+				}
+				if strings.Contains(string(got.Data), "fe80") || strings.Contains(string(got.Data), "en0") || strings.Contains(string(got.Data), "alice") || strings.Contains(string(got.Data), "private-password") {
+					t.Fatalf("scoped URL retains identifying content: %s", got.Data)
+				}
+			})
+		}
 	}
 }
 

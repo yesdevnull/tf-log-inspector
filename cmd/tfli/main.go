@@ -4,6 +4,8 @@
 // share back to this project. --profile reports real timing and resource
 // addresses for the user's own eyes; its output is NOT masked and must never
 // be treated as shareable the way a diagnose report is.
+// --scrub writes a separate log with consistent fake identifying values;
+// review that candidate before sharing because detection is heuristic.
 //
 // A bare invocation opens the full-screen interface, which discloses more
 // again: real addresses as --profile does, plus the log's own lines rendered
@@ -44,12 +46,15 @@ func run(args []string, stdout, stderr io.Writer) error {
 	var (
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
-		outPath    = fs.String("o", "", "write the --diagnose or --profile report to this file instead of standard output")
+		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
+		valuesPath = fs.String("scrub-values", "", "additional literal identifying values, one per line")
+		outPath    = fs.String("o", "", "write the selected report or scrubbed log to this file")
 		showVer    = fs.Bool("version", false, "print the version and exit")
 	)
 	usage := func() {
 		fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
-		fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n\n")
+		fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n")
+		fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
 		fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
 		fmt.Fprintf(stderr, "With no mode flag tfli opens the full-screen interface, which shows\n")
@@ -83,9 +88,30 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return errors.New("expected exactly one log file argument")
 	}
+	valuesSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "scrub-values" {
+			valuesSet = true
+		}
+	})
+	modeCount := 0
+	for _, selected := range []bool{*doDiagnose, *doProfile, *doScrub} {
+		if selected {
+			modeCount++
+		}
+	}
+	if modeCount > 1 {
+		return errors.New("pass only one of --diagnose, --profile, or --scrub")
+	}
+	if valuesSet && !*doScrub {
+		return errors.New("--scrub-values applies only to --scrub")
+	}
 	switch {
-	case *doDiagnose && *doProfile:
-		return errors.New("pass only one of --diagnose or --profile, not both")
+	case *doScrub:
+		if *outPath == "" {
+			return errors.New("--scrub requires -o")
+		}
+		return runScrub(fs.Arg(0), *outPath, *valuesPath, stderr)
 	case *doProfile:
 		return runProfile(fs.Arg(0), *outPath, stdout)
 	case *doDiagnose:
@@ -96,7 +122,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// looks exactly like a report written somewhere the user was not
 		// watching, which is how people lose work.
 		if *outPath != "" {
-			return errors.New("-o writes a report, so it applies only to --diagnose or --profile")
+			return errors.New("-o applies only to --diagnose, --profile, or --scrub")
 		}
 		return runTUI(fs.Arg(0))
 	}
@@ -205,7 +231,7 @@ func runProfile(path, outPath string, stdout io.Writer) error {
 var runTUIFunc = tui.Run
 
 // runTUI loads path and opens the full-screen interface. It has no --diagnose
-// or --profile equivalent flag: passing neither is what selects it.
+// or --profile equivalent flag: passing no mode flag is what selects it.
 func runTUI(path string) error {
 	l, err := model.Load(path)
 	if err != nil {

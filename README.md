@@ -83,6 +83,8 @@ For a local plan:
     tfli --diagnose -o report.txt plan.log
     tfli --profile plan.log
     tfli --profile -o profile.txt plan.log
+    tfli --scrub -o sanitised.log plan.log
+    tfli --scrub --scrub-values private-values.txt -o sanitised.log plan.log
 
 With no mode flag, `tfli` opens the full-screen interface: facet checkboxes
 on the left, a ranked table in the centre, the selected call's detail on the
@@ -112,12 +114,69 @@ and `←`/`→` (or `h`/`l`) step along the selected one call by call — the
 detail pane follows the step, and `⏎` opens that call's own log lines,
 scoped to it by its `tf_req_id`; `\` returns to the whole log.
 
-`-o` writes a report, so it applies to `--diagnose` and `--profile` only;
-passing it without a mode flag is an error rather than a file that never
-appears.
+`-o` writes a report for `--diagnose` and `--profile`, and is required for
+`--scrub`. Passing it without a mode flag is an error. Select only one mode.
 
 `--diagnose` reports the log's structure: size, levels, which extraction tier
 applies, which fields are present, and the most common message shapes.
+
+### Scrubbing a log
+
+`--scrub` writes a candidate log for sharing, replacing identifying values
+with consistent fake values throughout the file. Repeated values remain
+linkable and distinct resources remain distinct. The source stays unchanged;
+the output must be a new path, including when an existing path is a symbolic
+or hard link. Output is created exclusively with owner-only read/write
+permissions (`0600`) after transformation and validation succeed. Write or
+close failures remove the newly created partial output; a failed removal is
+reported as an error.
+
+Detection covers hclog fields, Terraform UI JSON, plan text and supported
+HTTP/JSON bodies, including escaped JSON strings:
+
+- Terraform module/resource labels and string instance keys; name, user,
+  organisation, workspace and project fields.
+- GUIDs and identifying ID fields, including opaque request/resource IDs
+  and Terraform UI `hook.id_value`.
+- Email addresses, IPv4/IPv6 literals, URL hosts and hostname fields.
+- AWS ARNs and account IDs, Azure resource-ID paths and GCP resource paths.
+- Recognised absolute POSIX and Windows paths, preserving separators and
+  file extensions.
+- Credential fields and HTTP headers, including passwords, tokens, API/access
+  keys, Authorization and cookies, plus PEM private-key payloads. Whole
+  credentials receive one opaque alias even when also used in another field.
+
+For additional identifiers, use `--scrub-values private-values.txt` with one
+literal UTF-8 value per line. Empty lines are ignored and line terminators
+are removed; other whitespace is significant. Controls and invalid UTF-8
+are rejected. There is no comment, regex or replacement syntax. This option
+applies only to `--scrub`. Mappings stay in memory and are not exported or
+stable across separate files.
+
+The scrubber preserves line order/endings, timestamps, severity, durations,
+counts, RPC names, resource types and lifecycle actions. Genuine hclog
+`tf_req_id` metadata stays unchanged so request scopes survive; other ID
+fields and body fields named `tf_req_id` are scrubbed. Terraform address
+grammar and numeric indices remain intact. Built-in components and the
+recognised public providers from HashiCorp (`aws`, `azurerm`, `azuread`,
+`google`, `local`, `null`, `random`, `time`, `tls`) and `integrations/github`
+retain their grouping labels; unknown provider identities are scrubbed.
+
+Conflicts with preserved syntax or metadata, including changes to fields
+visible through the inspector's header parsing window, reject the input
+before output creation. Invalid UTF-8 and unsupported binary input also
+fail. Malformed structured/quoted input is handled as text where possible
+and counted. Stderr reports aggregate replacement and unsupported-input
+counts, plus a review reminder; stdout contains no log content.
+
+**Review the output before sharing it.** This is heuristic pseudonymisation:
+unknown natural-language names, unrecognised provider formats and
+encoded/compressed payloads are outside automatic detection. Replacement
+counts do not measure completeness. Open or profile the candidate locally
+to check its usefulness:
+
+    tfli sanitised.log
+    tfli --profile sanitised.log
 
 ### Durations are measured under logging
 
@@ -139,6 +198,11 @@ resources, and concurrency. Use it to find the slow resource, not to share
 the result.
 
 ### What each mode discloses
+
+`--scrub` writes the complete transformed log, including anything its
+detectors did not recognise and preserved metadata such as `tf_req_id`.
+Review the candidate using the coverage and limitations above before
+sharing it or showing it in the interface.
 
 `--diagnose`'s field **keys** are reported verbatim, restricted to an
 identifier charset so log content cannot pose as a key. Field **values** are

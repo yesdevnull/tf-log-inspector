@@ -135,21 +135,33 @@ func TestSecretARNUsesOneAlias(t *testing.T) {
 
 **Interfaces:** Consumes `scrub.Scrub` and `scrub.Result`. Add `runScrub(inputPath, outputPath, valuesPath string, stderr io.Writer) error`; mode dispatch returns its error through the existing terminal-safe error handling. Values-file parsing is local to the command, returning `[]string` for the public API.
 
-- [ ] Write a CLI test with temporary input/output paths that invokes the existing `run` function using `--scrub -o`, confirms the input is unchanged, the new output is scrubbed and reloadable, stdout is empty, and stderr contains counts without source values. Run `go test ./cmd/tfli -run Scrub` and observe unsupported-flag RED.
-- [ ] Add the flags and dispatch. Keep the existing diagnose/profile/TUI paths intact:
+- [x] Write a CLI test with temporary input/output paths that invokes the existing `run` function using `--scrub -o`, confirms the input is unchanged, the new output is scrubbed and reloadable, stdout is empty, and stderr contains counts without source values. Run `go test ./cmd/tfli -run Scrub` and observe unsupported-flag RED.
+- [x] Add the flags and dispatch. Keep the existing diagnose/profile/TUI paths intact:
 
 ```go
 doScrub := fs.Bool("scrub", false, "write a log with consistent fake identifying values")
 valuesPath := fs.String("scrub-values", "", "additional literal identifying values, one per line")
 ```
 
-- [ ] Test and implement rejection of combined modes, missing `-o`, and `--scrub-values` outside scrub mode. Read input and values before transforming; remove only line terminators, ignore empty lines, retain other whitespace and reject controls/invalid UTF-8 without echoing them.
-- [ ] Test existing output files, input/output identity, symbolic/hard links, missing input/values, invalid output directory and permission mode. Create output only after successful scrubbing using `os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)`. Write all bytes, check short writes and close errors, remove only the newly created partial file on failure, and report cleanup failure without log content. Keep output ownership/lifecycle in the CLI rather than reuse the overwriting `writeReport` helper.
-- [ ] Test failure and count diagnostics, including zero replacements and unsupported input counts. Print categories in stable order; do not expose the mapping. Add help/README examples, actual detector coverage, explicit-values use, unchanged source behaviour, preserved metadata, errors on invariant conflicts and the manual-review limitation.
-- [ ] Run `go test ./cmd/tfli ./internal/scrub`, format changed Go files and commit signed as `Expose safe log scrubbing through the CLI`.
-- [ ] Complete task review and separate test-cleanup. Run the full normal/race suites using the signing-safe PATH, `go build ./...`, and `go vet ./...`. Manually scrub a synthetic fixture and open/profile the output; inspect that the result is useful without exposing source identifiers.
-- [ ] Complete broad independent whole-branch review against `main`, resolve findings with TDD and scoped re-review, and record validation in this plan. Keep the feature on its topic branch; do not push or merge without Dan's instruction.
+- [x] Test and implement rejection of combined modes, missing `-o`, and `--scrub-values` outside scrub mode. Read input and values before transforming; remove only line terminators, ignore empty lines, retain other whitespace and reject controls/invalid UTF-8 without echoing them.
+- [x] Test existing output files, input/output identity, symbolic/hard links, missing input/values, invalid output directory and permission mode. Create output only after successful scrubbing using `os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)`. Write all bytes, check short writes and close errors, remove only the newly created partial file on failure, and report cleanup failure without log content. Keep output ownership/lifecycle in the CLI rather than reuse the overwriting `writeReport` helper.
+- [x] Test failure and count diagnostics, including zero replacements and unsupported input counts. Print categories in stable order; do not expose the mapping. Add help/README examples, actual detector coverage, explicit-values use, unchanged source behaviour, preserved metadata, errors on invariant conflicts and the manual-review limitation.
+- [x] Run `go test ./cmd/tfli ./internal/scrub`, format changed Go files and commit signed as `Expose safe log scrubbing through the CLI`.
+- [x] Complete task review and separate test-cleanup. Run the full normal/race suites using the signing-safe PATH, `go build ./...`, and `go vet ./...`. Manually scrub a synthetic fixture and open/profile the output; inspect that the result is useful without exposing source identifiers.
+- [x] Complete broad independent whole-branch review against `main`, resolve findings with TDD and scoped re-review, and record validation in this plan. Keep the feature on its topic branch; do not push or merge without Dan's instruction.
 
 ## Plan self-review
 
 Task 1 covers syntax, the field table, shared allocation, exceptions, error contracts and PAR-1/PAR-2. Task 2 completes the discovery table, shared composite reconstruction, public-provider rules and PAR-3. Task 3 covers the file/CLI contract and user documentation. PAR-4 is exercised by both package and command tests. Signatures and `Result` fields are shared unchanged across all tasks. No dependency or scanner/model change is required.
+
+## Implementation and validation record
+
+Completed on `feat/log-scrubbing`; implementation head `932c677`. All three task reviews and the final whole-branch review are resolved. The final review fixes cover parser-recognised request-ID syntax, quoted numeric measurements, public hostname counts and scoped IPv6 URL offsets. Each fix has an observed behavioural RED and passing regression; scoped re-review found no remaining issue. Separate test-cleanup passes retained 81 reviewed tests and one benchmark, with no removals or flagged tests. Final package coverage: command 94.6%, scrubber 95.7%.
+
+Final verification passed: the full normal and race suites with the signing-safe PATH, `go build ./...`, `go vet ./...`, and Git diff checks. Manual CLI checks confirmed source integrity, exclusive 0600 output, empty stdout, aggregate-only stderr, targeted identifier removal, request linkage, line framing and unchanged files after an existing-output refusal. Profile comparison retained one RPC at 900 ms, one resource lifecycle at 2 seconds, provider/type grouping and concurrency; the TUI opened the output with contained attribution and displayed Raw Log correctly. The final synthetic scaling probe processed 16,777,304 bytes and 10,000 distinct names in 4.679 seconds. These are observed checks, not a throughput guarantee. All branch commits are signed; no push or merge was performed.
+
+Implementation decisions, in recorded order:
+
+- Added prefix-indexed candidate lookup after measuring multiplicative matching cost. This adds a small private index and its regression/benchmark coverage while preserving matching semantics.
+- Corrected the plan count from seven metadata fields to the six explicitly enumerated in the binding spec. No behavioural requirement changed.
+- A single-label hostname also required as a Terraform resource label receives one DNS-valid shared label. This preserves valid resource grammar and linkage; that cross-context hostname is a local label rather than an example.invalid domain. Host-only aliases retain example.invalid.
