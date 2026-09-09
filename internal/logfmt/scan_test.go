@@ -12,28 +12,21 @@ import (
 	"unicode/utf8"
 )
 
-func TestScanTimestampOffsetLimit(t *testing.T) {
+func TestScanRetainsEntriesBeyondClockRange(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, delta := range []int64{math.MaxUint32, math.MaxUint32 + 1} {
-		in := base.Format(tsLayout) + " [INFO] first\n" +
-			base.Add(time.Duration(delta)*time.Millisecond).Format(tsLayout) + " [INFO] last\n"
-		var c collector
-		_, err := Scan(strings.NewReader(in), &Interner{}, &Interner{}, &c)
-		if delta > math.MaxUint32 {
-			if err == nil || !strings.Contains(err.Error(), "timestamp offset") {
-				t.Fatalf("Scan offset %d: got %v, want timestamp offset error", delta, err)
-			}
-			if len(c.entries) != 1 {
-				t.Fatalf("got %d entries, want only the valid first entry", len(c.entries))
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(c.entries) != 2 || c.entries[1].TSms != math.MaxUint32 {
-			t.Fatalf("boundary entries = %+v, want exact maximum offset retained", c.entries)
-		}
+	exact := base.Add(time.Duration(math.MaxUint32) * time.Millisecond)
+	beyond := base.Add((time.Duration(math.MaxUint32) + 1) * time.Millisecond)
+	in := base.Format(tsLayout) + " [INFO] first\n" +
+		exact.Format(tsLayout) + " [INFO] exact\n" +
+		beyond.Format(tsLayout) + " [INFO] beyond\n" +
+		base.Add(time.Millisecond).Format(tsLayout) + " [INFO] continues\n"
+	var c collector
+	st, err := Scan(strings.NewReader(in), &Interner{}, &Interner{}, &c)
+	if err != nil || st.Entries != 4 {
+		t.Fatalf("entries=%d, err=%v; want all entries retained", st.Entries, err)
+	}
+	if c.entries[1].TSms != math.MaxUint32 {
+		t.Errorf("exact-boundary TSms = %d, want %d", c.entries[1].TSms, uint32(math.MaxUint32))
 	}
 }
 
@@ -42,6 +35,59 @@ type collector struct {
 	entries []Entry
 	msgs    []string
 	rpcs    []string
+}
+
+type clockCollector struct {
+	clocks      []ClockPosition
+	clockOrds   []uint32
+	entryOrds   []uint32
+	clockCounts []int
+}
+
+func (c *clockCollector) EntryClock(ord uint32, position ClockPosition) {
+	c.clockOrds = append(c.clockOrds, ord)
+	c.clocks = append(c.clocks, position)
+	c.clockCounts = append(c.clockCounts, len(c.entryOrds))
+}
+
+func (c *clockCollector) Entry(ord uint32, e Entry, msg string, f Fields) {
+	c.entryOrds = append(c.entryOrds, ord)
+}
+
+func TestScanDeliversClockBeforeEveryEntry(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	beyond := base.Add((time.Duration(math.MaxUint32) + 1) * time.Millisecond)
+	in := "leading\ncontinued leading\n" +
+		base.Format(tsLayout) + " [INFO] core: first\ncontinuation one\ncontinuation two\n" +
+		structuredVersionLine + "\n" +
+		beyond.Format(tsLayout) + " [INFO] core: beyond\n" +
+		base.Add(-time.Millisecond).Format(tsLayout) + " [INFO] core: backwards\n"
+	var c clockCollector
+	st, err := Scan(strings.NewReader(in), &Interner{}, &Interner{}, &c)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	want := []ClockPosition{
+		{Status: TimestampMissing},
+		{Status: TimestampValid},
+		{Status: TimestampMissing},
+		{Status: TimestampOutOfRange},
+		{Status: TimestampBeforeOrigin},
+	}
+	if !slices.Equal(c.clocks, want) {
+		t.Errorf("clock positions = %+v, want %+v", c.clocks, want)
+	}
+	if !slices.Equal(c.clockOrds, c.entryOrds) {
+		t.Errorf("clock ordinals %v do not match entry ordinals %v", c.clockOrds, c.entryOrds)
+	}
+	for i, entriesSeen := range c.clockCounts {
+		if entriesSeen != i {
+			t.Errorf("clock %d arrived after %d Entry calls, want %d", i, entriesSeen, i)
+		}
+	}
+	if st.TimestampOffsetsOutOfRange != 1 || st.BackwardsTimestamps != 1 {
+		t.Errorf("out-of-range=%d backwards=%d, want 1 each", st.TimestampOffsetsOutOfRange, st.BackwardsTimestamps)
+	}
 }
 
 func (c *collector) Entry(ord uint32, e Entry, msg string, f Fields) {

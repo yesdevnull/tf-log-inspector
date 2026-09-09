@@ -37,14 +37,18 @@ func TestLongHeaderPreservesVisibleMetadata(t *testing.T) {
 	}
 }
 
-func TestScannerFailureIsContentFree(t *testing.T) {
-	in := "2026-01-01T00:00:00.000Z [TRACE] core: begin\n2026-09-08T00:00:00.000Z [TRACE] core: private-content\n"
+func TestScrubRetainsEntriesAcrossLongTimestampSpan(t *testing.T) {
+	in := "2026-01-01T00:00:00.000Z [TRACE] core: begin\n2026-09-08T00:00:00.000Z [TRACE] core: password=private-content\n"
 	got, err := Scrub([]byte(in), nil)
-	if err == nil || got.Data != nil {
-		t.Fatal("accepted unsupported timestamp span")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), "private-content") {
-		t.Fatal("error leaked content")
+	text := string(got.Data)
+	if !strings.Contains(text, "2026-01-01T00:00:00.000Z") || !strings.Contains(text, "2026-09-08T00:00:00.000Z") {
+		t.Fatal("did not retain both entries across supported timestamp span")
+	}
+	if strings.Contains(text, "private-content") {
+		t.Fatal("private field value remains")
 	}
 }
 

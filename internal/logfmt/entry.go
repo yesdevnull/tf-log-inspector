@@ -73,6 +73,7 @@ type Stats struct {
 	ContinuationReqIDLines       uint64
 	ContinuationOnlyReqIDEntries uint64
 	BackwardsTimestamps          uint64
+	TimestampOffsetsOutOfRange   uint64
 	LinesSaturated               uint64
 	ByLevel                      [6]uint64
 	Bytes                        uint64

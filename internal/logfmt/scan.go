@@ -2,7 +2,6 @@ package logfmt
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -55,9 +54,10 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 		scratch  []byte
 		off      uint64
 
-		open   bool
-		cur    Entry
-		curMsg string
+		open     bool
+		cur      Entry
+		curClock ClockPosition
+		curMsg   string
 		// contFields is the parse buffer for a continuation line, kept
 		// beside fieldBuf rather than sharing it: flush reads fieldBuf
 		// after the continuations of its entry have been scanned, so one
@@ -94,6 +94,9 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 		st.Entries++
 		st.ByLevel[cur.Level]++
 		for _, s := range sinks {
+			if cs, ok := s.(ClockSink); ok {
+				cs.EntryClock(ord, curClock)
+			}
 			s.Entry(ord, cur, curMsg, fieldBuf)
 		}
 		ord++
@@ -137,6 +140,7 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 				// LevelUnknown, which reads as "this log says nothing about
 				// severity" when in fact it says it on every line.
 				cur = Entry{Off: off, Len: raw, Lines: 1, Level: StructuredLevel(text)}
+				curClock = ClockPosition{Status: TimestampMissing}
 				curMsg = ""
 				open = true
 				flush()
@@ -154,20 +158,19 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 				}
 				st.LastTS = h.TS
 
-				delta := h.TS.Sub(baseTS).Milliseconds()
-				if delta > math.MaxUint32 {
-					return st, fmt.Errorf("line %d: timestamp offset %dms exceeds supported maximum %dms", st.PhysicalLines, delta, uint64(math.MaxUint32))
-				}
-				if delta < 0 {
-					// Concurrent goroutines can emit out of order. Clamp
-					// rather than wrapping the unsigned field.
+				position := RelativePosition(h.TS, baseTS)
+				curClock = position
+				delta := position.OffsetMs
+				if position.Status == TimestampBeforeOrigin {
 					st.BackwardsTimestamps++
-					delta = 0
+				}
+				if position.Status == TimestampOutOfRange {
+					st.TimestampOffsetsOutOfRange++
 				}
 				cur = Entry{
 					Off:         off,
 					Len:         raw,
-					TSms:        uint32(delta),
+					TSms:        delta,
 					Level:       h.Level,
 					Comp:        comps.Intern(h.Comp),
 					Lines:       1,
@@ -227,6 +230,7 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 				// Non-hclog content before any entry.
 				st.UntimestampedLines++
 				cur = Entry{Off: off, Len: raw, Lines: 1}
+				curClock = ClockPosition{Status: TimestampMissing}
 				curMsg = ""
 				open = true
 			}
