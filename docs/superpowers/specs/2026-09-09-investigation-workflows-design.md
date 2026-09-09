@@ -89,6 +89,61 @@ storage layer, plugin system or general report framework.
 - Distinguish observed zero, absent observations and unavailable measurement
   tiers. A missing tier cannot become a zero-duration run.
 
+### Duration admission and position validity
+
+Duration evidence and timeline position are independent properties of each
+observation. Apply the following contract before building rankings, resource
+summaries, comparisons or timeline analysis:
+
+| Input evidence | Duration statistics | Timeline and temporal attribution |
+| --- | --- | --- |
+| Explicit valid duration, including zero, and a usable timestamp | Include the duration and count | Include the positioned observation |
+| Missing/null/invalid/negative duration, with any timestamp | Reject as a timing observation; retain a rejection count | Exclude; do not synthesise a duration |
+| Valid duration with a missing or invalid timestamp | Include the duration and count | Position unavailable; exclude |
+| Valid duration with a timestamp before its tier's origin or beyond the representable offset range | Include the duration and count | Position unavailable; exclude rather than using a clamped endpoint |
+| Valid duration extending before the capture origin, with a usable end timestamp | Include the full duration and count | Retain the existing start-at-zero clamp and its qualification |
+| Valid UI duration exceeding duration storage capacity | Include the saturated lower bound and count, flagged on the observation | Position unavailable because the capped duration cannot establish the start; exclude |
+
+RPC durations require the existing unsigned integer millisecond representation;
+values outside its storage range are rejected and counted, not silently capped.
+UI durations require an explicit finite non-negative JSON number of seconds and
+use the existing millisecond rounding. A positive duration that rounds to zero
+remains an admitted observation. Missing or null elapsed_seconds is not zero.
+
+Retain per-observation duration saturation and position-validity reasons. A
+whole-log counter alone cannot qualify an individual JSON row. For an
+unavailable position, both start/end offsets are null; retain its source location
+and usable duration. A genuine position at offset zero remains numerical zero.
+A tier clock origin is established only from parseable timestamps, and is null
+if none exists. It never supplies a missing observation's timestamp.
+
+Duration count, sum, mean and maximum use admitted duration observations,
+including those without a usable position. Means divide by that same count;
+rejected timing records are counted separately and never dilute a mean. Resource
+metadata absence may prevent a named grouping without invalidating a duration.
+Duration-based tier availability means at least one admitted observation, even
+if all its positions are unavailable.
+
+Timeline selection continues to prefer the RPC tier when it has admitted
+durations, otherwise UI. Within that chosen tier and active selection, analyse
+only observations with usable positions. Do not silently switch tiers because
+the preferred tier lacks usable positions. Report positioned and excluded
+observation counts and duration totals, with exclusion reasons and lower-bound
+flags. Some excluded observations make the analysis partial; none positioned
+makes the timeline metrics and window unavailable, not measured zero or “idle”.
+An empty active selection is separately labelled as having no matches.
+
+For a positioned subset, retain the current zero-to-latest-end window and
+threshold policy, explicitly scoped to that subset. A zero-length window has an
+unavailable busy fraction; zero-duration positioned observations contribute no
+busy extent. Start-clamped observations retain their shortened timeline extent.
+For RPC attribution, retain the existing end-point rule for clamped starts, with
+confidence capped at Overlapping. Unpositioned RPC observations receive no
+temporal attribution; if context exists, they remain Unattributed with a
+position-unavailable reason. They remain in the RPC duration denominator.
+No-context remains a distinct capture-level condition. Observed UI addresses
+remain available even when their timing positions are unavailable.
+
 ### Disclosure and diagnostics
 
 Text profiles, JSON exports and comparisons contain unmasked resource addresses
@@ -192,8 +247,12 @@ Contained/Likely and weaker Overlapping evidence. Label these as inferred and
 partial. Do not imply that all calls made by that resource have been recovered.
 Do not assign a provider to a UI resource from a type-name prefix.
 
-An evidence summary outside the ranked rows accounts for all RPC time. Classify
-calls without resource type as provider-level first. Among remaining calls,
+An evidence summary outside the ranked rows accounts for all admitted RPC time.
+Classify calls without resource type as “resource type unavailable” first. This
+is a statement about metadata, not provider-level scope: ReadResource,
+GetProviderSchema and an unknown RPC method all enter this bucket when their
+type is absent. Do not infer non-resource work from that absence or introduce
+a method-based scope classifier as part of this feature. Among remaining calls,
 absence of collected address context means no-context; otherwise use Contained,
 Likely, Overlapping, Ambiguous or Unattributed. These reporting buckets are
 disjoint and reconcile with the RPC total. Preserve the existing full confidence
@@ -224,8 +283,31 @@ Do not add a second implicit filter by typing into the chooser.
 
 For UI operations, resource/module filters use observed metadata. For RPC calls,
 they use named attribution and display its confidence. Ambiguous and unattributed
-calls do not silently match a named resource. Show excluded RPC time alongside
-the resource selection so the reader can see the incomplete association.
+calls do not silently match a named resource.
+
+When a resource or module selection is active, show a selection-evidence summary
+whose baseline is admitted RPC observations after provider/resource-type/method
+filters, but before resource/module filters. Severity and request scope affect
+Raw Log only and do not change this baseline. Partition its count and duration
+into three disjoint groups:
+
+- **Selected named associations:** the named address/module evidence satisfies
+  every active resource/module dimension. Preserve the Contained/Likely versus
+  Overlapping distinction; neither is an observed identity.
+- **Other named associations:** named evidence definitively fails at least one
+  active resource/module dimension. These calls were excluded by selection,
+  not lost to attribution failure. Preserve their confidence too.
+- **Unresolved evidence:** neither membership nor non-membership can be
+  established. This includes ambiguous/unattributed calls, no-context calls,
+  unavailable positions and insufficient address/module metadata. Label it as
+  potentially relevant work, never time known to belong to the selected resource.
+
+Missing-type observations participate if the provider/type/method filters admit
+them, including an unconstrained type filter or explicit unavailable-type choice.
+Their missing metadata is not evidence that they are provider-level calls. All
+three partitions must sum to the filtered baseline; lower-bound flags propagate.
+Show the baseline filters and distinguish this selection summary from whole-log
+capture quality. Do not label other named work as incomplete association.
 
 Provider and RPC-method filters apply only to RPC evidence; they cannot infer a
 provider or method for a UI operation. Resource/type/module filters apply where
@@ -246,15 +328,31 @@ ambiguous calls; and resource selections with no matching RPCs. UI totals and
 RPC totals reconcile independently. Review terminal layouts at existing golden
 widths, including availability of evidence qualifications on narrow screens.
 
+Check missing-type ReadResource, GetProviderSchema and unknown-method calls
+against ordinary typed resource calls: only their metadata determines the
+missing-type bucket, and no missing-type duration vanishes from the RPC total.
+For selection evidence, use resource A with 10ms named time, resource B with 20ms
+named time and 5ms unresolved time: selecting A shows 10ms selected, 20ms other
+named work and 5ms unresolved against a 35ms baseline. A separate provider/method
+filter that removes B changes that baseline to 15ms, while whole-log quality
+stays unchanged. Without the unresolved call, selecting A must not imply an
+attribution failure merely because B is excluded. Also cover missing-type and
+no-context observations admitted to the baseline, and combined resource/module
+selections with incomplete module metadata.
+
 ## 4. Drill down from aggregates and return predictably
 
-Enter on a provider or resource-type row opens Calls with that value added to
-the current selection. It preserves other active filters, so drill-down is a
-narrowing action rather than a hidden reset. A type with only UI operations opens
-its Resources view instead; the footer names the available action.
+Enter on a provider or resource-type row opens Calls with the clicked dimension
+restricted to a singleton containing that row's value. Replace that dimension's
+existing allow-list, including an unconstrained one; never union the clicked
+value into it. Preserve all other active dimensions and save the parent's full
+selection in history. A type with only UI operations opens its Resources view
+instead with the same singleton type restriction; the footer names the action.
 
-Enter on a resource opens its observed operation list. From there, the reader
-can open an operation's source entry or switch to the associated RPC call list.
+Enter on a resource similarly restricts the resource-address dimension to that
+one address, preserves other dimensions and opens its observed operation list.
+From there, the reader can open an operation's source entry or switch to the
+associated RPC call list without broadening that selection.
 Association confidence remains visible. A resource with no named RPCs states
 that fact rather than implying that it made no provider calls.
 
@@ -279,6 +377,10 @@ Exercise provider → calls → raw log → response → back, type → resource
 operation → raw log, and resource → associated calls. Cover child filter edits,
 sorting, empty results, terminal resizing, manual view changes and every Esc
 precedence. Returning must restore the investigation the reader actually left.
+Start with providers A and B selected and a resource-type filter active: entering
+A admits only A with that same type filter, and Esc restores A+B. Repeat for
+multiple selected resource types and resources, and an initially unconstrained
+clicked dimension. Other dimensions must remain unchanged in each child.
 
 ## 5. Actionable text profiles
 
@@ -294,9 +396,11 @@ internal identifiers; compute exact physical locations from source offsets,
 not the saturating `Entry.Lines` counter.
 
 Add observed busy time and longest low-concurrency/idle intervals, using the
-model calculations already used by the timeline. Use the same tier selection,
-window definition and thresholds as the current timeline. A UI-only log gets
-UI-tier analysis rather than no concurrency section. Never mix the two clocks.
+model calculations already used by the timeline. Apply the shared position
+eligibility and partial/unavailable analysis rules before calculating the window
+or intervals. Use the same tier selection, window definition and thresholds in
+the TUI and report. A UI-only log gets UI-tier analysis when positions are usable,
+otherwise an explicit unavailable section. Never mix the two clocks.
 
 Say “no observed RPC work” or “no observed UI work”, as appropriate, for gaps.
 Such a gap does not prove Terraform was idle, nor does a long active span prove
@@ -330,10 +434,11 @@ backwards timestamps; saturated durations/line counts; clamped span starts;
 request-ID/component interning overflow; capped capability tracking; incomplete
 resource contexts; unmatched terminators; and attribution counts and time totals.
 
-Tier availability means at least one valid timing observation was built for that
-tier. A separate evidence state records relevant markers or rejected observations
-when no valid timing exists. A missing tier therefore cannot falsely claim the
-log contains no provider traffic or no structured stream.
+Tier availability follows the shared duration-admission contract independently
+of timeline availability. Retain distinct admitted-duration, positioned and
+rejected-record counts. A separate evidence state records relevant markers or
+rejected observations when no duration was admitted. A missing tier therefore
+cannot falsely claim the log contains no provider traffic or no structured stream.
 
 Keep missing timestamps or schema fields separate from JSON syntax errors.
 Counters at different processing stages may overlap and must not be summed into
@@ -341,9 +446,12 @@ a fabricated “bad lines” total. Rejection categories within one stage should
 mutually exclusive where a total is presented. Document each denominator.
 
 Nameable RPC share retains the existing definition, Contained plus Likely over
-all RPC span time, and also shows the actual numerator and denominator. An
-additional eligible-resource-call share may be shown only with its distinct
-denominator. Zero denominator means unavailable, not 0% or 100% coverage.
+all admitted RPC span time, and also shows the actual numerator and denominator.
+Missing resource type and unavailable positions never remove an admitted
+duration from this denominator. Do not add an “eligible-resource-call” percentage
+whose denominator assumes that unknown metadata establishes provider-level scope.
+Zero denominator means unavailable, not 0% or 100% coverage. The separate
+selection-evidence summary uses its explicitly filtered baseline.
 
 Incomplete context means an observed start lacked a matching terminator. It is
 not proof the resource failed: capture truncation, cancellation and unsupported
@@ -372,6 +480,12 @@ Use controlled malformed, truncated and mixed fixtures to verify each fact and
 its denominator. Check that normal TUI loading and profile output disclose
 rejected timing evidence, that no-data guidance names the actual limitation,
 and that diagnose remains free of addresses and captured values.
+Exercise the admission matrix: explicit zero versus missing/null/negative/invalid
+duration; valid duration with invalid timestamp; genuine offset zero; mixed and
+entirely unpositioned tiers; backwards and saturated offsets; duration saturation;
+and a legitimate clamped start. The TUI, text and JSON must agree on which
+observations contribute to duration counts/means and which can establish a
+timeline position. Rejection counters must not replace per-observation validity.
 
 ## 7. JSON profiles and CLI run comparison
 
@@ -409,12 +523,12 @@ The first JSON schema includes:
 | Field group | Required meaning |
 | --- | --- |
 | Identity | `schema_version: 1`, `kind: "profile"`, tool version, input basename and byte size |
-| Tiers | Availability, observation counts, duration unit `ms`, clock origins when known |
+| Tiers | Duration availability, admitted/positioned/rejected counts, duration unit `ms`, clock origins when known |
 | Quality | Measured counters, attribution distribution, reconstruction status and qualifications |
-| RPC observations | Local source entry identity, physical line/byte reference, method, provider, type, duration, offsets, clamping and attribution |
-| UI observations | Local source identity, exact resource address, action, duration, offsets and saturation |
+| RPC observations | Local source entry identity, physical line/byte reference, method, provider, type, admitted duration, nullable offsets, position-validity reason, clamping and attribution |
+| UI observations | Local source identity, exact resource address, action, admitted duration, nullable offsets, position-validity reason, clamping and per-observation saturation |
 | Aggregates | Complete provider/type/resource rows with separate UI and RPC measurements |
-| Timeline summary | Analysed tier, window definition, observed busy duration, peak concurrency and complete qualifying interval list |
+| Timeline summary | Chosen tier, partial/unavailable status, positioned/excluded counts and duration totals with reasons, nullable window/metrics, and complete qualifying interval list |
 
 Use source-entry identifiers local to each capture. Do not export internal
 interned request-ID numbers as portable identities or invent a request-ID string
@@ -422,8 +536,11 @@ the model has not retained. Exact source byte offsets remain available even if
 displayed physical line counters exceed existing compact index fields.
 
 Unavailable values are explicit nulls or absent tier objects according to the
-schema; present numerical observations, including zero, are numbers. Arrays
-have deterministic order. Do not include current generation timestamps or
+schema; unavailable per-observation offsets and timeline metrics are null, never
+zero placeholders. Observation arrays contain admitted durations; rejected timing
+records contribute to quality counters only. Present numerical observations,
+including zero, are numbers. Array ordering is deterministic. Do not include
+current generation timestamps or
 absolute input paths by default, so repeated exports of the same input with the
 same tool version are reproducible.
 
@@ -441,7 +558,9 @@ on request IDs or source line numbers changing between runs.
 
 For each group show before/after observation count, summed duration, mean
 duration and maximum duration, plus signed absolute and percentage deltas where
-defined. Mean is unavailable for zero observations. Percentage change from zero
+defined. Counts and means use admitted duration observations, including those
+with unavailable positions; rejected timing records remain separate quality
+facts. Mean is unavailable for zero observations. Percentage change from zero
 is unavailable, not infinity. Sort duration changes deterministically, with
 increases first and explicit added/removed rows.
 
@@ -559,8 +678,8 @@ The following are implementation-plan boundaries, not implementation plans:
 | --- | --- | --- |
 | A. Timing qualifications | Item 2, report/README consistency | None |
 | B. Search positions | Item 1, response occurrence parity | None |
-| C. Capture evidence | Item 6 facts, quality presentation and location support | A for wording |
-| D. Resources and filters | Item 3, observed operation projection and typed selection | C for coverage presentation |
+| C. Capture evidence | Shared duration/position admission, per-observation validity, item 6 facts, quality presentation and location support | A for wording |
+| D. Resources and filters | Item 3, observed operation projection, typed selection and reconciling selection-evidence partitions | C for coverage presentation |
 | E. Investigation navigation | Item 4, history and resource operation drill-down | D for resource paths; aggregate-to-call path can ship earlier |
 | F. Profile data and text | Item 5, common report data, complete interval analysis | C; D for shared resource aggregates |
 | G. JSON export | Item 7 schema and profile encoding | F |
