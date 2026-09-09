@@ -63,8 +63,8 @@ func vaultCollection(value string) bool {
 	return false
 }
 
-func (s *session) discoverAzureEndpoints(v *view) {
-	for _, m := range s.cachedPatternMatches(azureEndpointPattern, strings.TrimRight(v.text, " \t\r\n"), ".") {
+func (s *session) discoverAzureEndpoints(v *view, text string) {
+	for _, m := range s.cachedPatternMatches(azureEndpointPattern, text, ".") {
 		if !boundaries(v.text, m[0], m[1]) || m[0] > 0 && v.text[m[0]-1] == '.' {
 			continue
 		}
