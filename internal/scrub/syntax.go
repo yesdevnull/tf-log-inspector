@@ -428,7 +428,10 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		}
 	}
 	bodyStart := providerJSONStart(v.text)
-	for i := 0; i < len(v.text); {
+	for i, bracketEnd := 0, -1; i < len(v.text); {
+		if i >= bracketEnd {
+			bracketEnd = -1
+		}
 		if i == bodyStart {
 			decoder := json.NewDecoder(strings.NewReader(v.text[i:]))
 			var raw json.RawMessage
@@ -486,6 +489,16 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			}
 			continue
 		}
+		if bracketed {
+			lineEnd := len(v.text)
+			if at := strings.IndexByte(v.text[start:], '\n'); at >= 0 {
+				lineEnd = start + at
+			}
+			// IDs are opaque and can contain literal, unmatched brackets.
+			if at := strings.LastIndexByte(v.text[start:lineEnd], ']'); at >= 0 {
+				bracketEnd = start + at
+			}
+		}
 		v.keys = append(v.keys, region{start, start + len(key)})
 		valueStart := skipSpace(v.text, sep+1)
 		if valueStart >= len(v.text) {
@@ -542,17 +555,13 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					}
 				}
 				end := valueStart
-				brackets := 0
-				for end < len(v.text) && (!space(v.text[end]) || bracketed && v.text[end] != '\r' && v.text[end] != '\n') {
-					if bracketed {
-						if v.text[end] == ']' {
-							if brackets == 0 {
-								break
-							}
-							brackets--
-						} else if v.text[end] == '[' {
-							brackets++
+				for end < len(v.text) && end != bracketEnd && (!space(v.text[end]) || key == "id" && end < bracketEnd) {
+					if space(v.text[end]) && (end == valueStart || !space(v.text[end-1])) && assignmentAhead(v.text, end) {
+						if end > valueStart && v.text[end-1] == ']' {
+							end--
+							bracketEnd = end
 						}
+						break
 					}
 					if v.text[end] == '"' {
 						quoteEnd, decoded, ok := readString(v.text, end)
@@ -598,6 +607,21 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			metadataField, protected = false, false
 		}
 	}
+}
+
+// Whitespace can belong to an opaque Terraform ID, but another assignment
+// starts a separate field whose credentials and identifiers need discovery.
+func assignmentAhead(text string, start int) bool {
+	start = skipSpace(text, start)
+	if start < len(text) && text[start] == '[' {
+		start++
+	}
+	end := start
+	for end < len(text) && !space(text[end]) && text[end] != '=' && text[end] != ':' && text[end] != '"' {
+		end++
+	}
+	sep := skipSpace(text, end)
+	return logfmt.ValidKey(text[start:end]) && sep < len(text) && text[sep] == '='
 }
 
 func wholeValueEnd(values []region, pos int) int {

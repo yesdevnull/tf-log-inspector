@@ -36,6 +36,8 @@ func TestTerraformOutputIDValues(t *testing.T) {
 		{"numeric", "123", "123"},
 		{"quoted", "private-instance", `"private-instance"`},
 		{"spaces", "private instance east", "private instance east"},
+		{"opening bracket", "private[instance", "private[instance"},
+		{"closing bracket", "private]instance", "private]instance"},
 		{"IPv6", "https://[2001:db8::1]", "https://[2001:db8::1]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,6 +103,19 @@ func TestTerraformOutputRejectsSecretFieldKey(t *testing.T) {
 		got, err := Scrub([]byte(input), extra)
 		if err == nil || len(got.Data) != 0 || !strings.Contains(err.Error(), "field key conflict") {
 			t.Fatalf("protected field key conflict published output: %s %v", got.Data, err)
+		}
+	}
+}
+
+func TestBracketedFieldsDoNotHideCredentials(t *testing.T) {
+	for _, key := range []string{"message", "id"} {
+		input := "Earlier private-secret\nmessage [" + key + "=thing token=private-secret]\n"
+		got, err := Scrub([]byte(input), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(got.Data), "private-secret") {
+			t.Fatalf("bracketed field hid a credential: %s", got.Data)
 		}
 	}
 }
