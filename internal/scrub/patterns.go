@@ -113,27 +113,35 @@ func (s *session) discoverPatterns(v *view) {
 		}
 	}
 	s.discoverAddresses(v, 0, len(v.text), v.addressContext)
-	trimmed := strings.TrimSpace(v.text)
-	if colon := strings.IndexByte(trimmed, ':'); colon > 0 {
-		key := strings.ToLower(trimmed[:colon])
-		category := ""
-		switch key {
-		case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key":
-			category = "secret"
-		case "x-request-id", "x-correlation-id", "x-amzn-requestid", "x-ms-request-id":
-			category = "id"
-		}
-		if category != "" {
-			value := strings.TrimSpace(trimmed[colon+1:])
-			s.discover(value, category, false)
-			start := strings.Index(v.text, trimmed)
-			v.protect(start, start+colon)
-			valueStart := start + colon + 1
-			for valueStart < len(v.text) && space(v.text[valueStart]) {
-				valueStart++
+	s.discoverHTTPHeaders(v)
+}
+
+func (s *session) discoverHTTPHeaders(v *view) {
+	offset := 0
+	for line := range strings.SplitAfterSeq(v.text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if colon := strings.IndexByte(trimmed, ':'); colon > 0 {
+			key := strings.ToLower(trimmed[:colon])
+			category := ""
+			switch key {
+			case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key":
+				category = "secret"
+			case "x-request-id", "x-correlation-id", "x-amzn-requestid", "x-ms-request-id":
+				category = "id"
 			}
-			v.wholeValues = append(v.wholeValues, region{valueStart, valueStart + len(value)})
+			if category != "" {
+				value := strings.TrimSpace(trimmed[colon+1:])
+				s.discover(value, category, false)
+				start := offset + strings.Index(line, trimmed)
+				v.protect(start, start+colon)
+				valueStart := start + colon + 1
+				for valueStart < len(v.text) && space(v.text[valueStart]) {
+					valueStart++
+				}
+				v.wholeValues = append(v.wholeValues, region{valueStart, valueStart + len(value)})
+			}
 		}
+		offset += len(line)
 	}
 }
 
@@ -161,7 +169,7 @@ func (s *session) discoverPath(value string) {
 		}
 		segment := value[pos:end]
 		stemEnd := end
-		if dot := strings.LastIndexByte(segment, '.'); dot > 0 {
+		if dot := strings.LastIndexByte(segment, '.'); dot > 0 && end == len(value) {
 			stemEnd = pos + dot
 		}
 		if segment != "" && segment != "." && segment != ".." {

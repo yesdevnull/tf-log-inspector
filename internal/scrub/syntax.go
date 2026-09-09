@@ -2,6 +2,7 @@ package scrub
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -11,7 +12,8 @@ import (
 type region struct{ start, end int }
 type quoted struct {
 	region
-	view *view
+	view     *view
+	verbatim bool
 }
 type view struct {
 	text             string
@@ -19,6 +21,7 @@ type view struct {
 	whole, mandatory bool
 	addressContext   bool
 	resourceKey      bool
+	chunk            *chunkFrame
 	addresses        []region
 	composites       []region
 	protected        []region
@@ -35,7 +38,15 @@ func (v *view) protect(start, end int) { v.protected = append(v.protected, regio
 func (s *session) parseLines(text string) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
+	chunked := false
+	chunkEnd := 0
 	for line, start := 1, 0; start < len(text); line++ {
+		if chunked && start < chunkEnd {
+			views = append(views, s.parseChunks(text[start:chunkEnd], line)...)
+			line += strings.Count(text[start:chunkEnd], "\n") - 1
+			start = chunkEnd
+			continue
+		}
 		end := strings.IndexByte(text[start:], '\n')
 		if end < 0 {
 			end = len(text)
@@ -75,6 +86,7 @@ func (s *session) parseLines(text string) []*view {
 		h := logfmt.ParseHeader(strings.TrimRight(v.text, "\r\n"))
 		if h.HasTS {
 			metadata, body, httpHeaders = true, false, false
+			chunked = false
 			prefix := strings.Index(v.text, h.Msg)
 			if prefix >= 0 {
 				compStart := strings.Index(v.text, h.Comp)
@@ -89,11 +101,22 @@ func (s *session) parseLines(text string) []*view {
 		}
 		trimmed := strings.TrimSpace(v.text)
 		lifecycle := lifecycleEnvelope(trimmed)
-		if strings.HasPrefix(trimmed, "HTTP/") || strings.HasPrefix(strings.ToLower(trimmed), "content-type:") || strings.HasPrefix(strings.ToLower(trimmed), "content-length:") {
+		if httpRequestLine(trimmed) || strings.HasPrefix(trimmed, "HTTP/") || strings.HasPrefix(strings.ToLower(trimmed), "content-type:") || strings.HasPrefix(strings.ToLower(trimmed), "content-length:") {
 			httpHeaders = true
 		}
-		if httpHeaders && trimmed == "" {
+		if httpHeaders && !body {
+			key, value, ok := strings.Cut(trimmed, ":")
+			if ok && strings.EqualFold(key, "Transfer-Encoding") {
+				for _, coding := range strings.Split(value, ",") {
+					chunked = chunked || strings.EqualFold(strings.TrimSpace(coding), "chunked")
+				}
+			}
+		}
+		if httpHeaders && trimmed == "" && !body {
 			body = true
+			if chunked {
+				chunkEnd = end + chunkedBodyLength(text[end:])
+			}
 		}
 		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 			body = !lifecycle
@@ -104,6 +127,138 @@ func (s *session) parseLines(text string) []*view {
 		start = end
 	}
 	return views
+}
+
+type chunkFrame struct {
+	sizeEnd, headerLength, dataLength, endingLength int
+}
+
+// parseChunks receives only framing already validated by chunkedBodyLength.
+func (s *session) parseChunks(text string, line int) []*view {
+	var views []*view
+	for pos := 0; pos < len(text); {
+		start := pos
+		at := strings.IndexByte(text[pos:], '\n')
+		header := strings.TrimSuffix(text[pos:pos+at], "\r")
+		size, _, _ := strings.Cut(header, ";")
+		n, _ := strconv.ParseUint(size, 16, 64)
+		pos += at + 1
+		head := s.parseChunkHeader(text[start:pos], len(size), line)
+		if n == 0 {
+			views = append(views, head)
+			v := &view{text: text[pos:], line: line + 1}
+			s.parseView(v, false, false)
+			views = append(views, v)
+			break
+		}
+		dataStart := pos
+		pos += int(n)
+		endingLength := 1
+		if strings.HasPrefix(text[pos:], "\r\n") {
+			endingLength = 2
+		}
+		child := &view{text: text[dataStart:pos], line: line + 1}
+		s.parseView(child, false, false)
+		v := &view{text: text[start : pos+endingLength], line: line, chunk: &chunkFrame{len(size), dataStart - start, int(n), endingLength}}
+		v.children = append(v.children, quoted{region{0, dataStart - start}, head, true})
+		v.children = append(v.children, quoted{region{dataStart - start, pos - start}, child, true})
+		views = append(views, v)
+		pos += endingLength
+		line += strings.Count(text[start:pos], "\n")
+	}
+	return views
+}
+
+func (s *session) parseChunkHeader(text string, sizeEnd, line int) *view {
+	// Normalise only field separators for discovery, retaining original offsets.
+	fields := []byte(text)
+	for i := sizeEnd; i < len(fields); i++ {
+		if fields[i] == '"' {
+			end, _, ok := readString(text, i)
+			if ok {
+				i = end - 1
+				continue
+			}
+		}
+		if fields[i] == ';' {
+			fields[i] = ' '
+		}
+	}
+	head := &view{text: string(fields), line: line}
+	s.parseView(head, false, false)
+	for _, key := range head.keys {
+		head.protect(key.start, key.end)
+		pos := skipSpace(head.text, key.end)
+		if pos >= len(head.text) || head.text[pos] != '=' {
+			continue
+		}
+		pos = skipSpace(head.text, pos+1)
+		if pos >= len(head.text) || head.text[pos] == '"' {
+			continue
+		}
+		end := pos
+		for end < len(head.text) && !space(head.text[end]) {
+			end++
+		}
+		s.discoverPatterns(&view{text: head.text[pos:end], line: line})
+	}
+	head.text = text
+	head.protect(0, sizeEnd)
+	return head
+}
+
+// Provider loggers can pretty-print bodies after producing their HTTP headers.
+// Enforce wire lengths only when the original dump has verifiable chunk framing.
+func chunkedBodyLength(text string) int {
+	pos := 0
+	for pos < len(text) {
+		at := strings.IndexByte(text[pos:], '\n')
+		if at < 0 {
+			return 0
+		}
+		header := strings.TrimSuffix(text[pos:pos+at], "\r")
+		size, _, _ := strings.Cut(header, ";")
+		n, err := strconv.ParseUint(size, 16, 64)
+		pos += at + 1
+		if err != nil || n > uint64(len(text)-pos) {
+			return 0
+		}
+		if n == 0 {
+			for pos < len(text) {
+				at = strings.IndexByte(text[pos:], '\n')
+				if at < 0 {
+					return 0
+				}
+				trailer := strings.TrimSuffix(text[pos:pos+at], "\r")
+				pos += at + 1
+				if trailer == "" {
+					return pos
+				}
+				if !strings.Contains(trailer, ":") {
+					return 0
+				}
+			}
+			return 0
+		}
+		pos += int(n)
+		if strings.HasPrefix(text[pos:], "\r\n") {
+			pos += 2
+		} else if strings.HasPrefix(text[pos:], "\n") {
+			pos++
+		} else {
+			return 0
+		}
+	}
+	return 0
+}
+
+func httpRequestLine(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) != 3 || !logfmt.ValidKey(fields[0]) {
+		return false
+	}
+	_, _, ok := http.ParseHTTPVersion(fields[2])
+	return ok
 }
 
 func lifecycleEnvelope(text string) bool {
@@ -118,11 +273,17 @@ func lifecycleEnvelope(text string) bool {
 }
 
 func (s *session) parseView(v *view, metadata, lifecycle bool) {
-	s.discoverPatterns(v)
-	if len(v.wholeValues) > 0 {
+	trimmed := strings.TrimSpace(v.text)
+	first, _, _ := strings.Cut(trimmed, "\n")
+	if v.whole && (strings.HasPrefix(first, "HTTP/") || httpRequestLine(first)) && strings.Contains(trimmed, "\n") {
+		pos := 0
+		for _, child := range s.parseLines(v.text) {
+			v.children = append(v.children, quoted{region{pos, pos + len(child.text)}, child, true})
+			pos += len(child.text)
+		}
 		return
 	}
-	trimmed := strings.TrimSpace(v.text)
+	s.discoverPatterns(v)
 	if _, ok := guidCore(trimmed); ok {
 		return
 	}
@@ -148,6 +309,10 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		}
 	}
 	for i := 0; i < len(v.text); {
+		if end := wholeValueEnd(v.wholeValues, i); end > i {
+			i = end
+			continue
+		}
 		if v.text[i] == '"' {
 			end, decoded, ok := readString(v.text, i)
 			if !ok {
@@ -156,7 +321,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			}
 			child := &view{text: decoded, line: v.line, whole: true}
 			s.parseView(child, false, false)
-			v.children = append(v.children, quoted{region{i, end}, child})
+			v.children = append(v.children, quoted{region{i, end}, child, false})
 			i = end
 			continue
 		}
@@ -182,60 +347,93 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			break
 		}
 		category := fieldCategory(key)
+		planAssignment := sep > i || valueStart > sep+1
 		// Hclog metadata requires adjacent key=value bytes; spaced assignments
 		// remain useful for discovery but are not parser-recognised fields.
 		metadataField := metadata && sep == i && valueStart == sep+1
 		protected := metadataField && preservedField(key)
-		if v.text[valueStart] == '"' {
-			end, decoded, ok := readString(v.text, valueStart)
-			if !ok {
-				s.unsupported++
+		for valueStart < len(v.text) {
+			if v.text[valueStart] == '"' {
+				end, decoded, ok := readString(v.text, valueStart)
+				if !ok {
+					s.unsupported++
+					i = len(v.text)
+					break
+				}
+				child := &view{text: decoded, line: v.line, whole: true}
+				if metadataField && key == "tf_provider_addr" {
+					child.mandatory = true
+					s.provider(child, 0, len(decoded), false)
+				} else if protected {
+					child.mandatory = true
+					child.protect(0, len(decoded))
+				} else {
+					child.addressContext = key == "addr" || key == "address"
+					child.mandatory = child.addressContext
+					s.discover(decoded, category, false)
+					if category != "" {
+						child.numeric = append(child.numeric, region{0, len(decoded)})
+					}
+					s.parseView(child, false, false)
+				}
+				v.children = append(v.children, quoted{region{valueStart, end}, child, false})
+				i = end
+			} else {
+				end := valueStart
+				for end < len(v.text) && !space(v.text[end]) {
+					if v.text[end] == '"' {
+						quoteEnd, decoded, ok := readString(v.text, end)
+						if ok {
+							child := &view{text: decoded, line: v.line, whole: true}
+							s.parseView(child, false, false)
+							v.children = append(v.children, quoted{region{end, quoteEnd}, child, false})
+							end = quoteEnd
+							continue
+						}
+					}
+					end++
+				}
+				if metadataField && key == "tf_provider_addr" {
+					s.provider(v, valueStart, end, false)
+				} else if protected {
+					v.protect(valueStart, end)
+				} else {
+					value := v.text[valueStart:end]
+					if value == "null" && planAssignment {
+						v.nulls = append(v.nulls, region{valueStart, end})
+					} else {
+						if category == "secret" {
+							v.wholeValues = append(v.wholeValues, region{valueStart, end})
+						}
+						if key == "addr" || key == "address" {
+							s.discoverAddresses(v, valueStart, end, true)
+						}
+						numeric := isNumber(value)
+						s.discover(value, category, numeric)
+						if numeric && category != "" {
+							v.numeric = append(v.numeric, region{valueStart, end})
+						}
+					}
+				}
+				i = end
+			}
+			next := skipSpace(v.text, i)
+			if !strings.HasPrefix(v.text[next:], "->") {
 				break
 			}
-			child := &view{text: decoded, line: v.line, whole: true}
-			if metadataField && key == "tf_provider_addr" {
-				child.mandatory = true
-				s.provider(child, 0, len(decoded), false)
-			} else if protected {
-				child.mandatory = true
-				child.protect(0, len(decoded))
-			} else {
-				child.addressContext = key == "addr" || key == "address"
-				child.mandatory = child.addressContext
-				s.discover(decoded, category, false)
-				if category != "" {
-					child.numeric = append(child.numeric, region{0, len(decoded)})
-				}
-				s.parseView(child, false, false)
-			}
-			v.children = append(v.children, quoted{region{valueStart, end}, child})
-			i = end
-		} else {
-			end := valueStart
-			for end < len(v.text) && !space(v.text[end]) {
-				end++
-			}
-			if metadataField && key == "tf_provider_addr" {
-				s.provider(v, valueStart, end, false)
-			} else if protected {
-				v.protect(valueStart, end)
-			} else {
-				value := v.text[valueStart:end]
-				if category == "secret" {
-					v.wholeValues = append(v.wholeValues, region{valueStart, end})
-				}
-				if key == "addr" || key == "address" {
-					s.discoverAddresses(v, valueStart, end, true)
-				}
-				numeric := isNumber(value)
-				s.discover(value, category, numeric)
-				if numeric && category != "" {
-					v.numeric = append(v.numeric, region{valueStart, end})
-				}
-			}
-			i = end
+			valueStart = skipSpace(v.text, next+2)
+			metadataField, protected = false, false
 		}
 	}
+}
+
+func wholeValueEnd(values []region, pos int) int {
+	for _, value := range values {
+		if value.start <= pos && pos < value.end {
+			return value.end
+		}
+	}
+	return pos
 }
 
 func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycle bool) {
@@ -314,7 +512,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 			}
 			s.parseView(child, false, false)
 		}
-		v.children = append(v.children, quoted{region{start, end}, child})
+		v.children = append(v.children, quoted{region{start, end}, child, false})
 		*i = end
 	default:
 		for *i < len(v.text) && !strings.ContainsRune(",]} \t\r\n", rune(v.text[*i])) {
