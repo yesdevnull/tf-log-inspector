@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
 
 var guidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
@@ -268,6 +270,9 @@ func (s *session) discoverHTTPHeaders(v *view) {
 	offset := 0
 	for line := range strings.SplitAfterSeq(v.text, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if h := logfmt.ParseHeader(trimmed); h.HasTS {
+			trimmed = strings.TrimSpace(h.Msg)
+		}
 		if colon := strings.IndexByte(trimmed, ':'); colon > 0 {
 			key := strings.ToLower(trimmed[:colon])
 			category := ""

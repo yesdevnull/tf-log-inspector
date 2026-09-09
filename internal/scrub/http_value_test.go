@@ -109,6 +109,49 @@ func TestHTTPResponseStatusAfterLoggerPrefix(t *testing.T) {
 	}
 }
 
+func TestHTTPResponseContextAcrossTimestampedHeaders(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] provider.aws: "
+	for _, tc := range []struct {
+		name, headers string
+		response      bool
+	}{
+		{"related headers", header + "Content-Type: application/json\n" + header + "X-Trace: ordinary\n\n", true},
+		{"prefixed separator", header + "Content-Type: application/json\n" + header + "\n", true},
+		{"unrelated message", header + "Routine status: tf_req_id=scope\n\n", false},
+		{"different provider", "2026-09-08T00:00:00.000Z [DEBUG] provider.azurerm: Content-Type: application/json\n\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := header + "HTTP/1.1 200 OK\n" + tc.headers
+			got, err := Scrub([]byte(prefix+`{"value":"body-content"}`+"\n"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(got.Data), prefix) || got.Unsupported != 0 {
+				t.Fatalf("transport headers changed: %s", got.Data)
+			}
+			var body map[string]string
+			if json.Unmarshal(got.Data[len(prefix):], &body) != nil || (strings.HasPrefix(body["value"], "secret_") != tc.response) || !tc.response && body["value"] != "body-content" {
+				t.Fatalf("response context crossed the wrong boundary: %s", got.Data)
+			}
+		})
+	}
+}
+
+func TestHTTPHeaderCredentialsAfterLoggerPrefix(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] provider.aws: "
+	for _, key := range []string{"Authorization", "Set-Cookie", "X-API-Key"} {
+		for _, prefix := range []string{header, header + "2026/09/08 00:00:00 [DEBUG] "} {
+			t.Run(key+"/"+prefix, func(t *testing.T) {
+				input := prefix + key + ": private-credential\nEarlier private-credential\n"
+				got, err := Scrub([]byte(input), nil)
+				if err != nil || strings.Contains(string(got.Data), "private-credential") || !strings.HasPrefix(string(got.Data), prefix+key+": secret_") || got.Replacements["secret"] != 2 {
+					t.Fatalf("prefixed HTTP credential lost discovery or propagation: %s %v", got.Data, err)
+				}
+			})
+		}
+	}
+}
+
 func TestUnquotedHTTPResponseBodyValuesAreSecrets(t *testing.T) {
 	for _, input := range []string{
 		`http.response.body={"value":"private-content"}`,
