@@ -117,7 +117,10 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		addIssue(b.evidence.TimestampIssues, reason, ord)
 	}
 	var typ string
-	typeSchema := len(ul.Type) > 0 && json.Unmarshal(ul.Type, &typ) != nil
+	typeSchema := false
+	if len(ul.Type) > 0 {
+		typeSchema = !decodeJSONString(ul.Type, &typ)
+	}
 	if timestampSchema || typeSchema {
 		addStage(&b.evidence.SchemaErrors, ord)
 	}
@@ -231,15 +234,39 @@ func uiDuration(raw json.RawMessage) (uint32, bool, string) {
 func parseUIHook(fields map[string]json.RawMessage) (uiHook, bool) {
 	var hook uiHook
 	schema := false
-	if raw := fields["action"]; len(raw) > 0 && json.Unmarshal(raw, &hook.Action) != nil {
-		schema = true
+	if raw := fields["action"]; len(raw) > 0 {
+		schema = !decodeJSONString(raw, &hook.Action)
 	}
 	if raw := fields["resource"]; len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		if err := json.Unmarshal(raw, &hook.Resource); err != nil {
+		var resourceFields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &resourceFields); err != nil || resourceFields == nil {
 			schema = true
+		} else {
+			resource := new(struct {
+				Addr            string `json:"addr"`
+				ResourceType    string `json:"resource_type"`
+				ImpliedProvider string `json:"implied_provider"`
+			})
+			for rawField, destination := range map[string]*string{
+				"addr":             &resource.Addr,
+				"resource_type":    &resource.ResourceType,
+				"implied_provider": &resource.ImpliedProvider,
+			} {
+				if value := resourceFields[rawField]; len(value) > 0 && !decodeJSONString(value, destination) {
+					schema = true
+				}
+			}
+			hook.Resource = resource
 		}
 	}
 	return hook, schema
+}
+
+func decodeJSONString(raw json.RawMessage, destination *string) bool {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	return json.Unmarshal(raw, destination) == nil
 }
 
 func positionedDuration(position logfmt.ClockPosition, duration uint32, saturated bool) (uint32, uint32, bool) {

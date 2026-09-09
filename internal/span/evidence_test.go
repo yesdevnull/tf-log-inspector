@@ -91,6 +91,23 @@ func TestUITimestampAndSchemaEvidenceAreIndependent(t *testing.T) {
 	}
 }
 
+func TestUINullStringFieldsCountOneSchemaErrorPerEnvelope(t *testing.T) {
+	input := `{"@level":"info","@timestamp":"2026-01-01T00:00:00Z","type":null}` + "\n" +
+		`{"@level":"info","@timestamp":"2026-01-01T00:00:01Z","type":"apply_complete","hook":{"elapsed_seconds":1,"action":null}}` + "\n" +
+		`{"@level":"info","@timestamp":"2026-01-01T00:00:02Z","type":"apply_complete","hook":{"elapsed_seconds":1,"resource":{"addr":null}}}` + "\n" +
+		`{"@level":"info","@timestamp":"2026-01-01T00:00:03Z","type":"apply_complete","hook":{"elapsed_seconds":1,"resource":{"resource_type":null}}}` + "\n" +
+		`{"@level":"info","@timestamp":"2026-01-01T00:00:04Z","type":"apply_complete","hook":{"elapsed_seconds":1,"resource":{"implied_provider":null}}}` + "\n" +
+		`{"@level":"info","@timestamp":"2026-01-01T00:00:05Z","type":"apply_complete","hook":{"elapsed_seconds":1,"action":null,"resource":{"addr":null,"resource_type":null,"implied_provider":null}}}` + "\n"
+	var b UIHookBuilder
+	scanUIInto(t, input, &b)
+	if got := b.Spans(); len(got) != 5 || got[0].DurationMs != 1000 {
+		t.Fatalf("null metadata discarded independent duration: %+v", got)
+	}
+	if got := b.Evidence().SchemaErrors; got != (IssueCount{Count: 6, FirstEntry: 0}) {
+		t.Fatalf("schema errors = %+v, want one for each envelope", got)
+	}
+}
+
 func TestRPCAdmissionAndClockEvidence(t *testing.T) {
 	input := "2026-01-01T00:00:00.000Z [TRACE] p: Received downstream response: tf_req_duration_ms=10\n" +
 		"not timestamped\n" +
