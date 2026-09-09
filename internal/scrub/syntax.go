@@ -429,7 +429,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 	}
 	bodyStart := providerJSONStart(v.text)
 	for i, bracketEnd := 0, -1; i < len(v.text); {
-		if i >= bracketEnd {
+		if bracketEnd >= 0 && i >= bracketEnd {
 			bracketEnd = -1
 		}
 		if i == bodyStart {
