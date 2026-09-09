@@ -171,8 +171,9 @@ HTTP/JSON bodies, including escaped JSON strings:
 - JSON HTTP response bodies treat scalar `value` fields as secrets. Arrays and
   objects retain their structure and are inspected recursively; null and empty
   values remain unchanged. This includes escaped and unquoted
-  `http.response.body` dumps. JSON fragmented across HTTP chunks is rejected
-  without output because it cannot be safely rewritten chunk by chunk.
+  `http.response.body` dumps and JSON objects or arrays logged directly after
+  a provider prefix. Malformed provider JSON bodies and JSON fragmented across
+  HTTP chunks are rejected without output.
 
 For additional identifiers, use `--scrub-values private-values.txt` with one
 literal UTF-8 value per line. Empty lines are ignored and line terminators
