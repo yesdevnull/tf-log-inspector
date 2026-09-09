@@ -257,6 +257,22 @@ detectors did not recognise and preserved metadata such as `tf_req_id`.
 Review the candidate using the coverage and limitations above before
 sharing it or showing it in the interface.
 
+The scrub summary reports the first 10 unsupported structured or quoted inputs
+in source order, with a reason and a location in the **original input file**.
+Lines and character columns are one-based; columns count Unicode characters,
+not bytes or expanded tab widths. For decoded strings and reconstructed provider
+responses, locations map back to the original physical text. Locations identify
+the start of the unsupported structure or quote, not necessarily the exact
+syntax error. The summary never prints captured content. These are parsing
+limitations, not a count of confirmed PII leaks; any remaining instances are
+reported as an omitted count.
+
+JSON warnings apply to standalone structured records and identified bodies,
+not ordinary string fields that happen to start with `[` or `{`. Valid JSON
+embedded in strings is still inspected, and malformed quoted strings still
+produce warnings. Malformed JSON hidden in an unmarked text field may therefore
+receive no JSON warning; sensitive-value detection still runs on that text.
+
 `--diagnose`'s field **keys** are reported verbatim, restricted to an
 identifier charset so log content cannot pose as a key. Field **values** are
 never reported. Message shapes are reported with quoted strings, paths,

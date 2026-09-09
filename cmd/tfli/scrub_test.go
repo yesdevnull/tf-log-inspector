@@ -407,7 +407,7 @@ func TestRunScrubReportsCountsInStableOrder(t *testing.T) {
 	}
 }
 
-func TestRunScrubReportsUnsupportedInputOnlyAsAnAggregate(t *testing.T) {
+func TestRunScrubReportsUnsupportedLocationsWithoutContent(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.log")
 	outputPath := filepath.Join(dir, "sanitised.log")
@@ -424,6 +424,29 @@ func TestRunScrubReportsUnsupportedInputOnlyAsAnAggregate(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "private-unterminated") {
 		t.Errorf("stderr disclosed input: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Locations in the original input (showing first 1; 1-based character columns):\n  line 1, column 7: invalid quoted string\n") {
+		t.Errorf("stderr missing source location: %q", stderr.String())
+	}
+}
+
+func TestRunScrubCapsUnsupportedLocations(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.log")
+	if err := os.WriteFile(inputPath, []byte(strings.Repeat("{private-broken}\n", 12)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	if err := run([]string{"--scrub", "-o", filepath.Join(dir, "out.log"), inputPath}, io.Discard, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Unsupported structured or quoted inputs: 12", "showing first 10", "line 10, column 1: invalid JSON", "2 additional instances omitted."} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("missing %q in %q", want, stderr.String())
+		}
+	}
+	if strings.Contains(stderr.String(), "private-broken") || strings.Contains(stderr.String(), "line 11,") {
+		t.Fatalf("unexpected diagnostic content: %q", stderr.String())
 	}
 }
 
