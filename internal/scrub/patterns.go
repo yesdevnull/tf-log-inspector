@@ -101,12 +101,12 @@ func (s *session) discoverPatterns(v *view) {
 	// from repeated searches.
 	text := strings.TrimRight(v.text, " \t\r\n")
 	v.credentials = append(v.credentials, s.discoverServiceTokens(text)...)
-	if line := strings.TrimSpace(v.text); httpRequestLine(line) {
+	if line := strings.TrimSpace(text); httpRequestLine(line) {
 		target := strings.Fields(line)[1]
 		s.discoverURL(target)
 		s.markComposite(v, target, strings.Index(v.text, target))
 	}
-	s.discoverAzureEndpoints(v)
+	s.discoverAzureEndpoints(v, text)
 	for _, m := range terraformSubjectPattern.FindAllStringSubmatchIndex(text, -1) {
 		if !boundaries(v.text, m[0], m[1]) {
 			continue
@@ -225,8 +225,8 @@ func (s *session) discoverPatterns(v *view) {
 			}
 		}
 	}
-	s.discoverAddresses(v, 0, len(v.text), v.addressContext)
-	s.discoverHTTPHeaders(v)
+	s.discoverAddresses(v, 0, len(text), v.addressContext)
+	s.discoverHTTPHeaders(v, text)
 }
 
 // Scan maximal IP-shaped runs, including optional zone identifiers. Runs without
@@ -273,9 +273,9 @@ func ipMatches(text string) []region {
 	return matches
 }
 
-func (s *session) discoverHTTPHeaders(v *view) {
+func (s *session) discoverHTTPHeaders(v *view, text string) {
 	offset := 0
-	for line := range strings.SplitAfterSeq(v.text, "\n") {
+	for line := range strings.SplitAfterSeq(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if h := logfmt.ParseHeader(trimmed); h.HasTS {
 			trimmed = strings.TrimSpace(h.Msg)
