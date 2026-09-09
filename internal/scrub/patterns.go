@@ -10,6 +10,7 @@ import (
 )
 
 var guidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+var guidSequencePattern = regexp.MustCompile(guidPattern.String() + `(?:-` + guidPattern.String() + `){2}`)
 var addressPart = regexp.MustCompile(`([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)\.([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)(\[(?:"(?:\\.|[^"\\])*"|[0-9]+)\])?`)
 var declaration = regexp.MustCompile(`\b(resource|data|module)\s+"([^"]+)"(?:\s+"([^"]+)")?`)
 var sourceToken = regexp.MustCompile(`[\pL\pN_-]+`)
@@ -22,6 +23,12 @@ var localPathPattern = regexp.MustCompile(`(?:[A-Za-z]:[\\/]|\\\\|/)[^\s"<>]+`)
 var privatePEMPattern = regexp.MustCompile(`(?s)-----BEGIN ([A-Z ]*PRIVATE KEY)-----\r?\n(.*?)-----END ([A-Z ]*PRIVATE KEY)-----`)
 
 func (s *session) discoverPatterns(v *view) {
+	s.discoverAzureEndpoints(v)
+	for _, m := range guidSequencePattern.FindAllStringIndex(v.text, -1) {
+		if boundaries(v.text, m[0], m[1]) {
+			s.discoverGUIDSequence(v.text[m[0]:m[1]])
+		}
+	}
 	for _, m := range privatePEMPattern.FindAllStringSubmatchIndex(v.text, -1) {
 		if v.text[m[2]:m[3]] != v.text[m[6]:m[7]] {
 			continue
@@ -260,7 +267,19 @@ func (s *session) composite(value, category string, parts []compositePart, suffi
 
 func (s *session) part(value, category string, start, end int, encoding string) compositePart {
 	s.discover(value, category, false)
+	s.discoverGUIDSequence(value)
 	return compositePart{region: region{start, end}, candidate: s.candidates[value], encoding: encoding}
+}
+
+func (s *session) discoverGUIDSequence(value string) {
+	if len(value) != 110 || !guidSequencePattern.MatchString(value) {
+		return
+	}
+	var parts []compositePart
+	for start := 0; start < len(value); start += 37 {
+		parts = append(parts, s.part(value[start:start+36], "guid", start, start+36, ""))
+	}
+	s.composite(value, "guid", parts, "").format = "guid-sequence"
 }
 
 func (s *session) discoverHost(value string) *candidate {
@@ -282,6 +301,11 @@ func (s *session) discoverHost(value string) *candidate {
 				return nil
 			}
 		}
+	}
+	if azureService(value) != "" {
+		part := s.part(labels[0], "name", 0, len(labels[0]), "")
+		part.candidate.hostname = true
+		return s.composite(value, "network", []compositePart{part}, "")
 	}
 	if len(labels) == 1 && !strings.HasSuffix(value, ".") {
 		s.discover(value, "network", false)
@@ -347,12 +371,21 @@ func (s *session) discoverURL(value string) {
 	pathStart := authorityEnd
 	pathEnd := pathStart + len(u.EscapedPath())
 	pos := pathStart
+	service := azureService(u.Hostname())
 	if cloud := s.discoverCloudPath(u.EscapedPath()); cloud != nil {
 		parts = append(parts, compositePart{region: region{pathStart, pathEnd}, candidate: cloud})
 	} else {
-		for _, segment := range strings.Split(u.EscapedPath(), "/") {
+		for index, segment := range strings.Split(u.EscapedPath(), "/") {
 			if decoded, err := url.PathUnescape(segment); err == nil && decoded != "" {
-				parts = append(parts, s.part(decoded, "name", pos, pos+len(segment), "path"))
+				if service == "vault" && index == 1 && vaultCollection(decoded) {
+					structure = append(structure, decoded)
+				} else {
+					part := s.part(decoded, "name", pos, pos+len(segment), "path")
+					if service == "vault" || service == "storage" && index == 1 {
+						part.candidate.hostname = true
+					}
+					parts = append(parts, part)
+				}
 			}
 			pos += len(segment) + 1
 		}
@@ -368,6 +401,19 @@ func (s *session) discoverURL(value string) {
 			decoded, e2 := url.QueryUnescape(raw)
 			if ok && e1 == nil && e2 == nil && decoded != "" {
 				category := fieldCategory(decodedKey)
+				if service == "storage" {
+					switch decodedKey {
+					case "sig":
+						category = "secret"
+					case "si", "skoid", "sktid", "saoid", "suoid", "sduoid", "skdutid", "scid":
+						category = "id"
+					case "spk", "srk", "epk", "erk":
+						category = "name"
+					case "sip":
+						category = "network"
+						s.discoverAzureIPRestriction(decoded)
+					}
+				}
 				if category != "" {
 					parts = append(parts, s.part(decoded, category, pos+len(key)+1, pos+len(pair), "query"))
 				} else {
