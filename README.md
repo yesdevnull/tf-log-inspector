@@ -79,8 +79,8 @@ For a local plan:
 ## Development checks
 
 GitHub CI runs on pull requests and pushes to `main`, using the Go version
-declared in `go.mod`. It runs the full test suite with race detection on Linux
-and macOS, checks formatting and module consistency, verifies dependency
+declared in `go.mod`. All jobs run on Ubuntu. CI runs the full test suite with
+race detection, checks formatting and module consistency, verifies dependency
 checksums, and runs golangci-lint 2.13.2 with the repository configuration.
 
 Run the same checks locally from the repository root:
