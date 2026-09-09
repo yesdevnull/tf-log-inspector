@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
@@ -24,6 +25,8 @@ type view struct {
 	addressContext   bool
 	resourceKey      bool
 	responseJSON     bool
+	jsonBody         bool
+	textField        bool
 	chunk            *chunkFrame
 	addresses        []region
 	composites       []region
@@ -37,6 +40,7 @@ type view struct {
 	allowed          []region
 	children         []quoted
 	cuts             []sourceCut
+	unsupported      []unsupportedInput
 }
 
 func (v *view) protect(start, end int) { v.protected = append(v.protected, region{start, end}) }
@@ -75,11 +79,11 @@ func providerJSONStart(text string) int {
 }
 
 func (s *session) parseLines(text string) []*view {
-	return s.parseBodyLines(text, false)
+	return s.parseBodyLines(text, false, false)
 }
 
 // Embedded response text cannot confer logger metadata or lifecycle exemptions.
-func (s *session) parseBodyLines(text string, responseContext bool) []*view {
+func (s *session) parseBodyLines(text string, responseContext, textField bool) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
 	responseJSON := responseContext
@@ -190,6 +194,7 @@ func (s *session) parseBodyLines(text string, responseContext bool) []*view {
 			body = !lifecycle
 		}
 		v.responseJSON = responseJSON && !lifecycle
+		v.textField = textField && !httpHeaders
 		s.parseView(v, metadata && !body, lifecycle)
 		views = append(views, v)
 		line += strings.Count(v.text, "\n") - 1
@@ -351,7 +356,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 	first, _, _ := strings.Cut(trimmed, "\n")
 	if v.whole && (v.responseJSON || strings.HasPrefix(first, "HTTP/") || httpRequestLine(first)) && strings.Contains(trimmed, "\n") && !json.Valid([]byte(trimmed)) {
 		pos := 0
-		for _, child := range s.parseBodyLines(v.text, v.responseJSON) {
+		for _, child := range s.parseBodyLines(v.text, v.responseJSON, !v.jsonBody) {
 			v.children = append(v.children, quoted{region{pos, pos + len(child.text)}, child, true})
 			pos += len(child.text)
 		}
@@ -370,8 +375,11 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			s.jsonValue(v, &i, "", nil, lifecycle, v.responseJSON)
 			return
 		}
-		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-			s.unsupported++
+		// Ordinary string values may contain brackets and braces as prose.
+		// Only standalone records and explicitly identified bodies confer
+		// JSON expectations; response discovery context alone does not.
+		if ((!v.whole && !v.textField) || v.jsonBody) && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
+			s.unsupportedAt(v, len(v.text)-len(strings.TrimLeftFunc(v.text, unicode.IsSpace)), "invalid JSON")
 		}
 	}
 	// Preserve diagnostic classification only where it is a real header message.
@@ -411,7 +419,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		if v.text[i] == '"' {
 			end, decoded, ok := readString(v.text, i)
 			if !ok {
-				s.unsupported++
+				s.unsupportedAt(v, i, "invalid quoted string")
 				break
 			}
 			child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON}
@@ -451,11 +459,11 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			if v.text[valueStart] == '"' {
 				end, decoded, ok := readString(v.text, valueStart)
 				if !ok {
-					s.unsupported++
+					s.unsupportedAt(v, valueStart, "invalid quoted string")
 					i = len(v.text)
 					break
 				}
-				child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON || keyWords(key) == "http/response/body"}
+				child := &view{text: decoded, line: v.line, whole: true, responseJSON: v.responseJSON || keyWords(key) == "http/response/body", jsonBody: keyWords(key) == "http/response/body"}
 				if metadataField && key == "tf_provider_addr" {
 					child.mandatory = true
 					s.provider(child, 0, len(decoded), false)
@@ -479,7 +487,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					var raw json.RawMessage
 					if decoder.Decode(&raw) == nil {
 						end := valueStart + int(decoder.InputOffset())
-						child := &view{text: v.text[valueStart:end], line: v.line, whole: true, responseJSON: true}
+						child := &view{text: v.text[valueStart:end], line: v.line, whole: true, responseJSON: true, jsonBody: true}
 						s.parseView(child, false, false)
 						v.children = append(v.children, quoted{region{valueStart, end}, child, true})
 						i = end
@@ -594,7 +602,7 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 		*i++
 	case '"':
 		end, decoded, _ := readString(v.text, start)
-		child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON}
+		child := &view{text: decoded, line: v.line, whole: true, responseJSON: responseJSON, jsonBody: keyWords(key) == "http/response/body"}
 		if resourceField && (key == "addr" || key == "module" || key == "resource") {
 			child.mandatory = true
 			child.addressContext = true

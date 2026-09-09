@@ -12,9 +12,17 @@ import (
 
 // Result contains transformed input and aggregate counts without source values.
 type Result struct {
-	Data         []byte
-	Replacements map[string]int
-	Unsupported  int
+	Data              []byte
+	Replacements      map[string]int
+	Unsupported       int
+	UnsupportedInputs []UnsupportedInput
+}
+
+// UnsupportedInput identifies a parsing limitation in the original input.
+// Line and Column are one-based; columns count Unicode characters, not bytes.
+type UnsupportedInput struct {
+	Line, Column int
+	Reason       string
 }
 
 // Scrub replaces identifying values using one mapping for the entire input.
@@ -77,7 +85,7 @@ func Scrub(data []byte, extra []string) (Result, error) {
 	if err := s.validate(masked, renderedMasked); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: []byte(output), Replacements: s.counts, Unsupported: s.unsupported}, nil
+	return Result{Data: []byte(output), Replacements: s.counts, Unsupported: s.unsupported, UnsupportedInputs: unsupportedLocations(input, physical, logical, fragments)}, nil
 }
 
 type candidate struct {

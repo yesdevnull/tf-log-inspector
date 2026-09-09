@@ -60,6 +60,15 @@ func runScrub(inputPath, outputPath, valuesPath string, stderr io.Writer) error 
 		fmt.Fprintf(stderr, "  %s: %d\n", category, result.Replacements[category])
 	}
 	fmt.Fprintf(stderr, "Unsupported structured or quoted inputs: %d\n", result.Unsupported)
+	if len(result.UnsupportedInputs) > 0 {
+		fmt.Fprintf(stderr, "Locations in the original input (showing first %d; 1-based character columns):\n", len(result.UnsupportedInputs))
+		for _, input := range result.UnsupportedInputs {
+			fmt.Fprintf(stderr, "  line %d, column %d: %s\n", input.Line, input.Column, input.Reason)
+		}
+		if remaining := result.Unsupported - len(result.UnsupportedInputs); remaining > 0 {
+			fmt.Fprintf(stderr, "%d additional instances omitted.\n", remaining)
+		}
+	}
 	fmt.Fprintln(stderr, "Review the scrubbed log before sharing it.")
 	return nil
 }
