@@ -9,9 +9,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
+
+type responseMatch struct {
+	line int
+	text literalPosition
+}
 
 type responseState struct {
 	open      bool
@@ -22,7 +26,8 @@ type responseState struct {
 	input     textinput.Model
 	query     string
 	notFound  bool
-	matchLine int
+	match     *responseMatch
+	column    int
 }
 
 const responseNavigation = "Esc/r back  ↑↓/←→ scroll  PgUp/PgDn page"
@@ -64,9 +69,12 @@ func (m *Model) openResponse() {
 }
 
 func (m *Model) renderResponse(w, h int) string {
-	m.response.viewport.Width, m.response.viewport.Height = max(1, w), max(1, h)
-	m.response.viewport.SetYOffset(m.response.viewport.YOffset)
-	return m.response.viewport.View()
+	r := &m.response
+	r.viewport.Width, r.viewport.Height = max(1, w), max(1, h)
+	r.viewport.SetYOffset(r.viewport.YOffset)
+	r.column = min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))
+	r.viewport.SetXOffset(r.column)
+	return r.viewport.View()
 }
 
 func (m *Model) handleResponseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -81,8 +89,11 @@ func (m *Model) handleResponseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			r.searching = false
 		case tea.KeyEnter:
 			r.searching = false
-			r.query = r.input.Value()
-			m.searchResponse(1, true)
+			if query := r.input.Value(); query != "" {
+				r.query = query
+				r.match = nil
+				m.searchResponse(1, true)
+			}
 		default:
 			if msg.Type == tea.KeyRunes {
 				msg.Runes = []rune(logfmt.DisplayText(string(msg.Runes)))
@@ -101,11 +112,23 @@ func (m *Model) handleResponseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchResponse(1, false)
 	case "N":
 		m.searchResponse(-1, false)
-	case "up", "down", "j", "k", "pgup", "pgdown", "left", "right", "h", "l":
+	case "left", "h":
+		m.View()
+		r.column = max(0, min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))-4)
+		r.viewport.SetXOffset(r.column)
+		r.notFound = false
+		r.match = nil
+	case "right", "l":
+		m.View()
+		r.column = min(rawLogMaxColumn(r.lines, r.viewport.Width), min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))+4)
+		r.viewport.SetXOffset(r.column)
+		r.notFound = false
+		r.match = nil
+	case "up", "down", "j", "k", "pgup", "pgdown":
 		m.View()
 		r.viewport, _ = r.viewport.Update(msg)
 		r.notFound = false
-		r.matchLine = r.viewport.YOffset
+		r.match = nil
 	}
 	return m, nil
 }
@@ -116,14 +139,23 @@ func (m *Model) searchResponse(direction int, includeCurrent bool) {
 		return
 	}
 	start := r.viewport.YOffset
-	if !includeCurrent {
-		start = r.matchLine + direction
+	column := min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))
+	var anchor *literalPosition
+	if !includeCurrent && r.match != nil {
+		start = r.match.line
+		anchor = &r.match.text
+		column = -1
 	}
 	for i := start; i >= 0 && i < len(r.lines); i += direction {
-		if column := strings.Index(r.lines[i], r.query); column >= 0 {
+		lineAnchor, lineColumn := (*literalPosition)(nil), -1
+		if i == start {
+			lineAnchor, lineColumn = anchor, column
+		}
+		if p, ok := findLiteral(r.lines[i], r.query, direction > 0, lineAnchor, lineColumn); ok {
 			r.viewport.SetYOffset(i)
-			r.viewport.SetXOffset(ansi.StringWidth(r.lines[i][:column]))
-			r.matchLine = i
+			r.column = p.column
+			r.viewport.SetXOffset(r.column)
+			r.match = &responseMatch{line: i, text: p}
 			r.notFound = false
 			return
 		}
