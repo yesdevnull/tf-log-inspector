@@ -8,19 +8,21 @@
 package attrib
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // ctxLine reads the envelope independently of the hook's schema. Action
 // hooks carry an object in hook.action where resource hooks carry a string;
 // both contribute timestamps even though only resource hooks bound contexts.
 type ctxLine struct {
-	Timestamp string          `json:"@timestamp"`
-	Type      string          `json:"type"`
+	Timestamp json.RawMessage `json:"@timestamp"`
+	Type      json.RawMessage `json:"type"`
 	Hook      json.RawMessage `json:"hook"`
 }
 
@@ -48,6 +50,7 @@ type ctxHook struct {
 // zero-extent window occupies no instant and is never a candidate for
 // anything.
 type Context struct {
+	Entry   uint32
 	Address string
 	Module  string // "" when the resource is not in a module
 	Name    string
@@ -110,8 +113,7 @@ type ContextCollector struct {
 	firstTS, lastTS time.Time
 	haveTS          bool
 
-	malformed   uint64
-	unmatched   uint64
+	evidence    ContextEvidence
 	closedPairs int
 	zeroExtent  uint64
 	// closedOut marks that Contexts' close-out (draining c.open,
@@ -121,25 +123,70 @@ type ContextCollector struct {
 	closedOut bool
 }
 
+// ContextEvidence records independently observable limitations in context
+// collection, retaining the first scanner ordinal for each reason.
+type ContextEvidence struct {
+	SyntaxErrors, SchemaErrors               span.IssueCount
+	MissingTimestamps, InvalidTimestamps     span.IssueCount
+	UnmatchedTerminators, IncompleteContexts span.IssueCount
+}
+
+func noteIssue(dst *span.IssueCount, entry uint32) {
+	if dst.Count == 0 || entry < dst.FirstEntry {
+		dst.FirstEntry = entry
+	}
+	dst.Count++
+}
+
 // Entry implements logfmt.Sink as a no-op: this collector only cares about
 // structured lines, delivered via Structured.
 func (c *ContextCollector) Entry(uint32, logfmt.Entry, string, logfmt.Fields) {}
 
 // Structured implements logfmt.StructuredSink.
-func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
+func (c *ContextCollector) Structured(ord uint32, _ logfmt.Entry, line string) {
+	if !json.Valid([]byte(line)) {
+		noteIssue(&c.evidence.SyntaxErrors, ord)
+		return
+	}
 	var cl ctxLine
 	if err := json.Unmarshal([]byte(line), &cl); err != nil {
-		c.malformed++
+		noteIssue(&c.evidence.SchemaErrors, ord)
 		return
+	}
+	schema := false
+
+	var typ string
+	typeValid := true
+	if len(cl.Type) > 0 {
+		if !decodeContextString(cl.Type, &typ) {
+			schema = true
+			typeValid = false
+		}
 	}
 
 	if c.counts == nil {
 		c.counts = make(map[string]uint64)
 	}
-	c.counts[cl.Type]++
+	if typeValid {
+		c.counts[typ]++
+	}
 
-	ts, err := time.Parse(time.RFC3339Nano, cl.Timestamp)
-	if err != nil {
+	ts, timestampOK, timestampSchema := contextTimestamp(cl.Timestamp)
+	schema = schema || timestampSchema
+	if !timestampOK {
+		if len(cl.Timestamp) == 0 || bytes.Equal(bytes.TrimSpace(cl.Timestamp), []byte("null")) {
+			noteIssue(&c.evidence.MissingTimestamps, ord)
+		} else {
+			var value string
+			if decodeContextString(cl.Timestamp, &value) && value == "" {
+				noteIssue(&c.evidence.MissingTimestamps, ord)
+			} else {
+				noteIssue(&c.evidence.InvalidTimestamps, ord)
+			}
+		}
+		if schema {
+			noteIssue(&c.evidence.SchemaErrors, ord)
+		}
 		// A line with no usable timestamp cannot bound a window. It is
 		// still counted in the histogram above, so its absence from the
 		// contexts is visible rather than silent.
@@ -152,15 +199,18 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 		c.lastTS = ts
 	}
 
-	if !opensContext(cl.Type) && !closesContext(cl.Type) {
+	if !opensContext(typ) && !closesContext(typ) {
+		if schema {
+			noteIssue(&c.evidence.SchemaErrors, ord)
+		}
 		return
 	}
-	var hook *ctxHook
-	if len(cl.Hook) == 0 {
-		return
+	hook, hookSchema := parseContextHook(cl.Hook)
+	schema = schema || hookSchema
+	if schema {
+		noteIssue(&c.evidence.SchemaErrors, ord)
 	}
-	if err := json.Unmarshal(cl.Hook, &hook); err != nil {
-		c.malformed++
+	if hookSchema {
 		return
 	}
 	if hook == nil || hook.Resource == nil {
@@ -170,7 +220,7 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 	key := r.Addr + "\x00" + hook.Action
 
 	switch {
-	case opensContext(cl.Type):
+	case opensContext(typ):
 		if c.open == nil {
 			c.open = make(map[string]int)
 		}
@@ -184,6 +234,7 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 			c.ctxs[prev].Unclosed = true
 		}
 		c.ctxs = append(c.ctxs, Context{
+			Entry:        ord,
 			Address:      r.Addr,
 			Module:       r.Module,
 			Name:         r.ResourceName,
@@ -197,13 +248,13 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 		})
 		c.open[key] = len(c.ctxs) - 1
 
-	case closesContext(cl.Type):
+	case closesContext(typ):
 		i, ok := c.open[key]
 		if !ok {
 			// A terminator with no start -- a log that begins mid-run.
 			// Counted rather than synthesising a window whose start
 			// nothing in the log states.
-			c.unmatched++
+			noteIssue(&c.evidence.UnmatchedTerminators, ord)
 			return
 		}
 		c.ctxs[i].End = ts
@@ -211,6 +262,72 @@ func (c *ContextCollector) Structured(_ uint32, _ logfmt.Entry, line string) {
 		delete(c.open, key)
 		c.closedPairs++
 	}
+}
+
+func contextTimestamp(raw json.RawMessage) (time.Time, bool, bool) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return time.Time{}, false, false
+	}
+	var value string
+	if !decodeContextString(raw, &value) {
+		return time.Time{}, false, true
+	}
+	if value == "" {
+		return time.Time{}, false, false
+	}
+	timestamp, err := time.Parse(time.RFC3339Nano, value)
+	return timestamp, err == nil, false
+}
+
+func decodeContextString(raw json.RawMessage, destination *string) bool {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	return json.Unmarshal(raw, destination) == nil
+}
+
+func parseContextHook(raw json.RawMessage) (*ctxHook, bool) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return nil, true
+	}
+	hook := &ctxHook{}
+	schema := false
+	if value := fields["action"]; len(value) > 0 {
+		schema = !decodeContextString(value, &hook.Action)
+	}
+	resourceRaw := fields["resource"]
+	if len(resourceRaw) == 0 || bytes.Equal(bytes.TrimSpace(resourceRaw), []byte("null")) {
+		return hook, schema
+	}
+	var resourceFields map[string]json.RawMessage
+	if err := json.Unmarshal(resourceRaw, &resourceFields); err != nil || resourceFields == nil {
+		return hook, true
+	}
+	hook.Resource = new(struct {
+		Addr         string          `json:"addr"`
+		Module       string          `json:"module"`
+		Resource     string          `json:"resource"`
+		ResourceType string          `json:"resource_type"`
+		ResourceName string          `json:"resource_name"`
+		ResourceKey  json.RawMessage `json:"resource_key"`
+	})
+	for field, destination := range map[string]*string{
+		"addr":          &hook.Resource.Addr,
+		"module":        &hook.Resource.Module,
+		"resource":      &hook.Resource.Resource,
+		"resource_type": &hook.Resource.ResourceType,
+		"resource_name": &hook.Resource.ResourceName,
+	} {
+		if value := resourceFields[field]; len(value) > 0 && !decodeContextString(value, destination) {
+			schema = true
+		}
+	}
+	hook.Resource.ResourceKey = resourceFields["resource_key"]
+	return hook, schema
 }
 
 // decodeKey renders hook.resource.resource_key, which may be null, a JSON
@@ -264,6 +381,9 @@ func (c *ContextCollector) Contexts() []Context {
 			if !ctx.Start.Before(ctx.End) {
 				c.zeroExtent++
 			}
+			if ctx.Unclosed {
+				noteIssue(&c.evidence.IncompleteContexts, ctx.Entry)
+			}
 		}
 		c.closedOut = true
 	}
@@ -293,12 +413,22 @@ func (c *ContextCollector) LastTS() time.Time { return c.lastTS }
 // and counts only: it is rendered by --diagnose, which is masked for sharing.
 func (c *ContextCollector) TypeCounts() map[string]uint64 { return c.counts }
 
-// Malformed reports structured lines that failed to decode as JSON.
-func (c *ContextCollector) Malformed() uint64 { return c.malformed }
+// Malformed preserves the aggregate count exposed to existing callers.
+func (c *ContextCollector) Malformed() uint64 {
+	return c.evidence.SyntaxErrors.Count + c.evidence.SchemaErrors.Count
+}
 
 // UnmatchedTerminators reports terminators seen with no matching start,
 // which is what a log captured from partway through a run produces.
-func (c *ContextCollector) UnmatchedTerminators() uint64 { return c.unmatched }
+func (c *ContextCollector) UnmatchedTerminators() uint64 {
+	return c.evidence.UnmatchedTerminators.Count
+}
+
+// Evidence returns the completed context-quality facts.
+func (c *ContextCollector) Evidence() ContextEvidence {
+	c.Contexts()
+	return c.evidence
+}
 
 // ZeroExtentContexts reports how many collected contexts have zero
 // duration -- Start not strictly before End -- and so can never be a

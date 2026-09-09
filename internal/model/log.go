@@ -23,13 +23,15 @@ import (
 // accessor, so swapping in ReadAt or mmap later is contained to this file if a
 // log ever turns up large enough to need it.
 type Log struct {
-	responseOnce sync.Once
-	responses    []logfmt.ProviderJSON
-	responseErr  error
-	Data         []byte
-	Entries      []logfmt.Entry
-	Comps        *logfmt.Interner
-	Stats        logfmt.Stats
+	responseOnce     sync.Once
+	responses        []logfmt.ProviderJSON
+	responseErr      error
+	sourceLinesOnce  sync.Once
+	sourceLineStarts []uint64
+	Data             []byte
+	Entries          []logfmt.Entry
+	Comps            *logfmt.Interner
+	Stats            logfmt.Stats
 
 	// RPCSpans and UISpans are kept apart rather than concatenated. Their
 	// StartMs/EndMs sit on different zero points -- see the doc comment on

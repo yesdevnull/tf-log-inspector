@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func TestActionHooksExtendUnclosedContext(t *testing.T) {
@@ -50,6 +51,67 @@ func collectLines(t *testing.T, content string) (*ContextCollector, []Context) {
 		t.Fatalf("Scan: %v", err)
 	}
 	return &c, c.Contexts()
+}
+
+func TestSchemaInvalidTimestampDoesNotHideTypeCount(t *testing.T) {
+	const line = `{"@level":"info","@timestamp":7,"type":"apply_complete","hook":null}` + "\n"
+	c, _ := collectLines(t, line)
+	if got := c.TypeCounts()["apply_complete"]; got != 1 {
+		t.Errorf("apply_complete count = %d, want 1", got)
+	}
+}
+
+func TestContextEvidenceSeparatesFactsAndRetainsFirstOrdinals(t *testing.T) {
+	const lines = `{"@level":"info","@timestamp":7,"type":8,"hook":null}
+{"@level":"info","@timestamp":"broken"
+{"@level":"info","@timestamp":null,"type":"version"}
+{"@level":"info","@timestamp":"","type":"version"}
+{"@level":"info","@timestamp":"not-a-time","type":"version"}
+{"@level":"info","@timestamp":"2026-09-10T00:00:05Z","type":"apply_complete","hook":{"resource":{"addr":"aws_instance.missing","resource":"aws_instance.missing","resource_type":"aws_instance","resource_name":"missing","resource_key":null},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-10T00:00:06Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.open","resource":"aws_instance.open","resource_type":"aws_instance","resource_name":"open","resource_key":null},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-10T00:00:07Z","type":null,"hook":null}
+{"@level":"info","@timestamp":"2026-09-10T00:00:08Z","type":"apply_start","hook":{"resource":{"addr":7,"resource":false,"resource_type":[],"resource_name":{}},"action":9}}
+`
+	c, contexts := collectLines(t, lines)
+	want := ContextEvidence{
+		SyntaxErrors:         span.IssueCount{Count: 1, FirstEntry: 1},
+		SchemaErrors:         span.IssueCount{Count: 3, FirstEntry: 0},
+		MissingTimestamps:    span.IssueCount{Count: 2, FirstEntry: 2},
+		InvalidTimestamps:    span.IssueCount{Count: 2, FirstEntry: 0},
+		UnmatchedTerminators: span.IssueCount{Count: 1, FirstEntry: 5},
+		IncompleteContexts:   span.IssueCount{Count: 1, FirstEntry: 6},
+	}
+	if got := c.Evidence(); got != want {
+		t.Errorf("Evidence = %+v, want %+v", got, want)
+	}
+	if len(contexts) != 1 || contexts[0].Entry != 6 || contexts[0].Address != "aws_instance.open" {
+		t.Fatalf("contexts = %+v, want one context starting at entry 6", contexts)
+	}
+	if got := c.Malformed(); got != 4 {
+		t.Errorf("Malformed = %d, want syntax and schema aggregate 4", got)
+	}
+
+	if again := c.Evidence(); again != want {
+		t.Errorf("second Evidence = %+v, want unchanged %+v", again, want)
+	}
+	againContexts := c.Contexts()
+	if len(againContexts) != 1 || againContexts[0] != contexts[0] {
+		t.Errorf("second Contexts = %+v, want unchanged %+v", againContexts, contexts)
+	}
+}
+
+func TestContextEvidenceCountsEveryDuplicateStartCloseOut(t *testing.T) {
+	const lines = `{"@level":"info","@timestamp":"2026-09-10T00:00:00Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.a","resource":"aws_instance.a","resource_type":"aws_instance"},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-10T00:00:01Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.a","resource":"aws_instance.a","resource_type":"aws_instance"},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-10T00:00:02Z","type":"version"}
+`
+	c, contexts := collectLines(t, lines)
+	if len(contexts) != 2 || !contexts[0].Unclosed || !contexts[1].Unclosed {
+		t.Fatalf("contexts = %+v, want both duplicate-start windows unclosed", contexts)
+	}
+	if got, want := c.Evidence().IncompleteContexts, (span.IssueCount{Count: 2, FirstEntry: 0}); got != want {
+		t.Errorf("IncompleteContexts = %+v, want %+v", got, want)
+	}
 }
 
 func TestCollectorPairsStartWithComplete(t *testing.T) {
