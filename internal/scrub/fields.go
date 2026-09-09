@@ -25,6 +25,9 @@ func keyWords(key string) string {
 
 func fieldCategory(key string) string {
 	w := keyWords(key)
+	if w == "admin/consent/description" || w == "user/consent/description" {
+		return "consent"
+	}
 	for _, suffix := range []string{"password", "secret", "token", "api/key", "access/key", "private/key", "access/key/id"} {
 		if w == suffix || strings.HasSuffix(w, "/"+suffix) {
 			return "secret"
@@ -53,7 +56,7 @@ func fieldCategory(key string) string {
 	case "host", "hostname", "host/name", "publisher/domain":
 		return "hostname"
 	}
-	if strings.HasSuffix(w, "/name") {
+	if strings.HasSuffix(w, "/name") || w == "displayname" || strings.HasSuffix(w, "/displayname") {
 		return "name"
 	}
 	switch w {

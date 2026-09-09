@@ -116,6 +116,10 @@ func (s *session) discover(value, category string, numeric bool) {
 	if value == "" || category == "" {
 		return
 	}
+	if category == "consent" {
+		s.discoverConsent(value, numeric)
+		return
+	}
 	hostname := category == "hostname"
 	if hostname {
 		category = "network"

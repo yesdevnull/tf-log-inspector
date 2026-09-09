@@ -37,6 +37,11 @@ func (s *session) discoverServiceTokens(value string) []region {
 
 func (s *session) discoverPatterns(v *view) {
 	v.credentials = append(v.credentials, s.discoverServiceTokens(v.text)...)
+	if line := strings.TrimSpace(v.text); httpRequestLine(line) {
+		target := strings.Fields(line)[1]
+		s.discoverURL(target)
+		s.markComposite(v, target, strings.Index(v.text, target))
+	}
 	s.discoverAzureEndpoints(v)
 	for _, m := range terraformSubjectPattern.FindAllStringSubmatchIndex(v.text, -1) {
 		if !boundaries(v.text, m[0], m[1]) {
@@ -73,6 +78,9 @@ func (s *session) discoverPatterns(v *view) {
 		v.protect(m[5], m[1])
 	}
 	for _, m := range localPathPattern.FindAllStringIndex(v.text, -1) {
+		if overlaps(v.composites, m[0], m[1]) {
+			continue
+		}
 		if m[0] > 0 && !strings.ContainsRune(" \t\r\n\"='(", rune(v.text[m[0]-1])) {
 			continue
 		}
@@ -335,7 +343,7 @@ func (s *session) discoverHost(value string) *candidate {
 			return nil
 		}
 		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
 				return nil
 			}
 		}
@@ -368,45 +376,48 @@ func (s *session) discoverHost(value string) *candidate {
 
 func (s *session) discoverURL(value string) {
 	u, err := url.Parse(value)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return
-	}
-	host := s.discoverHost(u.Hostname())
-	if host == nil {
+	if err != nil || (u.Scheme == "" || u.Host == "") && !(strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//")) {
 		return
 	}
 	var parts []compositePart
 	var structure []string
-	start := strings.Index(value, "://") + 3
-	// URL parsing decodes host escapes, so source spans must use raw bytes.
-	authorityEnd := len(value)
-	if at := strings.IndexAny(value[start:], "/?#"); at >= 0 {
-		authorityEnd = start + at
-	}
-	if u.User != nil {
-		end := strings.LastIndexByte(value[start:authorityEnd], '@') + start
-		userEnd := end
-		if colon := strings.IndexByte(value[start:end], ':'); colon >= 0 {
-			userEnd = start + colon
+	pathStart := 0
+	if u.Host != "" {
+		host := s.discoverHost(u.Hostname())
+		if host == nil {
+			return
 		}
-		if u.User.Username() != "" {
-			parts = append(parts, s.part(u.User.Username(), "name", start, userEnd, "user"))
+		start := strings.Index(value, "://") + 3
+		// URL parsing decodes host escapes, so source spans must use raw bytes.
+		authorityEnd := len(value)
+		if at := strings.IndexAny(value[start:], "/?#"); at >= 0 {
+			authorityEnd = start + at
 		}
-		if password, ok := u.User.Password(); ok && password != "" {
-			parts = append(parts, s.part(password, "secret", userEnd+1, end, "user"))
+		if u.User != nil {
+			end := strings.LastIndexByte(value[start:authorityEnd], '@') + start
+			userEnd := end
+			if colon := strings.IndexByte(value[start:end], ':'); colon >= 0 {
+				userEnd = start + colon
+			}
+			if u.User.Username() != "" {
+				parts = append(parts, s.part(u.User.Username(), "name", start, userEnd, "user"))
+			}
+			if password, ok := u.User.Password(); ok && password != "" {
+				parts = append(parts, s.part(password, "secret", userEnd+1, end, "user"))
+			}
+			start = end + 1
 		}
-		start = end + 1
+		hostStart := start
+		hostEnd := authorityEnd
+		if value[hostStart] == '[' {
+			hostStart++
+			hostEnd = hostStart + strings.LastIndexByte(value[hostStart:authorityEnd], ']')
+		} else if colon := strings.LastIndexByte(value[hostStart:authorityEnd], ':'); colon >= 0 {
+			hostEnd = hostStart + colon
+		}
+		parts = append(parts, compositePart{region: region{hostStart, hostEnd}, candidate: host})
+		pathStart = authorityEnd
 	}
-	hostStart := start
-	hostEnd := authorityEnd
-	if value[hostStart] == '[' {
-		hostStart++
-		hostEnd = hostStart + strings.LastIndexByte(value[hostStart:authorityEnd], ']')
-	} else if colon := strings.LastIndexByte(value[hostStart:authorityEnd], ':'); colon >= 0 {
-		hostEnd = hostStart + colon
-	}
-	parts = append(parts, compositePart{region: region{hostStart, hostEnd}, candidate: host})
-	pathStart := authorityEnd
 	pathEnd := pathStart + len(u.EscapedPath())
 	pos := pathStart
 	service := azureService(u.Hostname())
@@ -467,6 +478,9 @@ func (s *session) discoverURL(value string) {
 		s.discoverServiceTokens(u.Fragment)
 		start := strings.IndexByte(value, '#') + 1
 		parts = append(parts, compositePart{region: region{start, len(value)}, encoding: "fragment", literal: u.Fragment})
+	}
+	if len(parts) == 0 {
+		return
 	}
 	c := s.composite(value, "network", parts, "")
 	c.format, c.decodedStructure = "url", structure

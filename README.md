@@ -135,7 +135,14 @@ Detection covers hclog fields, Terraform UI JSON, plan text and supported
 HTTP/JSON bodies, including escaped JSON strings:
 
 - Terraform module/resource labels and string instance keys; name, user,
-  organisation, workspace and project fields.
+  organisation, workspace and project fields. Application display names,
+  including `app_displayname`, share aliases with consent descriptions,
+  service-principal URLs and encoded HTTP request queries.
+- Consent descriptions discover SP names from the complete sentence
+  `Allow the application to access <NAME> on behalf of the signed in user`
+  (with an optional final full stop). Other `adminConsentDescription` and
+  `userConsentDescription` values receive opaque whole-field replacements;
+  identical descriptions share an alias. Snake-case field names are supported.
 - GUIDs and identifying ID fields, including opaque request/resource IDs
   and Terraform UI `hook.id_value`. Azure AD IDs composed of three
   hyphen-separated GUIDs retain their component structure and share each

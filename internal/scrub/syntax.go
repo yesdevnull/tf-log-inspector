@@ -403,7 +403,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 					if value == "null" && planAssignment {
 						v.nulls = append(v.nulls, region{valueStart, end})
 					} else {
-						if category == "secret" {
+						if category == "secret" || category == "consent" {
 							v.wholeValues = append(v.wholeValues, region{valueStart, end})
 						}
 						if key == "addr" || key == "address" {

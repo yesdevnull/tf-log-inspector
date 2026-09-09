@@ -64,8 +64,9 @@ func TestServiceTokensInEscapedBodiesAndResourceKeys(t *testing.T) {
 }
 
 func TestConsentDescriptionsShareServicePrincipalName(t *testing.T) {
-	out := scrubObject(t, `{"userConsentDescription":"Allow Private Service to access your data.","adminConsentDescription":"Allow Private Service to access all data.","displayName":"Private Service"}`)
-	if out["displayName"] == "Private Service" || out["userConsentDescription"] != "Allow "+out["displayName"]+" to access your data." || out["adminConsentDescription"] != "Allow "+out["displayName"]+" to access all data." {
+	out := scrubObject(t, `{"userConsentDescription":"Allow the application to access Private Service on behalf of the signed in user.","adminConsentDescription":"Allow the application to access Private Service on behalf of the signed in user","displayName":"Private Service"}`)
+	want := "Allow the application to access " + out["displayName"] + " on behalf of the signed in user"
+	if out["displayName"] == "Private Service" || out["userConsentDescription"] != want+"." || out["adminConsentDescription"] != want {
 		t.Fatalf("consent description lost name linkage: %#v", out)
 	}
 }
@@ -79,5 +80,47 @@ func TestServiceTokensInEncodedURLs(t *testing.T) {
 		if err != nil || strings.Contains(decoded, token) || !strings.Contains(decoded, "secret_") {
 			t.Fatalf("encoded credential retained or misclassified: %#v %v", out, err)
 		}
+	}
+}
+
+func TestServicePrincipalNameAcrossGraphLogs(t *testing.T) {
+	const name = "EXAMPLE_SP"
+	const appID = "161b2a4a-3a23-45af-484d-42300363bba2"
+	const query = "/v1.0/servicePrincipals?%24filter=displayName+eq+%27EXAMPLE_SP%27"
+	input := `{"app_displayname":"EXAMPLE_SP","displayName":"EXAMPLE_SP","homepage":"https://EXAMPLE_SP","appId":"` + appID + `","servicePrincipalNames":["` + appID + `","https://EXAMPLE_SP.example.org"],"adminConsentDescription":"Allow the application to access EXAMPLE_SP on behalf of the signed in user"}` + "\nGET " + query + " HTTP/1.1\n[DEBUG] GET https://graph.microsoft.com" + query + ": timestamp=\"2026-09-04T12:53:23.881+1000\"\n"
+	got, err := Scrub([]byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got.Data), name) || strings.Contains(string(got.Data), appID) {
+		t.Fatalf("service principal identity leaked: %s", got.Data)
+	}
+	var object struct {
+		Name     string   `json:"displayName"`
+		AppName  string   `json:"app_displayname"`
+		Homepage string   `json:"homepage"`
+		AppID    string   `json:"appId"`
+		Names    []string `json:"servicePrincipalNames"`
+		Consent  string   `json:"adminConsentDescription"`
+	}
+	lines := strings.Split(string(got.Data), "\n")
+	if err := json.Unmarshal([]byte(lines[0]), &object); err != nil {
+		t.Fatal(err)
+	}
+	if object.AppName != object.Name || !strings.HasPrefix(object.Homepage, "https://"+object.Name) || object.Names[0] != object.AppID || !strings.HasPrefix(object.Names[1], "https://"+object.Name+".") || object.Consent != "Allow the application to access "+object.Name+" on behalf of the signed in user" {
+		t.Fatalf("service principal linkage changed: %+v", object)
+	}
+	for _, line := range lines[1:3] {
+		decoded, err := url.QueryUnescape(line)
+		if err != nil || !strings.Contains(decoded, "displayName eq '"+object.Name+"'") {
+			t.Fatalf("Graph filter lost linkage: %s %v", line, err)
+		}
+	}
+}
+
+func TestApplicationDisplayNameDiscoversConsentIdentity(t *testing.T) {
+	out := scrubObject(t, `{"app_displayname":"EXAMPLE_SP","message":"Previously EXAMPLE_SP","adminConsentDescription":"Allow EXAMPLE_SP access","userConsentDescription":"Sign in to EXAMPLE_SP"}`)
+	if out["app_displayname"] == "EXAMPLE_SP" || out["message"] != "Previously "+out["app_displayname"] || !strings.HasPrefix(out["adminConsentDescription"], "secret_") || !strings.HasPrefix(out["userConsentDescription"], "secret_") {
+		t.Fatalf("application display name not discovered: %#v", out)
 	}
 }
