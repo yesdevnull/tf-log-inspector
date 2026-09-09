@@ -9,7 +9,71 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
+
+func TestProviderJSONMessageValuesAreSecrets(t *testing.T) {
+	const prefix = "2026-09-04T12:56:10.514+1000 [DEBUG] provider.terraform-provider-azurerm_v4.81.0_x5: "
+	const body = `{"value":"ORG_SPECIFIC_SUBDOMAIN.name0355.int","id":"https://name5142.vault.azure.net/secrets/name5567/name5570","attributes":{"enabled":true,"created":1773897762,"updated":1773897762,"recoveryLevel":"Recoverable","recoverableDays":90},"tags":{}}`
+	for _, message := range []string{body, "\t" + body, "[DEBUG] " + body, "2026/09/04 12:56:10 [DEBUG] " + body, strings.ReplaceAll(body, ",", ",\n")} {
+		t.Run(message, func(t *testing.T) {
+			input := prefix + message + " tf_req_id=abc\n" + prefix + "Routine status\n{\"value\":\"ordinary-status\"}\n"
+			got, err := Scrub([]byte(input), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := string(got.Data)
+			if strings.Contains(output, "ORG_SPECIFIC_SUBDOMAIN") || !strings.Contains(output, `"value":"secret_`) || got.Unsupported != 0 {
+				t.Fatalf("provider JSON value leaked: %s", output)
+			}
+			if !strings.Contains(output, "tf_req_id=abc") || !strings.Contains(output, `"value":"ordinary-status"`) {
+				t.Fatalf("provider body changed metadata or next record: %s", output)
+			}
+			h := logfmt.ParseHeader(output)
+			var parsed struct {
+				Attributes map[string]any `json:"attributes"`
+			}
+			if err := json.NewDecoder(strings.NewReader(h.Msg)).Decode(&parsed); err != nil || parsed.Attributes["enabled"] != true || parsed.Attributes["created"] != float64(1773897762) {
+				t.Fatalf("provider JSON structure changed: %s %v", output, err)
+			}
+		})
+	}
+}
+
+func TestProviderBracketedDiagnosticIsNotJSON(t *testing.T) {
+	const input = "2026-09-04T12:56:10.514+1000 [DEBUG] provider.terraform-provider-azurerm_v4.81.0_x5: [Request] Sending request to server\n"
+	got, err := Scrub([]byte(input), nil)
+	if err != nil || string(got.Data) != input || got.Unsupported != 0 {
+		t.Fatalf("bracketed diagnostic rejected or changed: %s %v", got.Data, err)
+	}
+}
+
+func TestProviderJSONMessageCollections(t *testing.T) {
+	const prefix = "2026-09-04T12:56:10.514+1000 [DEBUG] provider.azure: "
+	got, err := Scrub([]byte(prefix+`[{"value":"private-content"},{"value":null},{"value":""}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []map[string]any
+	h := logfmt.ParseHeader(string(got.Data))
+	if err := json.Unmarshal([]byte(h.Msg), &entries); err != nil || len(entries) != 3 {
+		t.Fatalf("provider collection lost JSON structure: %s %v", got.Data, err)
+	}
+	if value, ok := entries[0]["value"].(string); !ok || !strings.HasPrefix(value, "secret_") || entries[1]["value"] != nil || entries[2]["value"] != "" {
+		t.Fatalf("provider collection values leaked or empty values changed: %s", got.Data)
+	}
+}
+
+func TestMalformedProviderJSONFailsClosed(t *testing.T) {
+	const prefix = "2026-09-04T12:56:10.514+1000 [DEBUG] provider.azure: "
+	for _, body := range []string{`{"value":"private-content"`, `[{"value":"private-content"}`} {
+		got, err := Scrub([]byte(prefix+body), nil)
+		if err == nil || len(got.Data) != 0 || !strings.Contains(err.Error(), "invalid body") || strings.Contains(err.Error(), "private-content") {
+			t.Fatalf("malformed provider JSON published: %s %v", got.Data, err)
+		}
+	}
+}
 
 func TestHTTPResponseScalarValuesAreSecrets(t *testing.T) {
 	const body = `{"value":"private-content","nested":{"value":"private-content"},"echo":"private-content"}`

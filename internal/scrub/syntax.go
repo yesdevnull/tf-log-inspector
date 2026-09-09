@@ -52,6 +52,27 @@ func responseBodyStart(text string) int {
 	return -1
 }
 
+// Providers can log a JSON body directly as their message, without an HTTP
+// status line or body field. Keep its source offset after peeling log prefixes.
+func providerJSONStart(text string) int {
+	h := logfmt.ParseHeader(strings.TrimRight(text, "\r\n"))
+	msg := strings.TrimLeft(h.Msg, " \t\r\n")
+	// An unquoted identifier in brackets is a diagnostic tag, not a JSON
+	// array. JSON's literal identifiers remain valid array elements.
+	if strings.HasPrefix(msg, "[") {
+		if end := strings.IndexByte(msg, ']'); end > 0 {
+			label := strings.TrimSpace(msg[1:end])
+			if logfmt.ValidKey(label) && label != "true" && label != "false" && label != "null" {
+				return -1
+			}
+		}
+	}
+	if h.HasTS && strings.HasPrefix(h.Comp, "provider.") && (strings.HasPrefix(msg, "{") || strings.HasPrefix(msg, "[")) {
+		return strings.Index(text, msg)
+	}
+	return -1
+}
+
 func (s *session) parseLines(text string) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
@@ -85,7 +106,10 @@ func (s *session) parseLines(text string) []*view {
 		}
 		trim := strings.TrimLeft(v.text, " \t\r\n")
 		jsonStart := start
-		bodyStart := responseBodyStart(v.text)
+		bodyStart := providerJSONStart(v.text)
+		if bodyStart < 0 {
+			bodyStart = responseBodyStart(v.text)
+		}
 		if bodyStart >= 0 {
 			trim = strings.TrimSpace(v.text[bodyStart:])
 			jsonStart += bodyStart
@@ -352,7 +376,22 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			}
 		}
 	}
+	bodyStart := providerJSONStart(v.text)
 	for i := 0; i < len(v.text); {
+		if i == bodyStart {
+			decoder := json.NewDecoder(strings.NewReader(v.text[i:]))
+			var raw json.RawMessage
+			if decoder.Decode(&raw) == nil {
+				end := i + int(decoder.InputOffset())
+				child := &view{text: v.text[i:end], line: v.line, responseJSON: true}
+				s.parseView(child, false, false)
+				v.children = append(v.children, quoted{region{i, end}, child, true})
+				i = end
+				continue
+			}
+			s.parseErr = fmt.Errorf("provider JSON at line %d: invalid body", v.line)
+			return
+		}
 		if end := wholeValueEnd(v.wholeValues, i); end > i {
 			i = end
 			continue
