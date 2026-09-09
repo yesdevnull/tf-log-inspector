@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -229,6 +230,233 @@ func TestSlashSearchJumpsToTheFirstMatch(t *testing.T) {
 	if !strings.Contains(string(m.log.Bytes(got)), "aws_internet_gateway") {
 		t.Errorf("TopEntry after search does not contain the query: %q", string(m.log.Bytes(got)))
 	}
+}
+
+func TestRawSearchRevealsContinuationOccurrences(t *testing.T) {
+	text := "header\n" + strings.Repeat("padding\n", 300) + "needle first needle second\ntail\n"
+	l := &model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text))}}}
+	m := New(l, "synthetic.log")
+	m.setView(ViewRawLog)
+	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "needle")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.TopLine() != 301 || !strings.Contains(m.renderRawLog(13, 1), "needle first") {
+		t.Fatalf("search did not reveal the continuation: line=%d, body=%q", m.TopLine(), m.renderRawLog(13, 1))
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if m.TopLine() != 301 || !strings.Contains(m.renderRawLog(13, 1), "needle second") {
+		t.Fatalf("next occurrence was skipped: %q", m.renderRawLog(13, 1))
+	}
+	before := m.renderRawLog(13, 1)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if !m.raw.notFound || m.renderRawLog(13, 1) != before {
+		t.Fatal("end of search moved or wrapped the viewport")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if !strings.Contains(m.renderRawLog(13, 1), "needle first") {
+		t.Fatal("reverse search skipped the first occurrence")
+	}
+}
+
+func TestRawSearchTraversesEveryVisibleOccurrence(t *testing.T) {
+	first := "hit one xx hit two\ncontinuation hit three\n"
+	second := "hit four\n"
+	l := &model.Log{Data: []byte(first + second), Entries: []logfmt.Entry{
+		{Len: uint32(len(first))},
+		{Off: uint64(len(first)), Len: uint32(len(second))},
+	}}
+	m := update(t, New(l, "synthetic.log"), tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.setView(ViewRawLog)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "hit")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	for _, want := range []string{"hit one", "hit two", "hit three", "hit four"} {
+		if got := m.renderRawLog(12, 1); !strings.Contains(got, want) {
+			t.Fatalf("search rendered %q, want occurrence %q", got, want)
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	}
+	if !m.raw.notFound {
+		t.Fatal("search wrapped after the final occurrence")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if got := m.renderRawLog(12, 1); !strings.Contains(got, "hit three") {
+		t.Fatalf("reverse search rendered %q, want the preceding occurrence", got)
+	}
+}
+
+func TestRawSearchUsesRenderedCellsAndText(t *testing.T) {
+	t.Run("wide prefix and embedded ANSI", func(t *testing.T) {
+		text := "界" + strings.Repeat("x", 30) + "nee\x1b[31mdle\n"
+		l := &model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text))}}}
+		m := New(l, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = "needle"
+		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(8, 1), "needle") {
+			t.Fatalf("search did not reveal the rendered word: %q", m.renderRawLog(8, 1))
+		}
+		if got, want := m.raw.column, 32; got != want {
+			t.Errorf("horizontal column = %d, want %d terminal cells", got, want)
+		}
+	})
+
+	t.Run("visible control escape", func(t *testing.T) {
+		text := "before\tafter\n"
+		l := &model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text))}}}
+		m := New(l, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = `\t`
+		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(10, 1), `\tafter`) {
+			t.Fatalf("search did not find the visible tab escape: %q", m.renderRawLog(10, 1))
+		}
+		m.raw.lastQuery = "\t"
+		if m.searchFrom(0, true, true) {
+			t.Fatal("search matched a raw control byte absent from rendered text")
+		}
+	})
+}
+
+func TestRawSearchRevealsTheContainingGrapheme(t *testing.T) {
+	for _, tc := range []struct{ text, query string }{
+		{"e\u0301", "\u0301"},
+		{"👩‍💻", "💻"},
+	} {
+		data := []byte(tc.text + strings.Repeat("x", 100) + "\n")
+		m := New(&model.Log{Data: data, Entries: []logfmt.Entry{{Len: uint32(len(data))}}}, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = tc.query
+		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(10, 1), tc.text) {
+			t.Errorf("query %q hid grapheme %q: %q", tc.query, tc.text, m.renderRawLog(10, 1))
+		}
+	}
+}
+
+func TestRawSearchLoadsAndRevealsAContinuationLine(t *testing.T) {
+	path := t.TempDir() + "/continuation.log"
+	text := "2026-09-09T10:00:00.000+1000 [INFO] header\ncontinuation needle\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	m := update(t, New(l, "continuation.log"), tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.setView(ViewRawLog)
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = typeQuery(t, m, "needle")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.TopLine() != 1 || !strings.Contains(m.renderRawLog(30, 1), "needle") {
+		t.Fatalf("parser-backed search did not reveal continuation: line=%d, body=%q", m.TopLine(), m.renderRawLog(30, 1))
+	}
+}
+
+func TestRawSearchRestartsFromTheViewportAfterScrolling(t *testing.T) {
+	t.Run("vertical", func(t *testing.T) {
+		text := "hit first\nhit second\n"
+		l := &model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text))}}}
+		m := New(l, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = "hit"
+		if !m.searchFrom(0, true, true) {
+			t.Fatal("initial search missed")
+		}
+		m.scrollRawLog(1)
+		m.searchAgain(-1)
+		if got := m.renderRawLog(12, 1); !strings.Contains(got, "hit second") {
+			t.Fatalf("reverse search resumed from the stale match: %q", got)
+		}
+	})
+
+	t.Run("horizontal", func(t *testing.T) {
+		text := "hit early xxxxxxxxxx hit later\n"
+		l := &model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text))}}}
+		m := update(t, New(l, "synthetic.log"), tea.WindowSizeMsg{Width: 20, Height: 12})
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = "hit"
+		if !m.searchFrom(0, true, true) {
+			t.Fatal("initial search missed")
+		}
+		m.scrollRawLogHorizontally(10)
+		m.searchAgain(1)
+		if got := m.renderRawLog(10, 1); !strings.Contains(got, "hit later") {
+			t.Fatalf("forward search resumed from the stale match: %q", got)
+		}
+	})
+}
+
+func TestRawSearchHandlesEmptyDomains(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		log  *model.Log
+	}{
+		{"empty log", &model.Log{}},
+		{"one entry", &model.Log{Data: []byte("no match\n"), Entries: []logfmt.Entry{{Len: 9}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.log, "synthetic.log")
+			m.setView(ViewRawLog)
+			m.raw.lastQuery = "needle"
+			for _, forward := range []bool{true, false} {
+				if m.searchFrom(0, forward, true) {
+					t.Fatalf("forward=%v search found text absent from the domain", forward)
+				}
+			}
+		})
+	}
+
+	text := "needle\n"
+	m := New(&model.Log{Data: []byte(text), Entries: []logfmt.Entry{{Len: uint32(len(text)), Level: logfmt.LevelInfo}}}, "synthetic.log")
+	m.setView(ViewRawLog)
+	m.setFacetExclusions(dimLevel, map[string]bool{"INFO": true})
+	m.invalidateRows()
+	m.raw.lastQuery = "needle"
+	if m.searchFrom(0, true, true) {
+		t.Fatal("search found an entry hidden by an empty filter result")
+	}
+}
+
+func TestRawSearchDiscardsAnchorsWhenItsDomainChanges(t *testing.T) {
+	t.Run("facet change", func(t *testing.T) {
+		first, second := "needle info\n", "needle warning\n"
+		l := &model.Log{Data: []byte(first + second), Entries: []logfmt.Entry{
+			{Len: uint32(len(first)), Level: logfmt.LevelInfo},
+			{Off: uint64(len(first)), Len: uint32(len(second)), Level: logfmt.LevelWarn},
+		}}
+		m := New(l, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.lastQuery = "needle"
+		if !m.searchFrom(0, true, true) {
+			t.Fatal("initial search missed")
+		}
+		m.setFacetExclusions(dimLevel, map[string]bool{"INFO": true})
+		m.invalidateRows()
+		m.searchAgain(-1)
+		if m.raw.notFound || !strings.Contains(m.renderRawLog(20, 1), "needle warning") {
+			t.Fatalf("search reused an anchor from before the facet change: %q", m.renderRawLog(20, 1))
+		}
+	})
+
+	t.Run("scope removal", func(t *testing.T) {
+		first, second := "needle first\n", "needle scoped\n"
+		l := &model.Log{Data: []byte(first + second), Entries: []logfmt.Entry{
+			{Len: uint32(len(first))},
+			{Off: uint64(len(first)), Len: uint32(len(second))},
+		}}
+		m := New(l, "synthetic.log")
+		m.setView(ViewRawLog)
+		m.raw.scope, m.raw.top = []int{1}, 1
+		m.raw.lastQuery = "needle"
+		if !m.searchFrom(1, true, true) {
+			t.Fatal("initial scoped search missed")
+		}
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
+		m.searchAgain(-1)
+		if m.raw.notFound || !strings.Contains(m.renderRawLog(20, 1), "needle scoped") {
+			t.Fatalf("search reused an anchor from before scope removal: %q", m.renderRawLog(20, 1))
+		}
+	})
 }
 
 // A search match hidden by the active facet filter must not be jumped to --
@@ -1242,25 +1470,10 @@ func TestScrollingUpIntoATallEntryArrivesAtItsEnd(t *testing.T) {
 	}
 }
 
-// A search opens the matched entry at its OWN first line. The raw log's
-// position is a pair -- the entry at the top of the pane, and how many of
-// that entry's lines are scrolled off above it -- so a search that moved
-// only the entry left the line offset standing at wherever the reader had
-// scrolled to before they searched.
-//
-// Both ways that goes wrong are pinned here, because they look nothing
-// alike on screen. Against an entry TALLER than the stale offset the pane
-// opens partway down it, with the matched text above the top of the pane:
-// a result that is on screen but not where the reader is looking. Against a
-// SHORTER one -- most entries are a single line -- the offset is past the
-// entry's end, renderRawLog skips it, and the pane draws whatever comes
-// after it instead. Either way the footer reports a search that found
-// something over a pane that does not contain the pattern.
-//
-// It takes a fixture of mixed heights to see: where every entry is one
-// line the offset is always 0, and a search that fails to reset it cannot
-// be told from one that does.
-func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
+// Search begins at the visible physical line and reveals the matched line,
+// including a continuation within the current entry. A forward search cannot
+// reach a header above that position; the reverse search can.
+func TestASearchRevealsTheMatchedPhysicalLine(t *testing.T) {
 	const tall = 40
 	// Down one line of "first", then 24 into "tall" -- far enough in to be
 	// past the whole of the one-line entries the searches below match.
@@ -1269,7 +1482,7 @@ func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"an entry taller than the offset", "tall head"},
+		{"an entry taller than the offset", "tall body line 030"},
 		{"an entry shorter than the offset", "last head"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1293,6 +1506,23 @@ func TestASearchOpensTheMatchedEntryAtItsFirstLine(t *testing.T) {
 				t.Errorf("a search reported as found for %q opens the pane on %q:\n%s", tc.query, strings.TrimSpace(body[0]), strings.Join(body, "\n"))
 			}
 		})
+	}
+
+	m := update(t, New(mixedHeightLog(tall), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.setView(ViewRawLog)
+	for range into {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	beforeEntry, beforeLine := m.TopEntry(), m.TopLine()
+	m.raw.lastQuery = "tall head"
+	if m.searchFrom(m.raw.top, true, true) {
+		t.Fatal("forward search found a header above the visible position")
+	}
+	if m.TopEntry() != beforeEntry || m.TopLine() != beforeLine {
+		t.Fatal("failed forward search moved the viewport")
+	}
+	if !m.searchFrom(m.raw.top, false, false) || !strings.Contains(m.renderRawLog(20, 1), "tall head") {
+		t.Fatalf("reverse search did not reveal the header: %q", m.renderRawLog(20, 1))
 	}
 }
 

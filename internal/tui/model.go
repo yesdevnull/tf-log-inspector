@@ -563,6 +563,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.view == ViewRawLog {
 				m.raw.scope = nil
 				m.raw.notFound = false
+				m.raw.match = nil
 				m.reconcileRawCursor()
 			}
 		case "?":
@@ -770,6 +771,7 @@ func (m *Model) invalidateRows() {
 	m.timelineWallClockCache = 0
 	m.timelineWallClockCached = false
 	m.raw.notFound = false
+	m.raw.match = nil
 	m.clampSelection()
 	if m.view == ViewRawLog {
 		m.reconcileRawCursor()

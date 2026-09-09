@@ -53,6 +53,7 @@ type rawLogState struct {
 	top     int
 	topLine int
 	column  int
+	match   *rawMatch
 
 	// searching is true while '/' gives input the keyboard; query holds
 	// its current text. lastQuery is what n/N repeat after submission.
@@ -77,6 +78,12 @@ type rawLogState struct {
 	// entry, so an empty scoped pane is the facet filter's doing and says so
 	// (see renderRawLog).
 	scope []int
+}
+
+type rawMatch struct {
+	entry int
+	line  int
+	text  literalPosition
 }
 
 // TopEntry reports the index into m.log.Entries currently at the top of the
@@ -272,6 +279,7 @@ func (m *Model) reconcileRawCursor() {
 // position the search started from, and scrolling has moved it.
 func (m *Model) scrollRawLog(delta int) {
 	m.raw.notFound = false
+	m.raw.match = nil
 	if len(m.log.Entries) == 0 {
 		m.raw.top, m.raw.topLine = 0, 0
 		return
@@ -495,6 +503,8 @@ func rawLogMaxColumn(lines []string, w int) int {
 }
 
 func (m *Model) scrollRawLogHorizontally(delta int) {
+	m.raw.notFound = false
+	m.raw.match = nil
 	w := m.rawLogViewportWidth()
 	bodyH := paneBodyHeight(workbenchPaneHeight(m.height))
 	limit := rawLogMaxColumn(m.rawLogLines(bodyH), w)
@@ -512,9 +522,8 @@ func (m *Model) rawLogViewportWidth() int {
 // searchAgain repeats the last submitted search, forward for n or backward
 // for N. It is a no-op until a search has been run at least once.
 //
-// It searches from the entry AFTER the one at the top of the pane, since the
-// top entry is where the previous match landed: including it would make n
-// return that same match for ever.
+// A recorded match is an exclusive anchor, so repeated searches can visit
+// another occurrence on the same physical line before moving through the log.
 func (m *Model) searchAgain(direction int) {
 	if m.raw.lastQuery == "" {
 		return
@@ -531,19 +540,16 @@ func (m *Model) searchAgain(direction int) {
 // it -- the same trade this project makes wherever a simpler synchronous
 // read is fast enough for the log sizes that actually exist.
 //
-// It scans from start in the given direction, honouring the same filter
-// renderRawLog does, and moves the raw log's top entry to the first match.
-// Whether start itself counts as a candidate is includeStart's to say; see
-// below.
+// It scans physical lines from start in the given direction, honouring the same
+// filter renderRawLog does, and moves the viewport to the first visible-text
+// occurrence.
 // It does not wrap around either end of the log; reaching an end without a
 // match leaves the position unchanged.
 //
-// includeStart says whether the entry AT start counts as a candidate. A
-// newly submitted search includes it: the user can see that entry on the
-// pane's first line -- Enter on a slow call puts it there -- and a query for
-// text sitting on that very line must find it rather than report "pattern
-// not found". n and N exclude it, or they would return the match already
-// shown for ever instead of advancing.
+// includeStart marks a newly submitted search. It discards the previous match
+// and includes the visible line and horizontal column. A repeated search uses
+// its recorded occurrence as an exclusive anchor; without one, it begins
+// inclusively at the visible position.
 //
 // It matches against the same ANSI-stripped text renderRawLog puts on
 // screen, not the entry's original bytes: an escape sequence sitting inside
@@ -562,53 +568,76 @@ func (m *Model) searchFrom(start int, forward, includeStart bool) bool {
 	if m.raw.lastQuery == "" {
 		return false
 	}
-	f := m.filter()
-	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
-
-	if !includeStart {
-		if forward {
-			start++
-		} else {
-			start--
-		}
+	if includeStart {
+		m.raw.match = nil
 	}
+	if len(m.log.Entries) == 0 {
+		return false
+	}
+	visible := m.rawLogVisible()
+	entryIndex := start
+	lineIndex := m.raw.topLine
+	column := min(m.raw.column, rawLogMaxColumn(m.rawLogLines(paneBodyHeight(workbenchPaneHeight(m.height))), m.rawLogViewportWidth()))
+	var anchor *literalPosition
+	if !includeStart && m.raw.match != nil {
+		entryIndex = m.raw.match.entry
+		lineIndex = m.raw.match.line
+		anchor = &m.raw.match.text
+		column = -1
+	}
+
 	var scratch []byte
 	if forward {
-		for i, ok := m.nextRawEntry(start); ok; i, ok = m.nextRawEntry(i + 1) {
-			e := m.log.Entries[i]
-			if !entryVisible(f, compProviders, e) {
+		for i, ok := m.nextRawEntry(entryIndex); ok; i, ok = m.nextRawEntry(i + 1) {
+			if !visible(i) {
 				continue
 			}
-			var plain string
-			plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
-			if strings.Contains(plain, m.raw.lastQuery) {
-				// The whole pair, since a position is a LINE: left at the
-				// offset the reader had scrolled to, a match on a shorter
-				// entry is skipped by renderRawLog altogether and one on a
-				// taller entry opens above the matched text -- a search
-				// reported as found over a pane that does not hold the
-				// pattern.
-				m.raw.top, m.raw.topLine, m.raw.column = i, 0, 0
-				return true
+			lines := m.entryLines(m.log.Entries[i])
+			firstLine := 0
+			if i == entryIndex {
+				firstLine = lineIndex
+			}
+			for j := firstLine; j < len(lines); j++ {
+				lineAnchor, lineColumn := (*literalPosition)(nil), -1
+				if i == entryIndex && j == lineIndex {
+					lineAnchor, lineColumn = anchor, column
+				}
+				plain, nextScratch := logfmt.StripANSI(lines[j], scratch)
+				scratch = nextScratch
+				display := logfmt.DisplayText(plain)
+				p, ok := findLiteral(display, m.raw.lastQuery, true, lineAnchor, lineColumn)
+				if ok {
+					m.raw.top, m.raw.topLine, m.raw.column = i, j, p.column
+					m.raw.match = &rawMatch{entry: i, line: j, text: p}
+					return true
+				}
 			}
 		}
 		return false
 	}
-	for i, ok := m.prevRawEntry(start); ok; i, ok = m.prevRawEntry(i - 1) {
-		e := m.log.Entries[i]
-		if !entryVisible(f, compProviders, e) {
+	for i, ok := m.prevRawEntry(entryIndex); ok; i, ok = m.prevRawEntry(i - 1) {
+		if !visible(i) {
 			continue
 		}
-		var plain string
-		plain, scratch = logfmt.StripANSI(string(m.log.Bytes(e)), scratch)
-		if strings.Contains(plain, m.raw.lastQuery) {
-			// The whole pair, since a position is a LINE: left at the offset
-			// the reader had scrolled to, a match on a shorter entry is
-			// skipped by renderRawLog altogether and one on a taller entry
-			// opens above the matched text -- a search reported as found
-			// over a pane that does not hold the pattern.
-			m.raw.top, m.raw.topLine, m.raw.column = i, 0, 0
-			return true
+		lines := m.entryLines(m.log.Entries[i])
+		lastLine := len(lines) - 1
+		if i == entryIndex {
+			lastLine = lineIndex
+		}
+		for j := lastLine; j >= 0; j-- {
+			lineAnchor, lineColumn := (*literalPosition)(nil), -1
+			if i == entryIndex && j == lineIndex {
+				lineAnchor, lineColumn = anchor, column
+			}
+			plain, nextScratch := logfmt.StripANSI(lines[j], scratch)
+			scratch = nextScratch
+			display := logfmt.DisplayText(plain)
+			p, ok := findLiteral(display, m.raw.lastQuery, false, lineAnchor, lineColumn)
+			if ok {
+				m.raw.top, m.raw.topLine, m.raw.column = i, j, p.column
+				m.raw.match = &rawMatch{entry: i, line: j, text: p}
+				return true
+			}
 		}
 	}
 	return false

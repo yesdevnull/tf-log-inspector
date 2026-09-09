@@ -92,7 +92,7 @@ func TestRawLogHorizontalScrollPreservesUnicodeAndEscapedControls(t *testing.T) 
 	}
 }
 
-func TestRawLogSearchArrowsEditQueryAndSearchRestoresLineStart(t *testing.T) {
+func TestRawLogSearchArrowsEditQueryWithoutMovingTheVisibleStart(t *testing.T) {
 	m := horizontalLog(t, "0123456789abcdefghijklmnopqrst")
 	for i := 0; i < 8; i++ {
 		m.Update(tea.KeyMsg{Type: tea.KeyRight})
@@ -105,8 +105,11 @@ func TestRawLogSearchArrowsEditQueryAndSearchRestoresLineStart(t *testing.T) {
 		t.Fatal("search cursor movement scrolled the log")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if got := unstyled(m.renderRawLog(20, 5)); !strings.HasPrefix(got, "012") {
-		t.Fatalf("successful search left its line start hidden: %q", got)
+	if !m.raw.notFound {
+		t.Fatal("forward search found text left of the visible column")
+	}
+	if got := m.renderRawLog(20, 5); got != before {
+		t.Fatalf("failed search moved the visible start: %q", unstyled(got))
 	}
 }
 
