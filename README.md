@@ -172,8 +172,14 @@ HTTP/JSON bodies, including escaped JSON strings:
   objects retain their structure and are inspected recursively; null and empty
   values remain unchanged. This includes escaped and unquoted
   `http.response.body` dumps and JSON objects or arrays logged directly after
-  a provider prefix. Malformed provider JSON bodies and JSON fragmented across
-  HTTP chunks are rejected without output.
+  a provider prefix. Timestamped provider JSON fragments are reassembled by
+  exact provider component, including when different providers interleave.
+  Rewritten values can move into an earlier fragment; physical record order
+  and headers are preserved. Incomplete, malformed or observably ambiguous
+  provider messages and JSON fragmented across HTTP chunks are rejected
+  without output. Fragments from simultaneous messages within the same
+  provider cannot be distinguished when the log supplies no message identity;
+  such unobservable interleaving is unsupported.
 
 For additional identifiers, use `--scrub-values private-values.txt` with one
 literal UTF-8 value per line. Empty lines are ignored and line terminators

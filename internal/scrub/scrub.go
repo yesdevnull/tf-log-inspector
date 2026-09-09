@@ -19,7 +19,7 @@ type Result struct {
 
 // Scrub replaces identifying values using one mapping for the entire input.
 func Scrub(data []byte, extra []string) (Result, error) {
-	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+	if bytes.IndexByte(data, 0) >= 0 {
 		return Result{}, fmt.Errorf("input at byte 0: unsupported encoding")
 	}
 	s := &session{candidates: make(map[string]*candidate), counts: make(map[string]int)}
@@ -30,11 +30,18 @@ func Scrub(data []byte, extra []string) (Result, error) {
 		s.discover(value, "explicit", false)
 	}
 	input := string(data)
-	views := s.parseLines(input)
+	physical, logical, fragments, masked, err := s.parseProviderFragments(input)
+	if err != nil {
+		return Result{}, err
+	}
+	views := append(append([]*view(nil), physical...), logical...)
 	if s.parseErr != nil {
 		return Result{}, s.parseErr
 	}
 	s.sources = make(map[string]bool)
+	for _, token := range sourceToken.FindAllString(input, -1) {
+		s.sources[token] = true
+	}
 	var reserve func(*view)
 	reserve = func(v *view) {
 		for _, token := range sourceToken.FindAllString(v.text, -1) {
@@ -63,16 +70,11 @@ func Scrub(data []byte, extra []string) (Result, error) {
 	if err := s.ensureDistinctResources(views); err != nil {
 		return Result{}, err
 	}
-	var out strings.Builder
-	for _, v := range views {
-		text, err := s.render(v)
-		if err != nil {
-			return Result{}, err
-		}
-		out.WriteString(text)
+	output, renderedMasked, err := s.renderProviderFragments(physical, logical, fragments)
+	if err != nil {
+		return Result{}, err
 	}
-	output := out.String()
-	if err := s.validate(input, output); err != nil {
+	if err := s.validate(masked, renderedMasked); err != nil {
 		return Result{}, err
 	}
 	return Result{Data: []byte(output), Replacements: s.counts, Unsupported: s.unsupported}, nil

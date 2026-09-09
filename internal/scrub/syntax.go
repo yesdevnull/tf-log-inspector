@@ -36,6 +36,7 @@ type view struct {
 	numeric          []region
 	allowed          []region
 	children         []quoted
+	cuts             []sourceCut
 }
 
 func (v *view) protect(start, end int) { v.protected = append(v.protected, region{start, end}) }
@@ -74,9 +75,14 @@ func providerJSONStart(text string) int {
 }
 
 func (s *session) parseLines(text string) []*view {
+	return s.parseBodyLines(text, false)
+}
+
+// Embedded response text cannot confer logger metadata or lifecycle exemptions.
+func (s *session) parseBodyLines(text string, responseContext bool) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
-	responseJSON := false
+	responseJSON := responseContext
 	chunked := false
 	chunkEnd := 0
 	for line, start := 1, 0; start < len(text); line++ {
@@ -139,7 +145,7 @@ func (s *session) parseLines(text string) []*view {
 			}
 		}
 		h := logfmt.ParseHeader(strings.TrimRight(v.text, "\r\n"))
-		if h.HasTS {
+		if h.HasTS && !responseContext {
 			metadata, body, httpHeaders = true, false, false
 			responseJSON = strings.HasPrefix(h.Msg, "HTTP Response")
 			chunked = false
@@ -160,7 +166,7 @@ func (s *session) parseLines(text string) []*view {
 		lifecycle := !responseJSON && lifecycleEnvelope(trimmed)
 		if strings.HasPrefix(trimmed, "HTTP/") {
 			responseJSON = true
-		} else if httpRequestLine(trimmed) {
+		} else if httpRequestLine(trimmed) && !responseContext {
 			responseJSON = false
 		}
 		if httpRequestLine(trimmed) || strings.HasPrefix(trimmed, "HTTP/") || strings.HasPrefix(strings.ToLower(trimmed), "content-type:") || strings.HasPrefix(strings.ToLower(trimmed), "content-length:") {
@@ -343,9 +349,9 @@ func lifecycleEnvelope(text string) bool {
 func (s *session) parseView(v *view, metadata, lifecycle bool) {
 	trimmed := strings.TrimSpace(v.text)
 	first, _, _ := strings.Cut(trimmed, "\n")
-	if v.whole && (strings.HasPrefix(first, "HTTP/") || httpRequestLine(first)) && strings.Contains(trimmed, "\n") {
+	if v.whole && (v.responseJSON || strings.HasPrefix(first, "HTTP/") || httpRequestLine(first)) && strings.Contains(trimmed, "\n") && !json.Valid([]byte(trimmed)) {
 		pos := 0
-		for _, child := range s.parseLines(v.text) {
+		for _, child := range s.parseBodyLines(v.text, v.responseJSON) {
 			v.children = append(v.children, quoted{region{pos, pos + len(child.text)}, child, true})
 			pos += len(child.text)
 		}

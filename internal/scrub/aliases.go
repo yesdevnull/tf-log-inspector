@@ -413,7 +413,15 @@ func (s *session) render(v *view) (string, error) {
 		}
 	}
 	var matches []*candidate
+	cutIndex := 0
+	mapCuts := func(source, output int) {
+		for cutIndex < len(v.cuts) && v.cuts[cutIndex].source <= source {
+			v.cuts[cutIndex].output = output
+			cutIndex++
+		}
+	}
 	for i, childIndex := 0, 0; i < len(v.text); {
+		mapCuts(i, out.Len())
 		if _, ok := positions[i]; ok {
 			positions[i] = out.Len()
 		}
@@ -503,9 +511,11 @@ func (s *session) render(v *view) (string, error) {
 			childIndex++
 			continue
 		}
-		out.WriteByte(v.text[i])
-		i++
+		_, size := utf8.DecodeRuneInString(v.text[i:])
+		out.WriteString(v.text[i : i+size])
+		i += size
 	}
+	mapCuts(len(v.text), out.Len())
 	if s.collectResources {
 		if _, ok := positions[len(v.text)]; ok {
 			positions[len(v.text)] = out.Len()
