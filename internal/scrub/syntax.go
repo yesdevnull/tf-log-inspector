@@ -402,6 +402,12 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			i = end
 			continue
 		}
+		// Masked provider bodies can contain long whitespace runs. Consume
+		// each run once instead of searching its remaining suffix per byte.
+		if space(v.text[i]) {
+			i = skipSpace(v.text, i)
+			continue
+		}
 		if v.text[i] == '"' {
 			end, decoded, ok := readString(v.text, i)
 			if !ok {

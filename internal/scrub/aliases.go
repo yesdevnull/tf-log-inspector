@@ -413,6 +413,7 @@ func (s *session) render(v *view) (string, error) {
 		}
 	}
 	var matches []*candidate
+	protected := indexRegions(v.protected)
 	cutIndex := 0
 	mapCuts := func(source, output int) {
 		for cutIndex < len(v.cuts) && v.cuts[cutIndex].source <= source {
@@ -439,7 +440,7 @@ func (s *session) render(v *view) (string, error) {
 			if overlaps(v.nulls, i, end) {
 				continue
 			}
-			if overlaps(v.protected, i, end) && !exactRegion(v.wholeValues, i, end) {
+			if protected.overlaps(i, end) && !exactRegion(v.wholeValues, i, end) {
 				if c.category == "secret" || c.category == "explicit" {
 					return "", fmt.Errorf("%s at line %d: preserved syntax conflict", c.category, v.line)
 				}
@@ -479,7 +480,7 @@ func (s *session) render(v *view) (string, error) {
 			if containsRegion(v.numeric, child.start, child.end) && !exactRegion(child.view.numeric, 0, len(child.view.text)) {
 				child.view.numeric = append(child.view.numeric, region{0, len(child.view.text)})
 			}
-			if containsRegion(v.protected, child.start, child.end) {
+			if protected.contains(child.start, child.end) {
 				child.view.protect(0, len(child.view.text))
 				child.view.mandatory = true
 			}
@@ -585,6 +586,31 @@ func containsRegion(regions []region, start, end int) bool {
 	}
 	return false
 }
+
+// Sorted starts and maximum preceding ends answer protection queries without
+// rescanning every JSON delimiter for each child. Keep overlapping regions
+// separate: a span covered by their union need not fit inside any one region.
+type regionIndex []region
+
+func indexRegions(regions []region) regionIndex {
+	index := append(regionIndex(nil), regions...)
+	sort.Slice(index, func(i, j int) bool { return index[i].start < index[j].start })
+	for i := 1; i < len(index); i++ {
+		index[i].end = max(index[i].end, index[i-1].end)
+	}
+	return index
+}
+
+func (index regionIndex) contains(start, end int) bool {
+	i := sort.Search(len(index), func(i int) bool { return index[i].start > start })
+	return i > 0 && index[i-1].end >= end
+}
+
+func (index regionIndex) overlaps(start, end int) bool {
+	i := sort.Search(len(index), func(i int) bool { return index[i].start >= end })
+	return i > 0 && index[i-1].end > start
+}
+
 func word(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' }
 func boundaries(text string, start, end int) bool {
 	first, _ := utf8.DecodeRuneInString(text[start:end])
