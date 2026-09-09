@@ -52,11 +52,9 @@ func viewUnsupported(v *view) []unsupportedInput {
 // readString accepts JSON and Go string escapes, so mapping accepts both too.
 func quotedSourceOffset(raw string, offset int) int {
 	for i, decoded := 1, 0; i < len(raw)-1; {
-		end := i + 1
 		_, width := utf8.DecodeRuneInString(raw[i:])
-		if raw[i] != '\\' {
-			end = i + width
-		} else {
+		end := i + width
+		if raw[i] == '\\' {
 			end = i + 2
 			switch raw[i+1] {
 			case 'u':

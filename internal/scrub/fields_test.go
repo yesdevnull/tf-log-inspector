@@ -173,9 +173,7 @@ func TestRequestMetadataRequiresParserFieldSyntax(t *testing.T) {
 					}
 					before := logfmt.ParseFields(assignment+value, nil)
 					outLine := strings.TrimSpace(strings.Split(strings.TrimSuffix(string(got.Data), "\n"), "\n")[strings.Count(prefix, "\n")])
-					if strings.HasPrefix(outLine, header) {
-						outLine = strings.TrimPrefix(outLine, header)
-					}
+					outLine = strings.TrimPrefix(outLine, header)
 					after := logfmt.ParseFields(outLine, nil)
 					beforeID, beforeOK := before.Get("tf_req_id")
 					afterID, afterOK := after.Get("tf_req_id")

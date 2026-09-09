@@ -76,6 +76,32 @@ For a local plan:
 
     TF_LOG=TRACE TF_LOG_PATH=plan.log terraform plan
 
+## Development checks
+
+GitHub CI runs on pull requests and pushes to `main`, using the Go version
+declared in `go.mod`. It runs the full test suite with race detection on Linux
+and macOS, checks formatting and module consistency, verifies dependency
+checksums, and runs golangci-lint 2.13.2 with the repository configuration.
+
+Run the same checks locally from the repository root:
+
+    gofmt -d .
+    go mod tidy -diff
+    go mod verify
+    golangci-lint run --timeout=5m
+    go test -race -count=1 ./...
+    go build ./...
+
+Formatting is clean when `gofmt -d .` prints nothing; CI fails if it finds a
+diff. Fix formatting with `gofmt -w` on the affected files. The linter includes
+`govet`, `staticcheck`, `errcheck`, `ineffassign` and `unused`; optional
+Staticcheck quick-fix style suggestions are disabled.
+
+CI also cross-compiles `tfli` for Linux and macOS on amd64 and arm64 with cgo
+disabled. Each workflow artefact contains a `tfli.tar.gz` archive that preserves
+the binary's executable permission. Artefacts are retained for seven days.
+These are development builds; version-tag publishing is not configured.
+
 ## Usage
 
     tfli plan.log

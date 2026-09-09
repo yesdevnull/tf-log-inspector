@@ -209,11 +209,6 @@ const (
 	paneRuleBottomSep = "─┴─"
 )
 
-// paneTitleLead is the rule drawn before a pane's name in the top rule. Two
-// columns, so a name reads as inset INTO the rule rather than as a caption
-// sitting to the left of one.
-const paneTitleLead = "──"
-
 // defaultWidth and defaultHeight size the view before the first
 // tea.WindowSizeMsg arrives -- bubbletea does not report a size until the
 // program has actually started, but View must still render something

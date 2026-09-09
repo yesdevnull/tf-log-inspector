@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -10,6 +11,34 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
+
+func TestRunReportsOutputWriteFailures(t *testing.T) {
+	for _, mode := range []string{"version", "scrub"} {
+		t.Run(mode, func(t *testing.T) {
+			closed, err := os.CreateTemp(t.TempDir(), "closed")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := closed.Close(); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"--version"}
+			output := filepath.Join(t.TempDir(), "scrubbed.log")
+			if mode == "scrub" {
+				args = []string{"--scrub", "-o", output, "../../testdata/provider-rpc.log"}
+			}
+			if err := run(args, closed, closed); !errors.Is(err, os.ErrClosed) {
+				t.Fatalf("want closed output error, got %v", err)
+			}
+			if mode == "scrub" {
+				data, err := os.ReadFile(output)
+				if err != nil || len(data) == 0 {
+					t.Fatalf("summary failure must preserve completed output: %v", err)
+				}
+			}
+		})
+	}
+}
 
 func TestCommandDiagnosticsCannotControlTheTerminal(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tfli")
