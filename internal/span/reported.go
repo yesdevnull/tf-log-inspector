@@ -1,6 +1,7 @@
 package span
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -55,8 +56,16 @@ type ReportedBuilder struct {
 	// a zero-value builder stays usable.
 	Comps *logfmt.Interner
 
-	spans []Span
-	kept  dedupCache // dedup cache for retained RPC/Provider/ResourceType strings
+	spans     []Span
+	kept      dedupCache // dedup cache for retained RPC/Provider/ResourceType strings
+	evidence  TimingEvidence
+	clock     logfmt.ClockPosition
+	clockOrd  uint32
+	haveClock bool
+}
+
+func (b *ReportedBuilder) EntryClock(ord uint32, position logfmt.ClockPosition) {
+	b.clockOrd, b.clock, b.haveClock = ord, position, true
 }
 
 // NewReportedBuilder creates a ReportedBuilder with the given Comps interner.
@@ -99,22 +108,42 @@ func (b *ReportedBuilder) providerAddr(addr string, e logfmt.Entry) string {
 
 // Entry implements logfmt.Sink.
 func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {
+	position := logfmt.ClockPosition{Status: logfmt.TimestampMissing}
+	if b.haveClock && b.clockOrd == ord {
+		position = b.clock
+	}
+	b.haveClock = false
 	if !strings.HasPrefix(msg, responseMarker) {
 		return
 	}
+	b.evidence.Records++
 	raw, ok := f.Get("tf_req_duration_ms")
 	if !ok {
+		b.reject("duration_missing", ord)
+		return
+	}
+	if strings.HasPrefix(raw, "-") {
+		b.reject("duration_negative", ord)
 		return
 	}
 	ms64, err := strconv.ParseUint(raw, 10, 32)
 	if err != nil {
+		if errors.Is(err, strconv.ErrRange) {
+			b.reject("duration_out_of_range", ord)
+		} else {
+			b.reject("duration_invalid", ord)
+		}
 		return
 	}
 	ms := uint32(ms64)
 
-	start, clamped := uint32(0), true
-	if e.TSms >= ms { // inclusive: an exact-base start is 0, not clamped
-		start, clamped = e.TSms-ms, false
+	start, end, clamped := uint32(0), uint32(0), false
+	if position.Status == logfmt.TimestampValid {
+		end = position.OffsetMs
+		clamped = ms > end
+		if !clamped {
+			start = end - ms
+		}
 	}
 
 	rpc, _ := f.Get("tf_rpc")
@@ -126,18 +155,28 @@ func (b *ReportedBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt
 	}
 
 	b.spans = append(b.spans, Span{
-		Entry:        ord,
-		ReqID:        reqIDOrNone(e.ReqID),
-		StartMs:      start,
-		EndMs:        e.TSms,
-		DurationMs:   ms,
-		StartClamped: clamped,
-		RPC:          b.kept.retain(rpc),
-		Provider:     b.kept.retain(provider),
-		ResourceType: b.kept.retain(resType),
-		Fidelity:     FidelityReported,
+		Entry:           ord,
+		ReqID:           reqIDOrNone(e.ReqID),
+		StartMs:         start,
+		EndMs:           end,
+		DurationMs:      ms,
+		StartClamped:    clamped,
+		TimestampStatus: position.Status,
+		RPC:             b.kept.retain(rpc),
+		Provider:        b.kept.retain(provider),
+		ResourceType:    b.kept.retain(resType),
+		Fidelity:        FidelityReported,
 	})
 }
+
+func (b *ReportedBuilder) reject(reason string, ord uint32) {
+	if b.evidence.Rejected == nil {
+		b.evidence.Rejected = make(map[string]IssueCount)
+	}
+	addIssue(b.evidence.Rejected, reason, ord)
+}
+
+func (b *ReportedBuilder) Evidence() TimingEvidence { return detachedEvidence(b.evidence) }
 
 // Spans returns the spans built so far, in the order they were logged.
 func (b *ReportedBuilder) Spans() []Span { return b.spans }

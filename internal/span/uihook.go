@@ -1,6 +1,7 @@
 package span
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
@@ -19,9 +20,8 @@ import (
 // of this struct's shape, not of code elsewhere remembering not to read
 // them.
 type uiLine struct {
-	Timestamp string  `json:"@timestamp"`
-	Type      string  `json:"type"`
-	Hook      *uiHook `json:"hook"`
+	Type string  `json:"type"`
+	Hook *uiHook `json:"hook"`
 }
 
 type uiHook struct {
@@ -30,8 +30,7 @@ type uiHook struct {
 		ResourceType    string `json:"resource_type"`
 		ImpliedProvider string `json:"implied_provider"`
 	} `json:"resource"`
-	Action  string  `json:"action"`
-	Elapsed float64 `json:"elapsed_seconds"`
+	Action string `json:"action"`
 }
 
 // isCompletionType reports whether t is a UI-hook type carrying a real,
@@ -73,6 +72,7 @@ type UIHookBuilder struct {
 	haveBase  bool
 	backwards uint64 // timestamps earlier than base, clamped to 0 rather than wrapping
 	saturated uint64 // durations that hit math.MaxUint32 rather than overflowing
+	evidence  TimingEvidence
 }
 
 // Entry implements logfmt.Sink as a no-op: UIHookBuilder only cares about
@@ -80,108 +80,189 @@ type UIHookBuilder struct {
 // logfmt.Scan must satisfy Sink.
 func (b *UIHookBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {}
 
-// relativeMs parses ts as RFC3339Nano -- the format Terraform's
-// structured-output stream uses -- and returns its offset in milliseconds
-// from the first successfully parsed timestamp this builder has seen,
-// mirroring how logfmt.Scan establishes its own baseline from the first
-// timestamped hclog entry. A line whose timestamp will not parse yields 0:
-// the duration is the valuable part of a UI-hook span, so a missing offset
-// must not discard the whole span. A timestamp earlier than the base clamps
-// to 0 rather than wrapping the unsigned result, the same rule
-// logfmt.Scan applies to backwards timestamps.
-func (b *UIHookBuilder) relativeMs(ts string) uint32 {
-	t, err := time.Parse(time.RFC3339Nano, ts)
-	if err != nil {
-		return 0
-	}
+// relativePosition places a parsed UI timestamp on this builder's clock.
+// Duration admission is independent of the returned position status.
+func (b *UIHookBuilder) relativePosition(t time.Time) logfmt.ClockPosition {
 	if !b.haveBase {
 		b.base, b.haveBase = t, true
 	}
-	delta := t.Sub(b.base).Milliseconds()
-	switch {
-	case delta < 0:
-		// Concurrent goroutines can emit out of order, the same rationale
-		// logfmt.Scan's own BackwardsTimestamps counter documents. Counted
-		// here, not just clamped, because a silent clamp shortens the
-		// derived UI-hook wall-clock without any visible trace of why.
+	position := logfmt.RelativePosition(t, b.base)
+	if position.Status == logfmt.TimestampBeforeOrigin {
 		b.backwards++
-		return 0
-	case delta > math.MaxUint32:
-		return math.MaxUint32
 	}
-	return uint32(delta)
+	return position
 }
 
 // Structured implements logfmt.StructuredSink.
 func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
-	// Every valid envelope contributes a timestamp. Only completion hooks
-	// use uiHook's schema: action hooks carry an object in hook.action.
+	if !json.Valid([]byte(line)) {
+		addStage(&b.evidence.SyntaxErrors, ord)
+		b.malformed++
+		return
+	}
 	var ul struct {
-		Timestamp string          `json:"@timestamp"`
-		Type      string          `json:"type"`
+		Timestamp json.RawMessage `json:"@timestamp"`
+		Type      json.RawMessage `json:"type"`
 		Hook      json.RawMessage `json:"hook"`
 	}
 	if err := json.Unmarshal([]byte(line), &ul); err != nil {
-		b.malformed++
+		addStage(&b.evidence.SchemaErrors, ord)
 		return
 	}
-
-	endMs := b.relativeMs(ul.Timestamp)
-
-	if !isCompletionType(ul.Type) {
-		return
-	}
-	if len(ul.Hook) == 0 {
-		return
-	}
-	var hook *uiHook
-	if err := json.Unmarshal(ul.Hook, &hook); err != nil {
-		b.malformed++
-		return
-	}
-	if hook == nil || hook.Resource == nil {
-		return
-	}
-
-	// DurationMs is stored, never derived, exactly as tf_req_duration_ms is
-	// for ReportedBuilder: guard against a negative elapsed_seconds (should
-	// not occur, but a stored duration must never be allowed to underflow
-	// the unsigned field) and against overflowing uint32 once scaled to
-	// milliseconds.
-	var durationMs uint32
-	if hook.Elapsed > 0 {
-		scaled := math.Round(hook.Elapsed * 1000)
-		if scaled > math.MaxUint32 {
-			durationMs = math.MaxUint32
-			// Counted, not just clamped: an unmarked saturation is
-			// indistinguishable from a real multi-million-second duration,
-			// and silently poisons any sum (UI-hook total time, the
-			// per-type rollup) it is folded into.
-			b.saturated++
-		} else {
-			durationMs = uint32(scaled)
+	position, timestampSchema := b.timestampPosition(ul.Timestamp)
+	if reason := timestampReason(position.Status); reason != "" {
+		if b.evidence.TimestampIssues == nil {
+			b.evidence.TimestampIssues = make(map[string]IssueCount)
 		}
+		addIssue(b.evidence.TimestampIssues, reason, ord)
 	}
-
-	start, clamped := uint32(0), true
-	if endMs >= durationMs { // inclusive: an exact-base start is 0, not clamped
-		start, clamped = endMs-durationMs, false
+	var typ string
+	typeSchema := len(ul.Type) > 0 && json.Unmarshal(ul.Type, &typ) != nil
+	if timestampSchema || typeSchema {
+		addStage(&b.evidence.SchemaErrors, ord)
+	}
+	if typeSchema || !isCompletionType(typ) {
+		return
+	}
+	b.evidence.Records++
+	if len(ul.Hook) == 0 || bytes.Equal(bytes.TrimSpace(ul.Hook), []byte("null")) {
+		b.reject("duration_missing", ord)
+		return
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(ul.Hook, &fields); err != nil || fields == nil {
+		if !timestampSchema && !typeSchema {
+			addStage(&b.evidence.SchemaErrors, ord)
+		}
+		b.reject("record_schema_invalid", ord)
+		return
+	}
+	hook, schema := parseUIHook(fields)
+	if schema && !timestampSchema && !typeSchema {
+		addStage(&b.evidence.SchemaErrors, ord)
+	}
+	durationMs, saturated, rejection := uiDuration(fields["elapsed_seconds"])
+	if rejection != "" {
+		b.reject(rejection, ord)
+		return
+	}
+	if saturated {
+		b.saturated++
+	}
+	start, end, clamped := positionedDuration(position, durationMs, saturated)
+	var address, provider, resourceType string
+	if hook.Resource != nil {
+		address = strings.Clone(hook.Resource.Addr)
+		provider = b.kept.retain(hook.Resource.ImpliedProvider)
+		resourceType = b.kept.retain(hook.Resource.ResourceType)
 	}
 
 	b.spans = append(b.spans, Span{
-		Entry:        ord,
-		ReqID:        0,
-		StartMs:      start,
-		EndMs:        endMs,
-		DurationMs:   durationMs,
-		StartClamped: clamped,
-		RPC:          b.kept.retain(hook.Action),
-		Provider:     b.kept.retain(hook.Resource.ImpliedProvider),
-		ResourceType: b.kept.retain(hook.Resource.ResourceType),
-		Address:      strings.Clone(hook.Resource.Addr),
-		Fidelity:     FidelityUIReported,
+		Entry:             ord,
+		ReqID:             0,
+		StartMs:           start,
+		EndMs:             end,
+		DurationMs:        durationMs,
+		StartClamped:      clamped,
+		TimestampStatus:   position.Status,
+		DurationSaturated: saturated,
+		RPC:               b.kept.retain(hook.Action),
+		Provider:          provider,
+		ResourceType:      resourceType,
+		Address:           address,
+		Fidelity:          FidelityUIReported,
 	})
 }
+
+func (b *UIHookBuilder) timestampPosition(raw json.RawMessage) (logfmt.ClockPosition, bool) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return logfmt.ClockPosition{Status: logfmt.TimestampMissing}, false
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return logfmt.ClockPosition{Status: logfmt.TimestampInvalid}, true
+	}
+	if value == "" {
+		return logfmt.ClockPosition{Status: logfmt.TimestampMissing}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return logfmt.ClockPosition{Status: logfmt.TimestampInvalid}, false
+	}
+	return b.relativePosition(t), false
+}
+
+func uiDuration(raw json.RawMessage) (uint32, bool, string) {
+	if len(raw) == 0 {
+		return 0, false, "duration_missing"
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return 0, false, "duration_null"
+	}
+	var value any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err != nil {
+		return 0, false, "duration_invalid"
+	}
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0, false, "duration_invalid"
+	}
+	literal := string(number)
+	mantissa := strings.SplitN(strings.ToLower(literal), "e", 2)[0]
+	if strings.HasPrefix(mantissa, "-") && strings.ContainsAny(mantissa, "123456789") {
+		return 0, false, "duration_negative"
+	}
+	seconds, err := number.Float64()
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return 0, false, "duration_invalid"
+	}
+	if seconds < 0 {
+		return 0, false, "duration_negative"
+	}
+	scaled := math.Round(seconds * 1000)
+	if scaled > math.MaxUint32 {
+		return math.MaxUint32, true, ""
+	}
+	return uint32(scaled), false, ""
+}
+
+func parseUIHook(fields map[string]json.RawMessage) (uiHook, bool) {
+	var hook uiHook
+	schema := false
+	if raw := fields["action"]; len(raw) > 0 && json.Unmarshal(raw, &hook.Action) != nil {
+		schema = true
+	}
+	if raw := fields["resource"]; len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		if err := json.Unmarshal(raw, &hook.Resource); err != nil {
+			schema = true
+		}
+	}
+	return hook, schema
+}
+
+func positionedDuration(position logfmt.ClockPosition, duration uint32, saturated bool) (uint32, uint32, bool) {
+	if position.Status != logfmt.TimestampValid || saturated {
+		return 0, 0, false
+	}
+	clamped := duration > position.OffsetMs
+	if clamped {
+		return 0, position.OffsetMs, true
+	}
+	return position.OffsetMs - duration, position.OffsetMs, false
+}
+
+func (b *UIHookBuilder) reject(reason string, ord uint32) {
+	if b.evidence.Rejected == nil {
+		b.evidence.Rejected = make(map[string]IssueCount)
+	}
+	addIssue(b.evidence.Rejected, reason, ord)
+}
+
+func (b *UIHookBuilder) Evidence() TimingEvidence { return detachedEvidence(b.evidence) }
+
+func (b *UIHookBuilder) Origin() (time.Time, bool) { return b.base, b.haveBase }
 
 // Spans returns the spans built so far, in the order their lines appeared.
 func (b *UIHookBuilder) Spans() []Span { return b.spans }

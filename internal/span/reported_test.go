@@ -288,6 +288,7 @@ func TestReportedSpanCopiesTheEntryRequestId(t *testing.T) {
 	var comps, reqIDs logfmt.Interner
 	b := NewReportedBuilder(&comps)
 	e := logfmt.Entry{TSms: 100, ReqID: reqIDs.Intern("abc123")}
+	b.EntryClock(0, logfmt.ClockPosition{OffsetMs: 100, Status: logfmt.TimestampValid})
 	b.Entry(0, e, "Received downstream response",
 		logfmt.ParseFields("tf_req_duration_ms=5 tf_rpc=ReadResource tf_provider_addr=p tf_resource_type=t", nil))
 
@@ -309,6 +310,7 @@ func TestReportedSpanCopiesTheEntryRequestId(t *testing.T) {
 func TestReportedSpanTreatsAnOverflowedIdAsAbsent(t *testing.T) {
 	var comps logfmt.Interner
 	b := NewReportedBuilder(&comps)
+	b.EntryClock(0, logfmt.ClockPosition{OffsetMs: 100, Status: logfmt.TimestampValid})
 	b.Entry(0, logfmt.Entry{TSms: 100, ReqID: logfmt.OverflowID}, "Received downstream response",
 		logfmt.ParseFields("tf_req_duration_ms=5 tf_rpc=ReadResource tf_provider_addr=p tf_resource_type=t", nil))
 

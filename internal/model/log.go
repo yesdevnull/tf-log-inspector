@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
@@ -34,9 +35,12 @@ type Log struct {
 	// StartMs/EndMs sit on different zero points -- see the doc comment on
 	// span.Span -- so a single merged slice would invite exactly the
 	// cross-timeline comparison that produces silently wrong orderings.
-	RPCSpans []span.Span
-	UISpans  []span.Span
-	Caps     span.Capabilities
+	RPCSpans    []span.Span
+	UISpans     []span.Span
+	RPCEvidence span.TimingEvidence
+	UIEvidence  span.TimingEvidence
+	UIOrigin    time.Time
+	Caps        span.Capabilities
 
 	// UISaturatedDurations counts UI timings capped at the storage limit.
 	// Consumers must qualify these values and their totals as lower bounds.
@@ -107,18 +111,24 @@ func Load(path string) (*Log, error) {
 		attribs = attrib.Correlate(rpcSpans, stats.FirstTS, ctxs)
 	}
 
-	return &Log{
+	result := &Log{
 		Data:                 data,
 		Entries:              idx.entries,
 		Comps:                comps,
 		Stats:                stats,
 		RPCSpans:             rpcSpans,
 		UISpans:              ub.Spans(),
+		RPCEvidence:          rb.Evidence(),
+		UIEvidence:           ub.Evidence(),
 		UISaturatedDurations: ub.Saturated(),
 		Caps:                 sniffer.Report(),
 		Contexts:             ctxs,
 		Attribs:              attribs,
-	}, nil
+	}
+	if origin, ok := ub.Origin(); ok {
+		result.UIOrigin = origin
+	}
+	return result, nil
 }
 
 // Bytes returns every line of an entry, including its continuations.

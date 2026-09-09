@@ -1,6 +1,8 @@
 // Package span turns parsed log entries into timed provider operations.
 package span
 
+import "github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+
 // Fidelity records how a span's duration was established. It is surfaced in
 // the UI so an inferred number is never mistaken for a measured one.
 type Fidelity uint8
@@ -96,15 +98,32 @@ type Span struct {
 	StartMs uint32 // clamped at zero; see StartClamped
 	EndMs   uint32
 
-	DurationMs   uint32 // as reported by the provider
-	StartClamped bool
-	RPC          string
-	Provider     string
-	ResourceType string
+	DurationMs        uint32 // as reported by the provider
+	StartClamped      bool
+	TimestampStatus   logfmt.TimestampStatus
+	DurationSaturated bool
+	RPC               string
+	Provider          string
+	ResourceType      string
 	// Address is the Terraform resource address (e.g.
 	// module.m["key"].aws_instance.foo). It is populated only for spans
 	// built from Terraform's structured-output UI hook stream, where the
 	// address is the only per-resource identifier available.
 	Address  string
 	Fidelity Fidelity
+}
+
+func (s Span) HasPosition() bool {
+	return s.TimestampStatus == logfmt.TimestampValid && !s.DurationSaturated
+}
+
+func (s Span) PositionReasons() []string {
+	var reasons []string
+	if reason := timestampReason(s.TimestampStatus); reason != "" {
+		reasons = append(reasons, reason)
+	}
+	if s.DurationSaturated {
+		reasons = append(reasons, "duration_saturated")
+	}
+	return reasons
 }

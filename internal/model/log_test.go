@@ -75,6 +75,27 @@ func TestLoadBuildsBothSpanKinds(t *testing.T) {
 	}
 }
 
+func TestLoadRetainsTimingEvidenceAndUIOrigin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "evidence.log")
+	input := "{\"@level\":\"info\",\"@timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"version\"}\n" +
+		"{\"@level\":\"info\",\"@timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"apply_complete\",\"hook\":{\"elapsed_seconds\":0}}\n" +
+		"2026-01-01T00:00:02.000Z [TRACE] p: Received downstream response\n"
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.UIOrigin.IsZero() || l.UIEvidence.Records != 1 || l.RPCEvidence.Records != 1 || l.RPCEvidence.Rejected["duration_missing"].Count != 1 {
+		t.Fatalf("origin/evidence = %v, %+v, %+v", l.UIOrigin, l.UIEvidence, l.RPCEvidence)
+	}
+	if string(l.Data) != input || len(l.Entries) != 3 || l.UISaturatedDurations != 0 {
+		t.Fatalf("load retention changed: entries=%d data=%q saturated=%d", len(l.Entries), l.Data, l.UISaturatedDurations)
+	}
+}
+
 func TestLoadNamesTheFileOnError(t *testing.T) {
 	_, err := Load("no-such-file.log")
 	if err == nil {
