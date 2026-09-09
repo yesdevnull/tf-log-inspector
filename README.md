@@ -173,7 +173,9 @@ retain their grouping labels; unknown provider identities are scrubbed.
 
 Conflicts with preserved syntax or metadata, including changes to fields
 visible through the inspector's header parsing window, reject the input
-before output creation. Invalid UTF-8 and unsupported binary input also
+before output creation. Verifiable chunked HTTP bodies have their chunk sizes
+updated after replacement. Provider dumps with already-invalid wire sizes,
+such as pretty-printed JSON bodies, are treated as log text. Invalid UTF-8 and unsupported binary input also
 fail. Malformed structured/quoted input is handled as text where possible
 and counted. Stderr reports aggregate replacement and unsupported-input
 counts, plus a review reminder; stdout contains no log content.

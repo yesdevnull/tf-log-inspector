@@ -26,6 +26,11 @@ func (s *session) ensureDistinctResources(views []*view) error {
 		value string
 		key   bool
 	}
+	type collisionKey struct {
+		source, rendered string
+		key              bool
+	}
+	retried := make(map[collisionKey]bool)
 	for {
 		emitted, err := s.renderResources(views)
 		if err != nil {
@@ -41,9 +46,11 @@ func (s *session) ensureDistinctResources(views []*view) error {
 			key := identityKey{identity.rendered, identity.key}
 			previous, exists := seen[key]
 			if sources[key] || exists && previous != identity.source {
-				if len(identity.used) == 0 {
+				failed := collisionKey{identity.source, identity.rendered, identity.key}
+				if len(identity.used) == 0 || retried[failed] {
 					return fmt.Errorf("name at line %d: resource syntax collision", identity.line)
 				}
+				retried[failed] = true
 				if s.blocked == nil {
 					s.blocked = make(map[string]bool)
 				}

@@ -391,8 +391,20 @@ func (s *session) render(v *view) (string, error) {
 	if c := s.candidates[v.text]; v.whole && c != nil && v.mandatory && (c.category == "secret" || c.category == "explicit") {
 		return "", fmt.Errorf("%s at line %d: preserved syntax conflict", c.category, v.line)
 	}
+	for _, key := range v.keys {
+		if v.text[key.start] == '"' {
+			_, decoded, ok := readString(v.text, key.start)
+			if ok && s.protectedIdentifier(decoded, []region{{0, len(decoded)}}) {
+				return "", fmt.Errorf("identifier at line %d: field key conflict", v.line)
+			}
+		}
+	}
 	var out strings.Builder
 	positions := make(map[int]int)
+	if v.chunk != nil {
+		positions[v.chunk.headerLength] = -1
+		positions[v.chunk.headerLength+v.chunk.dataLength] = -1
+	}
 	var edits []resourceEdit
 	if s.collectResources {
 		for _, address := range v.addresses {
@@ -426,6 +438,9 @@ func (s *session) render(v *view) (string, error) {
 				continue
 			}
 			if protectedKey(v.keys, i, end) {
+				if c.category == "secret" || c.category == "explicit" {
+					return "", fmt.Errorf("%s at line %d: field key conflict", c.category, v.line)
+				}
 				continue
 			}
 			if winner == nil || priority(c.category) > priority(winner.category) && c.category == "secret" {
@@ -476,7 +491,9 @@ func (s *session) render(v *view) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if rendered == child.view.text {
+			if child.verbatim {
+				out.WriteString(rendered)
+			} else if rendered == child.view.text {
 				out.WriteString(v.text[child.start:child.end])
 			} else {
 				encoded, _ := json.Marshal(rendered)
@@ -494,6 +511,12 @@ func (s *session) render(v *view) (string, error) {
 			positions[len(v.text)] = out.Len()
 		}
 		s.emitResources(v, out.String(), positions, edits)
+	}
+	if v.chunk != nil {
+		size := positions[v.chunk.headerLength+v.chunk.dataLength] - positions[v.chunk.headerLength]
+		if size != v.chunk.dataLength {
+			return fmt.Sprintf("%x", size) + out.String()[v.chunk.sizeEnd:], nil
+		}
 	}
 	return out.String(), nil
 }
