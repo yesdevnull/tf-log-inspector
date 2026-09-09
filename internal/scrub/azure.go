@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var azureEndpointPattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9-]*\.(?:(?:privatelink\.)?(?:blob|dfs|file|queue|table)\.core\.windows\.net|(?:vault|managedhsm|privatelink\.vaultcore)\.azure\.net)`)
+var azureEndpointPattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9-]*\.(?:onmicrosoft\.com|(?:privatelink\.)?(?:blob|dfs|file|queue|table)\.core\.windows\.net|(?:vault|managedhsm|privatelink\.vaultcore)\.azure\.net)`)
 
 // Only exact service suffixes preserve Azure structure; custom domains use
 // ordinary hostname scrubbing. Account and vault labels remain identifying.
@@ -16,6 +16,8 @@ func azureService(host string) string {
 		return ""
 	}
 	switch suffix {
+	case "onmicrosoft.com":
+		return "tenant"
 	case "vault.azure.net", "managedhsm.azure.net", "privatelink.vaultcore.azure.net":
 		return "vault"
 	}

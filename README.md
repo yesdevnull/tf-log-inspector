@@ -140,8 +140,15 @@ HTTP/JSON bodies, including escaped JSON strings:
   and Terraform UI `hook.id_value`. Azure AD IDs composed of three
   hyphen-separated GUIDs retain their component structure and share each
   GUID's replacement with standalone occurrences.
-- Email addresses, IPv4/IPv6 literals, URL hosts and hostname fields.
+- Email addresses, IPv4/IPv6 literals, URL hosts and hostname fields,
+  including `publisherDomain` and bare Azure `*.onmicrosoft.com` tenant domains.
 - AWS ARNs and account IDs, Azure resource-ID paths and GCP resource paths.
+- HCP Terraform OIDC subjects in `organization:…:project:…:workspace:…:run_phase:…`
+  format, sharing organisation/project/workspace aliases while preserving run
+  phases and trust-policy wildcards.
+- Recognisable GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`,
+  `github_pat_`, including dotted installation tokens) and HCP Terraform
+  `*.atlasv1.*` API tokens, including occurrences in prose.
 - Azure Key Vault/Managed HSM and Blob, DFS, File, Queue and Table endpoints,
   including recognised private-link hosts and bare endpoint hostnames.
   Fixed Azure service suffixes and Key Vault `secrets`/`keys`/`certificates`

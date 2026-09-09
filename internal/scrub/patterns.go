@@ -11,6 +11,7 @@ import (
 
 var guidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 var guidSequencePattern = regexp.MustCompile(guidPattern.String() + `(?:-` + guidPattern.String() + `){2}`)
+var terraformSubjectPattern = regexp.MustCompile(`organization:([^:\r\n"\\]+):project:([^:\r\n"\\]+):workspace:([^:\r\n"\\]+):run_phase:(plan|apply|\*)`)
 var addressPart = regexp.MustCompile(`([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)\.([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)(\[(?:"(?:\\.|[^"\\])*"|[0-9]+)\])?`)
 var declaration = regexp.MustCompile(`\b(resource|data|module)\s+"([^"]+)"(?:\s+"([^"]+)")?`)
 var sourceToken = regexp.MustCompile(`[\pL\pN_-]+`)
@@ -21,9 +22,37 @@ var arnPattern = regexp.MustCompile(`arn:[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]*:[0-9]*
 var cloudPathPattern = regexp.MustCompile(`(?i)(?:/subscriptions/|(?://[a-z0-9.-]+\.googleapis\.com/|/)?projects/)[^\s"<>\\?#]+`)
 var localPathPattern = regexp.MustCompile(`(?:[A-Za-z]:[\\/]|\\\\|/)[^\s"<>]+`)
 var privatePEMPattern = regexp.MustCompile(`(?s)-----BEGIN ([A-Z ]*PRIVATE KEY)-----\r?\n(.*?)-----END ([A-Z ]*PRIVATE KEY)-----`)
+var serviceTokenPattern = regexp.MustCompile(`(?:ghs_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+|[A-Za-z0-9]+\.atlasv1\.[A-Za-z0-9_-]+)`)
+
+func (s *session) discoverServiceTokens(value string) []region {
+	var spans []region
+	for _, m := range serviceTokenPattern.FindAllStringIndex(value, -1) {
+		if boundaries(value, m[0], m[1]) {
+			s.discover(value[m[0]:m[1]], "secret", false)
+			spans = append(spans, region{m[0], m[1]})
+		}
+	}
+	return spans
+}
 
 func (s *session) discoverPatterns(v *view) {
+	v.credentials = append(v.credentials, s.discoverServiceTokens(v.text)...)
 	s.discoverAzureEndpoints(v)
+	for _, m := range terraformSubjectPattern.FindAllStringSubmatchIndex(v.text, -1) {
+		if !boundaries(v.text, m[0], m[1]) {
+			continue
+		}
+		var parts []compositePart
+		for group := 2; group <= 6; group += 2 {
+			start, end := m[group], m[group+1]
+			if v.text[start:end] != "*" {
+				parts = append(parts, s.part(v.text[start:end], "name", start-m[0], end-m[0], ""))
+			}
+		}
+		if len(parts) > 0 {
+			s.composite(v.text[m[0]:m[1]], "cloud", parts, "")
+		}
+	}
 	for _, m := range guidSequencePattern.FindAllStringIndex(v.text, -1) {
 		if boundaries(v.text, m[0], m[1]) {
 			s.discoverGUIDSequence(v.text[m[0]:m[1]])
@@ -275,6 +304,7 @@ func (s *session) composite(value, category string, parts []compositePart, suffi
 
 func (s *session) part(value, category string, start, end int, encoding string) compositePart {
 	s.discover(value, category, false)
+	s.discoverServiceTokens(value)
 	s.discoverGUIDSequence(value)
 	return compositePart{region: region{start, end}, candidate: s.candidates[value], encoding: encoding}
 }
@@ -404,6 +434,7 @@ func (s *session) discoverURL(value string) {
 			key, raw, ok := strings.Cut(pair, "=")
 			decodedKey, e1 := url.QueryUnescape(key)
 			if e1 == nil {
+				s.discoverServiceTokens(decodedKey)
 				structure = append(structure, decodedKey)
 			}
 			decoded, e2 := url.QueryUnescape(raw)
@@ -425,6 +456,7 @@ func (s *session) discoverURL(value string) {
 				if category != "" {
 					parts = append(parts, s.part(decoded, category, pos+len(key)+1, pos+len(pair), "query"))
 				} else {
+					s.discoverServiceTokens(decoded)
 					parts = append(parts, compositePart{region: region{pos + len(key) + 1, pos + len(pair)}, encoding: "query", literal: decoded})
 				}
 			}
@@ -432,6 +464,7 @@ func (s *session) discoverURL(value string) {
 		}
 	}
 	if u.Fragment != "" {
+		s.discoverServiceTokens(u.Fragment)
 		start := strings.IndexByte(value, '#') + 1
 		parts = append(parts, compositePart{region: region{start, len(value)}, encoding: "fragment", literal: u.Fragment})
 	}
@@ -457,7 +490,9 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 			}
 		}
 		pos = m[1]
-		if overlaps(v.composites, m[0], m[1]) {
+		// Dotted credentials are opaque; enclosing resource addresses still
+		// need their labels and instance keys processed normally.
+		if overlaps(v.composites, m[0], m[1]) || containsRegion(v.credentials, m[0], m[1]) {
 			continue
 		}
 		if m[0] > start {

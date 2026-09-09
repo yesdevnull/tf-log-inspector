@@ -27,6 +27,7 @@ type view struct {
 	protected        []region
 	keys             []region
 	wholeValues      []region
+	credentials      []region
 	nulls            []region
 	numeric          []region
 	allowed          []region
