@@ -77,32 +77,26 @@ func providerMetadataMask(body string) string {
 	return string(mask)
 }
 
-func (s *session) renderProviderFragments(physical, logical []*view, fragments []providerFragment) (string, string, error) {
-	rendered := make([]string, len(logical))
-	for i, v := range logical {
-		text, err := s.render(v)
-		if err != nil {
-			return "", "", err
-		}
+// Assemble the successful collision-validation rendering. Its text, counts and
+// source cuts all belong to the same final alias allocation.
+func renderProviderFragments(physical, logical []*view, fragments []providerFragment, rendered map[*view]string) (string, string, error) {
+	for _, v := range logical {
+		text := rendered[v]
 		if !json.Valid([]byte(text)) {
 			return "", "", fmt.Errorf("provider JSON at line %d: invalid rendered body", v.line)
 		}
-		rendered[i] = text
 	}
 	var output, masked strings.Builder
 	fragmentIndex := 0
 	for _, v := range physical {
-		text, err := s.render(v)
-		if err != nil {
-			return "", "", err
-		}
+		text := rendered[v]
 		pos := 0
 		for i := 0; i < len(v.cuts); i += 2 {
 			output.WriteString(text[pos:v.cuts[i].output])
 			masked.WriteString(text[pos:v.cuts[i].output])
 			fragment := fragments[fragmentIndex]
 			cuts := logical[fragment.message].cuts
-			piece := rendered[fragment.message][cuts[fragment.piece].output:cuts[fragment.piece+1].output]
+			piece := rendered[logical[fragment.message]][cuts[fragment.piece].output:cuts[fragment.piece+1].output]
 			output.WriteString(piece)
 			masked.WriteString(providerMetadataMask(piece))
 			pos = v.cuts[i+1].output

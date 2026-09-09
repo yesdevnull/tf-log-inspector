@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
@@ -48,6 +50,19 @@ func (v *view) protect(start, end int) { v.protected = append(v.protected, regio
 var fieldAssignment = regexp.MustCompile(`(?:^|[ \t])([^ \t=]+)[ \t]*=[ \t]*`)
 
 func responseBodyStart(text string) int {
+	// Normalising a response-body key preserves the contiguous letters in
+	// "body". Most metadata has no such key and needs no assignment parsing.
+	for start := 0; ; {
+		at := strings.IndexAny(text[start:], "bB")
+		if at < 0 || start+at+4 > len(text) {
+			return -1
+		}
+		at += start
+		if strings.EqualFold(text[at:at+4], "body") {
+			break
+		}
+		start = at + 1
+	}
 	for _, m := range fieldAssignment.FindAllStringSubmatchIndex(text, -1) {
 		key := text[m[2]:m[3]]
 		if logfmt.ValidKey(key) && keyWords(key) == "http/response/body" {
@@ -650,41 +665,70 @@ func (s *session) jsonValue(v *view, i *int, key string, path []string, lifecycl
 }
 
 func (v *view) protectJSONSyntax() {
-	for i := 0; i < len(v.text); i++ {
-		if v.text[i] == '"' {
-			end, _, ok := readString(v.text, i)
-			if ok {
-				v.protect(i, i+1)
-				v.protect(end-1, end)
+	// Large collections contain many delimiters. Count them before reserving
+	// storage to avoid repeated copying of the growing protection slice.
+	count := 0
+	jsonSyntaxRegions(v.text, func(_, _ int) { count++ })
+	v.protected = slices.Grow(v.protected, count)
+	jsonSyntaxRegions(v.text, v.protect)
+}
+
+func jsonSyntaxRegions(text string, visit func(int, int)) {
+	// The caller has validated this JSON. Only quote boundaries are needed;
+	// decoding escaped contents would allocate values that are never used.
+	for i := 0; i < len(text); i++ {
+		if text[i] == '"' {
+			end, _ := quotedStringEnd(text, i)
+			if end > 0 {
+				visit(i, i+1)
+				visit(end-1, end)
 				i = end - 1
 				continue
 			}
 		}
-		if strings.ContainsRune("{}[]:,", rune(v.text[i])) {
-			v.protect(i, i+1)
+		if strings.ContainsRune("{}[]:,", rune(text[i])) {
+			visit(i, i+1)
 		}
 	}
 }
 
 func readString(text string, start int) (int, string, bool) {
+	end, plain := quotedStringEnd(text, start)
+	if end == 0 {
+		return len(text), "", false
+	}
+	// Ordinary UTF-8 needs no decoding or copy. Escapes, controls and invalid
+	// encoding retain the complete decoder semantics.
+	if value := text[start+1 : end-1]; plain && utf8.ValidString(value) {
+		return end, value, true
+	}
+	var value string
+	raw := text[start:end]
+	if json.Unmarshal([]byte(raw), &value) == nil {
+		return end, value, true
+	}
+	if value, err := strconv.Unquote(raw); err == nil {
+		return end, value, true
+	}
+	return end, "", false
+}
+
+func quotedStringEnd(text string, start int) (int, bool) {
+	plain := true
 	for i := start + 1; i < len(text); i++ {
 		if text[i] == '\\' {
+			plain = false
 			i++
 			continue
 		}
+		if text[i] < ' ' {
+			plain = false
+		}
 		if text[i] == '"' {
-			var value string
-			raw := text[start : i+1]
-			if json.Unmarshal([]byte(raw), &value) == nil {
-				return i + 1, value, true
-			}
-			if value, err := strconv.Unquote(raw); err == nil {
-				return i + 1, value, true
-			}
-			return i + 1, "", false
+			return i + 1, plain
 		}
 	}
-	return len(text), "", false
+	return 0, false
 }
 
 func space(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
@@ -695,5 +739,5 @@ func skipSpace(text string, i int) int {
 	return i
 }
 func isNumber(s string) bool {
-	return s != "" && json.Valid([]byte(s)) && (s[0] == '-' || s[0] >= '0' && s[0] <= '9')
+	return s != "" && (s[0] == '-' || s[0] >= '0' && s[0] <= '9') && json.Valid([]byte(s))
 }

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -13,10 +14,9 @@ var guidPattern = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 var guidSequencePattern = regexp.MustCompile(guidPattern.String() + `(?:-` + guidPattern.String() + `){2}`)
 var terraformSubjectPattern = regexp.MustCompile(`organization:([^:\r\n"\\]+):project:([^:\r\n"\\]+):workspace:([^:\r\n"\\]+):run_phase:(plan|apply|\*)`)
 var addressPart = regexp.MustCompile(`([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)\.([\pL\p{Nl}_][\pL\p{Nl}\pN\pM_-]*)(\[(?:"(?:\\.|[^"\\])*"|[0-9]+)\])?`)
+var addressAtStart = regexp.MustCompile(`^` + addressPart.String())
 var declaration = regexp.MustCompile(`\b(resource|data|module)\s+"([^"]+)"(?:\s+"([^"]+)")?`)
-var sourceToken = regexp.MustCompile(`[\pL\pN_-]+`)
 var emailPattern = regexp.MustCompile(`[a-zA-Z0-9.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}`)
-var ipPattern = regexp.MustCompile(`[0-9A-Fa-f:.]+(?:%[a-zA-Z0-9_-]+)?`)
 var urlPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"<>\\]+`)
 var arnPattern = regexp.MustCompile(`arn:[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]*:[0-9]*:[^\s"<>\\]+`)
 var cloudPathPattern = regexp.MustCompile(`(?i)(?:/subscriptions/|(?://[a-z0-9.-]+\.googleapis\.com/|/)?projects/)[^\s"<>\\?#]+`)
@@ -24,9 +24,67 @@ var localPathPattern = regexp.MustCompile(`(?:[A-Za-z]:[\\/]|\\\\|/)[^\s"<>]+`)
 var privatePEMPattern = regexp.MustCompile(`(?s)-----BEGIN ([A-Z ]*PRIVATE KEY)-----\r?\n(.*?)-----END ([A-Z ]*PRIVATE KEY)-----`)
 var serviceTokenPattern = regexp.MustCompile(`(?:ghs_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+|[A-Za-z0-9]+\.atlasv1\.[A-Za-z0-9_-]+)`)
 
+type patternKey struct {
+	pattern       *regexp.Regexp
+	text, markers string
+}
+
+// Short values recur across responses and decoded views. Cache only their
+// immutable match coordinates, with bounded entries and input lengths; field
+// context and candidate discovery remain specific to each occurrence.
+func (s *session) cachedPatternMatches(pattern *regexp.Regexp, text, markers string) [][]int {
+	if !strings.ContainsAny(text, markers) {
+		return nil
+	}
+	if len(text) > 256 {
+		return patternMatches(pattern, text, markers)
+	}
+	key := patternKey{pattern, text, markers}
+	if matches, ok := s.patterns[key]; ok {
+		return matches
+	}
+	matches := patternMatches(pattern, text, markers)
+	if len(s.patterns) < 4096 {
+		if s.patterns == nil {
+			s.patterns = make(map[patternKey][][]int)
+		}
+		// A short substring must not retain a much larger decoded input.
+		key.text = strings.Clone(key.text)
+		s.patterns[key] = matches
+	}
+	return matches
+}
+
+// Each marker set contains a character required by every alternative in its
+// pattern. These patterns cannot contain a quote, so quoted boundaries also
+// divide the search without changing matches or their original coordinates.
+func patternMatches(pattern *regexp.Regexp, text, markers string) [][]int {
+	if !strings.ContainsAny(text, markers) {
+		return nil
+	}
+	var matches [][]int
+	for start := 0; start < len(text); {
+		end := strings.IndexByte(text[start:], '"')
+		if end < 0 {
+			end = len(text)
+		} else {
+			end += start
+		}
+		if strings.ContainsAny(text[start:end], markers) {
+			for _, match := range pattern.FindAllStringIndex(text[start:end], -1) {
+				match[0] += start
+				match[1] += start
+				matches = append(matches, match)
+			}
+		}
+		start = end + 1
+	}
+	return matches
+}
+
 func (s *session) discoverServiceTokens(value string) []region {
 	var spans []region
-	for _, m := range serviceTokenPattern.FindAllStringIndex(value, -1) {
+	for _, m := range s.cachedPatternMatches(serviceTokenPattern, value, "_.") {
 		if boundaries(value, m[0], m[1]) {
 			s.discover(value[m[0]:m[1]], "secret", false)
 			spans = append(spans, region{m[0], m[1]})
@@ -36,14 +94,18 @@ func (s *session) discoverServiceTokens(value string) []region {
 }
 
 func (s *session) discoverPatterns(v *view) {
-	v.credentials = append(v.credentials, s.discoverServiceTokens(v.text)...)
+	// Trailing transport whitespace cannot finish any detection pattern.
+	// Keep original coordinates and values while excluding provider masks
+	// from repeated searches.
+	text := strings.TrimRight(v.text, " \t\r\n")
+	v.credentials = append(v.credentials, s.discoverServiceTokens(text)...)
 	if line := strings.TrimSpace(v.text); httpRequestLine(line) {
 		target := strings.Fields(line)[1]
 		s.discoverURL(target)
 		s.markComposite(v, target, strings.Index(v.text, target))
 	}
 	s.discoverAzureEndpoints(v)
-	for _, m := range terraformSubjectPattern.FindAllStringSubmatchIndex(v.text, -1) {
+	for _, m := range terraformSubjectPattern.FindAllStringSubmatchIndex(text, -1) {
 		if !boundaries(v.text, m[0], m[1]) {
 			continue
 		}
@@ -58,12 +120,12 @@ func (s *session) discoverPatterns(v *view) {
 			s.composite(v.text[m[0]:m[1]], "cloud", parts, "")
 		}
 	}
-	for _, m := range guidSequencePattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(guidSequencePattern, text, "-") {
 		if boundaries(v.text, m[0], m[1]) {
 			s.discoverGUIDSequence(v.text[m[0]:m[1]])
 		}
 	}
-	for _, m := range privatePEMPattern.FindAllStringSubmatchIndex(v.text, -1) {
+	for _, m := range privatePEMPattern.FindAllStringSubmatchIndex(text, -1) {
 		if v.text[m[2]:m[3]] != v.text[m[6]:m[7]] {
 			continue
 		}
@@ -77,7 +139,7 @@ func (s *session) discoverPatterns(v *view) {
 		v.protect(m[0], m[4])
 		v.protect(m[5], m[1])
 	}
-	for _, m := range localPathPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(localPathPattern, text, "/\\") {
 		if overlaps(v.composites, m[0], m[1]) {
 			continue
 		}
@@ -93,24 +155,27 @@ func (s *session) discoverPatterns(v *view) {
 		}
 		s.markComposite(v, value, m[0])
 	}
-	for _, m := range cloudPathPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(cloudPathPattern, text, "/") {
 		value := v.text[m[0]:m[1]]
 		value = strings.TrimRight(value, ",;)]}")
 		s.discoverCloudPath(strings.TrimRight(value, ",;)]}"))
 		s.markComposite(v, value, m[0])
 	}
-	for _, m := range arnPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range arnPattern.FindAllStringIndex(text, -1) {
 		value := strings.TrimRight(v.text[m[0]:m[1]], ",;)]}")
 		s.discoverARN(value)
 		s.markComposite(v, value, m[0])
 	}
-	for _, m := range urlPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(urlPattern, text, ":") {
 		value := strings.TrimRight(v.text[m[0]:m[1]], ",;)}")
 		s.discoverURL(value)
 		s.markComposite(v, value, m[0])
 	}
-	for _, m := range ipPattern.FindAllStringIndex(v.text, -1) {
-		value := strings.TrimRight(v.text[m[0]:m[1]], ".")
+	for _, m := range ipMatches(text) {
+		value := strings.TrimRight(v.text[m.start:m.end], ".")
+		if !strings.ContainsAny(value, ".:") {
+			continue
+		}
 		addr, err := netip.ParseAddr(value)
 		if err != nil {
 			if endpoint, parseErr := netip.ParseAddrPort(value); parseErr == nil {
@@ -118,12 +183,12 @@ func (s *session) discoverPatterns(v *view) {
 				value = value[:strings.LastIndexByte(value, ':')]
 			}
 		}
-		if err == nil && boundaries(v.text, m[0], m[0]+len(value)) {
+		if err == nil && boundaries(v.text, m.start, m.start+len(value)) {
 			s.discover(value, "network", false)
 			s.candidates[value].ip = addr
 		}
 	}
-	for _, m := range emailPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(emailPattern, text, "@") {
 		value := v.text[m[0]:m[1]]
 		if parsed, err := mail.ParseAddress(value); err == nil && parsed.Address == value {
 			s.discover(value, "email", false)
@@ -131,12 +196,12 @@ func (s *session) discoverPatterns(v *view) {
 			v.emails = append(v.emails, region{m[0], m[1]})
 		}
 	}
-	for _, m := range guidPattern.FindAllStringIndex(v.text, -1) {
+	for _, m := range s.cachedPatternMatches(guidPattern, text, "-") {
 		if boundaries(v.text, m[0], m[1]) {
 			s.discover(v.text[m[0]:m[1]], "guid", false)
 		}
 	}
-	for _, m := range declaration.FindAllStringSubmatchIndex(v.text, -1) {
+	for _, m := range declaration.FindAllStringSubmatchIndex(text, -1) {
 		v.protect(m[2], m[3])
 		if v.text[m[2]:m[3]] == "module" {
 			s.discover(v.text[m[4]:m[5]], "name", false)
@@ -153,6 +218,50 @@ func (s *session) discoverPatterns(v *view) {
 	}
 	s.discoverAddresses(v, 0, len(v.text), v.addressContext)
 	s.discoverHTTPHeaders(v)
+}
+
+// Scan maximal IP-shaped runs, including optional zone identifiers. Runs without
+// a dot or colon cannot be addresses; avoid allocating matches for those words
+// and numbers. netip still validates the remaining candidates.
+func ipMatches(text string) []region {
+	if !strings.ContainsAny(text, ".:") {
+		return nil
+	}
+	var matches []region
+	for i := 0; i < len(text); {
+		start := i
+		separator := false
+		for i < len(text) {
+			c := text[i]
+			if c == '.' || c == ':' {
+				separator = true
+			} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				break
+			}
+			i++
+		}
+		if i == start {
+			i++
+			continue
+		}
+		if i < len(text) && text[i] == '%' {
+			end := i + 1
+			for end < len(text) {
+				c := text[end]
+				if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+					break
+				}
+				end++
+			}
+			if end > i+1 {
+				i = end
+			}
+		}
+		if separator {
+			matches = append(matches, region{start, i})
+		}
+	}
+	return matches
 }
 
 func (s *session) discoverHTTPHeaders(v *view) {
@@ -494,7 +603,55 @@ func (s *session) discoverURL(value string) {
 	c.format, c.decodedStructure = "url", structure
 }
 
+// A resource address needs a dot immediately after its first identifier.
+// Locate those identifiers cheaply, then let the grammar handle the label and
+// optional instance key, including escapes and Unicode identifiers.
+func addressMatch(text string) []int {
+	for pos := 0; pos < len(text); {
+		dot := strings.IndexByte(text[pos:], '.')
+		if dot < 0 {
+			return nil
+		}
+		dot += pos
+		start := dot
+		for start > 0 {
+			r, size := utf8.DecodeLastRuneInString(text[:start])
+			if !addressLetter(r) && !(r >= '0' && r <= '9' || r == '-' || r >= utf8.RuneSelf && (unicode.IsNumber(r) || unicode.IsMark(r))) {
+				break
+			}
+			start -= size
+		}
+		for start < dot {
+			r, size := utf8.DecodeRuneInString(text[start:])
+			if addressLetter(r) {
+				break
+			}
+			start += size
+		}
+		if start < dot {
+			if match := addressAtStart.FindStringSubmatchIndex(text[start:]); match != nil {
+				for i := range match {
+					if match[i] >= 0 {
+						match[i] += start
+					}
+				}
+				return match
+			}
+		}
+		pos = dot + 1
+	}
+	return nil
+}
+
+func addressLetter(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '_' || r >= utf8.RuneSelf && (unicode.IsLetter(r) || unicode.Is(unicode.Nl, r))
+}
+
 func (s *session) discoverAddresses(v *view, start, end int, known bool) {
+	end = start + len(strings.TrimRight(v.text[start:end], " \t\r\n"))
+	if !strings.Contains(v.text[start:end], ".") {
+		return
+	}
 	var complete region
 	flush := func() {
 		if complete.end > complete.start && !exactRegion(v.addresses, complete.start, complete.end) {
@@ -502,7 +659,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 		}
 	}
 	for pos := start; pos < end; {
-		m := addressPart.FindStringSubmatchIndex(v.text[pos:end])
+		m := addressMatch(v.text[pos:end])
 		if m == nil {
 			break
 		}

@@ -199,6 +199,7 @@ func TestRenderedResourceCollisionsReallocateAliases(t *testing.T) {
 		t.Run(collision, func(t *testing.T) {
 			s := &session{candidates: make(map[string]*candidate), counts: make(map[string]int)}
 			views := s.parseLines(`thing.alice["red"] thing.bob["blue"]`)
+			views[0].cuts = []sourceCut{{source: 0}, {source: len(views[0].text)}}
 			if err := s.allocate(); err != nil {
 				t.Fatal(err)
 			}
@@ -215,15 +216,22 @@ func TestRenderedResourceCollisionsReallocateAliases(t *testing.T) {
 				s.candidates["red"].alias = "same_key"
 				s.candidates["blue"].alias = "same_key"
 			}
-			if err := s.ensureDistinctResources(views); err != nil {
+			rendered, err := s.ensureDistinctResources(views)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if len(s.counts) != 0 {
 				t.Fatal("collision validation counted unapplied edits")
 			}
+			if views[0].cuts[0].output != 0 || views[0].cuts[1].output != len(rendered.text[views[0]]) {
+				t.Fatal("validated rendering retained stale cuts")
+			}
 			out, err := s.render(views[0])
 			if err != nil {
 				t.Fatal(err)
+			}
+			if rendered.text[views[0]] != out || rendered.counts["name"] != 4 {
+				t.Fatalf("validated rendering retained stale text or counts: %+v", rendered)
 			}
 			parts := strings.Fields(out)
 			if parts[0] == parts[1] || parts[0] == `thing.bob["blue"]` || s.candidates["red"].alias == s.candidates["blue"].alias {
