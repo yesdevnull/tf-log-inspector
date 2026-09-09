@@ -67,5 +67,37 @@ needed for Dan's selected UI scope.
 - [x] Document reconstruction and its fail-closed limits in README.
 - [x] Run full tests with the signing-safe git shim, `go test -race ./...`,
   `go build ./...`, `go vet ./...`, and `codex-git diff --check`.
-- [ ] Obtain independent code review, address reproduced findings with TDD,
+- [x] Obtain independent code review, address reproduced findings with TDD,
   and run the separate test-cleanup pass. Verify all commits are signed.
+
+## Verification outcome
+
+The complete suite, race detector, coverage checks, build and vet passed.
+Independent task and final reviews are clean after fixing footer guidance,
+filtered response lookup and metadata visibility across the scanner window.
+Separate test cleanup retained the security and boundary regressions. Manual terminal
+checks used synthetic interleaved responses only.
+
+Authorised inspection of lines 11360–11361 identified a complete inline Terraform
+UI event inside the provider JSON string. Reconstruction now excludes that event
+from the provider join while retaining it for scrubbing. Synthetic roundtrip
+tests and separate full-suite, race and coverage checks pass.
+
+Authorised inspection of lines 11438–11439 identified an ordinary AzureAD request
+dump continuation. Reconstruction now follows its existing scanner entry ownership
+even while another provider is pending. A synthetic regression also identified
+and fixed UI insertion immediately after a JSON escape backslash.
+
+Authorised inspection of lines 11417–11418 identified a standalone Terraform UI
+event between provider object properties. Reconstruction now excludes validated
+UI envelopes at object-key positions while preserving legitimate objects at
+value positions. Independent review and separate test cleanup found no further
+issues; full tests, race, coverage, build and vet passed.
+
+The permitted actual-capture scrub command completed successfully on 9 September
+2026 and wrote its output to a temporary file. It reported 33,824 secret
+replacements and 632 unsupported structured or quoted inputs. Successful
+reconstruction does not establish complete sensitive-data removal; the output
+was not opened or inspected. Inspector checks remain synthetic-data-only.
+Direct inspection stayed within the authorised lines 11360–11361, 11417–11418,
+11438–11439 and 11711–11713.

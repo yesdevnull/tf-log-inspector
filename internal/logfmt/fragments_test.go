@@ -82,6 +82,46 @@ func TestProviderJSONBoundaries(t *testing.T) {
 	}
 }
 
+func TestProviderJSONLeavesOrdinaryContinuationsWithTheirEntry(t *testing.T) {
+	for _, owner := range []string{"provider.azuread_v1", "terraform"} {
+		t.Run(owner, func(t *testing.T) {
+			first := providerRecord("a", `{"value":"private-`) + "\n"
+			ordinary := "2026-09-08T00:00:00.000Z [DEBUG]  " + owner + ": 2026/09/08 00:00:00 [DEBUG] ============================ Begin AzureAD Request ============================\n" +
+				"Request ID: 11111111-2222-4333-8444-555555555555\nPOST /applications HTTP/1.1\nAuthorization: Bearer ordinary-credential\nContent-Type: application/json\n\n{\"password\":\"body-credential\"}\n"
+			input := first + ordinary + providerRecord("a", `credential"} tf_req_id=scope`) + "\n"
+			got, err := ReconstructProviderJSON(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Text != `{"value":"private-credential"}` {
+				t.Fatalf("ordinary continuation entered provider JSON: %#v", got)
+			}
+			var joined strings.Builder
+			for _, fragment := range got[0].Fragments {
+				joined.WriteString(input[fragment.Start:fragment.End])
+			}
+			if joined.String() != got[0].Text {
+				t.Fatal("source ranges include ordinary continuation bytes")
+			}
+			var c collector
+			var comps, reqIDs Interner
+			if _, err := Scan(strings.NewReader(input), &comps, &reqIDs, &c); err != nil {
+				t.Fatal(err)
+			}
+			if len(c.entries) != 3 {
+				t.Fatalf("got %d physical entries, want 3", len(c.entries))
+			}
+			e := c.entries[1]
+			if comps.Lookup(e.Comp) != owner || input[e.Off:e.Off+uint64(e.Len)] != ordinary {
+				t.Fatal("ordinary entry lost its raw continuations")
+			}
+			if got, err := ReconstructProviderJSON(first + ordinary); err == nil || len(got) != 0 {
+				t.Fatal("unfinished provider JSON accepted")
+			}
+		})
+	}
+}
+
 func TestProviderJSONRejectsUncertainBodies(t *testing.T) {
 	for _, tc := range []struct{ name, input string }{
 		{"incomplete", providerRecord("a", `{"secret":`)},
@@ -167,5 +207,104 @@ func TestProviderJSONDelimiterDiagnosticFindsEarlierSyntaxError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret") {
 		t.Fatalf("source in diagnostic: %v", err)
+	}
+}
+
+func TestProviderJSONSyntaxDiagnosticLocatesSourceLine(t *testing.T) {
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"event","@timestamp":"2026-09-08T00:00:00Z","type":"apply_complete"}`
+	const first = `{"secret":"a` + ui + `","count":`
+	for _, tc := range []struct{ name, first, continuation, sourceLine string }{
+		{"after inline event", first + `invalid`, "", "1"},
+		{"after interleaved entry", first, `invalid`, "3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := providerRecord("a", tc.first) + "\n" + providerRecord("b", "status") + "\n" +
+				providerRecord("a", tc.continuation) + "\n" + providerRecord("b", "status") + "\n" + providerRecord("a", "}")
+			got, err := ReconstructProviderJSON(input)
+			if err == nil || len(got) != 0 {
+				t.Fatal("invalid body accepted")
+			}
+			for _, want := range []string{"provider JSON at line 5:", "JSON syntax", "start line 1;", "syntax offset 23", "syntax source line " + tc.sourceLine} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("diagnostic %q missing %q", err.Error(), want)
+				}
+			}
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "event") || strings.Contains(err.Error(), "invalid}") {
+				t.Fatalf("source disclosed in diagnostic: %v", err)
+			}
+		})
+	}
+}
+
+func TestProviderJSONInlineUI(t *testing.T) {
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"PrivateSP","@timestamp":"2026-09-08T00:00:00Z","type":"apply_complete","hook":{"displayName":"PrivateSP"}}`
+	const body = `{"@message":"HTTP/1.1 200 OK\n\n{\"displayName\":\"PrivateSP\"}"}`
+	cut := strings.Index(body, "PrivateSP") + 3
+	escapeCut := strings.Index(body, `\"displayName`) + 1
+	for _, tc := range []struct{ name, input, want string }{
+		{"inside string", providerRecord("a", body[:cut]+ui) + "\n" + providerRecord("a", body[cut:]), body},
+		{"same line continuation", providerRecord("a", body[:cut]+ui+body[cut:]), body},
+		{"separate event", providerRecord("a", body[:cut]) + "\n" + ui + "\n" + providerRecord("a", body[cut:]), body},
+		{"escaped quote same line", providerRecord("a", body[:escapeCut]+ui+body[escapeCut:]), body},
+		{"escaped quote separate event", providerRecord("a", body[:escapeCut]) + "\n" + ui + "\n" + providerRecord("a", body[escapeCut:]), body},
+		{"after atomic string", providerRecord("a", body[:len(body)-1]+ui) + "\n" + providerRecord("a", "}"), body},
+		{"after root", providerRecord("a", body+ui), body},
+		{"before first key same line", providerRecord("a", `{`+ui+`"nested":{"value":1}}`), `{"nested":{"value":1}}`},
+		{"before first key standalone", providerRecord("a", `{"nested":{ `) + "\n" + ui + "\n" + providerRecord("a", `"value":1}}`), `{"nested":{ "value":1}}`},
+		{"between keys same line", providerRecord("a", `{"values":["text"], `+ui+`"value":1}`), `{"values":["text"], "value":1}`},
+		{"between keys standalone", providerRecord("a", `{"nested":{"values":["text"], `) + "\n" + ui + "\n" + providerRecord("a", `"value":1}}`), `{"nested":{"values":["text"], "value":1}}`},
+		{"nested data", providerRecord("a", `{"nested":`+ui+`}`), `{"nested":` + ui + `}`},
+		{"first array value", providerRecord("a", `{"nested":[ `) + "\n" + ui + "\n" + providerRecord("a", `]}`), `{"nested":[ ` + ui + `]}`},
+		{"later array value", providerRecord("a", `{"nested":[{}, `) + "\n" + ui + "\n" + providerRecord("a", `]}`), `{"nested":[{}, ` + ui + `]}`},
+		{"escaped text", providerRecord("a", `{"text":"{\"@module\":\"terraform.ui\"}"}`), `{"text":"{\"@module\":\"terraform.ui\"}"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ReconstructProviderJSON(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Text != tc.want {
+				t.Fatalf("incorrect reconstructed provider: %#v", got)
+			}
+			var joined strings.Builder
+			for _, f := range got[0].Fragments {
+				joined.WriteString(tc.input[f.Start:f.End])
+			}
+			if joined.String() != tc.want {
+				t.Fatal("source ranges include UI or omit provider bytes")
+			}
+		})
+	}
+}
+
+func TestProviderJSONRejectsUncertainObjectKeyUI(t *testing.T) {
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"private-event","@timestamp":"2026-09-08T00:00:00Z","type":"apply_complete"}`
+	for _, candidate := range []string{
+		ui[:len(ui)-1],
+		strings.Replace(ui, `"info"`, `false`, 1),
+		strings.Replace(ui, `"terraform.ui"`, `"other"`, 1),
+		`{"message":"private-event"}`,
+	} {
+		for _, prefix := range []string{`{`, `{"values":["text"],`} {
+			input := providerRecord("a", prefix) + "\n" + candidate + "\n" + providerRecord("a", `"value":1}`)
+			got, err := ReconstructProviderJSON(input)
+			if err == nil || len(got) != 0 {
+				t.Fatal("uncertain object-key event accepted")
+			}
+			if strings.Contains(err.Error(), "private-event") {
+				t.Fatal("diagnostic disclosed event")
+			}
+		}
+	}
+}
+
+func TestProviderJSONInlineUIFailureDiagnostics(t *testing.T) {
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"event","@timestamp":"2026-09-08T00:00:00Z","type":"apply_complete"}`
+	_, err := ReconstructProviderJSON(providerRecord("a", `{"a":"x`+ui+`"}]`))
+	if err == nil {
+		t.Fatal("invalid suffix accepted")
+	}
+	if !strings.Contains(err.Error(), "joined bytes 9;") {
+		t.Fatalf("provider byte count includes duplicated prefix or UI: %v", err)
 	}
 }

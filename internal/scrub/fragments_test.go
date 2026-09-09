@@ -2,12 +2,51 @@ package scrub
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
+
+func TestScrubProviderMetadataWindow(t *testing.T) {
+	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.aws: "
+	const suffix = " tf_req_id=scope"
+	for _, fragmented := range []bool{false, true} {
+		for _, shrink := range []bool{false, true} {
+			t.Run(fmt.Sprintf("fragmented=%t/shrink=%t", fragmented, shrink), func(t *testing.T) {
+				body := `{"name":"a"}`
+				// The request ends exactly at the real scanner's message window.
+				padding := 65536 - len(body) - len(suffix)
+				if fragmented {
+					padding++ // The opening brace belongs to the previous record.
+				}
+				body = body[:len(body)-1] + strings.Repeat(" ", padding) + "}"
+				wantRequest := "scope"
+				if shrink {
+					body = `{"value":"` + strings.Repeat("z", 70000) + `"}`
+					wantRequest = ""
+				}
+				input := header + body + suffix + "\n"
+				if fragmented {
+					input = header + body[:1] + "\n" + header + body[1:] + suffix + "\n"
+				}
+				before, err := scanMetadata(input)
+				if err != nil || before[len(before)-1].request != wantRequest {
+					t.Fatalf("fixture request visibility: %v, %v", before, err)
+				}
+				got, err := Scrub([]byte(input), nil)
+				if err == nil || got.Data != nil {
+					t.Fatal("published provider body changing genuine metadata visibility")
+				}
+				if !strings.Contains(err.Error(), "changed metadata") || strings.Contains(err.Error(), "zzz") {
+					t.Fatalf("expected content-free metadata rejection: %v", err)
+				}
+			})
+		}
+	}
+}
 
 func TestScrubProviderHTTPBanner(t *testing.T) {
 	input := `2026-09-04T12:56:10.000Z [DEBUG] provider.azuread_v1: {"@level":"debug","@message":"2026/09/04 12:56:10 [DEBUG] ==== HTTP Response ====\nHTTP/1.1 200 OK\n\n{\"value\":\"private-credential\",\"displayName\":\"PrivateSP\"}"}` + "\n"
@@ -17,6 +56,32 @@ func TestScrubProviderHTTPBanner(t *testing.T) {
 	}
 	if strings.Contains(string(result.Data), "private-credential") || strings.Contains(string(result.Data), "PrivateSP") {
 		t.Fatal("nested HTTP body leaked")
+	}
+}
+
+func TestScrubProviderMetadataIgnoresBodyDecoys(t *testing.T) {
+	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.aws: "
+	// A continuation starts with a field lookalike inside a JSON string. The
+	// genuine suffix still belongs to the second record after body expansion.
+	input := header + `{"name":"x","description":"` + "\n" +
+		header + `tf_req_id=decoy tf_rpc=DeleteResource"} tf_req_id=scope tf_rpc=ReadResource` + "\n"
+	got, err := Scrub([]byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(got.Data), " tf_req_id=scope tf_rpc=ReadResource\n") {
+		t.Fatal("genuine suffix metadata changed")
+	}
+	joined, err := logfmt.ReconstructProviderJSON(string(got.Data))
+	if err != nil || len(joined) != 1 {
+		t.Fatalf("reconstruction: %v", err)
+	}
+	var body map[string]string
+	if err := json.Unmarshal([]byte(joined[0].Text), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["name"] == "x" || body["name"] == "" {
+		t.Fatal("body name was not scrubbed")
 	}
 }
 
@@ -72,6 +137,41 @@ func TestScrubRejectsInvalidProviderFragments(t *testing.T) {
 		if strings.Contains(err.Error(), "private-credential") {
 			t.Fatal("error disclosed source")
 		}
+	}
+}
+
+func TestScrubOrdinaryHTTPContinuationWhileProviderJSONPending(t *testing.T) {
+	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.azurerm_v1: "
+	input := header + `{"value":"private-` + "\n" +
+		"2026-09-04T12:56:10.001Z [DEBUG]  provider.azuread_v1: 2026/09/04 12:56:10 [DEBUG] ============================ Begin AzureAD Request ============================\n" +
+		"Request ID: 11111111-2222-4333-8444-555555555555\nPOST /applications HTTP/1.1\nAuthorization: Bearer ordinary-credential\nContent-Type: application/json\n\n{\"password\":\"body-credential\"}\n"
+	if got, err := Scrub([]byte(input), nil); err == nil || len(got.Data) != 0 {
+		t.Fatal("unfinished provider JSON published")
+	}
+	input += header + `credential"} tf_req_id=scope` + "\n"
+	got, err := Scrub([]byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(got.Data)
+	for _, secret := range []string{"private-credential", "ordinary-credential", "body-credential", "11111111-2222-4333-8444-555555555555"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("leaked %s", secret)
+		}
+	}
+	if !strings.HasSuffix(output, " tf_req_id=scope\n") || !strings.Contains(output, "POST /") || !strings.Contains(output, " HTTP/1.1\n") || !strings.Contains(output, "Authorization: secret_") {
+		t.Fatalf("HTTP structure or genuine request metadata changed: %s", output)
+	}
+	joined, err := logfmt.ReconstructProviderJSON(output)
+	if err != nil || len(joined) != 1 {
+		t.Fatalf("scrubbed provider reconstruction: %v", err)
+	}
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(joined[0].Text), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 1 || !strings.HasPrefix(fields["value"], "secret_") {
+		t.Fatal("provider secret was not scrubbed independently")
 	}
 }
 
@@ -144,6 +244,111 @@ func TestScrubInterleavedProviderFragments(t *testing.T) {
 		}
 		if response["value"] == "private-credential" || other["value"] == "other-credential" {
 			t.Fatal("decoded credential leaked")
+		}
+	}
+}
+
+func TestScrubProviderInlineUI(t *testing.T) {
+	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.azuread_v1: "
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"PrivateSP","@timestamp":"2026-09-04T12:56:10Z","type":"apply_complete","hook":{"displayName":"PrivateSP","password":"ui-credential"}}`
+	const body = `{"@level":"debug","@message":"HTTP/1.1 200 OK\n\n{\"displayName\":\"PrivateSP\",\"value\":\"private-credential\"}"}`
+	for _, tc := range []struct {
+		name     string
+		cut      int
+		separate bool
+	}{
+		{"inside name", strings.Index(body, "PrivateSP") + 3, false},
+		{"inside credential", strings.Index(body, "credential") + 4, false},
+		{"atomic boundary", len(body) - 1, false},
+		{"before first key", 1, false},
+		{"before first key separate UI record", 1, true},
+		{"between keys", strings.Index(body, `,"@message"`) + 1, false},
+		{"between keys separate UI record", strings.Index(body, `,"@message"`) + 1, true},
+		{"separate UI record", strings.Index(body, "PrivateSP") + 3, true},
+		{"escaped quote", strings.Index(body, `\"displayName`) + 1, false},
+		{"escaped quote separate UI record", strings.Index(body, `\"displayName`) + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cut := tc.cut
+			separator := ""
+			records := 2
+			if tc.separate {
+				separator = "\n"
+				records = 3
+			}
+			input := header + body[:cut] + separator + ui + "\n" + header + body[cut:] + " tf_req_id=scope\n"
+			result, err := Scrub([]byte(input), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := string(result.Data)
+			for _, value := range []string{"PrivateSP", "private-credential", "ui-credential"} {
+				if strings.Contains(output, value) {
+					t.Fatalf("leaked %s", value)
+				}
+			}
+			if strings.Count(output, "\n") != records || strings.Count(output, header) != 2 || !strings.HasSuffix(output, " tf_req_id=scope\n") {
+				t.Fatal("physical records or metadata changed")
+			}
+			lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+			if !strings.HasPrefix(lines[0], header) || !strings.HasPrefix(lines[records-1], header) || !strings.Contains(lines[records-2], `"type":"apply_complete"`) {
+				t.Fatal("provider and UI record order changed")
+			}
+			joined, err := logfmt.ReconstructProviderJSON(output)
+			if err != nil || len(joined) != 1 {
+				t.Fatalf("rewritten reconstruction: %v", err)
+			}
+			var envelope map[string]string
+			if err := json.Unmarshal([]byte(joined[0].Text), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			_, nested, ok := strings.Cut(envelope["@message"], "\n\n")
+			if !ok {
+				t.Fatal("HTTP response missing")
+			}
+			var response map[string]string
+			if err := json.Unmarshal([]byte(nested), &response); err != nil {
+				t.Fatal(err)
+			}
+			// Remove only provider ranges to inspect the independently scrubbed UI.
+			physical := output
+			for i := len(joined[0].Fragments) - 1; i >= 0; i-- {
+				f := joined[0].Fragments[i]
+				physical = physical[:f.Start] + physical[f.End:]
+			}
+			eventStart := strings.Index(physical, `{"@level"`)
+			if eventStart < 0 {
+				t.Fatal("physical UI event missing")
+			}
+			var event struct {
+				Hook map[string]string `json:"hook"`
+			}
+			if err := json.NewDecoder(strings.NewReader(physical[eventStart:])).Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if response["displayName"] == "" || response["displayName"] != event.Hook["displayName"] {
+				t.Fatal("physical and provider aliases differ")
+			}
+		})
+	}
+}
+
+func TestScrubRejectsUncertainInlineUI(t *testing.T) {
+	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.azuread_v1: "
+	const prefix = `{"@message":"private-credential`
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"secret-event","@timestamp":"2026-09-04T12:56:10Z","type":"apply_complete"}`
+	for _, input := range []string{
+		header + prefix + ui,
+		header + prefix + ui[:len(ui)-1] + "\n" + header + `"}`,
+		header + prefix + strings.Replace(ui, `"terraform.ui"`, `"other"`, 1) + "\n" + header + `"}`,
+		header + prefix + `\` + ui[:len(ui)-1] + "\n" + header + `"text"}`,
+	} {
+		result, err := Scrub([]byte(input), nil)
+		if err == nil || len(result.Data) != 0 {
+			t.Fatal("uncertain UI produced output")
+		}
+		if strings.Contains(err.Error(), "private-credential") || strings.Contains(err.Error(), "secret-event") {
+			t.Fatal("diagnostic leaked input")
 		}
 	}
 }
