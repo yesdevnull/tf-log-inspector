@@ -2,6 +2,7 @@
 package scrub
 
 import (
+	"bytes"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -18,7 +19,7 @@ type Result struct {
 
 // Scrub replaces identifying values using one mapping for the entire input.
 func Scrub(data []byte, extra []string) (Result, error) {
-	if !utf8.Valid(data) || strings.ContainsRune(string(data), 0) {
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 		return Result{}, fmt.Errorf("input at byte 0: unsupported encoding")
 	}
 	s := &session{candidates: make(map[string]*candidate), counts: make(map[string]int)}
@@ -28,7 +29,8 @@ func Scrub(data []byte, extra []string) (Result, error) {
 		}
 		s.discover(value, "explicit", false)
 	}
-	views := s.parseLines(string(data))
+	input := string(data)
+	views := s.parseLines(input)
 	s.sources = make(map[string]bool)
 	var reserve func(*view)
 	reserve = func(v *view) {
@@ -66,10 +68,11 @@ func Scrub(data []byte, extra []string) (Result, error) {
 		}
 		out.WriteString(text)
 	}
-	if err := s.validate(string(data), out.String()); err != nil {
+	output := out.String()
+	if err := s.validate(input, output); err != nil {
 		return Result{}, err
 	}
-	return Result{Data: []byte(out.String()), Replacements: s.counts, Unsupported: s.unsupported}, nil
+	return Result{Data: []byte(output), Replacements: s.counts, Unsupported: s.unsupported}, nil
 }
 
 type candidate struct {

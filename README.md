@@ -137,9 +137,18 @@ HTTP/JSON bodies, including escaped JSON strings:
 - Terraform module/resource labels and string instance keys; name, user,
   organisation, workspace and project fields.
 - GUIDs and identifying ID fields, including opaque request/resource IDs
-  and Terraform UI `hook.id_value`.
+  and Terraform UI `hook.id_value`. Azure AD IDs composed of three
+  hyphen-separated GUIDs retain their component structure and share each
+  GUID's replacement with standalone occurrences.
 - Email addresses, IPv4/IPv6 literals, URL hosts and hostname fields.
 - AWS ARNs and account IDs, Azure resource-ID paths and GCP resource paths.
+- Azure Key Vault/Managed HSM and Blob, DFS, File, Queue and Table endpoints,
+  including recognised private-link hosts and bare endpoint hostnames.
+  Fixed Azure service suffixes and Key Vault `secrets`/`keys`/`certificates`
+  paths remain recognisable; account/vault names, object names and versions
+  are replaced consistently. Storage SAS signatures, policy identifiers
+    and IP restrictions are scrubbed, as are delegation identities and Table
+    partition/row keys. Custom domains use generic URL handling.
 - Recognised absolute POSIX and Windows paths, preserving separators and
   file extensions.
 - Credential fields and HTTP headers, including passwords, tokens, API/access

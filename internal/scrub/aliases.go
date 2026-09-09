@@ -23,6 +23,14 @@ func (s *session) allocate() error {
 		reserved[alias] = true
 	}
 	caseSensitive := make(map[string]bool)
+	// A composite resource key gives its GUID components case-sensitive identity.
+	for _, c := range s.ordered {
+		if c.caseSensitive && c.format == "guid-sequence" {
+			for _, part := range c.parts {
+				part.candidate.caseSensitive = true
+			}
+		}
+	}
 	for _, c := range s.ordered {
 		reserved[c.value] = true
 		c.syntaxConflict = false
