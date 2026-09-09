@@ -111,6 +111,7 @@ func (s *session) parseLines(text string) []*view {
 func (s *session) parseBodyLines(text string, responseContext, textField bool) []*view {
 	var views []*view
 	metadata, body, httpHeaders := false, false, false
+	httpComponent := ""
 	responseJSON := responseContext
 	chunked := false
 	chunkEnd := 0
@@ -175,10 +176,21 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 			}
 		}
 		h := logfmt.ParseHeader(strings.TrimRight(v.text, "\r\n"))
+		trimmed := strings.TrimSpace(v.text)
+		framing := trimmed
+		if h.HasTS {
+			framing = strings.TrimSpace(h.Msg)
+		}
 		if h.HasTS && !responseContext {
-			metadata, body, httpHeaders = true, false, false
-			responseJSON = strings.HasPrefix(h.Msg, "HTTP Response")
-			chunked = false
+			key, _, header := strings.Cut(framing, ":")
+			continuesHTTP := httpHeaders && !body && h.Comp == httpComponent && (framing == "" || header && logfmt.ValidKey(key))
+			metadata = true
+			if !continuesHTTP {
+				body, httpHeaders = false, false
+				responseJSON = strings.HasPrefix(h.Msg, "HTTP Response")
+				chunked = false
+			}
+			httpComponent = h.Comp
 			prefix := strings.Index(v.text, h.Msg)
 			if prefix >= 0 {
 				compStart := strings.Index(v.text, h.Comp)
@@ -190,11 +202,6 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 					v.protect(0, prefix)
 				}
 			}
-		}
-		trimmed := strings.TrimSpace(v.text)
-		framing := trimmed
-		if h.HasTS {
-			framing = strings.TrimSpace(h.Msg)
 		}
 		responseJSON = responseJSON || bodyKind == "response"
 		lifecycle := !responseJSON && lifecycleEnvelope(trimmed)
@@ -214,7 +221,7 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 				}
 			}
 		}
-		if httpHeaders && trimmed == "" && !body {
+		if httpHeaders && framing == "" && !body {
 			body = true
 			if chunked {
 				chunkEnd = end + chunkedBodyLength(text[end:])
