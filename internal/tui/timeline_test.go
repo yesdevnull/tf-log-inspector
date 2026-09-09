@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,8 +12,27 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/profile"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+const mixedPositionFixture = `2022-12-15T00:16:20.790Z [TRACE] terraform: origin
+2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=10
+2021-12-15T00:16:20.800Z [TRACE] provider.google: Received downstream response: tf_rpc=PlanResourceChange tf_req_duration_ms=20
+{"@level":"info","@timestamp":"2026-09-04T09:15:03Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":1,"resource":{"addr":"aws_instance.example","resource_type":"aws_instance","implied_provider":"aws"}}}`
+
+func loadedMixedPositionLog(t *testing.T) *model.Log {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mixed-position.log")
+	if err := os.WriteFile(path, []byte(mixedPositionFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
 
 // timelineModel is a model showing the timeline over timeline.log, sized so
 // every pane is drawn. Each test starts from its own, because Model is
@@ -499,6 +520,59 @@ func TestTimelineExplainsExcludedPositionReasonsWithoutClippingTotals(t *testing
 		if !strings.Contains(out, want) {
 			t.Errorf("timeline missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestLoadedMixedTimingKeepsAdmittedTotalsAndChoosesRPC(t *testing.T) {
+	l := loadedMixedPositionLog(t)
+	if len(l.RPCSpans) != 2 || len(l.UISpans) != 1 {
+		t.Fatalf("fixture spans = RPC %d UI %d, want 2 and 1", len(l.RPCSpans), len(l.UISpans))
+	}
+	m := New(l, "x.log")
+	tier, timing := m.timelineTiming()
+	if tier != tierRPC || len(timing.Positioned) != 1 || timing.AdmittedMs != 30 || timing.ExcludedMs != 20 {
+		t.Fatalf("timeline = tier %v positioned %d admitted %d excluded %d, want RPC/1/30/20", tier, len(timing.Positioned), timing.AdmittedMs, timing.ExcludedMs)
+	}
+	var report strings.Builder
+	if err := profile.Render(&report, l); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report.String(), "30ms total") || !strings.Contains(report.String(), "positioned duration   10ms (1 excluded, 20ms)") {
+		t.Errorf("profile does not retain the same admitted/positioned totals:\n%s", report.String())
+	}
+}
+
+func TestLoadedFilterDistinguishesUnavailablePositionsFromNoMatch(t *testing.T) {
+	m := New(loadedMixedPositionLog(t), "x.log")
+	showOnly(t, &m, dimRPC, "PlanResourceChange")
+	if got := unstyled(m.renderTimeline(100, 20)); !strings.Contains(got, "Timeline positions unavailable") {
+		t.Errorf("filter selecting only unpositioned timing = %q, want unavailable positions", got)
+	}
+	showOnly(t, &m, dimRPC)
+	if got := unstyled(m.renderTimeline(100, 20)); got != noMatchNote {
+		t.Errorf("filter with no matches = %q, want %q", got, noMatchNote)
+	}
+}
+
+func TestLoadedAllUnavailableRPCDoesNotFallBackToValidUI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unpositioned-rpc.log")
+	content := strings.Replace(mixedPositionFixture,
+		"2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=10",
+		"2022-12-15T00:16:20.800Z [TRACE] terraform: after origin", 1)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(l, "x.log")
+	tier, positioned := m.timelineSpans()
+	if tier != tierRPC || len(positioned) != 0 || len(l.UISpans) == 0 {
+		t.Fatalf("tier=%v positioned=%d UI=%d, want unavailable RPC tier with available UI evidence", tier, len(positioned), len(l.UISpans))
+	}
+	if got := unstyled(m.renderTimeline(100, 20)); !strings.Contains(got, "Timeline positions unavailable") {
+		t.Errorf("timeline switched away from unavailable RPC evidence:\n%s", got)
 	}
 }
 
