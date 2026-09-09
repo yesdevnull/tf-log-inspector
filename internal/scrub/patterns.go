@@ -123,10 +123,12 @@ func (s *session) discoverPatterns(v *view) {
 			s.candidates[value].ip = addr
 		}
 	}
-	for _, value := range emailPattern.FindAllString(v.text, -1) {
+	for _, m := range emailPattern.FindAllStringIndex(v.text, -1) {
+		value := v.text[m[0]:m[1]]
 		if parsed, err := mail.ParseAddress(value); err == nil && parsed.Address == value {
 			s.discover(value, "email", false)
 			s.candidates[value].email = true
+			v.emails = append(v.emails, region{m[0], m[1]})
 		}
 	}
 	for _, m := range guidPattern.FindAllStringIndex(v.text, -1) {
@@ -418,13 +420,19 @@ func (s *session) discoverURL(value string) {
 		parts = append(parts, compositePart{region: region{hostStart, hostEnd}, candidate: host})
 		pathStart = authorityEnd
 	}
-	pathEnd := pathStart + len(u.EscapedPath())
+	// Source spans use the logged bytes, which may contain raw UTF-8 rather
+	// than the longer percent-encoded spelling returned by EscapedPath.
+	pathEnd := len(value)
+	if at := strings.IndexAny(value[pathStart:], "?#"); at >= 0 {
+		pathEnd = pathStart + at
+	}
+	rawPath := value[pathStart:pathEnd]
 	pos := pathStart
 	service := azureService(u.Hostname())
-	if cloud := s.discoverCloudPath(u.EscapedPath()); cloud != nil {
+	if cloud := s.discoverCloudPath(rawPath); cloud != nil {
 		parts = append(parts, compositePart{region: region{pathStart, pathEnd}, candidate: cloud})
 	} else {
-		for index, segment := range strings.Split(u.EscapedPath(), "/") {
+		for index, segment := range strings.Split(rawPath, "/") {
 			if decoded, err := url.PathUnescape(segment); err == nil && decoded != "" {
 				if service == "vault" && index == 1 && vaultCollection(decoded) {
 					structure = append(structure, decoded)
@@ -506,7 +514,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 		pos = m[1]
 		// Dotted credentials are opaque; enclosing resource addresses still
 		// need their labels and instance keys processed normally.
-		if overlaps(v.composites, m[0], m[1]) || containsRegion(v.credentials, m[0], m[1]) {
+		if overlaps(v.composites, m[0], m[1]) || containsRegion(v.credentials, m[0], m[1]) || containsRegion(v.emails, m[0], m[1]) {
 			continue
 		}
 		if m[0] > start {

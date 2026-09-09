@@ -168,6 +168,11 @@ HTTP/JSON bodies, including escaped JSON strings:
 - Credential fields and HTTP headers, including passwords, tokens, API/access
   keys, Authorization and cookies, plus PEM private-key payloads. Whole
   credentials receive one opaque alias even when also used in another field.
+- JSON HTTP response bodies treat scalar `value` fields as secrets. Arrays and
+  objects retain their structure and are inspected recursively; null and empty
+  values remain unchanged. This includes escaped and unquoted
+  `http.response.body` dumps. JSON fragmented across HTTP chunks is rejected
+  without output because it cannot be safely rewritten chunk by chunk.
 
 For additional identifiers, use `--scrub-values private-values.txt` with one
 literal UTF-8 value per line. Empty lines are ignored and line terminators
