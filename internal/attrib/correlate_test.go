@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -25,7 +26,30 @@ func rpc(typ, rpcName string, startMs, endMs int) span.Span {
 		StartMs: uint32(startMs), EndMs: uint32(endMs),
 		DurationMs: uint32(endMs - startMs),
 		RPC:        rpcName, ResourceType: typ,
-		Fidelity: span.FidelityReported,
+		Fidelity: span.FidelityReported, TimestampStatus: logfmt.TimestampValid,
+	}
+}
+
+func TestUnavailablePositionCannotAcquireAnAddress(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s := span.Span{DurationMs: 10, ResourceType: "x", RPC: "ReadResource",
+		TimestampStatus: logfmt.TimestampInvalid}
+	c := Context{Address: "x.a", Name: "x.a", ResourceType: "x", Action: "read", Start: base.Add(-time.Second), End: base.Add(time.Second)}
+	got := Correlate([]span.Span{s}, base, []Context{c})[0]
+	if got.Confidence != Unattributed || got.Address != "" || got.Candidates != 0 {
+		t.Fatalf("unpositioned duration acquired attribution: %+v", got)
+	}
+	if !got.PositionUnavailable {
+		t.Fatal("PositionUnavailable = false, want true")
+	}
+}
+
+func TestUnknownTimestampCannotAcquireAnAddress(t *testing.T) {
+	s := span.Span{DurationMs: 10, ResourceType: "x", RPC: "ReadResource"}
+	c := Context{Address: "x.a", Name: "x.a", ResourceType: "x", Action: "read", Start: base.Add(-time.Second), End: base.Add(time.Second)}
+	got := Correlate([]span.Span{s}, base, []Context{c})[0]
+	if got.Confidence != Unattributed || got.Address != "" || got.Candidates != 0 || !got.PositionUnavailable {
+		t.Fatalf("unknown timestamp acquired attribution: %+v", got)
 	}
 }
 
@@ -498,7 +522,7 @@ func TestCorrelateAttributesARealParsedRefreshWindow(t *testing.T) {
 		StartMs: uint32(startMs + 1), EndMs: uint32(endMs - 1),
 		DurationMs: uint32(endMs - startMs - 2),
 		RPC:        "ReadResource", ResourceType: "aws_instance",
-		Fidelity: span.FidelityReported,
+		Fidelity: span.FidelityReported, TimestampStatus: logfmt.TimestampValid,
 	}
 	got := Correlate([]span.Span{s}, realBase, ctxs)
 	if got[0].Confidence != Contained {

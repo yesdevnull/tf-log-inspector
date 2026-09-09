@@ -84,6 +84,10 @@ type Attribution struct {
 	// Overlapping, N for Likely and Ambiguous, 0 for Unattributed.
 	Candidates uint32
 	Confidence Confidence
+	// PositionUnavailable means the span has a measured duration but no
+	// trustworthy point on the log clock, so temporal attribution could not
+	// safely consider any address context.
+	PositionUnavailable bool
 }
 
 // rpcActions maps a provider RPC name to the UI-hook actions it can belong
@@ -183,6 +187,10 @@ func Correlate(spans []span.Span, base time.Time, ctxs []Context) []Attribution 
 }
 
 func correlateOne(s span.Span, base time.Time, ctxs []Context) Attribution {
+	if !s.HasPosition() {
+		return Attribution{Confidence: Unattributed, PositionUnavailable: true}
+	}
+
 	start := base.Add(time.Duration(s.StartMs) * time.Millisecond)
 	end := base.Add(time.Duration(s.EndMs) * time.Millisecond)
 
