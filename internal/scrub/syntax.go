@@ -181,18 +181,22 @@ func (s *session) parseBodyLines(text string, responseContext, textField bool) [
 			}
 		}
 		trimmed := strings.TrimSpace(v.text)
+		framing := trimmed
+		if h.HasTS {
+			framing = strings.TrimSpace(h.Msg)
+		}
 		responseJSON = responseJSON || bodyStart >= 0
 		lifecycle := !responseJSON && lifecycleEnvelope(trimmed)
-		if strings.HasPrefix(trimmed, "HTTP/") {
+		if strings.HasPrefix(framing, "HTTP/") {
 			responseJSON = true
-		} else if httpRequestLine(trimmed) && !responseContext {
+		} else if httpRequestLine(framing) && !responseContext {
 			responseJSON = false
 		}
-		if httpRequestLine(trimmed) || strings.HasPrefix(trimmed, "HTTP/") || strings.HasPrefix(strings.ToLower(trimmed), "content-type:") || strings.HasPrefix(strings.ToLower(trimmed), "content-length:") {
+		if httpRequestLine(framing) || strings.HasPrefix(framing, "HTTP/") || strings.HasPrefix(strings.ToLower(framing), "content-type:") || strings.HasPrefix(strings.ToLower(framing), "content-length:") {
 			httpHeaders = true
 		}
 		if httpHeaders && !body {
-			key, value, ok := strings.Cut(trimmed, ":")
+			key, value, ok := strings.Cut(framing, ":")
 			if ok && strings.EqualFold(key, "Transfer-Encoding") {
 				for _, coding := range strings.Split(value, ",") {
 					chunked = chunked || strings.EqualFold(strings.TrimSpace(coding), "chunked")

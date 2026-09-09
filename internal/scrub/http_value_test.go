@@ -87,6 +87,28 @@ func TestHTTPResponseScalarValuesAreSecrets(t *testing.T) {
 	}
 }
 
+func TestHTTPResponseStatusAfterLoggerPrefix(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] provider.aws: "
+	for _, prefix := range []string{"", header, header + "[DEBUG] ", header + "2026/09/08 00:00:00 [DEBUG] "} {
+		t.Run(prefix, func(t *testing.T) {
+			input := prefix + "HTTP/1.1 200 OK\n\n{\"value\":\"private-credential\"}\n" +
+				header + "Routine status: tf_req_id=scope\n{\"value\":\"ordinary-status\"}\n"
+			got, err := Scrub([]byte(input), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(string(got.Data), "\n")
+			var body map[string]string
+			if json.Unmarshal([]byte(lines[2]), &body) != nil || !strings.HasPrefix(body["value"], "secret_") || got.Unsupported != 0 {
+				t.Fatalf("prefixed response lost credential classification: %s", got.Data)
+			}
+			if lines[0] != prefix+"HTTP/1.1 200 OK" || lines[3] != header+"Routine status: tf_req_id=scope" || lines[4] != `{"value":"ordinary-status"}` {
+				t.Fatalf("HTTP framing, metadata or following record changed: %s", got.Data)
+			}
+		})
+	}
+}
+
 func TestUnquotedHTTPResponseBodyValuesAreSecrets(t *testing.T) {
 	for _, input := range []string{
 		`http.response.body={"value":"private-content"}`,
