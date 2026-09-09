@@ -80,7 +80,7 @@ unrelated layout refactoring. Existing TUI goldens should normally remain stable
 
 **Interfaces:** Preserve `searchFrom(start int, forward, includeStart bool) bool` and `searchAgain(direction int)` for existing callers. Add `literalPosition` and `findLiteral` below for Task 2. No exported interface.
 
-- [ ] **Step 1: Add occurrence and raw rendering regression tests.**
+- [x] **Step 1: Add occurrence and raw rendering regression tests.**
 
 Use the existing `update`, `typeQuery`, `rawLogBody` and synthetic `model.Log`
 patterns in `rawlog_test.go`. Add this regression before production changes:
@@ -150,14 +150,14 @@ func TestLiteralOccurrencesAndColumns(t *testing.T) {
 
 The new test file uses `package tui` and imports `testing`.
 
-- [ ] **Step 2: Observe RED.**
+- [x] **Step 2: Observe RED.**
 
 Run `go test ./internal/tui -run TestRawSearchRevealsContinuationOccurrences -count=1`
 before introducing the helper-dependent tests. Expect failure because the
 current implementation opens line zero. Record that behavioural failure;
 compilation failures from a new helper are not its substitute.
 
-- [ ] **Step 3: Add the small literal selector.**
+- [x] **Step 3: Add the small literal selector.**
 
 ```go
 package tui
@@ -228,7 +228,7 @@ repository's pinned `x/ansi v0.10.1`; do not copy the newer incompatible API.
 Check long repeated lines before adding caching or
 optimisation; any optimisation must preserve the forward/reverse occurrence set.
 
-- [ ] **Step 4: Make raw search traverse positions rather than entries.**
+- [x] **Step 4: Make raw search traverse positions rather than entries.**
 
 Add the raw-specific position and anchor:
 
@@ -281,7 +281,7 @@ Horizontal scrolling must also clear `notFound`, as vertical scrolling already
 does. Confirm scope removal and `jumpToSpan` pass through these invalidation
 paths. Response opening/closing must not invalidate the raw anchor.
 
-- [ ] **Step 5: Cover search boundaries through real rendering and key handling.**
+- [x] **Step 5: Cover search boundaries through real rendering and key handling.**
 
 Extend the fixture-backed search tests, retaining existing scope/filter tests.
 Use distinct assertions for these cases:
@@ -331,7 +331,7 @@ func TestRawSearchRevealsTheContainingGrapheme(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Verify, review and commit Task 1.**
+- [x] **Step 6: Verify, review and commit Task 1.**
 
 Run `gofmt -w` on the changed Go files, the new focused tests with `-count=1`,
 then `go test ./internal/tui`. Inspect the diff and obtain independent task
@@ -344,7 +344,7 @@ subject `Search raw logs by visible text occurrence`. Preserve RED/GREEN evidenc
 
 **Interfaces:** Consume `literalPosition` and `findLiteral(line, query string, forward bool, anchor *literalPosition, column int) (literalPosition, bool)` from Task 1. Keep `searchResponse(direction int, includeCurrent bool)` and all existing viewer entry points.
 
-- [ ] **Step 1: Add a repeated-response regression and observe RED.**
+- [x] **Step 1: Add a repeated-response regression and observe RED.**
 
 Use the existing `responseModel` helper, which loads real reconstructed provider
 fragments. A body containing one long string keeps both matches on one line:
@@ -374,7 +374,7 @@ func TestResponseSearchVisitsOccurrencesOnOneLine(t *testing.T) {
 Run `go test ./internal/tui -run TestResponseSearchVisitsOccurrencesOnOneLine -count=1`.
 Record failure caused by line-sized repetition before production changes.
 
-- [ ] **Step 2: Track the response occurrence separately from its viewport.**
+- [x] **Step 2: Track the response occurrence separately from its viewport.**
 
 Replace `matchLine` with an optional response-specific anchor and an owned
 horizontal column:
@@ -406,7 +406,7 @@ offset, clear the anchor and clear `notFound`. Refresh dimensions via `m.View()`
 before these navigation actions, as the existing handler does. Retain viewport
 Update for vertical/page keys, clearing only the response anchor and miss flag.
 
-- [ ] **Step 3: Select occurrences using the shared helper.**
+- [x] **Step 3: Select occurrences using the shared helper.**
 
 For a submitted non-empty query, replace `r.query`, clear the response anchor and
 search inclusively from `YOffset` and the effective owned column. Empty Enter
@@ -430,7 +430,7 @@ anchor. A search after manual scrolling must not reuse a clamped previous
 match. Re-rendering may clamp horizontal position, but must not replace the
 byte position of a successful occurrence.
 
-- [ ] **Step 4: Verify response parity and regression boundaries.**
+- [x] **Step 4: Verify response parity and regression boundaries.**
 
 Extend `TestResponseNavigationAndSearchPreservesRawPosition` to preserve raw
 `topLine` as well as entry/column, and verify a raw `n` after closing continues
@@ -446,24 +446,24 @@ paths with a signed commit, subject `Search reconstructed responses by occurrenc
 
 ## Final validation and delivery
 
-- [ ] Run a separate test-cleanup subagent after implementation; preserve every
+- [x] Run a separate test-cleanup subagent after implementation; preserve every
   distinct occurrence, display-width, filter/scope and restoration boundary.
   Re-run affected tests after any edits and review the cleanup diff.
-- [ ] Inspect real terminal interaction using the existing CLI: open Raw Log,
+- [x] Inspect real terminal interaction using the existing CLI: open Raw Log,
   search a continuation and repeated text, use `n`/`N`, scroll and search again,
   open/close a reconstructed response, and repeat at a narrow terminal width.
   Use sanitised fixtures only. Record exact inputs and results.
-- [ ] Run `go test ./internal/tui` without updating goldens first. If output
+- [x] Run `go test ./internal/tui` without updating goldens first. If output
   changes intentionally, use `go test ./internal/tui -update`, inspect with
   `scripts/read-golden.sh`, and review raw styling diffs. Do not regenerate
   snapshots solely to make a test pass.
-- [ ] Run `gofmt -d .`, `go mod tidy -diff`, `go mod verify`,
+- [x] Run `gofmt -d .`, `go mod tidy -diff`, `go mod verify`,
   `golangci-lint run --timeout=5m`, `go test -race -count=1 ./...`, and
   `go build ./...`. Require pristine passing output and no module/format diff.
-- [ ] Obtain final whole-branch review, resolve substantive findings, and
+- [x] Obtain final whole-branch review, resolve substantive findings, and
   record execution evidence in this plan. Verify signatures with
   `codex-git log main..HEAD '--format=%h %G? %s'` using the full wrapper path.
-- [ ] Leave the completed branch ready for Dan's integration choice. No push
+- [x] Leave the completed branch ready for Dan's integration choice. No push
   or merge is authorised merely by drafting this plan. GitHub CI's existing
   Linux/macOS amd64/arm64 matrix remains required before remote integration.
 
@@ -476,7 +476,7 @@ paths with a signed commit, subject `Search reconstructed responses by occurrenc
   position and traversal. No shared view-state subsystem is introduced.
 - Existing raw query APIs and response entry points are retained; helper types
   consumed by Task 2 are defined in Task 1.
-- No application changes have been made by writing this plan.
+- The original planning commit contained no application changes; execution is recorded below.
 
 ## Plan review evidence
 
@@ -489,6 +489,55 @@ paths with a signed commit, subject `Search reconstructed responses by occurrenc
   the finding addressed with no new substantive findings.
 - The obsolete forward-search-above-cursor expectation has an explicit test
   migration preserving its stale-line-offset coverage.
-- Planning baseline: `go test ./internal/tui` passes. Implementation tests,
-  terminal checks, cleanup and full validation remain unchecked above; they
-  have not been claimed as executed by drafting this document.
+- Planning baseline: `go test ./internal/tui` passed. Implementation and delivery
+  checks were subsequently executed; evidence follows.
+
+## Implementation evidence
+
+- Task 1: signed commit `4a902f9`, `Search raw logs by visible text occurrence`.
+  Behavioural RED showed the continuation query opening line zero (`header`).
+  Focused GREEN covers occurrence order, physical continuations, real parser
+  loading, Unicode/graphemes, ANSI and visible controls, manual scrolling,
+  filters/scope changes and empty domains. The empty-log reverse regression
+  exposed an out-of-range panic; its guard was added after reproducing it.
+  The existing horizontal-search regression was also updated in
+  `rawlog_horizontal_test.go` to assert the visible starting-column contract.
+- Task 2: signed commit `4e2a035`, `Search reconstructed responses by occurrence`.
+  Behavioural RED showed the second same-line occurrence remaining hidden.
+  Focused GREEN covers repetition, miss/empty/cancel stability, manual scrolling,
+  resize, wide Unicode and restoration of raw position and occurrence state.
+- Independent task reviews approved both tasks with no findings. Controller
+  checks confirmed unchanged raw input/cancellation and decoded-control coverage.
+- A separate test-cleanup subagent classified all 17 touched tests (34 distinct
+  scenarios) and retained them all. No redundant tests, edits or empty commit.
+- Whole-branch review of `b799381..4e2a035` found no critical, important or minor
+  issues, substantive plan deviations or deferred findings.
+
+### Terminal verification
+
+Used a sanitised six-line, three-entry fixture with raw continuation matches,
+wide Unicode, a provider response and a later raw entry. Ran the actual CLI in
+an interactive PTY at 80 columns × 18 rows and 40 columns × 14 rows.
+
+- Raw keys: `6`, `/`, `needle`, Enter, `n`, `N`, `j`, `n`.
+  Search revealed physical continuation line 3 at column 4; repetition revealed
+  the second occurrence at column 17 and reversed correctly. After scrolling,
+  repetition advanced from the new visible position to the provider entry.
+- At narrow width, advanced to the provider entry and used `r`, `/`, `needle`,
+  Enter, `n`, `N`, `r`, `n`. Both response occurrences were visible in order.
+  Closing restored raw entry 2, line 1, column 103; raw repetition continued to
+  its second occurrence at column 125.
+- At normal width, searched raw `response-first`, opened the response, searched
+  `needle` and repeated both ways. Occurrences remained visible with a vertically
+  clamped viewport. Closing restored raw column 88 and its original query;
+  raw `n` reported exhaustion without moving. Each CLI run exited cleanly.
+
+### Final validation
+
+At `4e2a035`, `gofmt -d .` produced no diff;
+`golangci-lint run --timeout=5m` (2.13.2) reported zero issues;
+`go test -race -count=1 ./...` passed all ten packages with pristine output;
+and `go build ./...` passed. `go mod verify` and `go mod tidy -diff` also
+passed, with no dependency changes. Existing TUI goldens passed unchanged.
+All feature commits have verified signatures. No merge or push was performed;
+remote CI remains a requirement for later remote integration.
