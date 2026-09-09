@@ -23,17 +23,17 @@ Interface: `ReconstructProviderJSON(text string) ([]ProviderJSON, error)`;
 `ProviderJSON` contains `Text string` and `Fragments []JSONFragment`;
 `JSONFragment` contains `Start, End, Line int` source coordinates.
 
-- [ ] Write tests building two synthetic JSON messages, slicing each into
+- [x] Write tests building two synthetic JSON messages, slicing each into
   fragments and alternating provider-prefixed records. Assert reconstructed
   text equals the independent original messages and ranges recover every byte.
-- [ ] Run `go test ./internal/logfmt -run 'TestProviderJSON' -count=1` and
+- [x] Run `go test ./internal/logfmt -run 'TestProviderJSON' -count=1` and
   observe failure before implementation.
-- [ ] Implement per-component pending JSON, source ranges, exact payload
+- [x] Implement per-component pending JSON, source ranges, exact payload
   boundaries and JSON completion checking. Complete messages must pass
   `json.Valid`; unfinished streams return line-number-only errors.
-- [ ] Add boundary tests for escaped strings, diagnostic tags, plain
+- [x] Add boundary tests for escaped strings, diagnostic tags, plain
   continuations, malformed JSON, interruption, CRLF and missing final newline.
-- [ ] Run package tests and commit with signing.
+- [x] Run package tests and commit with signing.
 
 ### Task 2: Scrub reconstructed messages and preserve records
 
@@ -44,28 +44,28 @@ Files: `internal/scrub/fragments.go`, `internal/scrub/fragments_test.go`,
 Consumes the shared interface. A source-boundary list on each view records
 output offsets during rendering. Replacements crossing a cut are atomic.
 
-- [ ] Write a failing end-to-end `Scrub` test with interleaved responses,
+- [x] Write a failing end-to-end `Scrub` test with interleaved responses,
   a credential split across fragments, repeated names and `tf_req_id=abc`
   outside the final JSON body. Require zero leaks and valid reconstructed JSON.
-- [ ] Mask body ranges with spaces of identical byte length; parse metadata
+- [x] Mask body ranges with spaces of identical byte length; parse metadata
   from this input and discover bodies in separate response JSON views.
-- [ ] Render logical views once, tracking fragment cuts through replacements;
+- [x] Render logical views once, tracking fragment cuts through replacements;
   insert their pieces into rendered physical views at their mapped boundaries.
-- [ ] Validate metadata against masked physical input/output and validate
+- [x] Validate metadata against masked physical input/output and validate
   resource identity across both physical and reconstructed views.
-- [ ] Run scrub tests, including all existing regressions, then signed commit.
+- [x] Run scrub tests, including all existing regressions, then signed commit.
 
 ### Task 3: Inspector consumption and completion
 
 Files: `internal/model/log.go`, focused model/TUI tests and documentation as
 needed for Dan's selected UI scope.
 
-- [ ] Expose complete responses by source entry while preserving `Bytes` and
+- [x] Expose complete responses by source entry while preserving `Bytes` and
   `Entries`; test cross-fragment retrieval using an actual temporary log.
-- [ ] Implement the selected inspector presentation with tests for navigation
+- [x] Implement the selected inspector presentation with tests for navigation
   and search using the same displayed text, preserving the raw view.
-- [ ] Document reconstruction and its fail-closed limits in README.
-- [ ] Run full tests with the signing-safe git shim, `go test -race ./...`,
+- [x] Document reconstruction and its fail-closed limits in README.
+- [x] Run full tests with the signing-safe git shim, `go test -race ./...`,
   `go build ./...`, `go vet ./...`, and `codex-git diff --check`.
 - [ ] Obtain independent code review, address reproduced findings with TDD,
   and run the separate test-cleanup pass. Verify all commits are signed.

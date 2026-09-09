@@ -123,8 +123,9 @@ const (
 // Init, Update and View all take pointer receivers for that reason, and
 // the compile-time assertion below pins it.
 type Model struct {
-	log  *model.Log
-	name string
+	response responseState
+	log      *model.Log
+	name     string
 
 	view     View
 	pane     Pane
@@ -405,6 +406,9 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.response.open {
+			return m.handleResponseKey(msg)
+		}
 		// A blocked jump describes the Enter that was just refused, so it
 		// lasts exactly until the next key: any other key moves the
 		// selection, the filter or the view out from under it.
@@ -522,6 +526,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup":
 			if m.view == ViewRawLog {
 				m.pageRawLog(-1)
+			}
+		case "r":
+			if m.view == ViewRawLog && m.pane == PaneList {
+				m.openResponse()
 			}
 		case "/":
 			// Search only makes sense against the raw log's text.

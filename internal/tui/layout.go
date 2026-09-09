@@ -292,6 +292,9 @@ func countMatching(f model.Filter, spans []span.Span) int {
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer(w int) string {
+	if m.response.open {
+		return m.responseFooter(w)
+	}
 	// The help is modal in Update, so it is modal here too. The raw log's
 	// search report below describes a view the help is not drawing, and it
 	// REPLACES the whole footer -- so without this a reader who opened the
@@ -530,6 +533,13 @@ func (m *Model) actionKeys(w int) string {
 	esc := escClearHint
 	if m.hasReturn {
 		esc = escBackHint
+	}
+	if m.view == ViewRawLog && m.pane == PaneList && !m.facetOverlayShowing(w) {
+		keys = []string{"⇥ pane", "r response", "↔ scroll"}
+		if m.raw.scope != nil {
+			keys = append(keys, scopeHint)
+		}
+		return strings.Join(append(keys, "/ search", esc, quitHint), hintSep)
 	}
 	return strings.Join(append(keys, "f facets", "/ search", esc, quitHint), hintSep)
 }
@@ -786,6 +796,9 @@ func (m *Model) renderCentre(w, h int) string {
 	if h <= 0 {
 		return ""
 	}
+	if m.response.open {
+		return m.renderResponse(w, h)
+	}
 	switch m.view {
 	case ViewRawLog:
 		return m.renderRawLog(w, h)
@@ -814,6 +827,9 @@ func (m *Model) renderCentre(w, h int) string {
 // say. The detail pane's name is marked precisely because it has no cursor
 // (see pane.focused).
 func (m *Model) centreTitle() string {
+	if m.response.open {
+		return m.responseTitle()
+	}
 	if m.view == ViewRawLog && m.raw.scope != nil {
 		// The COUNT, not merely the fact. The measured spread is 4 to 1934
 		// entries, so a word like "one call" would read the same over a

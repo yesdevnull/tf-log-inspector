@@ -64,8 +64,10 @@ var helpGroups = func() []helpGroup {
 		{title: "THE LIST", entries: []helpEntry{
 			{keys: "↑ ↓ j k", what: "move the cursor in the focused pane"},
 			{keys: "← → h l", what: "step within a timeline lane -- the footer's ↔"},
-			{keys: "← → h l", what: "scroll horizontally in the raw log"},
-			{keys: "PgUp PgDn", what: "page through the raw log"},
+			{keys: "← → h l", what: "scroll horizontally in raw log or response"},
+			{keys: "PgUp PgDn", what: "page through raw log or response"},
+			{keys: "r", what: "open reconstructed response; r or Esc returns"},
+			{keys: "↑ ↓ j k", what: "scroll the reconstructed response"},
 			{keys: "⏎ Enter", what: "open the selected call in the raw log"},
 			{keys: "s", what: "sort by the next column, in the table views"},
 			{keys: "\\", what: "show the whole log again, after opening a call"},
@@ -75,7 +77,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "o", what: "show only that value -- again undoes it"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
 			{keys: "Esc", what: "leave an opened call, then clear the filters"},
-			{keys: "/", what: "search the raw log for a pattern"},
+			{keys: "/", what: "search raw log or reconstructed response"},
 			{keys: "n N", what: "step to the next or previous match"},
 		}},
 		{title: "EVERYWHERE", entries: []helpEntry{
