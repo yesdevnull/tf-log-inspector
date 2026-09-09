@@ -342,6 +342,11 @@ func TestOWithoutAModeFlagIsRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "-o") {
 		t.Errorf("error does not name the flag it refused: %v", err)
 	}
+	for _, mode := range []string{"--diagnose", "--profile", "--scrub"} {
+		if !strings.Contains(err.Error(), mode) {
+			t.Errorf("error does not name supported output mode %s: %v", mode, err)
+		}
+	}
 	if opened {
 		t.Error("the interface opened anyway, so -o was accepted and then ignored")
 	}

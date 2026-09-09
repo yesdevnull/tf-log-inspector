@@ -113,6 +113,10 @@ func (s *session) discover(value, category string, numeric bool) {
 	if value == "" || category == "" {
 		return
 	}
+	hostname := category == "hostname"
+	if hostname {
+		category = "network"
+	}
 	c := s.candidates[value]
 	if c == nil {
 		c = &candidate{value: value, category: category}
@@ -127,7 +131,7 @@ func (s *session) discover(value, category string, numeric bool) {
 	if priority(category) > priority(c.category) {
 		c.category = category
 	}
-	if category == "hostname" {
+	if hostname {
 		s.discoverHost(value)
 	}
 }

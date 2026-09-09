@@ -316,11 +316,12 @@ func (s *session) discoverURL(value string) {
 	var parts []compositePart
 	var structure []string
 	start := strings.Index(value, "://") + 3
+	// URL parsing decodes host escapes, so source spans must use raw bytes.
+	authorityEnd := len(value)
+	if at := strings.IndexAny(value[start:], "/?#"); at >= 0 {
+		authorityEnd = start + at
+	}
 	if u.User != nil {
-		authorityEnd := len(value)
-		if at := strings.IndexAny(value[start:], "/?#"); at >= 0 {
-			authorityEnd = start + at
-		}
 		end := strings.LastIndexByte(value[start:authorityEnd], '@') + start
 		userEnd := end
 		if colon := strings.IndexByte(value[start:end], ':'); colon >= 0 {
@@ -335,11 +336,15 @@ func (s *session) discoverURL(value string) {
 		start = end + 1
 	}
 	hostStart := start
+	hostEnd := authorityEnd
 	if value[hostStart] == '[' {
 		hostStart++
+		hostEnd = hostStart + strings.LastIndexByte(value[hostStart:authorityEnd], ']')
+	} else if colon := strings.LastIndexByte(value[hostStart:authorityEnd], ':'); colon >= 0 {
+		hostEnd = hostStart + colon
 	}
-	parts = append(parts, compositePart{region: region{hostStart, hostStart + len(u.Hostname())}, candidate: host})
-	pathStart := start + len(u.Host)
+	parts = append(parts, compositePart{region: region{hostStart, hostEnd}, candidate: host})
+	pathStart := authorityEnd
 	pathEnd := pathStart + len(u.EscapedPath())
 	pos := pathStart
 	if cloud := s.discoverCloudPath(u.EscapedPath()); cloud != nil {
@@ -435,6 +440,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 				_, value, ok := readString(v.text, keyStart)
 				if ok && value != "" {
 					s.discover(value, "name", false)
+					v.numeric = append(v.numeric, region{keyStart, keyEnd})
 				}
 			} else {
 				v.protect(keyStart, keyEnd)

@@ -370,7 +370,7 @@ func guidCase(alias, original string) string {
 }
 
 func (s *session) render(v *view) (string, error) {
-	if c := s.candidates[v.text]; v.whole && c != nil && !v.mandatory && (c.category == "secret" || !exactRegion(v.addresses, 0, len(v.text))) {
+	if c := s.candidates[v.text]; v.whole && c != nil && !v.mandatory && v.numericContext(c, 0, len(v.text)) && (c.category == "secret" || !exactRegion(v.addresses, 0, len(v.text))) {
 		if c.syntaxConflict {
 			return "", fmt.Errorf("identifier at line %d: preserved syntax conflict", v.line)
 		}
@@ -405,7 +405,7 @@ func (s *session) render(v *view) (string, error) {
 			if end > len(v.text) || !strings.HasPrefix(v.text[i:], c.value) || (!boundaries(v.text, i, end) && !exactRegion(v.allowed, i, end)) {
 				continue
 			}
-			if isNumber(c.value) && c.category != "secret" && c.category != "explicit" && !containsRegion(v.numeric, i, end) && !(i == 0 && end == len(v.text)) {
+			if !v.numericContext(c, i, end) {
 				continue
 			}
 			if overlaps(v.nulls, i, end) {
@@ -445,6 +445,9 @@ func (s *session) render(v *view) (string, error) {
 		}
 		if childIndex < len(v.children) && i == v.children[childIndex].start {
 			child := v.children[childIndex]
+			if containsRegion(v.numeric, child.start, child.end) && !exactRegion(child.view.numeric, 0, len(child.view.text)) {
+				child.view.numeric = append(child.view.numeric, region{0, len(child.view.text)})
+			}
 			if containsRegion(v.protected, child.start, child.end) {
 				child.view.protect(0, len(child.view.text))
 				child.view.mandatory = true
@@ -485,6 +488,10 @@ func (s *session) render(v *view) (string, error) {
 		s.emitResources(v, out.String(), positions, edits)
 	}
 	return out.String(), nil
+}
+
+func (v *view) numericContext(c *candidate, start, end int) bool {
+	return !isNumber(c.value) || c.category == "secret" || c.category == "explicit" || containsRegion(v.numeric, start, end)
 }
 
 func (s *session) record(c *candidate) {
