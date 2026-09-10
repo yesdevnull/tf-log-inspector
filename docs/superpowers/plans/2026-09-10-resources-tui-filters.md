@@ -267,6 +267,32 @@ if !reflect.DeepEqual(snapshot, l.CaptureQuality()) { t.Fatal("whole-log facts c
 
 Task 1 migrates timing consumers without losing source identity. Task 2 provides observed rankings, empty states and complete scoped evidence. Task 3 supplies exact/module selection and literal narrowing. Task 4 verifies full interaction and documentation. D1 owns calculations; TUI never recomputes attribution or whole-log quality. E owns operation navigation/history, F profile data/text, G JSON, H comparison and I partial recovery.
 
+## Approved peer-review follow-up
+
+Dan authorised both findings from `/tmp/tf-log-inspector-par-findings.md` on 10 September 2026. These are bounded corrections to the completed design: preserve subtree OR semantics and all evidence contracts. The reviewed baseline is `c1b62bc`.
+
+### Task 5: Make broad module selections efficient (PAR-001)
+
+**Files:** `internal/model/resource_selection.go`, `resource_address.go` if structural ancestor reuse requires it, `resource_selection_test.go`, `resources_benchmark_test.go`; `internal/tui/model.go`, `resource_selection.go` and their tests only for projection invalidation.
+
+**Interfaces:** Keep `ResourceSelection.Match(address string, module ResourceModule) Membership` and `SelectResources` public contracts. Subtrees are ORed; address and module dimensions are ANDed. Exact indexed/quoted module paths, invalid paths, unavailable membership, false map values and nil versus empty maps must retain their behaviour.
+
+- [ ] Establish a deterministic failing regression for repeated module parsing/allocation, using real matching and an allocation-growth bound rather than a wall-clock timeout. Retain behavioural assertions for broad selections, quoted keys and unknown membership. Add result-checked benchmarks for the normal state created by unticking root: all sibling module instances selected, at small and large cardinalities, alongside unconstrained and singleton selections. Record the slow baseline before changing production code.
+- [ ] Match structurally valid ancestor paths through selected-map lookups instead of scanning every selected parent for every observation. Reuse the existing parser and exact path spelling. Do not introduce a new dependency, generic cache framework or alternative address parser. Short-circuit definite address mismatches where safe. Keep projection caching across view/sort-only changes if this can be separated cleanly from filter invalidation; test cache lifetime through real behaviour and allocation evidence, not mocks.
+- [ ] Run the focused model/TUI tests, result-checked benchmarks and the saved review probe. Confirm all membership/evidence invariants. Run `go test ./...` before the signed commit; include actual RED/GREEN and measurements in the task report.
+- [ ] Independent task review and separate test cleanup; resolve findings before proceeding.
+
+### Task 6: Explain inherited module inclusion (PAR-002)
+
+**Files:** `internal/tui/facets.go`, `help.go`, their tests or `facet_search_test.go`; affected help/facet goldens and README filter guidance.
+
+**Interfaces:** Keep module selection as an OR of explicit selected subtrees, including root. Unticking a child does not exclude observations still covered by a selected ancestor. Exact-address and legacy facet controls retain their behaviour.
+
+- [ ] Write a real-key regression starting from root plus sibling modules, untick a child while root remains selected, and assert retained observations with accurate guidance. Fail first on the misleading presentation. Cover genuinely excluded choices and narrow rendering without weakening existing assertions.
+- [ ] Qualify the generic Space help and show inherited inclusion in the module chooser or adjacent visible guidance. Prefer a small, clearly explained inherited marker for an unchecked child covered by a selected ancestor; do not dim it as excluded. Preserve checkbox toggle/solo behaviour, counts, query-only narrowing and escaped identifiers. Keep marker width equal to existing checkboxes and explain it in help. Avoid introducing a per-frame selected-module-by-choice scan that recreates PAR-001.
+- [ ] Run focused tests, regenerate only intentional golden changes using existing tooling, inspect changed terminal text with `scripts/read-golden.sh` and inspect raw ANSI diffs. Update README guidance if needed. Run `go test ./...` before the signed commit; record RED/GREEN and inspection evidence.
+- [ ] Independent task review and separate test cleanup. Finish with whole-branch review, fresh build/race/lint checks, narrow-terminal verification and read-only verification against both saved findings.
+
 ## Planning review — 10 September 2026
 
 Reviewed alongside D1 against item 3 and current TUI code. Self-review corrected the editor declaration to the existing textinput.Model/newSearchInput API. Independent review and the scoped D1 correction review found no remaining actionable issue. See D1's planning review for the existing-suite/build results. No application changes, new golden outputs or terminal implementation checks were performed in this planning task.
