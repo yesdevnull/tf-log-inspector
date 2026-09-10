@@ -85,7 +85,7 @@ populate their existing `model.FacetKey` aggregate keys, Resources uses its exac
 uses its original RPC index. This is required for task 1 restoration, before
 aggregate drill-down is enabled by task 2.
 
-- [ ] **Step 1: Add a failing public-key regression for child edits.** Use existing `testLog`, `pressKey` and `pressRune` helpers, with `reflect` and Bubble Tea imports. This must fail because the current return path does not restore child-edited filters.
+- [x] **Step 1: Add a failing public-key regression for child edits.** Use existing `testLog`, `pressKey` and `pressRune` helpers, with `reflect` and Bubble Tea imports. This must fail because the current return path does not restore child-edited filters.
 
 ```go
 func TestHistoryRestoresParentAfterRawChildFilterEdit(t *testing.T) {
@@ -110,9 +110,9 @@ func TestHistoryRestoresParentAfterRawChildFilterEdit(t *testing.T) {
 
 Add separate cases exercising resource/module allow-list map edits (including empty versus nil), parent sorting, timeline selection after child filtering, request expansion, modal Esc precedence, manual same-view key clearing history, and refused jumps leaving history unchanged. Drive real key handlers; directly set only fixture preconditions that existing tests already set.
 
-- [ ] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestHistory' -count=1`; confirm the filter-restoration assertion fails for the current implementation before changing production behaviour.
+- [x] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestHistory' -count=1`; confirm the filter-restoration assertion fails for the current implementation before changing production behaviour.
 
-- [ ] **Step 3: Implement snapshot storage and restoration.** Use this data shape, with existing package types/imports:
+- [x] **Step 3: Implement snapshot storage and restoration.** Use this data shape, with existing package types/imports:
 
 ```go
 type navigationFrame struct {
@@ -167,9 +167,9 @@ dispatch ahead of numbered keys.
 
 Then initialise the new raw scope/position as today. Clear a previous raw match/search-failure anchor on entry to a different jump; restore the saved parent raw state on return. E1 deliberately restores the complete parent snapshot, so migrate old assertions that relied on child raw state leaking into the parent to assert exact parent restoration instead.
 
-- [ ] **Step 4: Verify GREEN and review navigation semantics.** Run `go test ./internal/tui -count=1`. Replace old field assertions in tests with history behaviour/depth only where needed. Update `noMatchTail`, footer and comments to consult history; check Resources empty-state messages as well as Calls. Confirm quality/evidence/help dismissal leaves depth unchanged and backslash retains the return frame. Run independent task review, then a separate test-cleanup agent; preserve behavioural coverage and repeat affected tests after edits.
+- [x] **Step 4: Verify GREEN and review navigation semantics.** Run `go test ./internal/tui -count=1`. Replace old field assertions in tests with history behaviour/depth only where needed. Update `noMatchTail`, footer and comments to consult history; check Resources empty-state messages as well as Calls. Confirm quality/evidence/help dismissal leaves depth unchanged and backslash retains the return frame. Run independent task review, then a separate test-cleanup agent; preserve behavioural coverage and repeat affected tests after edits.
 
-- [ ] **Step 5: Commit the task.** Inspect `codex-git diff --check` and status, stage only task files with the wrapper, then signed commit subject `Restore investigation state through navigation history`. Record RED/GREEN and review evidence in this plan.
+- [x] **Step 5: Commit the task.** Inspect `codex-git diff --check` and status, stage only task files with the wrapper, then signed commit subject `Restore investigation state through navigation history`. Record RED/GREEN and review evidence in this plan.
 
 ## Task 2: Open provider and type investigations with singleton scope
 
@@ -264,3 +264,9 @@ with explicit regression cases. Re-review found no remaining findings in either
 plan and approved them for Dan's review. Documentation link, code-fence,
 placeholder and staged whitespace checks passed; no application tests were run
 for this documentation-only change.
+
+## Execution record
+
+Dan authorised subagent implementation of both plans on 10 September 2026. E1 task 1 is complete in signed commits `31367fe`, `a0d0772` and `8e6ce58`. Required RED reproduced child type-filter leakage; focused tests and the full Go suite pass. Independent spec/quality review approved after additional real-key modal/selection coverage; separate cleanup retained all distinct boundary tests.
+
+An empty named selection cannot initiate an E1 raw jump because no timing row remains. E1 verifies empty snapshot preservation directly and Enter inert through real handlers. E2 must verify the newly reachable empty-operation parent → c → Calls → Esc path. This staging was confirmed in review.
