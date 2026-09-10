@@ -50,10 +50,11 @@ func TestResourceAssociatedCallsPreserveExplicitEmptySelection(t *testing.T) {
 	if m.view != ViewCalls || len(m.rows()) != 0 || m.resourceSelection.Addresses == nil {
 		t.Fatalf("empty associated Calls = view %v rows %d selection %#v", m.view, len(m.rows()), m.resourceSelection.Addresses)
 	}
-	for _, want := range []string{"No named RPC associations in this selection", "This does not establish that no provider calls occurred."} {
-		if got := strings.Join(strings.Fields(unstyled(m.renderList(60, 20))), " "); !strings.Contains(got, want) {
-			t.Errorf("empty associated Calls missing %q:\n%s", want, got)
-		}
+	if got := unstyled(m.View()); !strings.Contains(got, "No named rpc associations in this selection") {
+		t.Errorf("empty associated Calls title omitted the selection result:\n%s", got)
+	}
+	if got := strings.Join(strings.Fields(unstyled(m.renderList(60, 20))), " "); !strings.Contains(got, "This does not establish that no provider calls occurred.") {
+		t.Errorf("empty associated Calls omitted the provider-call caveat:\n%s", got)
 	}
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.view != ViewResources || !m.resourceOperations || m.resourceSelection.Addresses == nil || len(m.resourceSelection.Addresses) != 0 {
@@ -135,6 +136,117 @@ func TestAssociatedCallsHaveIndependentSortAndDiscoverableNarrowFooter(t *testin
 	pressRune(t, &m, '4')
 	if m.associatedCalls || m.activeSort() != ordinarySort || strings.Contains(unstyled(m.View()), "Inferred RPC associations") {
 		t.Fatalf("manual Calls retained associated context/sort: context %v sort %d", m.associatedCalls, m.activeSort())
+	}
+}
+
+func TestAssociatedCallsKeepQualificationAtSixtyByNine(t *testing.T) {
+	populated := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	populated.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &populated, '3')
+	pressKey(t, &populated, tea.KeyMsg{Type: tea.KeyEnter})
+	pressRune(t, &populated, 'c')
+	got := strings.Join(strings.Fields(unstyled(populated.View())), " ")
+	for _, want := range []string{"Inferred calls", "current selection", "confi", "conta"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("populated 60x9 associated Calls missing %q:\n%s", want, got)
+		}
+	}
+
+	empty := New(testLog(t, "resources-modules.log"), "resources-modules.log")
+	empty.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &empty, '3')
+	pressKey(t, &empty, tea.KeyMsg{Type: tea.KeyEnter})
+	setFacetCursor(t, &empty, dimResource, `module.app["a.b"].module.db[0].aws_instance.web["key[part"]`)
+	empty.pane = PaneFacets
+	pressKey(t, &empty, tea.KeyMsg{Type: tea.KeySpace})
+	empty.pane = PaneList
+	pressRune(t, &empty, 'c')
+	got = strings.Join(strings.Fields(unstyled(empty.View())), " ")
+	for _, want := range []string{"No named rpc associations in this selection", "This does not establish that no provider calls occurred."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("empty 60x9 associated Calls missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestAssociatedCallRawFooterKeepsReturnAndQuitAtSixtyColumns(t *testing.T) {
+	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &m, '3')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	pressRune(t, &m, 'c')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog || m.raw.scope == nil {
+		t.Fatal("associated call did not open scoped Raw Log")
+	}
+	footer := unstyled(m.footer(60))
+	for _, want := range []string{"Esc back", "q quit"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("60-column associated Raw footer missing %q: %q", want, footer)
+		}
+	}
+}
+
+func TestAssociatedCallsPreserveEverySelectionDimension(t *testing.T) {
+	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	setFacetCursor(t, &m, dimProvider, "registry.terraform.io/hashicorp/aws")
+	m.pane = PaneFacets
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeySpace})
+	setFacetCursor(t, &m, dimType, "aws_subnet")
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeySpace})
+	setFacetCursor(t, &m, dimRPC, "Other")
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeySpace})
+	m.pane = PaneList
+	pressRune(t, &m, '3')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	setFacetCursor(t, &m, dimResource, "aws_instance.a")
+	m.pane = PaneFacets
+	pressRune(t, &m, 'o')
+	setFacetCursor(t, &m, dimModule, "")
+	pressRune(t, &m, 'o')
+	if m.resourceSelection.Addresses != nil || m.resourceSelection.Modules == nil {
+		t.Fatalf("named selection = %#v/%#v, want nil address and active module", m.resourceSelection.Addresses, m.resourceSelection.Modules)
+	}
+	beforeFilter := m.filter()
+	beforeExclusions := cloneExclusions(m.excludedFacets)
+	beforeAddresses := maps.Clone(m.resourceSelection.Addresses)
+	beforeModules := maps.Clone(m.resourceSelection.Modules)
+	m.pane = PaneList
+	pressRune(t, &m, 'c')
+	if !reflect.DeepEqual(m.resourceSelection.Addresses, beforeAddresses) || !reflect.DeepEqual(m.resourceSelection.Modules, beforeModules) || !reflect.DeepEqual(m.excludedFacets, beforeExclusions) || !reflect.DeepEqual(m.filter(), beforeFilter) {
+		t.Fatalf("associated Calls changed selection: addresses %#v modules %#v filter %#v", m.resourceSelection.Addresses, m.resourceSelection.Modules, m.filter())
+	}
+	if got := unstyled(m.View()); !strings.Contains(got, "No named rpc associations") || strings.Contains(got, "Calls for current selection") {
+		t.Fatalf("active module selection got neutral wording:\n%s", got)
+	}
+}
+
+func TestAssociatedCallRowsNeverNameUnresolvedAttributions(t *testing.T) {
+	l, err := model.Load("testdata/resource-association-confidence.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(l, "resource-association-confidence.log")
+	m.associatedCalls = true
+	for _, row := range m.rows() {
+		a := l.AttributionForEntry(l.RPCSpans[row.spanIdx].Entry)
+		if (a.Confidence.String() == "ambiguous" || a.Confidence.String() == "unattributed") && a.Address != "" {
+			t.Errorf("%s row chose address %q", a.Confidence, a.Address)
+		}
+	}
+}
+
+func TestAssociatedCallsLabelLogsWithoutAddressContext(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "provider-rpc.log")
+	m.associatedCalls = true
+	rows := m.rows()
+	if len(rows) == 0 {
+		t.Fatal("no-context fixture has no calls")
+	}
+	for _, row := range rows {
+		if got := row.cells[len(row.cells)-1]; got != noAddressContextValue {
+			t.Errorf("confidence cell = %q, want %q", got, noAddressContextValue)
+		}
 	}
 }
 

@@ -780,7 +780,7 @@ func (m *Model) renderList(w, h int) string {
 	}
 	empty := noRowsNote
 	if m.associatedCalls && (m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) {
-		empty = "No named RPC associations in this selection"
+		empty = "This does not establish that no provider calls occurred."
 	} else if m.filterActive() {
 		empty = m.noMatchTail()
 	}
@@ -804,11 +804,13 @@ func (m *Model) renderList(w, h int) string {
 	if m.view == ViewCalls && m.associatedCalls {
 		if m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
 			preamble = []string{"Calls for current selection", "Confidence describes resource attribution."}
+		} else if len(m.rows()) == 0 {
+			if h > 3 {
+				preamble = wrapToWidth("This does not establish that no provider calls occurred.", w)
+				empty = "No calls shown."
+			}
 		} else {
 			preamble = []string{"Inferred RPC associations for current selection", "Not assigned to an individual UI operation."}
-			if len(m.rows()) == 0 {
-				preamble = append(preamble, wrapToWidth("This does not establish that no provider calls occurred.", w)...)
-			}
 		}
 	}
 	rows := m.rows()

@@ -535,7 +535,26 @@ func (m *Model) actionKeys(w int) string {
 		if m.raw.scope != nil {
 			keys = append(keys, scopeHint)
 		}
-		return strings.Join(append(keys, "/ search", esc, quitHint), hintSep)
+		keys = append(keys, "/ search", esc, quitHint)
+		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
+			removed := false
+			for _, secondary := range []string{"⇥ pane", "↔ scroll", "r response"} {
+				for i, key := range keys {
+					if key == secondary {
+						keys = append(keys[:i], keys[i+1:]...)
+						removed = true
+						break
+					}
+				}
+				if removed {
+					break
+				}
+			}
+			if !removed {
+				break
+			}
+		}
+		return strings.Join(keys, hintSep)
 	}
 	keys = append(keys, "f facets")
 	if m.facetSearchAvailable() {
@@ -870,6 +889,15 @@ func (m *Model) centreTitle() string {
 	}
 	if m.view == ViewTimeline {
 		return m.timelineTitle()
+	}
+	if m.view == ViewCalls && m.associatedCalls {
+		if len(m.rows()) == 0 && (m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) {
+			return "NO NAMED RPC ASSOCIATIONS IN THIS SELECTION"
+		}
+		if m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
+			return "CALLS · CURRENT SELECTION"
+		}
+		return "INFERRED CALLS · CURRENT SELECTION"
 	}
 	if m.view == ViewResources && m.resourceOperations {
 		return "OBSERVED UI OPERATIONS"
