@@ -27,7 +27,7 @@
 
 ## Status and proposed approach
 
-Dan authorised drafting G1/G2 on 11 September 2026, after F merged locally at `529a6fd`. These plans propose exact contracts for approval; application implementation is not yet authorised.
+Dan authorised drafting G1/G2 on 11 September 2026, after F merged locally at `529a6fd`, then approved both plans and subagent implementation. Execution evidence is recorded below.
 
 Use dedicated wire structs. Directly marshalling `Report` would expose Go names, enum ordinals, cached selection details and invalid zero offsets. A generic export framework or second parser would add unnecessary machinery. A small explicit projection keeps F's calculations authoritative and makes schema changes reviewable.
 
@@ -126,7 +126,7 @@ Private API between these tasks: `func buildJSONProfile(report Report, metadata 
 
 **Interfaces:** Consume `Build(*model.Log) (Report,error)` and the F report types. Add `Reconstruction model.ReconstructionQuality` to Report, populated by the non-triggering accessor. Produce `JSONMetadata` and `buildJSONProfile` with the complete schema above.
 
-- [ ] **Step 1: Add behaviour tests.** Start with real `resources-accounting.log`, `two-tier.log`, `resources-long-lower-bound.log`, `core-only.log` and the association-confidence fixture. A representative source assertion must use independently counted lines:
+- [x] **Step 1: Add behaviour tests.** Start with real `resources-accounting.log`, `two-tier.log`, `resources-long-lower-bound.log`, `core-only.log` and the association-confidence fixture. A representative source assertion must use independently counted lines:
 
 ```go
 func TestJSONProjectionRetainsPhysicalSources(t *testing.T) {
@@ -154,9 +154,9 @@ Cover >20 observations/providers/types/resources without truncation, original ar
 
 Exercise no tier, UI only, differing origins, preferred RPC with unusable positions, partial positions, zero window, clamping, all intervals, and an excluded observation preceding the referenced active observation. Verify an active index identifies the original RPC/UI array element, not the compact positioned slot. Invalid mapping returns `errors.New("profile interval observation index out of range")`; no negative mapping is indexed. Reuse existing `intervalObservation` for nonnegative indices; accept only -1 as the null gap sentinel and reject other negative indices. Verify reconstruction remains `not_checked` after Build/projection on a fresh loaded log; separately map checked-zero and failed snapshots. Invalid UTF-8 in metadata and an identifier must return a fixed `profile JSON contains invalid UTF-8` error, without echoing the value.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run 'TestJSONProjection|TestBuild.*Reconstruction' -count=1`. Initial missing API compilation establishes scaffolding only; after minimal empty projection exists, record failing value/null/source/complete-count assertions before implementing mappings.
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run 'TestJSONProjection|TestBuild.*Reconstruction' -count=1`. Initial missing API compilation establishes scaffolding only; after minimal empty projection exists, record failing value/null/source/complete-count assertions before implementing mappings.
 
-- [ ] **Step 3: Implement private wire projection.** Define each schema object with explicit tags and pointer nulls, for example:
+- [x] **Step 3: Implement private wire projection.** Define each schema object with explicit tags and pointer nulls, for example:
 
 ```go
 type jsonPosition struct {
@@ -175,8 +175,8 @@ func positionJSON(s span.Span) jsonPosition {
 
 Copy fields using the mapping tables; initialise output slices/maps even when empty. Copy sources rather than sharing pointers. Format copied origin timestamps with UTC/RFC3339Nano. Map confidence enums by explicit cases, never numeric casts. Use small helpers for Total, Tier, Source and Position; do not recalculate rollups or correlations. Validate exported untrusted strings with `utf8.ValidString` as they enter wire fields, returning the fixed error above. Sort only copied histogram data; never sort Report slices in place. Map `Report.Reconstruction` exactly as specified; unexpected states return `errors.New("profile JSON has invalid reconstruction state")` rather than claim success. Unknown confidence enums return `errors.New("profile JSON has invalid attribution confidence")`; an unsupported non-null timeline tier returns `errors.New("profile JSON has invalid timing tier")`. Loaded reports cannot produce those states, but synthetic test reports must not cause invented evidence.
 
-- [ ] **Step 4: Verify, document and measure.** Run profile/model tests and full suite. Write the schema reference with every field above and a decoder example preserving integers; specify JSON spelling/order conventions and no compatibility promise. Add `BenchmarkJSONProjection` with `b.ReportAllocs`, a fixed generated sanitised capture outside the timed loop, and `b.ResetTimer` before projection iterations. Use 1,000 and 10,000 observations; record `go test ./internal/profile -run '^$' -bench BenchmarkJSONProjection -benchmem -count=1`. Do not set arbitrary timing thresholds or add parallel loading. Independent review checks the full wire contract; separate cleanup checks tests.
-- [ ] **Step 5: Commit.** Signed commit `Define complete JSON profile schema`; record actual RED/GREEN, benchmark and review evidence here. This task leaves an internally tested projection, with no new CLI option.
+- [x] **Step 4: Verify, document and measure.** Run profile/model tests and full suite. Write the schema reference with every field above and a decoder example preserving integers; specify JSON spelling/order conventions and no compatibility promise. Add `BenchmarkJSONProjection` with `b.ReportAllocs`, a fixed generated sanitised capture outside the timed loop, and `b.ResetTimer` before projection iterations. Use 1,000 and 10,000 observations; record `go test ./internal/profile -run '^$' -bench BenchmarkJSONProjection -benchmem -count=1`. Do not set arbitrary timing thresholds or add parallel loading. Independent review checks the full wire contract; separate cleanup checks tests.
+- [x] **Step 5: Commit.** Signed commit `Define complete JSON profile schema`; record actual RED/GREEN, benchmark and review evidence here. This task leaves an internally tested projection, with no new CLI option.
 
 ## Task 2: Encode reproducible complete JSON and propagate failures
 
@@ -241,3 +241,18 @@ addition is the reconstruction snapshot; its accessor already exists. G1 and G2
 use the same metadata/renderer signatures. No test execution is claimed for
 these documentation-only plans. Exact schema and UTF-8 failure behaviour remain
 proposed for Dan's approval, with no backward-compatibility commitment.
+
+## Execution record
+
+Task 1 completed in signed commits `fce7734` and `1b7bbb7`. A behavioural RED
+reported lost observations before projection implementation. Focused, full-suite
+and vet checks pass. Independent review required fuller field/state assertions;
+the test-only fix passed scoped re-review with no findings. Separate cleanup
+retained all genuine cases: profile package coverage is 96.9%, and projection
+statement coverage is 100%. No production correction was needed after review.
+
+Local projection benchmarks: 1,000 observations used 128,465 ns/op, 327,039 B/op
+and 3,012 allocations/op; 10,000 used 1,118,756 ns/op, 3,216,656 B/op and 30,012
+allocations/op. These measurements are descriptive, not performance thresholds.
+The accidentally tracked scratch report is removed from tracking; this plan
+retains its durable evidence. Renderer and CLI implementation remain pending.
