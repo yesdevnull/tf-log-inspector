@@ -139,17 +139,25 @@ func splitAddress(address string) ([]string, bool) {
 func validPlainSegment(segment string) bool {
 	for i, r := range segment {
 		if i == 0 {
-			if r != '_' && !unicode.IsLetter(r) {
+			if !identifierStart(r) {
 				return false
 			}
 			continue
 		}
-		if r != '-' && !unicode.IsLetter(r) && !unicode.IsDigit(r) &&
-			!unicode.Is(unicode.Mn, r) && !unicode.Is(unicode.Mc, r) && !unicode.Is(unicode.Pc, r) {
+		if !identifierContinue(r) {
 			return false
 		}
 	}
 	return segment != ""
+}
+
+func identifierStart(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.Is(unicode.Nl, r) || unicode.Is(unicode.Other_ID_Start, r)
+}
+
+func identifierContinue(r rune) bool {
+	return r == '-' || identifierStart(r) || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) ||
+		unicode.Is(unicode.Nd, r) || unicode.Is(unicode.Pc, r) || unicode.Is(unicode.Other_ID_Continue, r)
 }
 
 func validNameSegment(segment string) bool {

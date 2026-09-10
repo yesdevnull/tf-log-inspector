@@ -64,6 +64,9 @@ func TestResourceModuleAcceptsConservativeTerraformIdentifiers(t *testing.T) {
 		`module._private.aws_instance.web`,
 		`module.app-name.aws_instance.web_2`,
 		`module.应用.aws_实例.网页2`,
+		`module.℘module.aws_instance.web`,
+		`module.Ⅰmodule.aws_instance.web`,
+		`module.a·b.aws_instance.web`,
 	} {
 		if got := ResolveResourceModule(address, "", false); !got.Known {
 			t.Errorf("ResolveResourceModule(%q) = %+v, want known", address, got)

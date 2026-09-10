@@ -32,4 +32,12 @@ Review found that plain address segments accepted spaces, leading digits and exp
 
 RED: `go test ./internal/model -run 'TestResourceModule(Rejects|Accepts)' -count=1` failed for `module.bad name`, `module.9name`, `module.bad+name`, a punctuated resource name, and `module.m["a[b"]`.
 
-GREEN: the same command passed after applying conservative Unicode identifier validation with ASCII hyphen support and relying on numeric/JSON key validation to reject multiple index suffixes. Comments now state that `ModuleKnown` and `ModuleInvalid` distinguish root from unavailable metadata. The original 43 model cases remain intact.
+GREEN: the same command passed after applying conservative Unicode identifier validation with ASCII hyphen support and relying on numeric/JSON key validation to reject multiple index suffixes. Comments now state that `ModuleKnown` and `ModuleInvalid` distinguish root from unavailable metadata. The original 43 cases across the affected packages remain intact.
+
+## Round-two review fix
+
+Scoped rereview found that `unicode.IsLetter` omitted the Unicode `Nl` category and `Other_ID_Start`, while continuation omitted `Other_ID_Continue`. Added representative ℘ (`Other_ID_Start`), Ⅰ (`Nl`) and middle-dot (`Other_ID_Continue`) cases before changing production code.
+
+RED: `go test ./internal/model -run TestResourceModuleAcceptsConservativeTerraformIdentifiers -count=1` failed for all three new cases.
+
+GREEN: `go test ./internal/model -run 'TestResourceModule(AcceptsConservativeTerraformIdentifiers|RejectsIncompleteOrUnsupportedAddresses)' -count=1` passed after implementing HCL's `ID_Start` and `ID_Continue` category/property rules with the standard library, retaining ASCII underscore at start and ASCII hyphen in continuation. Existing malformed-input rejection passed in the same run.
