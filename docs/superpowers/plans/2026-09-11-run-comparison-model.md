@@ -148,7 +148,7 @@ Validate UTF-8 in every exported string; fixed error `comparison JSON contains i
 
 **Interfaces:** Consume `ComparisonInput{RPC, UI []span.Span}`. Produce the exact model declarations and `Compare` API above for H1 task 2 and H2. Apply all semantics and ordering in this plan.
 
-- [ ] **Step 1: Add a failing behavioural test.** Start with a volume-versus-mean example; import the existing span package and `testing`. Once the API declarations compile, record the behavioural failure before implementing grouping.
+- [x] **Step 1: Add a failing behavioural test.** Start with a volume-versus-mean example; import the existing span package and `testing`. Once the API declarations compile, record the behavioural failure before implementing grouping.
 
 ```go
 func TestCompareSeparatesVolumeAndMean(t *testing.T) {
@@ -170,8 +170,8 @@ func TestCompareSeparatesVolumeAndMean(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run RED.** `go test ./internal/model -run TestCompareSeparatesVolumeAndMean -count=1`. Distinguish initial absent API compilation from a meaningful assertion failure. Add table-driven cases for identical inputs, added/removed keys while each tier has another admitted observation, zero baseline, zero-duration availability, empty inputs and disjoint tiers. Assert null versus zero and all metric deltas, not just row counts.
-- [ ] **Step 3: Implement grouping and arithmetic.** Aggregate each input once per tier using typed keys, then form section key unions. Construct independent summaries, calculate deltas only when each metric is available, and sort complete rows. These are the required arithmetic kernels in `comparison_delta.go`:
+- [x] **Step 2: Run RED.** `go test ./internal/model -run TestCompareSeparatesVolumeAndMean -count=1`. Distinguish initial absent API compilation from a meaningful assertion failure. Add table-driven cases for identical inputs, added/removed keys while each tier has another admitted observation, zero baseline, zero-duration availability, empty inputs and disjoint tiers. Assert null versus zero and all metric deltas, not just row counts.
+- [x] **Step 3: Implement grouping and arithmetic.** Aggregate each input once per tier using typed keys, then form section key unions. Construct independent summaries, calculate deltas only when each metric is available, and sort complete rows. These are the required arithmetic kernels in `comparison_delta.go`:
 
 ```go
 func signedChange(before, after uint64) SignedChange {
@@ -188,8 +188,8 @@ func addDuration(total uint64, duration uint32) (uint64, error) {
 
 For count/total percentage, convert the already-computed signed difference to float64 and divide by the positive baseline; never subtract two rounded float64 totals. For mean percentage use the two finite means. For integer ranking compare sign then magnitude (reverse magnitude ordering for negatives), with raw-key ties. Do not mutate the original observation slices.
 
-- [ ] **Step 4: Extend GREEN coverage.** Add repeated UI address/action aggregation and different-action separation; missing-address UI accounting; raw missing identifiers versus literal `(none)`; compound identifiers containing separators; non-positioned durations; lower bound on either side suppressing every timing delta; count deltas retained; independent alias renames yielding added/removed, not fuzzy matches. Test provider identity `same`/`different`/`unknown`, empty provider, UI-only, input-order permutations and tied/unranked ordering. Exercise signed differences around 2^53, MaxInt64 and MaxUint64, `addDuration` overflow and zero normalisation directly, without enormous fixtures. Snapshot inputs to prove nonmutation and mutate returned summaries to prove independent pointer ownership. Run `go test ./internal/model -run 'TestCompare|TestComparison' -count=1`, then the whole model package.
-- [ ] **Step 5: Benchmark, review, cleanup and commit.** Use this benchmark with inputs built outside the timed loop (imports: fmt, testing and the existing span package):
+- [x] **Step 4: Extend GREEN coverage.** Add repeated UI address/action aggregation and different-action separation; missing-address UI accounting; raw missing identifiers versus literal `(none)`; compound identifiers containing separators; non-positioned durations; lower bound on either side suppressing every timing delta; count deltas retained; independent alias renames yielding added/removed, not fuzzy matches. Test provider identity `same`/`different`/`unknown`, empty provider, UI-only, input-order permutations and tied/unranked ordering. Exercise signed differences around 2^53, MaxInt64 and MaxUint64, `addDuration` overflow and zero normalisation directly, without enormous fixtures. Snapshot inputs to prove nonmutation and mutate returned summaries to prove independent pointer ownership. Run `go test ./internal/model -run 'TestCompare|TestComparison' -count=1`, then the whole model package.
+- [x] **Step 5: Benchmark, review, cleanup and commit.** Use this benchmark with inputs built outside the timed loop (imports: fmt, testing and the existing span package):
 
 ```go
 func BenchmarkCompare(b *testing.B) {
@@ -279,3 +279,19 @@ shared types, task dependencies, null semantics and overflow behaviour against
 the current source at `801a917`. All plan links resolve and code fences balance.
 Baseline `go test ./...` and `go build ./...` pass on the unchanged application;
 these results do not validate the proposed comparison implementation.
+
+## Execution record
+
+Task 1 completed in signed commits `cf9958a`, `7c92c5b` and `2b581f1`.
+Behavioural RED reported missing sections after API declarations compiled.
+Independent review found mandatory coverage gaps; test-only additions passed
+scoped re-review with every finding addressed. Separate cleanup retained all
+required cases and removed one fully duplicated identical-row test. The model
+package passes at 97.4% statement coverage. Full eleven-package tests passed
+before the test-only review changes; focused and model checks passed afterwards.
+
+Local benchmarks (Apple M4): 1k/10k repeated-key captures took 548,318/5,496,835
+ns/op with 13,376 B/op and 125 allocations each. Distinct-key captures took
+6,364,394/63,166,727 ns/op, 11,684,962/118,042,216 B/op and 90,385/901,413
+allocations. These are descriptive scaling measurements, not performance
+thresholds. Task 2 and H2 remain pending.
