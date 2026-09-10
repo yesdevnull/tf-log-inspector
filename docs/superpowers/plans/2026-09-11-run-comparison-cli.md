@@ -105,7 +105,7 @@ This retains the previous arity-before-mode ordering. For combined comparison/mo
 
 **Interfaces:** Consume H1's `ComparisonReport`, `ComparisonMetadata`, `model.Comparison` and full exact schema contract. Produce `RenderComparisonJSON(io.Writer, ComparisonReport, ComparisonMetadata) error`. H2 task 3 calls it directly.
 
-- [ ] **Step 1: Write failing decoder/contract tests.** Build reports from real `provider-rpc.log` and `structured-ui.log`; validate one root document followed by EOF, five sections, before/after metadata and independent fixture counts. Use this exact integer boundary assertion against the private formatter introduced in step 3:
+- [x] **Step 1: Write failing decoder/contract tests.** Build reports from real `provider-rpc.log` and `structured-ui.log`; validate one root document followed by EOF, five sections, before/after metadata and independent fixture counts. Use this exact integer boundary assertion against the private formatter introduced in step 3:
 
 ```go
 func TestComparisonJSONSignedInteger(t *testing.T) {
@@ -119,8 +119,8 @@ func TestComparisonJSONSignedInteger(t *testing.T) {
 ```
 
 Assert exact root/section/row/key/summary/change key sets, including each key shape. Recursively check both shared capture objects against G's key contract and no raw-body/internal-ID fields. Include null and populated forms, empty maps/arrays, >20 rows in all five sections, zero baseline and lower bounds. Numbers above 2^53 must survive `UseNumber`; tests must not decode exact integers through float64.
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run 'TestComparisonJSON' -count=1`. Add minimal declarations to reach behavioural failures before production implementation. Do not label missing-symbol errors as evidence the encoder satisfies the contract.
-- [ ] **Step 3: Implement private JSON projection and full-buffer encoding.** Reuse G's `jsonInput`, `jsonTiers`, `jsonQuality`, `tierJSON`, `qualityJSON`, `validStrings` and integer/null meanings. Extract the small shared metadata/tier-reason validation into a private helper if needed so both paths reject invalid UTF-8; keep the exact profile diagnostic unchanged and translate it to the comparison diagnostic at the comparison boundary. Do not render whole profiles to JSON and decode them, nor project/copy their observation arrays merely to get capture summaries. Use explicit private wire structs, including separate typed key objects for the five section kinds. Unknown synthetic kind/state values return fixed errors before writing, not a guessed key shape.
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run 'TestComparisonJSON' -count=1`. Add minimal declarations to reach behavioural failures before production implementation. Do not label missing-symbol errors as evidence the encoder satisfies the contract.
+- [x] **Step 3: Implement private JSON projection and full-buffer encoding.** Reuse G's `jsonInput`, `jsonTiers`, `jsonQuality`, `tierJSON`, `qualityJSON`, `validStrings` and integer/null meanings. Extract the small shared metadata/tier-reason validation into a private helper if needed so both paths reject invalid UTF-8; keep the exact profile diagnostic unchanged and translate it to the comparison diagnostic at the comparison boundary. Do not render whole profiles to JSON and decode them, nor project/copy their observation arrays merely to get capture summaries. Use explicit private wire structs, including separate typed key objects for the five section kinds. Unknown synthetic kind/state values return fixed errors before writing, not a guessed key shape.
 
 ```go
 func comparisonInteger(v model.SignedChange) json.Number {
@@ -131,8 +131,8 @@ func comparisonInteger(v model.SignedChange) json.Number {
 ```
 
 Projection prepares all fields, marshals with `json.MarshalIndent`, appends exactly one newline and calls existing `writeText` once. Fixed marshal error: `encoding comparison JSON failed`. Unknown section kinds return `comparison JSON has invalid section kind`; unknown row states return `comparison JSON has invalid row state`. Propagate writer errors and `io.ErrShortWrite`. Validate exported string values and map keys; invalid UTF-8 must fail before any bytes are passed to the writer. Non-finite synthetic means/percentages also fail before writer invocation without echoing values.
-- [ ] **Step 4: Run GREEN, parity and failure tests.** Require deterministic output from equivalent inputs regardless of map iteration, valid newline/ESC/quotes/Unicode round-trip, no report mutation, exact signed extremes, and correct nulls. Reuse the existing failing/short writer helpers. Ensure profile JSON byte/schema tests still pass after helper extraction. Run `go test ./internal/profile -count=1`. Independently decode one comparison document and inspect both side labels, quality and lower-bound semantics.
-- [ ] **Step 5: Review, clean up and commit.** Independent task review plus separate test cleanup; fix actionable findings. Signed commit: `Encode complete comparison reports`.
+- [x] **Step 4: Run GREEN, parity and failure tests.** Require deterministic output from equivalent inputs regardless of map iteration, valid newline/ESC/quotes/Unicode round-trip, no report mutation, exact signed extremes, and correct nulls. Reuse the existing failing/short writer helpers. Ensure profile JSON byte/schema tests still pass after helper extraction. Run `go test ./internal/profile -count=1`. Independently decode one comparison document and inspect both side labels, quality and lower-bound semantics.
+- [x] **Step 5: Review, clean up and commit.** Independent task review plus separate test cleanup; fix actionable findings. Signed commit: `Encode complete comparison reports`.
 
 ## Task 2: Render qualified text comparisons
 
@@ -240,3 +240,25 @@ H1/H2 signature consistency, CLI error ordering and all existing writer callers.
 Placeholder scan, relative links and code-fence checks pass. Baseline
 `go test ./...` and `go build ./...` pass on the unchanged application;
 implementation, independent code review and cleanup remain future work.
+
+## Execution record
+
+Task 1 completed in signed commits `ff97904` and `9464f9e`. The initial RED
+was compilation-only, not the planned behavioural failure. A later controlled
+empty-object encoder mutation failed the intended root-key assertion; production
+was restored byte-for-byte and focused/profile checks passed. This sensitivity
+check does not retroactively establish the original TDD order.
+
+Independent review found an invalid-UTF-8 row-state diagnostic and missing
+populated/null/zero-baseline/lower-bound wire assertions. The fix recorded
+behavioural RED before correction, then focused/profile GREEN and scoped review
+approval. Separate cleanup retained all genuine cases and additions. The full
+eleven-package suite passed before these focused comparison fixes. A minor
+independent nonmutation-snapshot improvement is carried to task 4.
+
+Controller decision: qualifications is an ordered array of the nine specified
+codes, matching profile JSON. The draft did not explicitly identify its
+container, and the implemented prose-valued object introduced unspecified wire
+values. Schema, encoder and tests now agree on the smaller array representation.
+If this choice is wrong, the schema/doc/tests require rework before consumer
+adoption. The clarification is committed in `8810492`.
