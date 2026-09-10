@@ -121,3 +121,29 @@ ok github.com/yesdevnull/tf-log-inspector/internal/tui
 ```
 
 No golden files changed in the review fix.
+
+### Active-sort width correction
+
+Scoped re-review found that the narrow Types fitter measured the default sorted
+header even after another column became the active sort. A rendered boundary
+case proved the active marker could consume two columns from the promised
+12-column identity:
+
+```text
+$ go test ./internal/tui -run '^TestDrillDownShortTypesFrameKeepsTheActiveSortColumn$' -count=1
+--- FAIL: TestDrillDownShortTypesFrameKeepsTheActiveSortColumn
+    active sort marker consumed the promised 12-column identity:
+    resource t…  UI res.▾              UI total
+    …cdefghijkl         1  12345678901234567890
+FAIL
+```
+
+The fitter now measures `headerCells` with the active sort column. The rendered
+boundary case and the real 60×9 route both pass:
+
+```text
+$ go test ./internal/tui -run '^(TestDrillDownShortTypesFrameKeepsTheActiveSortColumn|TestDrillDownShortTypesFrameShowsSelectedRouteTarget)$' -count=1
+ok github.com/yesdevnull/tf-log-inspector/internal/tui
+```
+
+No golden files changed for this correction.

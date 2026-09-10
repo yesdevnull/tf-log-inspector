@@ -227,6 +227,19 @@ func TestDrillDownShortTypesFrameKeepsTheActiveSortColumn(t *testing.T) {
 		if visibleSort < 0 || visibleSort >= len(cols) || cols[visibleSort] != typeColumns[sortCol] {
 			t.Fatalf("sort column %q was dropped from narrow table", typeColumns[sortCol].header)
 		}
+		if out := unstyled(m.renderList(58, 3)); !strings.Contains(out, "aws_instance") {
+			t.Fatalf("sort column %q clipped the selected type below 12 columns:\n%s", typeColumns[sortCol].header, out)
+		}
+	}
+
+	rows := []row{{
+		cells:   []string{"abcdefghijkl", "1", "12345678901234567890", "1", "1", "1"},
+		numeric: []uint64{0, 1, 1, 1, 1, 1},
+	}}
+	cols, visibleRows, visibleSort := visibleTypeColumns(typeColumns, rows, 1, 43)
+	out := unstyled(renderTable(nil, cols, visibleSort, visibleRows, "", 0, true, 43, 2))
+	if !strings.Contains(out, "abcdefghijkl") {
+		t.Fatalf("active sort marker consumed the promised 12-column identity:\n%s", out)
 	}
 }
 

@@ -746,7 +746,7 @@ func visibleTypeColumns(cols []column, rows []row, sortCol, w int) ([]column, []
 	for i := range indices {
 		indices[i] = i
 	}
-	natural := columnWidths(headerCells(cols, 2), rows)
+	natural := columnWidths(headerCells(cols, sortCol), rows)
 	for len(indices) > 2 {
 		reserved := 2 * (len(indices) - 1)
 		for _, index := range indices[1:] {
