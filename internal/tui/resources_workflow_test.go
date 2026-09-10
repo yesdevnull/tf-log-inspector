@@ -79,20 +79,34 @@ func TestResourcesInvestigationWorkflowPreservesEvidenceQualityAndRawState(t *te
 	if m.raw.top != 3 || m.raw.topLine != 0 || m.raw.column != 180 {
 		t.Fatalf("raw query anchor = entry %d line %d column %d, want entry 3 line 0 column 180", m.raw.top, m.raw.topLine, m.raw.column)
 	}
+	beforeTop, beforeLine, beforeColumn := m.raw.top, m.raw.topLine, m.raw.column
+	beforeQuery, beforeMatch, beforeScope := m.raw.lastQuery, *m.raw.match, slices.Clone(m.raw.scope)
+	pressRune(t, &m, 'i')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewRawLog || m.raw.top != beforeTop || m.raw.topLine != beforeLine || m.raw.column != beforeColumn || m.raw.lastQuery != beforeQuery || m.raw.match == nil || *m.raw.match != beforeMatch || !slices.Equal(m.raw.scope, beforeScope) {
+		t.Fatalf("quality round trip changed active request state: %+v", m.raw)
+	}
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.view != ViewCalls || m.selected != callRow {
 		t.Fatalf("raw return lost Calls row: view %v row %d", m.view, m.selected)
+	}
+	if m.raw.scope != nil {
+		t.Fatalf("raw return retained request scope %v", m.raw.scope)
 	}
 	m.raw.lastQuery = "ReadResource"
 	if !m.searchFrom(m.raw.top, true, true) || m.raw.match == nil {
 		t.Fatal("returned raw state did not retain a searchable anchor")
 	}
-	beforeTop, beforeLine, beforeColumn := m.raw.top, m.raw.topLine, m.raw.column
-	beforeQuery, beforeMatch, beforeScope := m.raw.lastQuery, *m.raw.match, slices.Clone(m.raw.scope)
+	beforeTop, beforeLine, beforeColumn = m.raw.top, m.raw.topLine, m.raw.column
+	beforeQuery, beforeMatch = m.raw.lastQuery, *m.raw.match
 	pressRune(t, &m, 'e')
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.raw.top != beforeTop || m.raw.topLine != beforeLine || m.raw.column != beforeColumn || m.raw.lastQuery != beforeQuery || m.raw.match == nil || *m.raw.match != beforeMatch || !slices.Equal(m.raw.scope, beforeScope) {
+	if m.raw.top != beforeTop || m.raw.topLine != beforeLine || m.raw.column != beforeColumn || m.raw.lastQuery != beforeQuery || m.raw.match == nil || *m.raw.match != beforeMatch || m.raw.scope != nil {
 		t.Fatalf("evidence round trip changed raw state: %+v", m.raw)
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog || !slices.Equal(m.raw.scope, []int{3}) || m.raw.top != 3 || m.raw.topLine != 0 || m.raw.column != 0 {
+		t.Fatalf("post-evidence raw jump state = view %v scope %v top %d:%d col %d", m.view, m.raw.scope, m.raw.top, m.raw.topLine, m.raw.column)
 	}
 }
 
@@ -105,6 +119,10 @@ func TestRepeatedResourceOperationsKeepOriginalIdentitiesThroughSelection(t *tes
 	rows := m.rows()
 	if len(rows) != 1 || len(rows[0].resource.Operations) != 2 || rows[0].resource.Operations[0].UIIndex != 0 || rows[0].resource.Operations[1].UIIndex != 1 {
 		t.Fatalf("repeated operation identities = %+v", rows)
+	}
+	pressRune(t, &m, 'f')
+	if m.pane != PaneList {
+		t.Fatalf("f left aggregate focus on pane %v, want list", m.pane)
 	}
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.view != ViewResources || m.hasReturn {
