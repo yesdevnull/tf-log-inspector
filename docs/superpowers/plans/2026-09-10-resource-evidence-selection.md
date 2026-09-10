@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25+, standard library and existing test tooling; no new dependency.
 
-**Spec:** [Investigation workflows design](../specs/2026-09-09-investigation-workflows-design.md), shared rules, item 3 and boundary D. D1 precedes [Resources TUI and filters](2026-09-10-resources-tui-filters.md). Dan approved this split and RPC-only provider/method filtering on 10 September 2026. This plan awaits execution approval.
+**Spec:** [Investigation workflows design](../specs/2026-09-09-investigation-workflows-design.md), shared rules, item 3 and boundary D. D1 precedes [Resources TUI and filters](2026-09-10-resources-tui-filters.md). Dan approved this split and RPC-only provider/method filtering on 10 September 2026, then authorised sequential subagent implementation of both plans.
 
 ## Global Constraints
 
@@ -128,7 +128,7 @@ LowerBound is true when any included duration is saturated; qualify sum and maxi
 
 Also add ModuleKnown/ModuleInvalid to `attrib.Context` and `attrib.Attribution`, preserving their existing Module string. This is metadata retention only: context windows, pairing, candidate selection and confidence calculation remain unchanged.
 
-- [ ] **Step 1: Write real parsing and membership tests.** Recognised structured fixtures include `@level` and `@timestamp`. Explicit empty-string module is known root; absent module permits address fallback. Null/invalid field shape sets ModuleInvalid, uses existing string-schema policy and increments schema once without rejecting valid duration. Check valid duration with invalid timestamp, source ordinal preservation and saturation flags.
+- [x] **Step 1: Write real parsing and membership tests.** Recognised structured fixtures include `@level` and `@timestamp`. Explicit empty-string module is known root; absent module permits address fallback. Null/invalid field shape sets ModuleInvalid, uses existing string-schema policy and increments schema once without rejecting valid duration. Check valid duration with invalid timestamp, source ordinal preservation and saturation flags.
 
 ```go
 func TestResourceModuleBoundaries(t *testing.T) {
@@ -156,8 +156,8 @@ func TestResourceModuleBoundaries(t *testing.T) {
 
 Also cover root managed/data/ephemeral shapes, escaped quote/backslash/`]` keys, Unicode identifiers, unclosed keys, trailing separators, partial resource addresses and malformed supplied modules. Exact address spelling survives decomposition failure.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/span ./internal/model -run 'Test(UI.*Module|ResourceModule)' -count=1`. After declarations compile, establish failing semantic assertions and record output.
-- [ ] **Step 3: Implement retention.** Extend both anonymous resource structs in `uiHook` and `parseUIHook` identically. Decode presence explicitly, reuse schema boolean, clone retained module and assign all three Span fields in the admitted construction.
+- [x] **Step 2: Run RED.** `go test ./internal/span ./internal/model -run 'Test(UI.*Module|ResourceModule)' -count=1`. After declarations compiled, the command failed on the expected semantic assertions: UI module evidence remained zero-valued and every resolver/membership result remained unknown or false.
+- [x] **Step 3: Implement retention.** Extend both anonymous resource structs in `uiHook` and `parseUIHook` identically. Decode presence explicitly, reuse schema boolean, clone retained module and assign all three Span fields in the admitted construction.
 
 ```go
 // Additional fields in both resource structs:
@@ -180,7 +180,7 @@ ModuleKnown: r.ModuleKnown, // use c.ModuleKnown in named
 ModuleInvalid: r.ModuleInvalid, // use c.ModuleInvalid in named
 ```
 
-- [ ] **Step 4: Implement conservative decomposition.** In private helpers, scan with bracket-depth, quoted-string and backslash-escape state; split only on dots outside brackets. Reject unbalanced state, empty tokens, raw controls and multiple index suffixes. Consume module/name-with-optional-key pairs. Address remainder must be a complete managed resource pair or data/ephemeral plus a pair; module-only input must contain only complete module pairs. Accept digit-only numeric keys or properly terminated quoted keys; unsupported expressions remain unknown. This is structural recognition, not a complete Terraform validator. Compare whole retained module tokens.
+- [x] **Step 4: Implement conservative decomposition.** In private helpers, scan with bracket-depth, quoted-string and backslash-escape state; split only on dots outside brackets. Reject unbalanced state, empty tokens, raw controls and multiple index suffixes. Consume module/name-with-optional-key pairs. Address remainder must be a complete managed resource pair or data/ephemeral plus a pair; module-only input must contain only complete module pairs. Accept digit-only numeric keys or properly terminated quoted keys; unsupported expressions remain unknown. This is structural recognition, not a complete Terraform validator. Compare whole retained module tokens.
 
 ```go
 // Final prefix comparison after validating/splitting both module paths.
@@ -193,8 +193,8 @@ return true
 
 Resolver rules: validate supplied module before use; if observedKnown and malformed, return unknown. If observedKnown and a known address decomposition disagrees, return unknown. Otherwise valid observed module wins. With no observed module return address decomposition. Callers first reject ModuleInvalid; otherwise pass the retained ModuleKnown bit for spans, contexts and attributions alike, including explicit root. Never infer presence from nonempty strings.
 
-- [ ] **Step 5: Run GREEN and independent review.** Focused cases, then `go test ./internal/span ./internal/model ./internal/attrib -count=1`; format changed files. Check new schema counts do not alter duration admission. Resolve review findings.
-- [ ] **Step 6: Signed commit.** Stage the nine named files and execution record; commit `Retain resource module evidence` with the wrapper.
+- [ ] **Step 5: Run GREEN and independent review.** Focused GREEN passed with `go test ./internal/span ./internal/model -run 'Test(UI.*Module|ResourceModule)' -count=1`; affected packages passed with `go test ./internal/span ./internal/model ./internal/attrib -count=1`; formatting and `go test ./...` passed. Self-review found no remaining Task 1 issue. Independent review remains pending for the controller.
+- [x] **Step 6: Signed commit.** Staged the nine named files and execution record, then committed `Retain resource module evidence` with the wrapper and mandatory signing.
 
 ### Task 2: Build indexed observations and complete filter choices
 

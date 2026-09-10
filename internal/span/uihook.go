@@ -27,6 +27,9 @@ type uiLine struct {
 type uiHook struct {
 	Resource *struct {
 		Addr            string `json:"addr"`
+		Module          string `json:"module"`
+		ModuleKnown     bool   `json:"-"`
+		ModuleInvalid   bool   `json:"-"`
 		ResourceType    string `json:"resource_type"`
 		ImpliedProvider string `json:"implied_provider"`
 	} `json:"resource"`
@@ -153,9 +156,13 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		b.saturated++
 	}
 	start, end, clamped := positionedDuration(position, durationMs, saturated)
-	var address, provider, resourceType string
+	var address, module, provider, resourceType string
+	var moduleKnown, moduleInvalid bool
 	if hook.Resource != nil {
 		address = strings.Clone(hook.Resource.Addr)
+		module = strings.Clone(hook.Resource.Module)
+		moduleKnown = hook.Resource.ModuleKnown
+		moduleInvalid = hook.Resource.ModuleInvalid
 		provider = b.kept.retain(hook.Resource.ImpliedProvider)
 		resourceType = b.kept.retain(hook.Resource.ResourceType)
 	}
@@ -173,6 +180,9 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		Provider:          provider,
 		ResourceType:      resourceType,
 		Address:           address,
+		Module:            module,
+		ModuleKnown:       moduleKnown,
+		ModuleInvalid:     moduleInvalid,
 		Fidelity:          FidelityUIReported,
 	})
 }
@@ -244,6 +254,9 @@ func parseUIHook(fields map[string]json.RawMessage) (uiHook, bool) {
 		} else {
 			resource := new(struct {
 				Addr            string `json:"addr"`
+				Module          string `json:"module"`
+				ModuleKnown     bool   `json:"-"`
+				ModuleInvalid   bool   `json:"-"`
 				ResourceType    string `json:"resource_type"`
 				ImpliedProvider string `json:"implied_provider"`
 			})
@@ -253,6 +266,13 @@ func parseUIHook(fields map[string]json.RawMessage) (uiHook, bool) {
 				"implied_provider": &resource.ImpliedProvider,
 			} {
 				if value := resourceFields[rawField]; len(value) > 0 && !decodeJSONString(value, destination) {
+					schema = true
+				}
+			}
+			if value, present := resourceFields["module"]; present {
+				resource.ModuleKnown = decodeJSONString(value, &resource.Module)
+				resource.ModuleInvalid = !resource.ModuleKnown
+				if resource.ModuleInvalid {
 					schema = true
 				}
 			}

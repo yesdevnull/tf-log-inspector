@@ -366,9 +366,22 @@ func TestUnmappedRPCMatchesAnyAction(t *testing.T) {
 func TestModuleNameAndKeyTravelWithTheAttribution(t *testing.T) {
 	c := ctx(`module.m["k"].aws_instance.web[0]`, "aws_instance", "read", 0, 1000)
 	c.Module, c.Name, c.Key = `module.m["k"]`, "web", "0"
+	c.ModuleKnown, c.ModuleInvalid = true, false
 	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, []Context{c})
 	if got[0].Module != `module.m["k"]` || got[0].Name != "web" || got[0].Key != "0" {
 		t.Errorf("got Module=%q Name=%q Key=%q", got[0].Module, got[0].Name, got[0].Key)
+	}
+	if !got[0].ModuleKnown || got[0].ModuleInvalid {
+		t.Errorf("module evidence = known %v invalid %v, want true false", got[0].ModuleKnown, got[0].ModuleInvalid)
+	}
+}
+
+func TestInvalidModuleEvidenceTravelsWithNamedAttribution(t *testing.T) {
+	c := ctx("module.m.aws_instance.web", "aws_instance", "read", 0, 1000)
+	c.ModuleInvalid = true
+	got := Correlate([]span.Span{rpc("aws_instance", "ReadResource", 100, 200)}, base, []Context{c})
+	if got[0].Confidence != Contained || !got[0].ModuleInvalid || got[0].ModuleKnown {
+		t.Errorf("attribution = %+v, want unchanged confidence with invalid module evidence", got[0])
 	}
 }
 

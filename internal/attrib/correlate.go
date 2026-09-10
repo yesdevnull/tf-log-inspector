@@ -63,9 +63,11 @@ type Attribution struct {
 	// Address is "" for Ambiguous and Unattributed. An Ambiguous span
 	// reports Candidates instead: naming one of several equally plausible
 	// resources would assert something the evidence does not support.
-	Address string
-	Module  string // "" when the resource is not in a module
-	Name    string
+	Address       string
+	Module        string // "" when the resource is not in a module
+	ModuleKnown   bool
+	ModuleInvalid bool
+	Name          string
 	// Key is "" when the resource has no index key, and otherwise carried
 	// straight through from Context.Key -- already in the bracket syntax
 	// Terraform's own address uses, so a caller building one concatenates
@@ -294,12 +296,14 @@ func named(c Context, n uint32, conf Confidence) Attribution {
 		panic(fmt.Sprintf("attrib: named called with %s, which must never carry an address", conf))
 	}
 	return Attribution{
-		Address:    c.Address,
-		Module:     c.Module,
-		Name:       c.Name,
-		Key:        c.Key,
-		IsData:     c.IsData,
-		Candidates: n,
-		Confidence: conf,
+		Address:       c.Address,
+		Module:        c.Module,
+		ModuleKnown:   c.ModuleKnown,
+		ModuleInvalid: c.ModuleInvalid,
+		Name:          c.Name,
+		Key:           c.Key,
+		IsData:        c.IsData,
+		Candidates:    n,
+		Confidence:    conf,
 	}
 }

@@ -109,8 +109,11 @@ type Span struct {
 	// module.m["key"].aws_instance.foo). It is populated only for spans
 	// built from Terraform's structured-output UI hook stream, where the
 	// address is the only per-resource identifier available.
-	Address  string
-	Fidelity Fidelity
+	Address       string
+	Module        string
+	ModuleKnown   bool
+	ModuleInvalid bool
+	Fidelity      Fidelity
 }
 
 func (s Span) HasPosition() bool {

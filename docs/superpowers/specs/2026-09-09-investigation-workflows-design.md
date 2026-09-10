@@ -22,8 +22,9 @@ On 10 September 2026 Dan approved planning boundary D as two sequential plans:
 followed by [Resources TUI and filters](../plans/2026-09-10-resources-tui-filters.md).
 He explicitly approved provider and RPC-method filters affecting RPC evidence
 only, including replacing the existing UI provider-filter translation. This is
-scoped planning approval; it does not mark unrelated draft decisions approved
-or authorise implementation of the new plans.
+scoped approval; it does not mark unrelated draft decisions approved. Dan
+subsequently authorised subagent implementation of both plans on 10 September
+2026, with D1 completed and reviewed before D2.
 
 ## Evidence and relationship to existing designs
 

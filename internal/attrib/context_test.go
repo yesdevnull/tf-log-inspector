@@ -246,6 +246,9 @@ func TestModuleNameAndKeyAreDecoded(t *testing.T) {
 	if got.Module != `module.m["k"]` {
 		t.Errorf("Module = %q", got.Module)
 	}
+	if !got.ModuleKnown || got.ModuleInvalid {
+		t.Errorf("module evidence = known %v invalid %v, want true false", got.ModuleKnown, got.ModuleInvalid)
+	}
 	if got.Name != "web" {
 		t.Errorf("Name = %q, want web", got.Name)
 	}
@@ -254,6 +257,38 @@ func TestModuleNameAndKeyAreDecoded(t *testing.T) {
 	}
 	if ctxs[0].Key != "" {
 		t.Errorf("null resource_key = %q, want empty", ctxs[0].Key)
+	}
+}
+
+func TestContextCollectorRetainsModuleEvidence(t *testing.T) {
+	cases := []struct {
+		name, module           string
+		wantKnown, wantInvalid bool
+		wantContexts           int
+	}{
+		{"absent", "", false, false, 1},
+		{"root", `,"module":""`, true, false, 1},
+		{"null", `,"module":null`, false, true, 1},
+		{"object", `,"module":{}`, false, true, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-09-10T00:00:00Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.web"%s,"resource":"aws_instance.web","resource_type":"aws_instance","resource_name":"web"},"action":"create"}}`, tc.module)
+			collector, contexts := collectLines(t, line+"\n")
+			if len(contexts) != tc.wantContexts {
+				t.Fatalf("contexts = %d, want %d", len(contexts), tc.wantContexts)
+			}
+			wantSchema := uint64(0)
+			if tc.wantInvalid {
+				wantSchema = 1
+			}
+			if got := collector.Evidence().SchemaErrors; got.Count != wantSchema || wantSchema == 1 && got.FirstEntry != 0 {
+				t.Errorf("SchemaErrors = %+v, want count %d at entry 0", got, wantSchema)
+			}
+			if len(contexts) == 1 && (contexts[0].ModuleKnown != tc.wantKnown || contexts[0].ModuleInvalid != tc.wantInvalid) {
+				t.Errorf("module evidence = known %v invalid %v, want %v %v", contexts[0].ModuleKnown, contexts[0].ModuleInvalid, tc.wantKnown, tc.wantInvalid)
+			}
+		})
 	}
 }
 

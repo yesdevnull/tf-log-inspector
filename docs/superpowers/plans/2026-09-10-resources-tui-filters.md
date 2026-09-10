@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25+, existing Bubble Tea, Bubbles text input/viewport and Lip Gloss; existing test and golden tools only.
 
-**Spec:** [Investigation workflows design](../specs/2026-09-09-investigation-workflows-design.md), item 3 and boundary D. Requires reviewed [Resource evidence and selection](2026-09-10-resource-evidence-selection.md), D1. Dan approved the split and RPC-only provider/method filter behaviour on 10 September 2026. This plan awaits execution approval.
+**Spec:** [Investigation workflows design](../specs/2026-09-09-investigation-workflows-design.md), item 3 and boundary D. Requires reviewed [Resource evidence and selection](2026-09-10-resource-evidence-selection.md), D1. Dan approved the split and RPC-only provider/method filter behaviour on 10 September 2026, then authorised sequential subagent implementation of both plans.
 
 ## Global Constraints
 

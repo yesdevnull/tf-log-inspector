@@ -30,12 +30,14 @@ type ctxLine struct {
 // values are never decoded or retained in a Context.
 type ctxHook struct {
 	Resource *struct {
-		Addr         string          `json:"addr"`
-		Module       string          `json:"module"`
-		Resource     string          `json:"resource"`
-		ResourceType string          `json:"resource_type"`
-		ResourceName string          `json:"resource_name"`
-		ResourceKey  json.RawMessage `json:"resource_key"`
+		Addr          string          `json:"addr"`
+		Module        string          `json:"module"`
+		ModuleKnown   bool            `json:"-"`
+		ModuleInvalid bool            `json:"-"`
+		Resource      string          `json:"resource"`
+		ResourceType  string          `json:"resource_type"`
+		ResourceName  string          `json:"resource_name"`
+		ResourceKey   json.RawMessage `json:"resource_key"`
 	} `json:"resource"`
 	Action string `json:"action"`
 }
@@ -50,10 +52,12 @@ type ctxHook struct {
 // zero-extent window occupies no instant and is never a candidate for
 // anything.
 type Context struct {
-	Entry   uint32
-	Address string
-	Module  string // "" when the resource is not in a module
-	Name    string
+	Entry         uint32
+	Address       string
+	Module        string // "" when the resource is not in a module
+	ModuleKnown   bool
+	ModuleInvalid bool
+	Name          string
 	// Key is "" when the resource has no index key, and otherwise already
 	// in the syntax Terraform's own address puts inside the trailing
 	// brackets -- bare for a count key, quoted for a for_each key (see
@@ -205,12 +209,12 @@ func (c *ContextCollector) Structured(ord uint32, _ logfmt.Entry, line string) {
 		}
 		return
 	}
-	hook, hookSchema := parseContextHook(cl.Hook)
+	hook, hookSchema, hookValid := parseContextHook(cl.Hook)
 	schema = schema || hookSchema
 	if schema {
 		noteIssue(&c.evidence.SchemaErrors, ord)
 	}
-	if hookSchema {
+	if !hookValid {
 		return
 	}
 	if hook == nil || hook.Resource == nil {
@@ -234,17 +238,19 @@ func (c *ContextCollector) Structured(ord uint32, _ logfmt.Entry, line string) {
 			c.ctxs[prev].Unclosed = true
 		}
 		c.ctxs = append(c.ctxs, Context{
-			Entry:        ord,
-			Address:      r.Addr,
-			Module:       r.Module,
-			Name:         r.ResourceName,
-			Key:          decodeKey(r.ResourceKey),
-			ResourceType: r.ResourceType,
-			Action:       hook.Action,
-			IsData:       strings.HasPrefix(r.Resource, "data."),
-			Start:        ts,
-			End:          ts,
-			Unclosed:     true,
+			Entry:         ord,
+			Address:       r.Addr,
+			Module:        r.Module,
+			ModuleKnown:   r.ModuleKnown,
+			ModuleInvalid: r.ModuleInvalid,
+			Name:          r.ResourceName,
+			Key:           decodeKey(r.ResourceKey),
+			ResourceType:  r.ResourceType,
+			Action:        hook.Action,
+			IsData:        strings.HasPrefix(r.Resource, "data."),
+			Start:         ts,
+			End:           ts,
+			Unclosed:      true,
 		})
 		c.open[key] = len(c.ctxs) - 1
 
@@ -286,43 +292,54 @@ func decodeContextString(raw json.RawMessage, destination *string) bool {
 	return json.Unmarshal(raw, destination) == nil
 }
 
-func parseContextHook(raw json.RawMessage) (*ctxHook, bool) {
+func parseContextHook(raw json.RawMessage) (*ctxHook, bool, bool) {
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return nil, false
+		return nil, false, true
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return nil, true
+		return nil, true, false
 	}
 	hook := &ctxHook{}
 	schema := false
+	valid := true
 	if value := fields["action"]; len(value) > 0 {
 		schema = !decodeContextString(value, &hook.Action)
+		valid = !schema
 	}
 	resourceRaw := fields["resource"]
 	if len(resourceRaw) == 0 || bytes.Equal(bytes.TrimSpace(resourceRaw), []byte("null")) {
-		return hook, schema
+		return hook, schema, true
 	}
 	var resourceFields map[string]json.RawMessage
 	if err := json.Unmarshal(resourceRaw, &resourceFields); err != nil || resourceFields == nil {
-		return hook, true
+		return hook, true, false
 	}
 	hook.Resource = new(struct {
-		Addr         string          `json:"addr"`
-		Module       string          `json:"module"`
-		Resource     string          `json:"resource"`
-		ResourceType string          `json:"resource_type"`
-		ResourceName string          `json:"resource_name"`
-		ResourceKey  json.RawMessage `json:"resource_key"`
+		Addr          string          `json:"addr"`
+		Module        string          `json:"module"`
+		ModuleKnown   bool            `json:"-"`
+		ModuleInvalid bool            `json:"-"`
+		Resource      string          `json:"resource"`
+		ResourceType  string          `json:"resource_type"`
+		ResourceName  string          `json:"resource_name"`
+		ResourceKey   json.RawMessage `json:"resource_key"`
 	})
 	for field, destination := range map[string]*string{
 		"addr":          &hook.Resource.Addr,
-		"module":        &hook.Resource.Module,
 		"resource":      &hook.Resource.Resource,
 		"resource_type": &hook.Resource.ResourceType,
 		"resource_name": &hook.Resource.ResourceName,
 	} {
 		if value := resourceFields[field]; len(value) > 0 && !decodeContextString(value, destination) {
+			schema = true
+			valid = false
+		}
+	}
+	if value, present := resourceFields["module"]; present {
+		hook.Resource.ModuleKnown = decodeContextString(value, &hook.Resource.Module)
+		hook.Resource.ModuleInvalid = !hook.Resource.ModuleKnown
+		if hook.Resource.ModuleInvalid {
 			schema = true
 		}
 	}
@@ -331,8 +348,9 @@ func parseContextHook(raw json.RawMessage) (*ctxHook, bool) {
 		hook.Resource.ResourceKey = resourceKey
 	} else {
 		schema = true
+		valid = false
 	}
-	return hook, schema
+	return hook, schema, valid
 }
 
 func validResourceKey(raw json.RawMessage) bool {

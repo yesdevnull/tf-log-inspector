@@ -257,6 +257,66 @@ func TestUIHookBuilderMapsFields(t *testing.T) {
 	}
 }
 
+func TestUIHookBuilderRetainsModuleEvidence(t *testing.T) {
+	cases := []struct {
+		name, module           string
+		wantModule             string
+		wantKnown, wantInvalid bool
+	}{
+		{"observed module", `"module.m[\"key\"]"`, `module.m["key"]`, true, false},
+		{"observed root", `""`, "", true, false},
+		{"absent", "", "", false, false},
+		{"null", "null", "", false, true},
+		{"object", `{}`, "", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			moduleField := ""
+			if tc.module != "" {
+				moduleField = `,"module":` + tc.module
+			}
+			line := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-09-10T00:00:00Z","type":"apply_complete","hook":{"resource":{"addr":"module.m[\"key\"].aws_instance.web"%s,"resource_type":"aws_instance","implied_provider":"aws"},"action":"create","elapsed_seconds":2}}`, moduleField)
+			var b UIHookBuilder
+			scanUIInto(t, line+"\n", &b)
+			spans := b.Spans()
+			if len(spans) != 1 {
+				t.Fatalf("spans = %d, want one valid duration", len(spans))
+			}
+			got := spans[0]
+			if got.Module != tc.wantModule || got.ModuleKnown != tc.wantKnown || got.ModuleInvalid != tc.wantInvalid {
+				t.Errorf("module evidence = %q,%v,%v, want %q,%v,%v", got.Module, got.ModuleKnown, got.ModuleInvalid, tc.wantModule, tc.wantKnown, tc.wantInvalid)
+			}
+			wantSchema := uint64(0)
+			if tc.wantInvalid {
+				wantSchema = 1
+			}
+			if evidence := b.Evidence().SchemaErrors; evidence.Count != wantSchema || wantSchema == 1 && evidence.FirstEntry != 0 {
+				t.Errorf("SchemaErrors = %+v, want count %d at entry 0", evidence, wantSchema)
+			}
+			if got.DurationMs != 2000 || got.Entry != 0 {
+				t.Errorf("duration/entry = %d/%d, want 2000/0", got.DurationMs, got.Entry)
+			}
+		})
+	}
+}
+
+func TestUIHookBuilderModuleSchemaDoesNotChangePositionOrSaturationAdmission(t *testing.T) {
+	const line = `{"@level":"info","@timestamp":7,"type":"apply_complete","hook":{"resource":{"addr":"aws_instance.web","module":null,"resource_type":"aws_instance"},"action":"create","elapsed_seconds":1e300}}`
+	var b UIHookBuilder
+	scanUIInto(t, `{"@level":"info","@timestamp":"2026-09-10T00:00:00Z","type":"version"}`+"\n"+line+"\n", &b)
+	spans := b.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want one", len(spans))
+	}
+	got := spans[0]
+	if got.Entry != 1 || got.TimestampStatus != logfmt.TimestampInvalid || !got.DurationSaturated || got.DurationMs != math.MaxUint32 {
+		t.Errorf("span validity = %+v, want invalid timestamp and saturated admitted duration", got)
+	}
+	if evidence := b.Evidence().SchemaErrors; evidence.Count != 1 || evidence.FirstEntry != 1 {
+		t.Errorf("SchemaErrors = %+v, want one coalesced error at entry 1", evidence)
+	}
+}
+
 // UIHookBuilder shares its dedup cache (dedupCache) with ReportedBuilder: a
 // repeated RPC value across two spans must land in a single cache entry
 // rather than being cloned per span.
