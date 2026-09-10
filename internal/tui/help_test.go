@@ -284,9 +284,11 @@ func TestTheFooterOffersHelpAndSaysWhichWayItGoes(t *testing.T) {
 // that do nothing, over the very screen that says what each key does.
 func TestTheFooterDropsEveryInertHintWhileTheHelpIsOpen(t *testing.T) {
 	shut := update(t, New(testLog(t, "two-tier.log"), "x.log"), tea.WindowSizeMsg{Width: 100, Height: 40})
+	shut.pane = PaneFacets
+	setFacetCursor(t, &shut, dimResource, "aws_instance.db")
 	open := update(t, shut, helpKey)
 	footer := open.keyHints(100)
-	inertHints := []string{"⇥ pane", "␣ facet", openHint, sortHint, "f facets", "/ search", "Esc clear", "1 providers", helpHint}
+	inertHints := []string{"⇥ pane", "␣ facet", openHint, sortHint, "f facets", "/ narrow", "Esc clear", "1 providers", helpHint}
 	// Asserted PRESENT with the help shut first. These are literals, and a
 	// hint renamed in actionKeys would otherwise leave its row silently
 	// asserting the absence of a string the footer never contained.

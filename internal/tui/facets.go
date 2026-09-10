@@ -2,6 +2,7 @@ package tui
 
 import (
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // Facet dimension names. The first three match model.FacetsForSpans
@@ -20,6 +22,8 @@ const (
 	dimRPC      = "rpc"
 	dimType     = "resource type"
 	dimLevel    = "level"
+	dimResource = "resource"
+	dimModule   = "module subtree"
 )
 
 // levelFacet builds the level dimension from the log's ENTRIES rather than
@@ -57,6 +61,71 @@ func levelFacet(entries []logfmt.Entry) model.Facet {
 		return f.Values[i].Value < f.Values[j].Value
 	})
 	return f
+}
+
+// resourceFacets builds whole-log choices from the cached resource index.
+// Counts are distinct resource addresses: one for an exact address and the
+// number of known addresses contained by a module subtree.
+func resourceFacets(index model.ResourceIndex) []model.Facet {
+	resources := model.Facet{Name: dimResource, Values: make([]model.FacetValue, len(index.Choices))}
+	exactModuleCounts := make(map[string]int, len(index.Modules))
+	for i, choice := range index.Choices {
+		resources.Values[i] = model.FacetValue{Value: choice.Address, Count: 1}
+		if choice.Module.Known {
+			exactModuleCounts[choice.Module.Path]++
+		}
+	}
+
+	parents := make([]int, len(index.Modules))
+	counts := make([]int, len(index.Modules))
+	stack := make([]int, 0, len(index.Modules))
+	for i, module := range index.Modules {
+		parents[i] = -1
+		counts[i] = exactModuleCounts[module]
+		for len(stack) > 0 && !model.ModuleContains(index.Modules[stack[len(stack)-1]], module) {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 {
+			parents[i] = stack[len(stack)-1]
+		}
+		stack = append(stack, i)
+	}
+	for i := len(index.Modules) - 1; i >= 0; i-- {
+		if parents[i] >= 0 {
+			counts[parents[i]] += counts[i]
+		}
+	}
+	modules := model.Facet{Name: dimModule, Values: make([]model.FacetValue, len(index.Modules))}
+	for i, module := range index.Modules {
+		modules.Values[i] = model.FacetValue{Value: module, Count: counts[i]}
+	}
+	return []model.Facet{resources, modules}
+}
+
+func mergeUIResourceTypes(facets []model.Facet, spans []span.Span) {
+	for i := range facets {
+		if facets[i].Name != dimType {
+			continue
+		}
+		counts := make(map[string]int, len(facets[i].Values))
+		for _, value := range facets[i].Values {
+			counts[value.Value] = value.Count
+		}
+		for _, s := range spans {
+			counts[model.FacetKey(s.ResourceType)]++
+		}
+		facets[i].Values = facets[i].Values[:0]
+		for value, count := range counts {
+			facets[i].Values = append(facets[i].Values, model.FacetValue{Value: value, Count: count})
+		}
+		sort.Slice(facets[i].Values, func(a, b int) bool {
+			if facets[i].Values[a].Count != facets[i].Values[b].Count {
+				return facets[i].Values[a].Count > facets[i].Values[b].Count
+			}
+			return facets[i].Values[a].Value < facets[i].Values[b].Value
+		})
+		return
+	}
 }
 
 // filter derives the model.Filter this model's ticked checkboxes represent:
@@ -147,6 +216,9 @@ func (m Model) cursorFacetValue() (dim, val string, ok bool) {
 	if m.facetCursor.val < 0 || m.facetCursor.val >= len(f.Values) {
 		return "", "", false
 	}
+	if !slices.Contains(m.visibleFacetIndices(f.Name), m.facetCursor.val) {
+		return "", "", false
+	}
 	return f.Name, f.Values[m.facetCursor.val].Value, true
 }
 
@@ -182,6 +254,27 @@ func firstFacetCursor(facets []model.Facet) facetCursor {
 func (m *Model) toggleFacetValue() {
 	dim, val, ok := m.cursorFacetValue()
 	if !ok {
+		return
+	}
+	if namedFacetDimension(dim) {
+		selected := m.namedFacetSelection(dim)
+		if selected == nil {
+			selected = make(map[string]bool, len(m.facetValues(dim)))
+			for _, value := range m.facetValues(dim) {
+				if value.Value != val {
+					selected[value.Value] = true
+				}
+			}
+		} else {
+			selected = maps.Clone(selected)
+			if selected[val] {
+				delete(selected, val)
+			} else {
+				selected[val] = true
+			}
+		}
+		m.setNamedFacetSelection(dim, selected)
+		m.invalidateRows()
 		return
 	}
 	excluded := map[string]bool{}
@@ -231,6 +324,16 @@ func (m *Model) soloFacetValue() {
 	if !ok {
 		return
 	}
+	if namedFacetDimension(dim) {
+		selected := m.namedFacetSelection(dim)
+		if len(selected) == 1 && selected[val] {
+			m.setNamedFacetSelection(dim, nil)
+		} else {
+			m.setNamedFacetSelection(dim, map[string]bool{val: true})
+		}
+		m.invalidateRows()
+		return
+	}
 	others := map[string]bool{}
 	for _, v := range m.facetValues(dim) {
 		if v.Value != val {
@@ -246,6 +349,21 @@ func (m *Model) soloFacetValue() {
 	}
 	m.setFacetExclusions(dim, others)
 	m.invalidateRows()
+}
+
+func (m Model) namedFacetSelection(dim string) map[string]bool {
+	if dim == dimResource {
+		return m.resourceSelection.Addresses
+	}
+	return m.resourceSelection.Modules
+}
+
+func (m *Model) setNamedFacetSelection(dim string, selected map[string]bool) {
+	if dim == dimResource {
+		m.resourceSelection.Addresses = selected
+	} else {
+		m.resourceSelection.Modules = selected
+	}
 }
 
 // setFacetExclusions records which of a dimension's values are unticked,
@@ -305,33 +423,30 @@ func (m *Model) clearFilters() {
 // moveFacetCursor can move it with simple arithmetic rather than a
 // dimension-boundary switch in every direction.
 func (m Model) facetFlatIndex() int {
-	idx := 0
-	for d := 0; d < m.facetCursor.dim && d < len(m.facets); d++ {
-		idx += len(m.facets[d].Values)
+	for i, cursor := range m.visibleFacetCursors() {
+		if cursor == m.facetCursor {
+			return i
+		}
 	}
-	return idx + m.facetCursor.val
+	return 0
 }
 
-// facetCursorAt is facetFlatIndex's inverse: it resolves a flat index back
-// into the (dim, val) coordinate it names.
-func (m Model) facetCursorAt(idx int) facetCursor {
-	for d, f := range m.facets {
-		if idx < len(f.Values) {
-			return facetCursor{dim: d, val: idx}
+func (m Model) visibleFacetCursors() []facetCursor {
+	var cursors []facetCursor
+	for d, facet := range m.facets {
+		for _, value := range m.visibleFacetIndices(facet.Name) {
+			cursors = append(cursors, facetCursor{dim: d, val: value})
 		}
-		idx -= len(f.Values)
 	}
-	return facetCursor{}
+	return cursors
 }
 
 // moveFacetCursor shifts the facet pane's cursor by delta through every
 // dimension's values in display order, clamped to stay within them. A log
 // with no facet values at all leaves the cursor untouched.
 func (m *Model) moveFacetCursor(delta int) {
-	total := 0
-	for _, f := range m.facets {
-		total += len(f.Values)
-	}
+	cursors := m.visibleFacetCursors()
+	total := len(cursors)
 	if total == 0 {
 		return
 	}
@@ -342,7 +457,7 @@ func (m *Model) moveFacetCursor(delta int) {
 	if idx >= total {
 		idx = total - 1
 	}
-	m.facetCursor = m.facetCursorAt(idx)
+	m.facetCursor = cursors[idx]
 }
 
 // facetPaneTitle names the facet pane in the pane row's top rule.
@@ -403,13 +518,18 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 		if dimIdx == m.facetCursor.dim {
 			headerIdx = len(lines)
 		}
-		lines = append(lines, styles.title.Render(clipWidth(facetSectionHeader(f.Name), w)))
+		lines = append(lines, styles.title.Render(clipWidth(m.facetHeading(f.Name), w)))
 		kind := facetValueKind(f.Name)
-		for valIdx, v := range f.Values {
+		for _, valIdx := range m.visibleFacetIndices(f.Name) {
+			v := f.Values[valIdx]
 			// One lookup, named: the checkbox and the dimming are two
 			// renderings of this one fact, and reading it twice leaves
 			// nothing saying they are the same fact.
 			excluded := m.excludedFacets[f.Name][v.Value]
+			if namedFacetDimension(f.Name) {
+				selected := m.namedFacetSelection(f.Name)
+				excluded = selected != nil && !selected[v.Value]
+			}
 			check := "x"
 			if excluded {
 				check = " "
@@ -420,7 +540,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			// count facetValueLine went to the trouble of keeping whole (or
 			// biting back into the value's tail -- the part a leading
 			// ellipsis was chosen to preserve).
-			line := facetValueLine(check, v.Value, v.Count, countWidth, w, kind)
+			line := facetValueLine(check, displayFacetValue(f.Name, v.Value), v.Count, countWidth, w, kind)
 			switch {
 			case dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val:
 				cursor = len(lines)

@@ -163,7 +163,7 @@ func TestFacetPaneShowsCountsPerValue(t *testing.T) {
 		{"[x] registry.terraform.io/hashicorp/aws", "3"},
 		{"[x] ApplyResourceChange", "2"},
 		{"[x] PlanResourceChange", "1"},
-		{"[x] aws_instance", "2"},
+		{"[x] aws_instance", "4"},
 		{"[x] aws_subnet", "1"},
 	} {
 		found := false
@@ -632,18 +632,17 @@ func TestLevelFacetNarrowsTheRawLogAndLeavesTheRollupsAlone(t *testing.T) {
 // is empty, counted under model.FacetKey("") and -- until the two agreed --
 // matched against a raw "" no span carries.
 //
-// The property is asserted over every value of every dimension rather than
-// over the one that broke, since it is the invariant that generalises: any
-// future dimension whose offered key and matched key disagree fails here.
-// The level dimension is excluded deliberately and not by oversight -- its
-// counts are ENTRY counts and it filters the raw log only (see levelFacet).
+// The property is asserted over every legacy span dimension rather than over
+// the one that broke, since it is the invariant that generalises there. The
+// level dimension counts entries, while resource and module count distinct
+// addresses and use D1's typed selection, so none has a call-count complement.
 func TestUntickingAFacetValueHidesExactlyItsAdvertisedCount(t *testing.T) {
 	facets := New(testLog(t, "provider-level-rpc.log"), "x.log").facets
 	base := callsModel(t, "provider-level-rpc.log", "x.log")
 	all := len(base.rows())
 	var sawNone bool
 	for _, f := range facets {
-		if f.Name == dimLevel {
+		if f.Name == dimLevel || namedFacetDimension(f.Name) {
 			continue
 		}
 		if len(f.Values) == 0 {

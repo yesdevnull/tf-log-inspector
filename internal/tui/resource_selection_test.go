@@ -115,3 +115,27 @@ func TestResourceSelectionClearsWithOtherFilters(t *testing.T) {
 		t.Errorf("selected UI spans = %d after clearing, want all %d", got, len(l.UISpans))
 	}
 }
+
+func TestModuleFacetSelectionUsesStructuralBoundaries(t *testing.T) {
+	l := &model.Log{UISpans: []span.Span{
+		{Address: `module.app["a.b"].module.db[0].aws_instance.one`},
+		{Address: `module.app["other"].module.db[0].aws_instance.two`},
+		{Address: `module.application.aws_instance.three`},
+		{Address: "opaque", ModuleInvalid: true},
+	}}
+	m := New(l, "synthetic.log")
+	setFacetCursor(t, &m, dimModule, `module.app["a.b"]`)
+	m.soloFacetValue()
+	projection := m.selectedResources()
+	if len(projection.UIIndices) != 1 || projection.UIIndices[0] != 0 {
+		t.Fatalf("indexed module selection admitted UI indices %v, want only original index 0", projection.UIIndices)
+	}
+
+	m.soloFacetValue()
+	setFacetCursor(t, &m, dimModule, "")
+	m.soloFacetValue()
+	projection = m.selectedResources()
+	if len(projection.UIIndices) != 3 {
+		t.Fatalf("root subtree admitted UI indices %v, want three known module members and no unknown opaque address", projection.UIIndices)
+	}
+}

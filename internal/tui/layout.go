@@ -68,7 +68,7 @@ func facetNaturalWidth(facets []model.Facet) int {
 	for _, f := range facets {
 		width = max(width, lipgloss.Width(facetSectionHeader(f.Name)))
 		for _, v := range f.Values {
-			width = max(width, facetValueNaturalWidth(v.Value, countWidth))
+			width = max(width, facetValueNaturalWidth(displayFacetValue(f.Name, v.Value), countWidth))
 		}
 	}
 	return width
@@ -291,6 +291,9 @@ func (m *Model) footer(w int) string {
 	}
 	if m.showResourceEvidence {
 		return clipWidth(resourceEvidenceNavigation, w) + "\n" + clipWidth(quitHint, w)
+	}
+	if m.facetSearch.editing {
+		return m.facetSearchPrompt(w)
 	}
 	if m.blockedJump {
 		return styles.alert.Render(jumpBlockedNote)
@@ -526,6 +529,8 @@ func (m *Model) actionKeys(w int) string {
 	esc := escClearHint
 	if m.hasReturn {
 		esc = escBackHint
+	} else if m.facetSearch.query != "" {
+		esc = escQueryHint
 	}
 	if m.view == ViewRawLog && m.pane == PaneList && !m.facetOverlayShowing(w) {
 		keys = []string{"⇥ pane", "r response", "↔ scroll"}
@@ -535,8 +540,8 @@ func (m *Model) actionKeys(w int) string {
 		return strings.Join(append(keys, "/ search", esc, quitHint), hintSep)
 	}
 	keys = append(keys, "f facets")
-	if w > detailInlineWidth {
-		keys = append(keys, "/ search")
+	if m.facetSearchAvailable() {
+		keys = append(keys, "/ narrow")
 	}
 	return strings.Join(append(keys, esc, quitHint), hintSep)
 }
@@ -554,6 +559,7 @@ func (m *Model) actionKeys(w int) string {
 const (
 	escClearHint = "Esc clear"
 	escBackHint  = "Esc back"
+	escQueryHint = "Esc query"
 )
 
 // scopeHint offers the key that drops a raw-log scope. It is shown only

@@ -76,8 +76,8 @@ var helpGroups = func() []helpGroup {
 			{keys: "␣ Space", what: "untick the value under the cursor to hide it"},
 			{keys: "o", what: "show only that value -- again undoes it"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
-			{keys: "Esc", what: "leave an opened call, then clear the filters"},
-			{keys: "/", what: "search raw log or reconstructed response"},
+			{keys: "Esc", what: "leave call; clear chooser query; then filters"},
+			{keys: "/", what: "narrow resources/modules; search log/response"},
 			{keys: "n N", what: "step to the next or previous match"},
 		}},
 		{title: "EVERYWHERE", entries: []helpEntry{

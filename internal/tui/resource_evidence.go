@@ -136,12 +136,7 @@ func selectedValues(values map[string]bool) string {
 }
 
 func selectedModuleValues(values map[string]bool) string {
-	return selectedDisplayValues(values, func(value string) string {
-		if value == "" {
-			return "(root subtree)"
-		}
-		return logfmt.DisplayText(value)
-	})
+	return selectedDisplayValues(values, func(value string) string { return displayFacetValue(dimModule, value) })
 }
 
 func selectedDisplayValues(values map[string]bool, display func(string) string) string {

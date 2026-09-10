@@ -25,8 +25,8 @@
 [2m│[0m   [36m␣ Space[0m    untick the value under the cursor to hide … [2m│[0m
 [2m│[0m   [36mo[0m          show only that value -- again undoes it     [2m│[0m
 [2m│[0m   [36mf[0m          show the facets and give them the keyboard  [2m│[0m
-[2m│[0m   [36mEsc[0m        leave an opened call, then clear the filte… [2m│[0m
-[2m│[0m   [36m/[0m          search raw log or reconstructed response    [2m│[0m
+[2m│[0m   [36mEsc[0m        leave call; clear chooser query; then filt… [2m│[0m
+[2m│[0m   [36m/[0m          narrow resources/modules; search log/respo… [2m│[0m
 [2m│[0m   [36mn N[0m        step to the next or previous match          [2m│[0m
 [2m│[0m                                                          [2m│[0m
 [2m│[0m [1;36mEVERYWHERE[0m                                               [2m│[0m

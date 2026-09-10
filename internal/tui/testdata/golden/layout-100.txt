@@ -10,11 +10,11 @@
 [2m│[0m [1;36mRESOURCE TYPES[0m        [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   …o/hashicorp/google [2m│[0m
 [2m│[0m [x] aws_subnet      1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mduration[0m              [2m│[0m
 [2m│[0m [x] …pute_instance  1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   8ms                 [2m│[0m
-[2m│[0m [1;36mLEVELS[0m                [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mresource[0m              [2m│[0m
-[2m│[0m [x] TRACE           2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   no address context… [2m│[0m
+[2m│[0m [1;36mRESOURCES[0m             [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mresource[0m              [2m│[0m
+[2m│[0m [1;36mMODULE SUBTREES[0m       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   no address context… [2m│[0m
+[2m│[0m [1;36mLEVELS[0m                [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m [x] TRACE           2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m [x] UNKNOWN         1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
-[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
-[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
@@ -37,4 +37,4 @@
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m╰───────────────────────╯[0m [36m╰──────────────────────────────────────────────╯[0m [2m╰───────────────────────╯[0m
 [2mDurations measured under logging; rankings approximate.[0m
-[36m⇥[0m pane  [36m␣[0m facet  [36me[0m evidence  [36m⏎[0m open  [36ms[0m sort  [36mf[0m facets  [36m/[0m search  [36mEsc[0m clear  [36mq[0m quit
+[36m⇥[0m pane  [36m␣[0m facet  [36me[0m evidence  [36m⏎[0m open  [36ms[0m sort  [36mf[0m facets  [36mEsc[0m clear  [36mq[0m quit

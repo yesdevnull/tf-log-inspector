@@ -145,25 +145,27 @@ type Model struct {
 	// tables and rows().
 	sortCol [viewCount]int
 
-	// facets is built once from the whole log -- its RPC spans for the
-	// three span dimensions, its entries for the level dimension (see
-	// levelFacet) -- so a value's count always reflects the log, never the
-	// current filter: a facet pane where narrowing the filter also shrank
-	// the other options' counts would make it hard to see what widening the
-	// filter again would show.
+	// facets is built once from the whole log: provider and RPC method use
+	// RPC spans, resource type uses both timing tiers, resource and module
+	// use the cached index's distinct addresses, and level uses entries (see
+	// levelFacet). A value's count always reflects the log, never the current
+	// filter, so narrowing does not hide what widening can restore.
 	facets []model.Facet
-	// excludedFacets holds, per facet dimension name, the values the user
+	// excludedFacets holds, per legacy facet dimension name, the values the user
 	// has UNTICKED. Every value starts ticked and admitted, so an untouched
 	// pane shows the whole log with every box marked: the checkboxes are a
 	// legend for what the views beside them are showing, not a tally of
 	// picks the reader has accumulated. Nothing excluded in a dimension
 	// leaves it unconstrained; filter() turns this into the model.Filter
-	// every view is built from.
+	// every view is built from. Resource and module use the explicit
+	// allow-lists in resourceSelection because selecting every known name
+	// still excludes unresolved identity and therefore differs from nil.
 	excludedFacets map[string]map[string]bool
 	// facetCursor is the pane's highlighted value: which dimension (index
 	// into facets) and which value within it space would toggle, and what
 	// up/down/j/k move when the facet pane has focus.
 	facetCursor facetCursor
+	facetSearch facetSearchState
 
 	// rowsCache memoises rows() for the current view and filter, so the
 	// several callers a single keystroke has -- the RowCount that clamps
@@ -333,14 +335,18 @@ func New(l *model.Log, path string) Model {
 	// The level dimension goes last, after the span dimensions
 	// FacetsForSpans builds: it is the one dimension drawn from entries
 	// rather than spans, and it filters only the raw log.
-	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
+	resourceIndex := model.BuildResourceIndex(l)
+	facets := model.FacetsForSpans(l.RPCSpans)
+	mergeUIResourceTypes(facets, l.UISpans)
+	facets = append(facets, resourceFacets(resourceIndex)...)
+	facets = append(facets, levelFacet(l.Entries))
 	m := Model{
 		log:           l,
 		name:          filepath.Base(path),
 		view:          ViewCalls,
 		pane:          PaneList,
 		facets:        facets,
-		resourceIndex: model.BuildResourceIndex(l),
+		resourceIndex: resourceIndex,
 	}
 	// Every table view starts on the column its own builder already ranks
 	// by, so the table is served in that builder's own order -- tie-break
@@ -437,6 +443,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.facetSearch.editing {
+			m.handleFacetSearchKey(msg)
+			if m.quitting {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		// A lone space arrives as KeySpace, not KeyRunes{' '} -- msg.String()
 		// happens to render it as " " too, but dispatching on Type is the
 		// documented, unambiguous way to recognise it.
@@ -508,9 +521,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			//
 			// Clearing is otherwise global, regardless of which pane has
 			// focus -- the spec binds it that way, not to the facet pane.
-			if !m.returnFromJump() {
-				m.clearFilters()
+			if m.returnFromJump() {
+				break
 			}
+			if m.facetSearch.query != "" {
+				m.facetSearch.query = ""
+				m.facetSearch.input.SetValue("")
+				m.clampFacetCursor()
+				break
+			}
+			m.clearFilters()
 		case "enter":
 			// Enter jumps to the log entry that closed the selected span: a
 			// call row's own span in the table views -- a rollup row stands
@@ -552,8 +572,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openResponse()
 			}
 		case "/":
-			// Search only makes sense against the raw log's text.
-			if m.view == ViewRawLog {
+			if m.facetSearchAvailable() {
+				m.beginFacetSearch()
+			} else if m.view == ViewRawLog {
 				m.raw.searching = true
 				m.raw.query = ""
 				m.raw.notFound = false
