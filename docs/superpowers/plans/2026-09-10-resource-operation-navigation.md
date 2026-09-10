@@ -92,7 +92,7 @@ their own four columns. Preserve the aggregate restriction against ranking by
 inferred RPC totals. Update `renderResources` to use the active sort helper
 without changing its aggregate columns or default ranking.
 
-- [ ] **Step 1: Write a failing original-identity regression.** Import Bubble Tea and use existing real fixture/helper functions:
+- [x] **Step 1: Write a failing original-identity regression.** Import Bubble Tea and use existing real fixture/helper functions:
 
 ```go
 func TestResourceOperationsRetainRepeatedSourceIdentity(t *testing.T) {
@@ -122,9 +122,9 @@ func TestResourceOperationsRetainRepeatedSourceIdentity(t *testing.T) {
 
 Extend source assertions to prove the opened target is UI index 1's entry, allowing existing context lines above it. Test selection of the other operation, sorting then opening, equal durations/actions with separate entries, a missing action, zero duration, and `resources-long-lower-bound.log` (source works while position is unavailable). Start with multiple addresses selected and verify the child singleton then parent restoration; repeat from nil address selection. Verify module/type/provider/method/severity selections survive unchanged.
 
-- [ ] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestResourceOperations' -count=1`; E1 still returns one aggregate row. Compile with E1's `row.identity` available; fail on behaviour rather than missing E2 fields.
+- [x] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestResourceOperations' -count=1`; E1 still returns one aggregate row. Compile with E1's `row.identity` available; fail on behaviour rather than missing E2 fields.
 
-- [ ] **Step 3: Implement the operation route and rows.**
+- [x] **Step 3: Implement the operation route and rows.**
 
 ```go
 func (m *Model) openResourceOperations() bool {
@@ -164,9 +164,9 @@ Render the operation list under Resources, title `OBSERVED UI OPERATIONS`, keepi
 
 Use Enter dispatch order: aggregate provider/type route, resource-operation route, individual source jump. Generate the resource aggregate `↵ operations` and operation `↵ log` hints from the same availability checks. Change only the tests that deliberately asserted the old inert Enter; retain their original identity checks.
 
-- [ ] **Step 4: Verify GREEN, accessibility and history.** Run `go test ./internal/tui -count=1`. Check rows from real parsed fixtures, operation detail/evidence at narrow widths, exact source identities after sorting, empty child after facet edits, quality unchanged, modal Esc before history, resize and manual number 3 resetting to aggregate mode. Include a selected address with controls/long Unicode text: display is escaped, selection identity stays exact. Independent review then separate test-cleanup agent must pass; repeat affected tests after changes.
+- [x] **Step 4: Verify GREEN, accessibility and history.** Run `go test ./internal/tui -count=1`. Check rows from real parsed fixtures, operation detail/evidence at narrow widths, exact source identities after sorting, empty child after facet edits, quality unchanged, modal Esc before history, resize and manual number 3 resetting to aggregate mode. Include a selected address with controls/long Unicode text: display is escaped, selection identity stays exact. Independent review then separate test-cleanup agent must pass; repeat affected tests after changes.
 
-- [ ] **Step 5: Commit.** Inspect diff/status, stage task files explicitly with the wrapper and signed commit `Open observed resource operations and their source logs`. Record RED/GREEN and review evidence here.
+- [x] **Step 5: Commit.** Inspect diff/status, stage task files explicitly with the wrapper and signed commit `Open observed resource operations and their source logs`. Record RED/GREEN and review evidence here.
 
 ## Task 2: Navigate from operations to associated Calls
 
@@ -258,3 +258,7 @@ and a regression using the real facet action. Re-review confirmed all E1/E2
 findings resolved and readiness for Dan's plan review. Documentation link,
 code-fence, placeholder and staged whitespace checks passed; application tests
 were not run for this documentation-only change.
+
+## Execution record
+
+Dan authorised both plans for subagent implementation on 10 September 2026. Task 1 completed in signed commits `1a3841a` and `8d0735e`. Required RED found one aggregate instead of two operations; focused tests, full suite and build pass. Review found and verified fixes for off-screen UI source targets at 60×9 and missing narrow Esc hints. Separate cleanup retained all 13 distinct tests. Real PTY confirms selected source entry5 is visible, Esc hints remain available, evidence exposes full address/action/source, and returns restore operations/aggregate. Task 2 and combined final review remain pending.
