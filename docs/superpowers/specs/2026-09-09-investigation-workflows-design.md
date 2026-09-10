@@ -26,6 +26,12 @@ scoped approval; it does not mark unrelated draft decisions approved. Dan
 subsequently authorised subagent implementation of both plans on 10 September
 2026, with D1 completed and reviewed before D2.
 
+Boundary D implementation completed on 10 September 2026. Independent review
+of the combined D1/D2 range approved its specification and quality after the
+aggregate UI evidence qualification fix in `69d1fb9`; no finding remains. This
+completion applies only to Boundary D. The other draft boundaries and review
+decisions retain their existing status.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response
