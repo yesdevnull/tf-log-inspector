@@ -111,6 +111,8 @@ These are development builds; version-tag publishing is not configured.
     tfli --profile --limit 5 plan.log
     tfli --profile --limit 0 plan.log
     tfli --profile -o profile.txt plan.log
+    tfli --profile --format json run.log
+    tfli --profile --format json -o profile.json run.log
     tfli --scrub -o sanitised.log plan.log
     tfli --scrub --scrub-values private-values.txt -o sanitised.log plan.log
 
@@ -333,6 +335,15 @@ limit independently to every list; `--limit 0` shows every row. Limiting lists
 does not change whole-log counts, durations, concurrency totals or capture
 quality.
 
+JSON profiles export the complete data without a row limit. The
+[versioned JSON schema](docs/profile-json-v1.md) uses explicit `null` values for
+unavailable measurements and `0` for measured zeroes. Durations and separate
+RPC and UI clock offsets are integer milliseconds; the two tiers measure
+different work and their durations must not be added. Observations retain full
+source references, confidence labels and lower-bound qualifications. Entry
+indices identify entries only within the local input log. The default text
+profile remains unchanged.
+
 Individual observations include their physical source line or line range in
 the input log. RPC resource addresses are inferred from nearby context and
 carry a confidence label such as contained, likely or overlapping; ambiguous
@@ -375,6 +386,10 @@ guarantee. Review a diagnose report before sharing it.
 the point of a profiler, which is useless if it cannot say which resource was
 slow. It is for your own eyes on your own machine, and unlike `--diagnose`,
 it is not safe to share.
+
+JSON profiles also contain unmasked identifiers and full source references,
+but exclude raw log and response bodies. Review a JSON profile before sharing
+it.
 
 The full-screen interface (`tfli plan.log`) discloses **more than
 `--profile`**, and it sits behind the easiest invocation. Alongside the same

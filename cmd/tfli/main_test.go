@@ -665,10 +665,17 @@ func TestRunWritesToOutputFile(t *testing.T) {
 	}
 }
 
-func TestReportsPreserveTheirInputFile(t *testing.T) {
-	for _, mode := range []string{"--diagnose", "--profile"} {
+func TestReportsPreserveTheirInputFileIncludingJSON(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		args []string
+	}{
+		{name: "diagnose", args: []string{"--diagnose"}},
+		{name: "profile text", args: []string{"--profile"}},
+		{name: "profile JSON", args: []string{"--profile", "--format=json"}},
+	} {
 		for _, alias := range []string{"same path", "hard link", "symbolic link"} {
-			t.Run(mode+"/"+alias, func(t *testing.T) {
+			t.Run(mode.name+"/"+alias, func(t *testing.T) {
 				dir := t.TempDir()
 				input := filepath.Join(dir, "capture.log")
 				original := []byte("2026-09-08T00:00:00.000Z [INFO] Terraform started\n")
@@ -686,8 +693,13 @@ func TestReportsPreserveTheirInputFile(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				before, readErr := os.ReadFile(input)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
 				var stdout, stderr strings.Builder
-				err := run([]string{mode, "-o", output, input}, &stdout, &stderr)
+				args := append(append([]string{}, mode.args...), "-o", output, input)
+				err := run(args, &stdout, &stderr)
 				if err == nil || !strings.Contains(err.Error(), "same file") {
 					t.Errorf("run error = %v, want same-file rejection", err)
 				}
@@ -695,7 +707,7 @@ func TestReportsPreserveTheirInputFile(t *testing.T) {
 				if readErr != nil {
 					t.Fatal(readErr)
 				}
-				if string(got) != string(original) {
+				if !bytes.Equal(before, original) || !bytes.Equal(got, before) {
 					t.Errorf("input file was overwritten: %q", got)
 				}
 				if stdout.Len() != 0 || stderr.Len() != 0 {
