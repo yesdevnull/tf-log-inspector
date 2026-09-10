@@ -101,6 +101,9 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.pane = frame.pane
 	m.selected = frame.selected
 	m.changeView(frame.view)
+	// The transition records an outgoing cursor; a return must retain the
+	// snapshot's remembered positions instead of that child departure.
+	m.viewSelected = frame.viewSelected
 	m.restoreIdentity(frame.identity, frame.selected)
 	m.raw = cloneRawState(frame.raw)
 	m.reconcileRawCursor()

@@ -808,6 +808,8 @@ func (m *Model) renderList(w, h int) string {
 			if h > 3 {
 				preamble = wrapToWidth("This does not establish that no provider calls occurred.", w)
 				empty = "No calls shown."
+			} else if w < len(empty) {
+				empty = "Provider calls may still have occurred."
 			}
 		} else {
 			preamble = []string{"Inferred RPC associations for current selection", "Not assigned to an individual UI operation."}

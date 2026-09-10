@@ -296,6 +296,12 @@ func (m *Model) footer(w int) string {
 		return m.facetSearchPrompt(w)
 	}
 	if m.blockedJump {
+		if len(m.history) > 0 {
+			return styles.alert.Render("target entry hidden by the active filter -- Esc goes back")
+		}
+		if m.facetSearch.query != "" {
+			return styles.alert.Render("target entry hidden by the active filter -- Esc clears query")
+		}
 		return styles.alert.Render(jumpBlockedNote)
 	}
 	if m.view == ViewRawLog {
@@ -721,7 +727,7 @@ func (m *Model) renderPanes(w, h int) string {
 			listW := w - facetW - paneSepWidth
 			return framePanes(h,
 				pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(facetW), bodyH), width: facetW},
-				pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
+				pane{title: m.centreTitleAtWidth(listW), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			)
 		}
 		detailW := detailPaneWidth(m.detailPaneNatural+4, w)
@@ -729,7 +735,7 @@ func (m *Model) renderPanes(w, h int) string {
 		detailTitle, detail := m.renderDetail(panelContentWidth(detailW), bodyH)
 		return framePanes(h,
 			pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(facetW), bodyH), width: facetW},
-			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
+			pane{title: m.centreTitleAtWidth(listW), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	case m.detailPaneDrawn(w):
@@ -737,7 +743,7 @@ func (m *Model) renderPanes(w, h int) string {
 		listW := w - detailW - paneSepWidth
 		detailTitle, detail := m.renderDetail(panelContentWidth(detailW), bodyH)
 		return framePanes(h,
-			pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
+			pane{title: m.centreTitleAtWidth(listW), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(listW), bodyH), width: listW},
 			pane{title: detailTitle, content: detail, width: detailW, focused: m.pane == PaneDetail},
 		)
 	default:
@@ -747,7 +753,7 @@ func (m *Model) renderPanes(w, h int) string {
 		// height it was given. framePanes holds it to the row regardless,
 		// the same way it holds every other pane, which is why the one
 		// layout with no second pane beside it needs no clamp of its own.
-		return framePanes(h, pane{title: m.centreTitle(), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(w), bodyH), width: w})
+		return framePanes(h, pane{title: m.centreTitleAtWidth(w), focused: m.pane == PaneList, content: m.renderCentre(panelContentWidth(w), bodyH), width: w})
 	}
 }
 
@@ -856,6 +862,20 @@ func (m *Model) renderCentre(w, h int) string {
 	default:
 		return m.renderList(w, h)
 	}
+}
+
+// centreTitleAtWidth keeps association qualifications complete within the pane rule.
+func (m *Model) centreTitleAtWidth(w int) string {
+	title := m.centreTitle()
+	if m.view == ViewCalls && m.associatedCalls &&
+		(m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) &&
+		lipgloss.Width(title) > w-5 {
+		if len(m.rows()) == 0 {
+			return "NO NAMED RPCS IN SELECTION"
+		}
+		return "PARTIAL INFERRED · NOT PER OPERATION"
+	}
+	return title
 }
 
 // centreTitle names the centre pane for the top rule it is inset into.

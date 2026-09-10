@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -10,6 +11,35 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
+
+func TestAssociatedCallsQualificationsSurviveSplitLayouts(t *testing.T) {
+	for _, width := range []int{60, 70, 100} {
+		for _, fixture := range []string{"resources-accounting.log", "resources-modules.log"} {
+			t.Run(fmt.Sprintf("%s/%d", fixture, width), func(t *testing.T) {
+				m := New(testLog(t, fixture), fixture)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: 9})
+				pressRune(t, &m, '3')
+				pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+				pressRune(t, &m, 'c')
+				got := strings.ToLower(unstyled(m.View()))
+				if fixture == "resources-accounting.log" {
+					if !strings.Contains(got, "partial inferred") || !(strings.Contains(got, "not one operation") || strings.Contains(got, "not per operation")) {
+						t.Errorf("association qualification incomplete:\n%s", got)
+					}
+					if !strings.Contains(got, "10ms") || !strings.Contains(got, "conta") {
+						t.Errorf("selected call or confidence hidden:\n%s", got)
+					}
+				} else {
+					// Borders separate wrapped lines, so assert complete clauses
+					// individually rather than treating borders as message text.
+					if !(strings.Contains(got, "this does not establish that no provider calls occurred.") || strings.Contains(got, "provider calls may still have occurred.")) {
+						t.Errorf("empty result caveat incomplete:\n%s", got)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestResourceAssociatedCallsPreserveSelectionAndReturn(t *testing.T) {
 	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")

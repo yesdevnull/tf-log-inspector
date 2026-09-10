@@ -4,11 +4,72 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
+
+func TestBlockedJumpGuidanceMatchesEsc(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		nested, query bool
+		want          string
+	}{
+		{"root", false, false, "Esc clears it"},
+		{"chooser query", false, true, "Esc clears query"},
+		{"nested", true, false, "Esc goes back"},
+		{"nested query", true, true, "Esc goes back"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(testLog(t, "provider-rpc.log"), "provider-rpc.log")
+			m.setFacetExclusions(dimLevel, map[string]bool{"TRACE": true, "DEBUG": true, "UNKNOWN": true})
+			m.invalidateRows()
+			if tc.query {
+				m.facetSearch.query = "aws"
+			}
+			if tc.nested {
+				pressRune(t, &m, '1')
+				pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+			}
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+			if !m.blockedJump {
+				t.Fatal("source jump was not blocked")
+			}
+			if got := unstyled(m.footer(100)); !strings.Contains(got, tc.want) {
+				t.Errorf("footer = %q, want %q", got, tc.want)
+			}
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+			if tc.nested {
+				if m.view != ViewProviders || !m.filterActive() {
+					t.Fatal("Esc did not restore filtered parent")
+				}
+			} else if tc.query {
+				if m.facetSearch.query != "" || !m.filterActive() {
+					t.Fatal("Esc did not clear only query")
+				}
+			} else if m.filterActive() {
+				t.Fatal("Esc did not clear filters")
+			}
+		})
+	}
+}
+
+func TestHistoryPreservesRememberedCallsCursor(t *testing.T) {
+	m := New(testLog(t, "provider-rpc.log"), "provider-rpc.log")
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.selected != 1 {
+		t.Fatal("fixture did not select the second call")
+	}
+	pressRune(t, &m, '1')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	pressRune(t, &m, '4')
+	if m.view != ViewCalls || m.selected != 1 {
+		t.Fatalf("remembered Calls position = view %v row %d, want Calls row 1", m.view, m.selected)
+	}
+}
 
 func TestHistoryRestoresParentAfterRawChildFilterEdit(t *testing.T) {
 	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
