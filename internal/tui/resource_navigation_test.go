@@ -146,7 +146,7 @@ func TestAssociatedCallsKeepQualificationAtSixtyByNine(t *testing.T) {
 	pressKey(t, &populated, tea.KeyMsg{Type: tea.KeyEnter})
 	pressRune(t, &populated, 'c')
 	got := strings.Join(strings.Fields(unstyled(populated.View())), " ")
-	for _, want := range []string{"Inferred calls", "current selection", "confi", "conta"} {
+	for _, want := range []string{"Partial inferred calls", "selection, not one operation", "confi", "conta"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("populated 60x9 associated Calls missing %q:\n%s", want, got)
 		}

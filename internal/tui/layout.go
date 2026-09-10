@@ -897,7 +897,7 @@ func (m *Model) centreTitle() string {
 		if m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
 			return "CALLS · CURRENT SELECTION"
 		}
-		return "INFERRED CALLS · CURRENT SELECTION"
+		return "PARTIAL INFERRED CALLS · SELECTION, NOT ONE OPERATION"
 	}
 	if m.view == ViewResources && m.resourceOperations {
 		return "OBSERVED UI OPERATIONS"
