@@ -98,6 +98,7 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.operationSort = frame.operationSort
 	m.associatedCalls = frame.associatedCalls
 	m.associatedCallSort = frame.associatedCallSort
+	m.pane = frame.pane
 	m.selected = frame.selected
 	m.changeView(frame.view)
 	m.restoreIdentity(frame.identity, frame.selected)

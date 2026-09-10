@@ -62,6 +62,35 @@ func TestResourceAssociatedCallsPreserveExplicitEmptySelection(t *testing.T) {
 	}
 }
 
+func TestEmptyResourceOperationsExplainTheActiveSelectionBeforeAndAfterCalls(t *testing.T) {
+	m := New(testLog(t, "resources-modules.log"), "resources-modules.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &m, '3')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	setFacetCursor(t, &m, dimResource, `module.app["a.b"].module.db[0].aws_instance.web["key[part"]`)
+	pressRune(t, &m, 'f')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeySpace})
+	pressRune(t, &m, 'f')
+	assertEmptyOperationGuidance(t, &m)
+	pressRune(t, &m, 'c')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	assertEmptyOperationGuidance(t, &m)
+}
+
+func assertEmptyOperationGuidance(t *testing.T, m *Model) {
+	t.Helper()
+	if m.view != ViewResources || !m.resourceOperations || len(m.rows()) != 0 {
+		t.Fatalf("operation state = view %v operations %v rows %d", m.view, m.resourceOperations, len(m.rows()))
+	}
+	got := strings.Join(strings.Fields(unstyled(m.View())), " ")
+	if !strings.Contains(got, "nothing matches the filter") || !strings.Contains(got, "Esc back") {
+		t.Fatalf("empty operation guidance does not explain selection and return:\n%s", got)
+	}
+	if strings.Contains(got, noRowsNote) {
+		t.Fatalf("empty operation guidance blames the log:\n%s", got)
+	}
+}
+
 func TestResourceAssociatedCallsUseNeutralContextAfterNamedConstraintsAreRemoved(t *testing.T) {
 	l, err := model.Load("testdata/resource-association-confidence.log")
 	if err != nil {

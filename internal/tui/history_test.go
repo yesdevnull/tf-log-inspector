@@ -211,3 +211,31 @@ func TestNavigationFramesDoNotShareMutableMaps(t *testing.T) {
 		t.Fatal("navigation frame shares mutable selection maps")
 	}
 }
+
+func TestHistoryRestoresParentFocusAndClampsItAfterResize(t *testing.T) {
+	t.Run("child focus does not replace parent focus", func(t *testing.T) {
+		m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+		m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+		pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+		pressRune(t, &m, 'f')
+		pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+		if m.view != ViewCalls || m.pane != PaneList {
+			t.Fatalf("returned view %v pane %v, want Calls list", m.view, m.pane)
+		}
+	})
+
+	t.Run("restored focus is clamped to the resized layout", func(t *testing.T) {
+		m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+		m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+		pressRune(t, &m, 'f')
+		if m.pane != PaneFacets {
+			t.Fatal("parent did not focus facets")
+		}
+		parent := m.captureNavigation()
+		m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+		m.restoreNavigation(parent)
+		if m.view != ViewCalls || m.pane != PaneList {
+			t.Fatalf("resized return = view %v pane %v, want Calls list", m.view, m.pane)
+		}
+	})
+}

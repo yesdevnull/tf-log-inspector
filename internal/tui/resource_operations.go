@@ -69,7 +69,11 @@ func (m *Model) selectedUIOperation() (int, bool) {
 
 func (m *Model) renderResourceOperations(w, h int) string {
 	cols, rows, sortCol := visibleOperationColumns(operationColumns, m.rows(), m.activeSort(), w)
-	return renderTable(nil, cols, sortCol, rows, noRowsNote, m.selected, m.pane == PaneList, w, h)
+	empty := noRowsNote
+	if m.filterActive() {
+		empty = m.noMatchTail()
+	}
+	return renderTable(nil, cols, sortCol, rows, empty, m.selected, m.pane == PaneList, w, h)
 }
 
 func (m *Model) operationJumpContextLines() int {
