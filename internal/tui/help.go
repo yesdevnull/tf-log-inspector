@@ -156,6 +156,25 @@ func renderHelp(w, h int) string {
 		}
 		sections = append(sections, lines)
 	}
+	resources := paneSection{"", styles.title.Render(clipWidth("RESOURCES", w))}
+	for _, line := range []string{
+		"Resources ranks exact addresses by summed",
+		"observed UI duration.",
+		"Associated RPC time is inferred and partial.",
+		"It cannot recover every call.",
+		"UI scope: type/resource/module.",
+		"RPC scope: provider/type/method/resource/module.",
+		"Resource/module / narrows only the chooser.",
+		"Space or o changes results.",
+		"(root subtree) includes every known descendant.",
+		"Module instance keys remain exact.",
+		"e shows selected-scope evidence; i shows whole-log quality.",
+	} {
+		for _, wrapped := range strings.Split(ansi.Wrap(line, max(1, w), ""), "\n") {
+			resources = append(resources, styles.note.Render(clipWidth(wrapped, w)))
+		}
+	}
+	sections = append(sections, resources)
 	timing := paneSection{"", styles.title.Render(clipWidth("TIMING", w))}
 	for _, line := range fullLoggingCaveat {
 		for _, wrapped := range strings.Split(ansi.Wrap(line, max(1, w), ""), "\n") {

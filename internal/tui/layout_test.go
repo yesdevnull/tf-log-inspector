@@ -128,6 +128,10 @@ func wholeFrameCases(t *testing.T) []wholeFrameCase {
 	open := func(name string) Model { return New(testLog(t, name), "x.log") }
 	return []wholeFrameCase{
 		{"calls/mixed-hcp.log", open("mixed-hcp.log")},
+		{"resources/resources-accounting.log", press(open("resources-accounting.log"), '3')},
+		{"resources/resources-modules.log", press(open("resources-modules.log"), '3')},
+		{"resources/resources-rpc-only.log", press(open("resources-rpc-only.log"), '3')},
+		{"resources/resources-long-lower-bound.log", press(open("resources-long-lower-bound.log"), '3')},
 		{"timeline/mixed-hcp.log", press(open("mixed-hcp.log"), '5')},
 		{"timeline/structured-ui.log", press(open("structured-ui.log"), '5')},
 		// The facet overlay is the third of the three layouts renderPanes
@@ -337,6 +341,25 @@ func TestGoldenLayouts(t *testing.T) {
 	m := update(t, base, tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	compareGolden(t, "layout-100-providers.txt", m.View())
+}
+
+// The four Resources snapshots cover its materially different evidence states
+// while spanning every supported layout boundary named by the plan.
+func TestGoldenResourceLayouts(t *testing.T) {
+	cases := []struct {
+		width   int
+		fixture string
+	}{
+		{60, "resources-accounting.log"},
+		{70, "resources-modules.log"},
+		{100, "resources-rpc-only.log"},
+		{160, "resources-long-lower-bound.log"},
+	}
+	for _, c := range cases {
+		m := update(t, New(testLog(t, c.fixture), c.fixture), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+		m = update(t, m, tea.WindowSizeMsg{Width: c.width, Height: 40})
+		compareGolden(t, fmt.Sprintf("resources-%d.txt", c.width), m.View())
+	}
 }
 
 // Golden files lock the timeline view's own layout at the three widths the

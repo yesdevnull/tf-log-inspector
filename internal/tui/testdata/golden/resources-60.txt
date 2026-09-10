@@ -1,0 +1,40 @@
+[7m tfli [0m  [1;36mi limitations · resources-accounting.log[0m  [2m3 RPC span[0m
+[7m 3 res [0m  [36m?[0m help
+
+[36m╭▶[0m[1;36m Resources (observed ui) [0m[36m────────────────────────────────╮[0m
+[36m│[0m Scopes: UI type/resource/module; RPC provider/type/metho [36m│[0m
+[36m│[0m Inferred RPC evidence is partial; observed UI ranks rows [36m│[0m
+[36m│[0m Observed UI operations; measurements rounded to whole se [36m│[0m
+[36m│[0m [1maddress       [0m  [1moperations[0m  [1;36mUI total▾[0m  [1mUI max[0m            [36m│[0m
+[36m│[0m [7maws_instance.a           1       1.0s    1.0s           [0m [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m╰──────────────────────────────────────────────────────────╯[0m
+[2mDurations measured under logging; rankings approximate.[0m
+[36m⇥[0m pane  [36me[0m evidence  [36ms[0m sort  [36mf[0m facets  [36mEsc[0m clear  [36mq[0m quit

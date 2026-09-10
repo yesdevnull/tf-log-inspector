@@ -1,0 +1,2 @@
+# SYNTHETIC Resources fixture; all values invented.
+2026-09-10T00:00:01.000Z [TRACE] provider.terraform-provider-aws: Received downstream response: tf_req_id=aaaaaaaa-0000-4000-8000-000000000004 tf_resource_type=aws_instance tf_rpc=ReadResource tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5

@@ -133,6 +133,33 @@ lines, attribution coverage, context limitations, and the lazy response
 reconstruction status. Scroll with arrows, `j`/`k` or `PgUp`/`PgDn`; `i` or
 `Esc` returns without changing the active view, filters, scope or search.
 
+Key `3` opens Resources, which groups exact Terraform addresses and ranks them
+by summed observed UI duration. Repeated completions of one address count as
+operations of that resource. UI totals and maxima come from Terraform's
+structured UI stream and retain its whole-second rounding and lower-bound
+qualifications. The associated RPC counts and time are inferred, partial
+evidence split into Contained/Likely and weaker Overlapping groups; they do not
+replace the observed ranking or recover every provider call. `Enter` on a
+resource aggregate is intentionally inert because individual operation
+navigation is not yet available.
+
+Resource type, exact-resource and module-subtree selections apply to UI
+operations. RPC evidence also uses provider and RPC-method selections; those
+two filters do not imply a provider or method for UI operations. In the facet
+pane, `/` narrows the visible resource or module choices without changing the
+result set. Use `Space` to toggle a choice or `o` to select it alone. Module
+instance keys remain exact. The explicit `(root subtree)` choice includes every
+resource with a known module path, including descendants. Unknown module
+evidence does not become root.
+
+Press `e` from a timing view for scrollable evidence about the current selected
+scope, including selected/other/unresolved RPC partitions and preselection
+attribution buckets. From Resources it also carries the complete selected-row
+address and qualifications when the detail pane is absent or clipped. Press
+`i` for capture quality measured over the whole log; its denominator is
+deliberately different from the scoped evidence panel. Both panels close with
+their opening key or `Esc` and leave the investigation state intact.
+
 In Raw Log, `←`/`→` (or `h`/`l`) scroll horizontally one display column at a
 time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
 to edit the query. Long queries scroll with the cursor. `Enter` searches,

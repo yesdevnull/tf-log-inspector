@@ -1298,6 +1298,15 @@ func attributionFields(a attrib.Attribution, hasContext bool) []detailField {
 	case attrib.Unattributed:
 		return []detailField{{label: "resource", value: unattributedValue, kind: headIdentifierColumn}}
 	}
+	// Some structured records carry the authoritative exact address without
+	// the optional split resource_name. Show the known address rather than
+	// turning a successfully named attribution into "(none)".
+	if a.Name == "" && a.Address != "" {
+		return []detailField{
+			{label: "resource", value: a.Address, kind: tailIdentifierColumn},
+			{label: "attribution", value: a.Confidence.String(), kind: headIdentifierColumn},
+		}
+	}
 
 	name := a.Name
 	if a.IsData {
