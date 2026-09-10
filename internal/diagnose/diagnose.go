@@ -10,6 +10,7 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -694,7 +695,7 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  none\n")
 	}
 	fmt.Fprintf(b, "\n")
-	writeCaptureQuality(b, r.Quality)
+	qualitytext.WriteCaptureQuality(b, r.Quality)
 
 	// EXTRACTION's labels vary widely in length -- "response duration
 	// fields" is the longest -- so a field-width specifier keeps the value
@@ -968,63 +969,6 @@ func (r Report) Render(w io.Writer) error {
 
 	_, err := io.WriteString(w, b.String())
 	return err
-}
-
-func writeCaptureQuality(b *strings.Builder, q model.CaptureQuality) {
-	fmt.Fprintf(b, "CAPTURE QUALITY (whole log)\n")
-	writeTierQuality(b, "RPC", q.RPC)
-	writeTierQuality(b, "UI", q.UI)
-	switch {
-	case !q.HasContext:
-		fmt.Fprintf(b, "  %-22s unavailable (no address context)\n", "nameable duration")
-	case q.NameableShare == nil:
-		fmt.Fprintf(b, "  %-22s unavailable (total RPC duration is 0ms)\n", "nameable duration")
-	default:
-		fmt.Fprintf(b, "  %-22s %s / %s (%.1f%%)\n", "nameable duration", formatMs(q.NameableMs), formatMs(q.RPCDurationMs), *q.NameableShare*100)
-	}
-	if hasQualityIssue(q.Issues, "context", "context_incomplete") {
-		fmt.Fprintf(b, "  Context evidence is incomplete; this limits attribution and does not establish that an operation failed.\n")
-	}
-	stage := ""
-	for _, issue := range q.Issues {
-		if issue.Count == 0 {
-			continue
-		}
-		if issue.Stage != stage {
-			stage = issue.Stage
-			fmt.Fprintf(b, "  %s issues\n", stage)
-		}
-		fmt.Fprintf(b, "    %-24s %d", issue.Code, issue.Count)
-		if issue.FirstEntry != nil {
-			fmt.Fprintf(b, " (first entry %d)", *issue.FirstEntry)
-		}
-		fmt.Fprintln(b)
-	}
-	fmt.Fprintln(b)
-}
-
-func writeTierQuality(b *strings.Builder, name string, q model.TierQuality) {
-	total := formatMs(q.DurationMs)
-	if q.DurationLowerBound {
-		total += " (lower bound)"
-	}
-	fmt.Fprintf(b, "  %s timing records     %d: admitted %d, rejected %d; duration %s\n",
-		name, q.Records, q.Admitted, q.Rejected, total)
-	excluded := formatMs(q.ExcludedMs)
-	if q.DurationLowerBound && q.ExcludedMs > 0 {
-		excluded += " (lower bound)"
-	}
-	fmt.Fprintf(b, "  %s positioning        %d observations, %s; excluded %d observations, %s\n",
-		name, q.Positioned, formatMs(q.PositionedMs), q.Admitted-q.Positioned, excluded)
-}
-
-func hasQualityIssue(issues []model.QualityIssue, stage, code string) bool {
-	for _, issue := range issues {
-		if issue.Stage == stage && issue.Code == code && issue.Count > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // writeRPCCaptureHint explains how to capture provider RPC entries. Debug
