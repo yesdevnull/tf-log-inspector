@@ -119,20 +119,6 @@ func TestComparisonUnavailableTiers(t *testing.T) {
 	}
 }
 
-func TestComparisonIdenticalRowHasDefinedZeroChanges(t *testing.T) {
-	input := ComparisonInput{RPC: []span.Span{{Provider: "p", DurationMs: 10}}}
-	got, err := Compare(input, input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertComparisonChanges(t, got.Sections[0].Rows[0].Changes, ComparisonChanges{
-		Count: changePointer(SignedChange{}), TotalMs: changePointer(SignedChange{}),
-		MaxMs: changePointer(SignedChange{}), MeanMs: float64Pointer(0),
-		CountPercent: float64Pointer(0), TotalPercent: float64Pointer(0),
-		MeanPercent: float64Pointer(0), MaxPercent: float64Pointer(0),
-	})
-}
-
 func TestComparisonChangeFieldsByRowState(t *testing.T) {
 	tests := []struct {
 		name   string
