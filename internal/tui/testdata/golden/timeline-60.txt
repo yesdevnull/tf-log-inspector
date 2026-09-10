@@ -1,4 +1,4 @@
-[7m tfli [0m  [1;36mplan.log[0m                     [2m3 RPC spans, 0 UI spans[0m
+[7m tfli [0m  [1;36mi limitations · plan.log[0m     [2m3 RPC spans, 0 UI spans[0m
  [36m1[0m prov    [36m2[0m types    [36m4[0m calls   [7m 5 time [0m   [36m6[0m log   [36m?[0m help
 
 [36m╭▶[0m[1;36m Timeline (rpc) [0m[36m─────────────────────────────────────────╮[0m

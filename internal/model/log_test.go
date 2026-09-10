@@ -91,8 +91,8 @@ func TestLoadRetainsTimingEvidenceAndUIOrigin(t *testing.T) {
 	if l.UIOrigin.IsZero() || l.UIEvidence.Records != 1 || l.RPCEvidence.Records != 1 || l.RPCEvidence.Rejected["duration_missing"].Count != 1 {
 		t.Fatalf("origin/evidence = %v, %+v, %+v", l.UIOrigin, l.UIEvidence, l.RPCEvidence)
 	}
-	if string(l.Data) != input || len(l.Entries) != 3 || l.UISaturatedDurations != 0 {
-		t.Fatalf("load retention changed: entries=%d data=%q saturated=%d", len(l.Entries), l.Data, l.UISaturatedDurations)
+	if string(l.Data) != input || len(l.Entries) != 3 || l.CaptureQuality().UI.DurationLowerBound {
+		t.Fatalf("load retention changed: entries=%d data=%q lower-bound=%v", len(l.Entries), l.Data, l.CaptureQuality().UI.DurationLowerBound)
 	}
 }
 

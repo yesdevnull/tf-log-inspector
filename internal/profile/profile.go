@@ -116,8 +116,14 @@ func Render(w io.Writer, l *model.Log) error {
 	quality := l.CaptureQuality()
 	qualitytext.WriteCaptureQuality(b, quality)
 	rpcTiming := model.SelectTiming(l.RPCSpans)
-	if l.UISaturatedDurations > 0 {
-		fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", l.UISaturatedDurations)
+	if quality.UI.DurationLowerBound {
+		var saturated uint64
+		for _, issue := range quality.Issues {
+			if issue.Stage == "ui_duration" && issue.Code == "duration_saturated" {
+				saturated += issue.Count
+			}
+		}
+		fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", saturated)
 		fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\n")
 		fmt.Fprintf(b, "and timeline positions may be inaccurate.\n\n")
 	}

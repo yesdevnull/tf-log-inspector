@@ -1,4 +1,4 @@
-[7m tfli [0m  [1;36mplan.log[0m                                                             [2m2 RPC spans, 0 UI spans[0m
+[7m tfli [0m  [1;36mi limitations · plan.log[0m                                             [2m2 RPC spans, 0 UI spans[0m
 [7m 1 providers [0m   [36m2[0m types    [36m4[0m calls    [36m5[0m timeline    [36m6[0m raw log   [36m?[0m help
 
 [2m╭─[0m[1;36m Filters [0m[2m─────────────╮[0m [36m╭▶[0m[1;36m By provider [0m[36m────────────────────────────────╮[0m [2m╭─[0m[1;36m Group detail [0m[2m────────╮[0m

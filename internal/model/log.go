@@ -47,10 +47,6 @@ type Log struct {
 	UIOrigin    time.Time
 	Caps        span.Capabilities
 
-	// UISaturatedDurations counts UI timings capped at the storage limit.
-	// Consumers must qualify these values and their totals as lower bounds.
-	UISaturatedDurations uint64
-
 	// Contexts and Attribs are the address-attribution layer. Attribs is
 	// parallel to RPCSpans specifically -- never to a concatenation of
 	// RPCSpans and UISpans, which are kept apart above. UISpans need no
@@ -125,18 +121,17 @@ func Load(path string) (*Log, error) {
 	requestIDOverflow := reqIDs.Overflowed()
 
 	result := &Log{
-		Data:                 data,
-		Entries:              idx.entries,
-		Comps:                comps,
-		Stats:                stats,
-		RPCSpans:             rpcSpans,
-		UISpans:              uiSpans,
-		RPCEvidence:          rpcEvidence,
-		UIEvidence:           uiEvidence,
-		UISaturatedDurations: ub.Saturated(),
-		Caps:                 caps,
-		Contexts:             ctxs,
-		Attribs:              attribs,
+		Data:        data,
+		Entries:     idx.entries,
+		Comps:       comps,
+		Stats:       stats,
+		RPCSpans:    rpcSpans,
+		UISpans:     uiSpans,
+		RPCEvidence: rpcEvidence,
+		UIEvidence:  uiEvidence,
+		Caps:        caps,
+		Contexts:    ctxs,
+		Attribs:     attribs,
 	}
 	if origin, ok := ub.Origin(); ok {
 		result.UIOrigin = origin

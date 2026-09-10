@@ -24,13 +24,11 @@ func TestEmptyRawLogStatusOmitsPosition(t *testing.T) {
 }
 
 func TestWorkbenchHeaderPreservesFilenameSeparators(t *testing.T) {
-	for _, capped := range []uint64{0, 1} {
-		m := New(&model.Log{UISaturatedDurations: capped}, "prod · trace.log")
-		m.width, m.height = 100, 24
-		head := strings.Split(ansi.Strip(m.View()), "\n")[0]
-		if !strings.Contains(head, "prod · trace.log") {
-			t.Fatalf("header split the filename: %q", head)
-		}
+	m := New(&model.Log{}, "prod · trace.log")
+	m.width, m.height = 100, 24
+	head := strings.Split(ansi.Strip(m.View()), "\n")[0]
+	if !strings.Contains(head, "prod · trace.log") {
+		t.Fatalf("header split the filename: %q", head)
 	}
 }
 

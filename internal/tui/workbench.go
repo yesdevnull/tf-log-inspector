@@ -49,6 +49,8 @@ func (m *Model) workbenchView() string {
 			navigation = styleHintKeys(helpCloseHint) + "  " + styles.note.Render("Esc closes help")
 		} else if m.response.open {
 			navigation = responseNavigation
+		} else if m.quality.open {
+			navigation = qualityNavigation
 		}
 		lines = append(lines, clipWidth(navigation, w))
 	}
@@ -70,6 +72,8 @@ func (m *Model) workbenchView() string {
 		switch {
 		case m.response.open:
 			status = m.responseTitle()
+		case m.quality.open:
+			status = qualityTitle
 		case m.showHelp:
 			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.view == ViewRawLog:

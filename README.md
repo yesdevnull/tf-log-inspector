@@ -127,6 +127,12 @@ without a Detail panel and reports its position in the status bar.
 `PgUp`/`PgDn`; the timing explanation follows the shortcuts. The main views
 keep a compact timing qualification beside their action hints.
 
+`i` opens the whole-log capture-quality panel. It reports admitted, rejected
+and positioned timing evidence, extraction anomalies and their first source
+lines, attribution coverage, context limitations, and the lazy response
+reconstruction status. Scroll with arrows, `j`/`k` or `PgUp`/`PgDn`; `i` or
+`Esc` returns without changing the active view, filters, scope or search.
+
 In Raw Log, `←`/`→` (or `h`/`l`) scroll horizontally one display column at a
 time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
 to edit the query. Long queries scroll with the cursor. `Enter` searches,

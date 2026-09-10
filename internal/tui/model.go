@@ -124,6 +124,7 @@ const (
 // the compile-time assertion below pins it.
 type Model struct {
 	response responseState
+	quality  qualityState
 	log      *model.Log
 	name     string
 
@@ -448,6 +449,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.quality.open {
+			return m.handleQualityKey(msg)
+		}
 		if msg.Type == tea.KeySpace {
 			if m.pane == PaneFacets {
 				m.toggleFacetValue()
@@ -570,6 +574,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 			m.helpViewport = viewport.Model{}
+		case "i":
+			m.openQuality()
 		case "s":
 			m.cycleSort()
 		case "f":

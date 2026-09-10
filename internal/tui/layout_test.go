@@ -17,7 +17,7 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
-func TestSaturatedUIDurationsAreMarkedInTheHeader(t *testing.T) {
+func TestSaturatedUIDurationsAreMarkedByTheIndicatorAndPanel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "capture.log")
 	data := []byte(`{"@level":"info","@timestamp":"2026-09-04T09:15:02Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":1e300,"resource":{"addr":"local_file.example","implied_provider":"local","resource_type":"local_file"}}}` + "\n")
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -31,9 +31,13 @@ func TestSaturatedUIDurationsAreMarkedInTheHeader(t *testing.T) {
 	for _, width := range []int{60, 100, 160} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
 		head := strings.SplitN(unstyled(m.View()), "\n", 2)[0]
-		if !strings.Contains(head, "WARNING") || !strings.Contains(head, "1 UI duration") || !strings.Contains(head, "capped") {
+		if !strings.Contains(head, "i limitations") {
 			t.Errorf("at width %d the header hides saturated durations: %q", width, head)
 		}
+	}
+	m.openQuality()
+	if panel := m.renderQuality(100, 200); !strings.Contains(panel, "lower bound") || !strings.Contains(panel, "duration_saturated") {
+		t.Errorf("quality panel does not explain saturation:\n%s", panel)
 	}
 }
 
@@ -266,7 +270,7 @@ func TestViewKeepsTheHeaderAtHeightTwo(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("View() at height 2 is %d lines, want 2:\n%s", len(lines), view)
 	}
-	if !strings.HasPrefix(unstyled(lines[0]), " tfli   x.log") {
+	if !strings.HasPrefix(unstyled(lines[0]), " tfli   i limitations · x.log") {
 		t.Errorf("first line at height 2 is %q, want the header naming the file", lines[0])
 	}
 	// The surviving footer line must be the ACTION line, not the view-key
@@ -979,7 +983,7 @@ func TestADetailPaneNumberIsCutFromItsTail(t *testing.T) {
 // whole log's; with no filter it must read as the plain count it always did,
 // since "2 of 2" on every frame is noise that says nothing.
 func TestHeaderReportsFilteredCountsOnlyWhileAFilterIsActive(t *testing.T) {
-	const unfiltered = "tfli · x.log · 2 RPC spans, 0 UI spans"
+	const unfiltered = "tfli · i limitations · x.log · 2 RPC spans, 0 UI spans"
 	m := New(testLog(t, "two-providers.log"), "x.log")
 	if got := header(&m); got != unfiltered {
 		t.Fatalf("fixture assumption changed: unfiltered header = %q, want %q", got, unfiltered)
@@ -989,7 +993,7 @@ func TestHeaderReportsFilteredCountsOnlyWhileAFilterIsActive(t *testing.T) {
 	// they order by value ascending), which carries one of the two spans.
 	m = moveFacetCursorTo(t, m, dimProvider, "registry.terraform.io/hashicorp/aws")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	if want := "tfli · x.log · 1 of 2 RPC spans, 0 of 0 UI spans"; header(&m) != want {
+	if want := "tfli · i limitations · x.log · 1 of 2 RPC spans, 0 of 0 UI spans"; header(&m) != want {
 		t.Errorf("header under an active filter = %q, want %q -- nothing on screen says the rankings are narrowed", header(&m), want)
 	}
 

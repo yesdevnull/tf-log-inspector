@@ -247,15 +247,12 @@ const headerSep = "·"
 func header(m *Model) string {
 	rpc, ui := len(m.log.RPCSpans), len(m.log.UISpans)
 	name := logfmt.DisplayText(m.name)
-	if n := m.log.UISaturatedDurations; n > 0 {
-		name = fmt.Sprintf("WARNING: %d UI durations capped %s %s", n, headerSep, name)
-	}
 	if !m.filterActive() {
-		return fmt.Sprintf("tfli %s %s %s %d RPC spans, %d UI spans", headerSep, name, headerSep, rpc, ui)
+		return fmt.Sprintf("tfli %s %s %s %s %s %d RPC spans, %d UI spans", headerSep, m.qualityIndicator(), headerSep, name, headerSep, rpc, ui)
 	}
 	f := m.filter()
-	return fmt.Sprintf("tfli %s %s %s %d of %d RPC spans, %d of %d UI spans",
-		headerSep, name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
+	return fmt.Sprintf("tfli %s %s %s %s %s %d of %d RPC spans, %d of %d UI spans",
+		headerSep, m.qualityIndicator(), headerSep, name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
 }
 
 // countMatching counts the spans passing f. It exists rather than a call to
@@ -289,6 +286,9 @@ func countMatching(f model.Filter, spans []span.Span) int {
 func (m *Model) footer(w int) string {
 	if m.response.open {
 		return m.responseFooter(w)
+	}
+	if m.quality.open {
+		return clipWidth(qualityNavigation, w) + "\n" + clipWidth(quitHint, w)
 	}
 	// The help is modal in Update, so it is modal here too. The raw log's
 	// search report below describes a view the help is not drawing, and it
@@ -381,6 +381,9 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // independently, because a 60-column terminal cannot show 62 columns of
 // action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
+	if m.quality.open {
+		return clipWidth("i close", w) + "\n" + clipWidth(quitHint, w)
+	}
 	// While the help is open only three keys do anything: ? and Esc close
 	// it, q quits (see Update). The footer names two of them. Esc is left
 	// out because the meaning it is advertised under here -- "Esc clear" --
@@ -656,6 +659,9 @@ func (m *Model) renderPanes(w, h int) string {
 	// it, so the frame's arithmetic is stated once here rather than at each
 	// of the five sites that would otherwise each have to subtract.
 	bodyH := paneBodyHeight(h)
+	if m.quality.open {
+		return framePanes(h, pane{title: qualityTitle, content: m.renderQuality(panelContentWidth(w), bodyH), width: w})
+	}
 	if m.showHelp {
 		return framePanes(h, pane{title: helpTitle, content: m.renderWorkbenchHelp(panelContentWidth(w), bodyH), width: w})
 	}
