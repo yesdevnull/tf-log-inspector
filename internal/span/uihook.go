@@ -70,7 +70,7 @@ type UIHookBuilder struct {
 
 	base      time.Time // first parseable @timestamp seen, any line
 	haveBase  bool
-	backwards uint64 // timestamps earlier than base, clamped to 0 rather than wrapping
+	backwards uint64 // timestamps earlier than base and unavailable for positioning
 	saturated uint64 // durations that hit math.MaxUint32 rather than overflowing
 	evidence  TimingEvidence
 }
@@ -299,9 +299,9 @@ func (b *UIHookBuilder) Spans() []Span { return b.spans }
 func (b *UIHookBuilder) Malformed() uint64 { return b.malformed }
 
 // BackwardsTimestamps reports how many UI-hook lines carried a timestamp
-// earlier than this builder's base. Each one clamps to a 0 offset rather
-// than wrapping, which silently shortens the derived UI-hook wall-clock, so
-// this is what lets that be surfaced instead of hidden.
+// earlier than this builder's base. Their independent durations are retained,
+// but their positions on the builder's clock are unavailable. Capture wall
+// clock is derived separately from parsed structured timestamps.
 func (b *UIHookBuilder) BackwardsTimestamps() uint64 { return b.backwards }
 
 // Saturated reports how many span durations hit math.MaxUint32 milliseconds

@@ -144,6 +144,65 @@ func TestRunReportsStructuredOutputLog(t *testing.T) {
 	}
 }
 
+func TestRunDiagnoseDistinguishesObservedSourcesFromMissingSources(t *testing.T) {
+	const applyStart = `{"@level":"info","@message":"aws_instance.example: Creating...","@module":"terraform.ui","@timestamp":"2026-09-10T00:00:00Z","hook":{"resource":{"addr":"aws_instance.example","resource":"aws_instance.example","resource_type":"aws_instance","resource_name":"example","resource_key":null,"implied_provider":"aws"},"action":"create"},"type":"apply_start"}`
+	const unmatchedRefresh = `{"@level":"info","@message":"aws_instance.example: Refresh complete","@module":"terraform.ui","@timestamp":"2026-09-10T00:00:00Z","hook":{"resource":{"addr":"aws_instance.example","resource":"aws_instance.example","resource_type":"aws_instance","resource_name":"example","resource_key":null,"implied_provider":"aws"}},"type":"refresh_complete"}`
+	const rejectedResponse = "2026-09-10T00:00:01.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ApplyResourceChange tf_req_duration_ms=broken\n"
+
+	cases := []struct {
+		name       string
+		input      string
+		want       []string
+		contradict string
+	}{
+		{
+			name:  "rejected RPC duration with address context",
+			input: applyStart + "\n" + rejectedResponse,
+			want: []string{
+				"RPC timing records     1: admitted 0, rejected 1",
+				"response entries          1",
+				"provider entries          1",
+				"provider RPC evidence was observed, but no duration was admitted",
+			},
+			contradict: "no TRACE-level provider RPC entries",
+		},
+		{
+			name:  "structured terminator without address context",
+			input: unmatchedRefresh + "\n",
+			want: []string{
+				"structured lines     1",
+				"unmatched terminators     1",
+				"structured output was observed, but it yielded no usable",
+			},
+			contradict: "the terraform.ui stream, which the debug-logging",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "capture.log")
+			if err := os.WriteFile(path, []byte(tc.input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr strings.Builder
+			if err := run([]string{"--diagnose", path}, &stdout, &stderr); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("diagnose wrote stderr: %q", stderr.String())
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout.String(), want) {
+					t.Errorf("report missing %q:\n%s", want, stdout.String())
+				}
+			}
+			if strings.Contains(stdout.String(), tc.contradict) {
+				t.Errorf("report contradicts its observed source counts with %q:\n%s", tc.contradict, stdout.String())
+			}
+		})
+	}
+}
+
 func TestRunReportsMissingFileClearly(t *testing.T) {
 	var sb strings.Builder
 	err := run([]string{"--diagnose", "no-such-file.log"}, &sb, io.Discard)

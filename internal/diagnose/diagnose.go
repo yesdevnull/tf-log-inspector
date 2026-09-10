@@ -224,7 +224,7 @@ type Report struct {
 	UIResourceTypeCount   int                 // distinct resource types seen, before the top-10 cap on ByResourceType
 	UIActionCounts        []Template          // action -> count, ranked by count descending
 	UIMalformedLines      uint64              // structured lines that failed to decode as JSON (span.UIHookBuilder.Malformed)
-	UIBackwardsTimestamps uint64              // UI-hook timestamps earlier than the builder's base, clamped to 0
+	UIBackwardsTimestamps uint64              // UI-hook timestamps earlier than the builder's base, unavailable for positioning
 	UISaturatedDurations  uint64              // UI-hook durations that hit math.MaxUint32ms rather than the real value
 
 	// Address-attribution figures. Counts and totals only -- no address
@@ -825,19 +825,20 @@ func (r Report) Render(w io.Writer) error {
 		// at all must not have both counts silently dropped.
 		fmt.Fprintf(b, "  %-25s %d\n", "context lines malformed", r.MalformedStructuredLines)
 		fmt.Fprintf(b, "  %-25s %d\n", "unmatched terminators", r.UnmatchedTerminators)
-		// The HCP Terraform/CLI debug-logging toggle is what produces the
-		// terraform.ui stream this log is missing -- TF_LOG_PROVIDER and
-		// TF_LOG_SDK_PROTO produce no terraform.ui context on their own.
-		// They instead govern the provider RPC entries reported in SPANS
-		// above, which this log may already carry: a reader who already set
-		// those two and is missing only the toggle must not be told to set
-		// what they already have.
-		fmt.Fprintf(b, "  no address context in this log -- attribution needs\n")
-		fmt.Fprintf(b, "  the terraform.ui stream, which the debug-logging\n")
-		fmt.Fprintf(b, "  toggle produces. TF_LOG_PROVIDER=TRACE and\n")
-		fmt.Fprintf(b, "  TF_LOG_SDK_PROTO=TRACE govern the provider RPC\n")
-		fmt.Fprintf(b, "  entries above instead; set alone, they are not\n")
-		fmt.Fprintf(b, "  expected to add a terraform.ui stream of their own\n")
+		if r.Stats.StructuredLines > 0 {
+			fmt.Fprintf(b, "  structured output was observed, but it yielded no usable\n")
+			fmt.Fprintf(b, "  address context for attribution\n")
+		} else {
+			// The HCP Terraform/CLI debug-logging toggle is what produces the
+			// terraform.ui stream this log is missing -- TF_LOG_PROVIDER and
+			// TF_LOG_SDK_PROTO produce no terraform.ui context on their own.
+			fmt.Fprintf(b, "  no address context in this log -- attribution needs\n")
+			fmt.Fprintf(b, "  the terraform.ui stream, which the debug-logging\n")
+			fmt.Fprintf(b, "  toggle produces. TF_LOG_PROVIDER=TRACE and\n")
+			fmt.Fprintf(b, "  TF_LOG_SDK_PROTO=TRACE govern the provider RPC\n")
+			fmt.Fprintf(b, "  entries above instead; set alone, they are not\n")
+			fmt.Fprintf(b, "  expected to add a terraform.ui stream of their own\n")
+		}
 	} else {
 		// Substance first, caveats after: how much context there is, then
 		// how much of it is suspect. context lines malformed/unmatched
@@ -856,9 +857,14 @@ func (r Report) Render(w io.Writer) error {
 			// would read as "attribution ran and every span failed", which is
 			// a different and false claim from "there was nothing to
 			// attribute".
-			fmt.Fprintf(b, "  no provider RPC spans to attribute -- this log has\n")
-			fmt.Fprintf(b, "  terraform.ui context but no TRACE-level provider RPC\n")
-			fmt.Fprintf(b, "  entries, so nothing was measured\n")
+			if r.Caps.ResponseEntries+r.Caps.ProviderEntries > 0 {
+				fmt.Fprintf(b, "  provider RPC evidence was observed, but no duration was admitted\n")
+				fmt.Fprintf(b, "  for attribution\n")
+			} else {
+				fmt.Fprintf(b, "  no provider RPC spans to attribute -- this log has\n")
+				fmt.Fprintf(b, "  terraform.ui context but no TRACE-level provider RPC\n")
+				fmt.Fprintf(b, "  entries, so nothing was measured\n")
+			}
 		} else {
 			for _, c := range []attrib.Confidence{
 				attrib.Contained, attrib.Likely, attrib.Overlapping,
