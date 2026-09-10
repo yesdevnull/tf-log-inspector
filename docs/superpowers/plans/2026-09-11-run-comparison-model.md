@@ -27,7 +27,7 @@
 
 ## Status and scope
 
-Dan authorised drafting H1/H2 on 11 September 2026 after G merged locally at `801a917`. These plans propose precise implementation choices for review; application implementation is not yet authorised. H1 yields a tested calculation/report API and public schema reference. H2 consumes those exact APIs to expose the feature. Boundary I is unaffected.
+Dan authorised drafting H1/H2 on 11 September 2026 after G merged locally at `801a917`, then approved both plans and subagent implementation. H1 yields a tested calculation/report API and public schema reference. H2 consumes those exact APIs to expose the feature. Boundary I is unaffected.
 
 The spec permits a comparison package only if calculations outgrow focused model files. Keep calculations in model and assembly/rendering in profile. Parsing JSON profile exports, comparing request IDs, resource aliases or inferred RPC addresses, workload normalisation, threshold exits, timeline alignment and provider-version reconciliation are outside H.
 

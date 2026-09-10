@@ -28,7 +28,7 @@
 
 ## Status and fixed interfaces
 
-Draft authorised on 11 September 2026 after G merged at `801a917`; implementation awaits approval. H1 must pass review and cleanup first. Its exact JSON field contract, model declarations and semantics are binding inputs to every task below; give each implementing subagent both the task brief and H1 contract.
+Draft authorised on 11 September 2026 after G merged at `801a917`; Dan subsequently approved both plans and subagent implementation. H1 must pass review and cleanup first. Its exact JSON field contract, model declarations and semantics are binding inputs to every task below; give each implementing subagent both the task brief and H1 contract.
 
 ```go
 // internal/profile — H1 provides these names and complete declarations:

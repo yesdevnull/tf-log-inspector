@@ -76,9 +76,10 @@ On 11 September 2026, after G merged locally at `801a917`, Dan authorised
 drafting Boundary H as two sequential plans:
 [comparison model and schema](../plans/2026-09-11-run-comparison-model.md), then
 [comparison renderers and CLI](../plans/2026-09-11-run-comparison-cli.md).
-The drafts define exact grouping, availability, deltas, ordering, wire fields
-and two-input output protection for review. This authorises planning only;
-Boundary H implementation and Boundary I retain their existing status.
+The plans define exact grouping, availability, deltas, ordering, wire fields
+and two-input output protection. Dan subsequently approved both plans and
+subagent implementation. This approval is limited to H; Boundary I retains
+its existing status.
 
 ## Evidence and relationship to existing designs
 
