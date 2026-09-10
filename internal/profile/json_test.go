@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
@@ -105,6 +108,162 @@ func TestJSONRendererProducesOneDeterministicCompleteDocument(t *testing.T) {
 	}
 }
 
+func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
+	firstEntry := uint32(0)
+	share, fraction := 0.5, 0.25
+	tier := span.FidelityReported
+	origin := time.Date(2026, 9, 11, 1, 2, 3, 0, time.UTC)
+	report := Report{
+		HasContext:     true,
+		Reconstruction: model.ReconstructionQuality{State: "checked", Responses: 1},
+		Quality: model.CaptureQuality{
+			HasContext: true,
+			RPC:        model.TierQuality{Admitted: 1, Positioned: 1, Origin: &origin, Exclusions: map[string]uint64{}},
+			UI:         model.TierQuality{Exclusions: map[string]uint64{}},
+			Issues: []model.QualityIssue{
+				{Stage: "scan", Code: "example", Count: 1, FirstEntry: &firstEntry},
+				{Stage: "scan", Code: "absent", Count: 1},
+			},
+			Attribution: attrib.Coverage{
+				Spans: 1, TotalMs: 10, Candidates: map[uint32]int{1: 1},
+			},
+			NameableShare: &share,
+		},
+		RPC: []Observation{{
+			Index: 0,
+			Span: span.Span{Entry: 0, StartMs: 0, EndMs: 10, DurationMs: 10, TimestampStatus: logfmt.TimestampValid,
+				RPC: "read", Provider: "provider", ResourceType: "type"},
+			Source:      &model.SourceLocation{Entry: 0, StartLine: 1, EndLine: 1, StartByte: 0, EndByte: 10},
+			Attribution: attrib.Attribution{Confidence: attrib.Contained, Address: "resource.a", Candidates: 1},
+		}, {Index: 1, Attribution: attrib.Attribution{Confidence: attrib.Unattributed}}},
+		UI:        []Observation{{Index: 0, Span: span.Span{Address: "resource.a", RPC: "read", ResourceType: "type"}}},
+		Providers: []model.Bucket{{Key: "provider", Count: 1}},
+		Types:     []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "type", RPCCalls: 1, UIResources: 1}}},
+		Resources: model.ResourceProjection{
+			Rows: []model.ResourceRow{{Address: "resource.a", Operations: []model.ResourceOperation{{UIIndex: 0}}}},
+		},
+		Timeline: Timeline{
+			Tier:              &tier,
+			PositionedIndices: []int{0},
+			Analysis: model.TimingAnalysis{
+				Timing:      model.TimingSelection{AdmittedCount: 1, Exclusions: map[string]uint64{}},
+				Metrics:     &model.TimingMetrics{WindowMs: 10, BusyFraction: &fraction},
+				ThresholdMs: 1,
+				Intervals:   []model.Stall{{StartMs: 0, EndMs: 10, Blocking: 0}, {StartMs: 10, EndMs: 11, Blocking: -1}},
+			},
+		},
+	}
+	var out bytes.Buffer
+	if err := RenderJSON(&out, report, JSONMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	root := decodeJSONObject(t, out.Bytes())
+	tiers := decodeJSONObject(t, root["tiers"])
+	assertJSONKeys(t, "tiers", tiers, "rpc", "ui")
+	for name, raw := range tiers {
+		assertJSONKeys(t, name+" tier", decodeJSONObject(t, raw), "duration_available", "records", "admitted", "rejected", "positioned", "excluded", "duration_ms", "positioned_ms", "excluded_ms", "duration_lower_bound", "clock_origin", "exclusions")
+	}
+	rpcRows := decodeJSONArray(t, root["rpc_observations"])
+	rpc := rpcRows[0]
+	assertJSONKeys(t, "source", decodeJSONObject(t, rpc["source"]), "entry", "start_line", "end_line", "start_byte", "end_byte")
+	assertJSONKeys(t, "position", decodeJSONObject(t, rpc["position"]), "start_ms", "end_ms", "valid", "reasons", "start_clamped")
+	assertJSONKeys(t, "attribution", decodeJSONObject(t, rpc["attribution"]), "confidence", "address", "candidates")
+
+	quality := decodeJSONObject(t, root["quality"])
+	assertJSONKeys(t, "quality", quality, "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction")
+	issues := decodeJSONArray(t, quality["issues"])
+	assertJSONKeys(t, "issue", issues[0], "stage", "code", "count", "first_entry")
+	assertJSONNull(t, "absent issue first entry", issues[1]["first_entry"])
+	attributionQuality := decodeJSONObject(t, quality["attribution"])
+	assertJSONKeys(t, "attribution quality", attributionQuality, "spans", "duration_ms", "by_confidence", "candidate_counts")
+	assertJSONKeys(t, "confidence total", decodeJSONArray(t, attributionQuality["by_confidence"])[0], "confidence", "count", "duration_ms")
+	assertJSONKeys(t, "candidate count", decodeJSONArray(t, attributionQuality["candidate_counts"])[0], "candidates", "count")
+	assertJSONKeys(t, "reconstruction", decodeJSONObject(t, quality["reconstruction"]), "state", "responses", "code")
+	assertJSONNull(t, "checked reconstruction code", decodeJSONObject(t, quality["reconstruction"])["code"])
+
+	aggregates := decodeJSONObject(t, root["aggregates"])
+	assertJSONKeys(t, "aggregates", aggregates, "providers", "resource_types", "resources", "ui", "unnamed_ui", "rpc_evidence")
+	provider := decodeJSONArray(t, aggregates["providers"])[0]
+	assertJSONKeys(t, "provider", provider, "provider", "rpc")
+	assertJSONKeys(t, "total", decodeJSONObject(t, provider["rpc"]), "count", "total_ms", "max_ms", "lower_bound")
+	assertJSONKeys(t, "resource type", decodeJSONArray(t, aggregates["resource_types"])[0], "resource_type", "rpc", "ui")
+	assertJSONKeys(t, "resource", decodeJSONArray(t, aggregates["resources"])[0], "address", "ui", "named_rpc", "overlapping_rpc", "ui_observation_indices")
+	assertJSONKeys(t, "RPC evidence", decodeJSONObject(t, aggregates["rpc_evidence"]), "baseline", "missing_type", "no_context", "contained", "likely", "overlapping", "ambiguous", "unattributed")
+
+	timeline := decodeJSONObject(t, root["timeline"])
+	assertJSONKeys(t, "timeline", timeline, "tier", "status", "clock_origin", "window_scope", "admitted", "positioned", "excluded", "admitted_ms", "admitted_lower_bound", "positioned_ms", "excluded_ms", "excluded_lower_bound", "exclusions", "metrics", "threshold_ms", "intervals")
+	assertJSONKeys(t, "metrics", decodeJSONObject(t, timeline["metrics"]), "window_ms", "peak", "busy_ms", "busy_fraction", "summed_duration_ms", "summed_window_ratio")
+	intervals := decodeJSONArray(t, timeline["intervals"])
+	assertJSONKeys(t, "interval", intervals[0], "start_ms", "end_ms", "duration_ms", "min_running", "max_running", "observed_peak", "active_observation_index")
+	assertJSONNull(t, "inactive interval observation", intervals[1]["active_observation_index"])
+	rpcPosition := decodeJSONObject(t, rpc["position"])
+	rpcAttribution := decodeJSONObject(t, rpc["attribution"])
+	absentRPCAttribution := decodeJSONObject(t, rpcRows[1]["attribution"])
+	rpcTier := decodeJSONObject(t, tiers["rpc"])
+	uiTier := decodeJSONObject(t, tiers["ui"])
+	reconstruction := decodeJSONObject(t, quality["reconstruction"])
+	metrics := decodeJSONObject(t, timeline["metrics"])
+	if string(rpc["source"]) == "null" || string(rpcPosition["start_ms"]) == "null" || string(rpcPosition["end_ms"]) == "null" ||
+		string(rpcAttribution["address"]) == "null" || string(issues[0]["first_entry"]) == "null" ||
+		string(quality["attribution"]) == "null" || string(quality["nameable_share"]) == "null" ||
+		string(reconstruction["responses"]) == "null" || string(rpcTier["clock_origin"]) == "null" ||
+		string(timeline["clock_origin"]) == "null" || string(metrics["busy_fraction"]) == "null" || string(metrics["summed_window_ratio"]) == "null" ||
+		string(timeline["threshold_ms"]) == "null" || string(intervals[0]["active_observation_index"]) == "null" {
+		t.Fatal("populated nullable field encoded as null")
+	}
+	assertJSONNull(t, "unattributed address", absentRPCAttribution["address"])
+	assertJSONNull(t, "absent UI tier origin", uiTier["clock_origin"])
+
+	failedReport := Report{
+		Reconstruction: model.ReconstructionQuality{State: "failed", Code: "decode_failed"},
+		Timeline: Timeline{Tier: &tier, Analysis: model.TimingAnalysis{
+			Timing:  model.TimingSelection{Exclusions: map[string]uint64{}},
+			Metrics: &model.TimingMetrics{},
+		}},
+	}
+	var failed bytes.Buffer
+	if err := RenderJSON(&failed, failedReport, JSONMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	failedQuality := decodeJSONObject(t, decodeJSONObject(t, failed.Bytes())["quality"])
+	failedReconstruction := decodeJSONObject(t, failedQuality["reconstruction"])
+	assertJSONNull(t, "failed reconstruction responses", failedReconstruction["responses"])
+	if string(failedReconstruction["code"]) == "null" {
+		t.Fatal("failed reconstruction code encoded as null")
+	}
+	failedTimeline := decodeJSONObject(t, decodeJSONObject(t, failed.Bytes())["timeline"])
+	failedMetrics := decodeJSONObject(t, failedTimeline["metrics"])
+	assertJSONNull(t, "zero-window busy fraction", failedMetrics["busy_fraction"])
+	assertJSONNull(t, "zero-window summed ratio", failedMetrics["summed_window_ratio"])
+
+	var absent bytes.Buffer
+	if err := RenderJSON(&absent, Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, JSONMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	absentRoot := decodeJSONObject(t, absent.Bytes())
+	absentQuality := decodeJSONObject(t, absentRoot["quality"])
+	absentTimeline := decodeJSONObject(t, absentRoot["timeline"])
+	for name, raw := range map[string]json.RawMessage{
+		"quality attribution": absentQuality["attribution"], "nameable share": absentQuality["nameable_share"],
+		"timeline tier": absentTimeline["tier"], "timeline origin": absentTimeline["clock_origin"],
+		"timeline metrics": absentTimeline["metrics"], "timeline threshold": absentTimeline["threshold_ms"],
+	} {
+		assertJSONNull(t, name, raw)
+	}
+	absentReconstruction := decodeJSONObject(t, absentQuality["reconstruction"])
+	assertJSONNull(t, "reconstruction responses", absentReconstruction["responses"])
+	assertJSONNull(t, "reconstruction code", absentReconstruction["code"])
+	absentRPC := decodeJSONArray(t, absentRoot["rpc_observations"])
+	if len(absentRPC) != 0 {
+		t.Fatal("absent RPC observations are not empty")
+	}
+	populatedUI := decodeJSONArray(t, root["ui_observations"])[0]
+	assertJSONNull(t, "absent source", populatedUI["source"])
+	uiPosition := decodeJSONObject(t, populatedUI["position"])
+	assertJSONNull(t, "absent position start", uiPosition["start_ms"])
+	assertJSONNull(t, "absent position end", uiPosition["end_ms"])
+}
+
 func TestJSONRendererPreservesIdentifiersAndNulls(t *testing.T) {
 	identifier := "module.東京[\"quoted\"]\n\x1b[2J"
 	report := Report{
@@ -155,12 +314,17 @@ func TestJSONRendererPreservesIdentifiersAndNulls(t *testing.T) {
 	}
 }
 
-func TestJSONRendererIncludesAllObservationsAndSaturatedValues(t *testing.T) {
+func TestJSONRendererIncludesAllArraysAndSaturatedValues(t *testing.T) {
 	report := Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}}
 	for i := 0; i < 25; i++ {
 		report.RPC = append(report.RPC, Observation{Index: i, Span: span.Span{DurationMs: uint32(i)}})
+		report.UI = append(report.UI, Observation{Index: i, Span: span.Span{DurationMs: uint32(i)}})
+		report.Providers = append(report.Providers, model.Bucket{Key: fmt.Sprintf("provider-%02d", i)})
+		report.Types = append(report.Types, TypeSummary{TypeRow: model.TypeRow{ResourceType: fmt.Sprintf("type-%02d", i)}})
+		report.Resources.Rows = append(report.Resources.Rows, model.ResourceRow{Address: fmt.Sprintf("resource-%02d", i)})
 	}
-	report.UI = []Observation{{Index: 0, Span: span.Span{DurationMs: math.MaxUint32, DurationSaturated: true}}}
+	report.UI[24].Span.DurationMs = math.MaxUint32
+	report.UI[24].Span.DurationSaturated = true
 	var out bytes.Buffer
 	if err := RenderJSON(&out, report, JSONMetadata{}); err != nil {
 		t.Fatal(err)
@@ -170,9 +334,21 @@ func TestJSONRendererIncludesAllObservationsAndSaturatedValues(t *testing.T) {
 			Index int `json:"index"`
 		} `json:"rpc_observations"`
 		UI []struct {
+			Index              int    `json:"index"`
 			DurationMs         uint32 `json:"duration_ms"`
 			DurationLowerBound bool   `json:"duration_lower_bound"`
 		} `json:"ui_observations"`
+		Aggregates struct {
+			Providers []struct {
+				Provider string `json:"provider"`
+			} `json:"providers"`
+			Types []struct {
+				ResourceType string `json:"resource_type"`
+			} `json:"resource_types"`
+			Resources []struct {
+				Address string `json:"address"`
+			} `json:"resources"`
+		} `json:"aggregates"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatal(err)
@@ -180,8 +356,13 @@ func TestJSONRendererIncludesAllObservationsAndSaturatedValues(t *testing.T) {
 	if len(doc.RPC) != 25 || doc.RPC[24].Index != 24 {
 		t.Fatalf("RPC observations were limited: len=%d last=%+v", len(doc.RPC), doc.RPC[len(doc.RPC)-1])
 	}
-	if doc.UI[0].DurationMs != math.MaxUint32 || !doc.UI[0].DurationLowerBound {
-		t.Fatalf("saturated UI duration = %+v", doc.UI[0])
+	if len(doc.UI) != 25 || doc.UI[24].Index != 24 || doc.UI[24].DurationMs != math.MaxUint32 || !doc.UI[24].DurationLowerBound {
+		t.Fatalf("UI observations were limited or saturation changed: len=%d last=%+v", len(doc.UI), doc.UI[24])
+	}
+	if len(doc.Aggregates.Providers) != 25 || doc.Aggregates.Providers[24].Provider != "provider-24" ||
+		len(doc.Aggregates.Types) != 25 || doc.Aggregates.Types[24].ResourceType != "type-24" ||
+		len(doc.Aggregates.Resources) != 25 || doc.Aggregates.Resources[24].Address != "resource-24" {
+		t.Fatalf("aggregate arrays were limited: providers=%d types=%d resources=%d", len(doc.Aggregates.Providers), len(doc.Aggregates.Types), len(doc.Aggregates.Resources))
 	}
 }
 
@@ -256,5 +437,30 @@ func decodeJSONField(t *testing.T, object map[string]json.RawMessage, key string
 	t.Helper()
 	if err := json.Unmarshal(object[key], target); err != nil {
 		t.Fatalf("decode %s: %v", key, err)
+	}
+}
+
+func decodeJSONObject(t *testing.T, data []byte) map[string]json.RawMessage {
+	t.Helper()
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		t.Fatalf("decode object: %v", err)
+	}
+	return object
+}
+
+func decodeJSONArray(t *testing.T, data []byte) []map[string]json.RawMessage {
+	t.Helper()
+	var array []map[string]json.RawMessage
+	if err := json.Unmarshal(data, &array); err != nil {
+		t.Fatalf("decode array: %v", err)
+	}
+	return array
+}
+
+func assertJSONNull(t *testing.T, name string, raw json.RawMessage) {
+	t.Helper()
+	if string(raw) != "null" {
+		t.Fatalf("%s = %s, want null", name, raw)
 	}
 }
