@@ -1,0 +1,270 @@
+# Resources TUI and Filters Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Expose observed resource rankings, searchable resource/module choices and honest selected RPC evidence in the terminal interface.
+
+**Architecture:** Consume D1's resource projection through one cached TUI selection. Extend current table/facet patterns while retaining original RPC indices for attribution and navigation. Expose complete scoped evidence in a scrollable panel so narrow layouts can retain its qualifications.
+
+**Tech Stack:** Go 1.25+, existing Bubble Tea, Bubbles text input/viewport and Lip Gloss; existing test and golden tools only.
+
+**Spec:** [Investigation workflows design](../specs/2026-09-09-investigation-workflows-design.md), item 3 and boundary D. Requires reviewed [Resource evidence and selection](2026-09-10-resource-evidence-selection.md), D1. Dan approved the split and RPC-only provider/method filter behaviour on 10 September 2026. This plan awaits execution approval.
+
+## Global Constraints
+
+- “Use the reserved `3` key for Resources.”
+- “Use ‘operations’, not ‘resources’, for repeated completions on one address.”
+- “Supplement each resource with associated RPC count and total, separated into Contained/Likely and weaker Overlapping evidence.”
+- “Label these as inferred and partial.”
+- “The view does not substitute a misleading inferred ranking.”
+- “Provider and RPC-method filters apply only to RPC evidence; they cannot infer a provider or method for a UI operation.”
+- “Raw-log provider and severity filtering retains its existing meaning.”
+- “Terminal rendering escapes untrusted controls.”
+- “Whole-log quality facts remain labelled as whole-log facts.”
+- Keep C1/C2 timing/source/quality semantics. No inferred address ranking, provider guessing, compatibility adapter, CLI flag, JSON, response recovery or general history implementation.
+- TDD, sanitised real fixtures, independent reviews and separate test cleanup. Signed commits through `/Users/dan/.codex/bin/codex-git`; signing failure is a hard stop. Preserve hooks; no push/merge without instruction.
+
+---
+
+## Prerequisites and responsibilities
+
+Start after D1's reviewed integration commit; consume its interface ledger verbatim. Check status, pull with rebase and use a topic branch/worktree. Do not execute D1 and D2 concurrently. Run tasks sequentially, recording actual RED/GREEN, review and signed commits. New API compile failures do not replace demonstrating failing behavioural assertions.
+
+| Files | Responsibility |
+| --- | --- |
+| New `internal/tui/resource_selection.go`, `resource_selection_test.go` | D1 index/projection cache and original-index consumers |
+| `internal/tui/model.go`, `facets.go`, `views.go`, `timeline.go`, `layout.go` and corresponding tests | Tier-specific filtering and view integration |
+| New `internal/tui/resources.go`, `resources_test.go` | Resource table, observed details and scoped preamble |
+| New `internal/tui/resource_evidence.go`, `resource_evidence_test.go` | Scrollable complete evidence and modal precedence |
+| New `internal/tui/facet_search.go`, `facet_search_test.go`; `facets.go` | Literal narrowing with complete underlying choice universe |
+| `internal/tui/navigation.go`, `help.go`, `workbench.go`, affected tests; `README.md` | Keys, scope explanations and user guidance |
+| `internal/tui/testdata/golden/` | Reviewed layout updates and Resources fixtures |
+
+## UI decisions
+
+Resources groups exact addresses. Columns: address, operations, observed UI total, longest UI operation, inferred Contained/Likely RPC count/total and inferred Overlapping RPC count/total. Default order is UI total descending then exact address. Only address and observed UI columns participate in `s` sorting; inferred RPC ranking remains prohibited. Saturated observations qualify UI sum/max as lower bounds.
+
+Selected-resource details show full escaped address, UI operation count/total/max, timing qualifications and separate inferred RPC groups. D1 preserves individual operation identities; boundary E owns a selectable operation list and multi-step drill-down. Enter on a resource aggregate must not jump to an arbitrary completion or RPC. Existing Calls/Timeline Enter remains intact.
+
+The preamble names separate scopes: UI uses type/resource/module; RPC uses provider/type/method/resource/module. With named selection active, show selected/other/unresolved RPC totals against the provider/type/method baseline. `e evidence` opens a complete scrollable panel from Resources, Calls, Types, Providers and Timeline. It shows preselection resource evidence, selected partitions and exact baseline filters. `i` remains whole-log quality.
+
+Resource/module facets use D1's complete choices, including context-only addresses and ancestor modules. Root displays `(root subtree)` but uses the typed empty path, never generic `(none)`. Root subtree includes known descendants, not just root resources. Unknown module never becomes root; exact address selection still works with unknown module membership.
+
+With facet focus, `/` starts literal case-sensitive narrowing for its resource/module dimension. Enter finishes editing and retains the narrowed list; Esc during editing restores the previous chooser query. Outside editing, Esc clears a nonempty chooser query before existing filter-clearing behaviour. Queries never change result filters. Space toggles a choice; `o` solos it against the entire underlying dimension. `f`/Tab and narrow overlay keep their existing focus meaning. During editing, q/3/i/e insert text; Ctrl-C quits.
+
+### Task 1: Connect selection and migrate tier-specific consumers
+
+**Files:** Create `internal/tui/resource_selection.go`, `resource_selection_test.go`; modify `model.go`, `facets.go`, `views.go`, `timeline.go`, `layout.go`, `facets_test.go`, `timeline_test.go`, `views_test.go` under `internal/tui/`.
+
+**Consumes:** D1 BuildResourceIndex/SelectResources/ResourceSelection/ResourceProjection and original Log spans.
+
+**Produces:**
+
+```go
+// Additional Model fields:
+resourceIndex model.ResourceIndex
+resourceProjection model.ResourceProjection
+resourceProjectionCached bool
+resourceSelection model.ResourceSelection
+
+func (m *Model) selectedResources() model.ResourceProjection
+func (m *Model) selectedRPCSpans() []span.Span
+func (m *Model) selectedUISpans() []span.Span
+```
+
+- [ ] **Step 1: Write regressions before migration.** Excluding all providers/methods empties RPCs but preserves UI rows/durations and UI-only timeline. Type and named selections narrow applicable metadata in both tiers. Raw provider/severity semantics remain; type/resource/module/method filters cannot discard surrounding raw text. Use real parsed captures for integration and existing key helpers.
+
+```go
+func TestResourceSelectionKeepsUIUnderRPCFilters(t *testing.T) {
+    l := &model.Log{
+        RPCSpans: []span.Span{{Entry: 1, Provider: "p", RPC: "ReadResource", DurationMs: 10}},
+        UISpans: []span.Span{{Entry: 2, Address: "aws_instance.a", DurationMs: 1000}},
+    }
+    m := New(l, "synthetic.log")
+    m.setFacetExclusions(dimProvider, map[string]bool{"p": true})
+    m.invalidateRows()
+    if len(m.selectedRPCSpans()) != 0 || len(m.selectedUISpans()) != 1 {
+        t.Fatal("RPC-only filter changed observed UI")
+    }
+}
+```
+
+Also filter to an RPC originally at index 2 and assert its attribution/request/raw entry remain index 2's. Unpositioned UI remains ranked but unavailable in temporal projection. Named filtering must not switch a capture's chosen timeline tier from RPC to UI.
+
+- [ ] **Step 2: Run RED.** `go test ./internal/tui -run TestResourceSelection -count=1`; demonstrate tier-scope and original-index failures after declarations compile.
+- [ ] **Step 3: Implement one selection cache.** Initialise index in New. Invalidate projection before existing row/timeline clamping/rebuild in invalidateRows. Call D1 with original Log, never prefiltered spans.
+
+```go
+func (m *Model) selectedResources() model.ResourceProjection {
+    if !m.resourceProjectionCached {
+        m.resourceProjection = model.SelectResources(m.log, m.resourceIndex, m.filter(), m.resourceSelection)
+        m.resourceProjectionCached = true
+    }
+    return m.resourceProjection
+}
+func (m *Model) selectedUISpans() []span.Span {
+    result := make([]span.Span, 0, len(m.selectedResources().UIIndices))
+    for _, i := range m.selectedResources().UIIndices { result = append(result, m.log.UISpans[i]) }
+    return result
+}
+```
+
+Implement selectedRPCSpans analogously using original RPCIndices. Providers/Types use the selected slices. Timeline passes only the already-chosen tier through existing SelectTiming. Calls construct rows from original RPCIndices and carry that original index into callRow; never pass a reindexed filtered slice to callRows. Headers, no-match guidance and counts use the same projection. Audit every direct SpansMatching/filterActive/timelineNarrowed consumer for named selection. Raw entryVisible/request scope keep base filters only.
+
+Replace the approved UI provider translation with type-only uiFilter; remove uiProviderTypes once no consumer uses it. Update obsolete tests to the new contract while preserving type/nil/empty/raw-provider coverage. Do not add compatibility behaviour or remove recorded UI provider metadata.
+
+- [ ] **Step 4: GREEN and independent review.** `go test ./internal/tui ./internal/model -count=1`. Check existing timing validity tests. Inspect any intentional changed goldens using Task 4's procedure before committing.
+- [ ] **Step 5: Signed commit.** Stage task files and execution record; commit `Apply typed resource selection across timing views`.
+
+### Task 2: Add observed Resources and complete evidence access
+
+**Files:** Create `internal/tui/resources.go`, `resources_test.go`, `resource_evidence.go`, `resource_evidence_test.go`; modify `model.go`, `views.go`, `layout.go`, `navigation.go`, `help.go`, `workbench.go` and affected tests under `internal/tui/`.
+
+**Consumes:** selectedResources, D1 ResourceRow/ResourceEvidence/SelectionEvidence, existing table/detail escaping and quality viewport patterns.
+
+**Produces:**
+
+```go
+// Add ViewResources before viewCount and key 3 in views.
+func (m *Model) resourceRows() []row
+func (m *Model) renderResources(w, h int) string
+func (m *Model) openResourceEvidence()
+func (m *Model) renderResourceEvidence(w, h int) string
+// Model fields:
+showResourceEvidence bool
+resourceEvidenceViewport viewport.Model
+// Additional optional row field:
+resource *model.ResourceRow
+```
+
+- [ ] **Step 1: Write rendering/interaction tests.** Key 3 opens Resources. Two completions of A yield one row/two operations. UI-only works. RPC-only explains missing observed UI and offers `4 calls`, `2 types`, `i quality`, `e evidence`; no inferred replacement ranking. Distinguish filtered no matches, ungrouped unnamed UI and unavailable UI with rejected timing evidence. Preserve lower-bound/rounding/position qualifications and safely render long/control-containing identities.
+
+```go
+func TestResourcesKeyAndEvidence(t *testing.T) {
+    m := New(&model.Log{}, "empty.log")
+    m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+    m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+    if m.view != ViewResources { t.Fatalf("view=%v", m.view) }
+    m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+    if !m.showResourceEvidence { t.Fatal("evidence did not open") }
+    m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+    if m.showResourceEvidence || m.view != ViewResources { t.Fatal("return state lost") }
+}
+```
+
+Render D1's 10/20/5 fixture: baseline 35, selected 10, other 20, unresolved 5; method filter changes baseline to 15 without changing UI. Remove unresolved call and assert excluded B is not called association failure. Cover missing-type priority across the three methods, no-context and unavailable denominator. Full C2 quality remains unchanged.
+
+- [ ] **Step 2: Run RED.** `go test ./internal/tui -run 'Test(Resources|ResourceEvidence)' -count=1`; establish observable rendering/key failures after declarations compile.
+- [ ] **Step 3: Register and render.** Add enum/binding/switch/table cases, safe details and observed-column sorting. Resource row has resource pointer, noSpanIdx and nil rollup; predicates must never resolve it to RPC index zero. Keep the backing projected row in the cached projection. Explicit Resources detail dispatch avoids pretending its UI measurement is an RPC rollup.
+
+```go
+rows = append(rows, row{
+    cells: cells, numeric: numeric,
+    spanIdx: noSpanIdx,
+    resource: &projection.Rows[i],
+})
+```
+
+Give Resources cycleSort an explicit observed-only column list; retain existing sorts elsewhere. Address ties remain deterministic. Expand navigation short labels for six views; remove stale unbound-3 comments/tests/help. Keep active view and quit hint available at narrow widths. Enter on resource aggregate is inert and unadvertised until boundary E.
+
+- [ ] **Step 4: Implement evidence modal.** Bind e on timing views. Follow quality viewport sizing/input patterns. Existing active response/help/quality modals and text editing have precedence. Evidence arrows/j/k/PgUp/PgDn scroll, Esc/e close, q/Ctrl-C quit; other keys are swallowed. Do not change filters, selection, raw top/line/column, search query/anchor, request scope or timeline cursor.
+
+Render sorted escaped provider/type/method baseline filters (all/none/exact values), named selections, selected/other confidence subdivisions, unresolved potentially relevant work, and complete preselection resource buckets with counts/durations. Explain that these buckets and whole-log C2 confidence use different denominators; keep the latter in `i`. UI selected/unnamed totals remain separate. Zero denominator is unavailable, while zero duration with observations remains measured zero. Lower bounds remain flagged. Rewrap on resize; retain visible close/scroll/quit footer at short heights.
+
+- [ ] **Step 5: GREEN, inspection and independent review.** Focused tests then `go test ./internal/tui -count=1`. Exercise a 60-column short viewport requiring scrolling to reach every evidence section. Review escaping, denominator wording, scopes and original row identity.
+- [ ] **Step 6: Signed commit.** Commit `Show observed resources and selected RPC evidence`, including reviewed golden changes.
+
+### Task 3: Add resource/module choices and literal narrowing
+
+**Files:** Create `internal/tui/facet_search.go`, `facet_search_test.go`; modify `facets.go`, `model.go`, `layout.go`, `help.go`, `facets_test.go`, `resource_selection_test.go` under `internal/tui/`.
+
+**Consumes:** D1 complete choices/modules, typed ResourceSelection, existing facet overlay/focus and `newSearchInput() textinput.Model`.
+
+**Produces:**
+
+```go
+const dimResource = "resource"
+const dimModule = "module subtree"
+type facetSearchState struct {
+    editing bool
+    dimension string
+    query, previous string
+    input textinput.Model
+}
+// Model field: facetSearch facetSearchState
+func (m *Model) visibleFacetIndices(dim string) []int
+func (m *Model) beginFacetSearch()
+func displayFacetValue(dim, value string) string
+```
+
+- [ ] **Step 1: Write state and key regressions.** Use A/B and context-only C. Query A changes choices only; Space/o commits selection. Solo A must exclude hidden B/C. Repeat solo restores whole dimension. Root, indexed siblings and module-name boundaries follow D1. Combined address/module filters preserve unknown versus definite exclusion. A single available address must still be explicitly selectable to exclude unresolved RPCs, unlike existing exclusion-only single-value no-op.
+
+```go
+before := m.selectedResources()
+m.facetSearch.dimension = dimResource
+m.facetSearch.query = "aws_instance.a"
+if len(m.visibleFacetIndices(dimResource)) != 1 { t.Fatal("chooser did not narrow") }
+after := m.selectedResources()
+if len(before.RPCIndices) != len(after.RPCIndices) || before.UI != after.UI {
+    t.Fatal("chooser query applied a result filter")
+}
+```
+
+Drive Update too: cancel restores previous query; no matches means no selectable cursor; q/number/i/e insert while editing, Ctrl-C quits; Unicode/backspace, f/Tab, narrow overlay and resize preserve selection. Raw `/` on focused raw list remains unchanged. Match safe untruncated display text and map to exact original identities.
+
+- [ ] **Step 2: Run RED.** `go test ./internal/tui -run 'Test(FacetSearch|ResourceFacet|ModuleFacet)' -count=1`; include the single-choice and hidden-choice behavioural failures.
+- [ ] **Step 3: Add typed named dimensions.** Keep provider/method/type/severity checkbox semantics. Named dimensions use explicit allow-lists: nil unconstrained, empty none, nonempty exact alternatives. Initially all appear ticked/unconstrained. Space from nil selects every underlying value except the toggled one. o always creates a singleton, even when only one choice exists; o on explicit singleton restores nil. Existing clear-filter action resets named maps to nil. Do not derive named state solely from exclusions, which loses explicit selection of all known names while unresolved evidence still exists.
+
+Build complete choices from D1 index, not filtered projection. Root label is separate from typed empty key. Resource/module counts mean distinct addresses: one per address and known addresses within each module subtree. Document this unit. Merge type choices from both admitted tiers so UI-only types remain selectable; provider/method choices come only from RPCs.
+
+- [ ] **Step 4: Implement display-only cursor mapping.** Retain original facet values; both cursor movement and rendering use indices into the narrowed view. Clamp after query edits; empty view makes Space/o inert. All selection/solo operations iterate complete facetValues, not visible indices.
+
+```go
+func (m *Model) visibleFacetIndices(dim string) []int {
+    var result []int
+    for i, value := range m.facetValues(dim) {
+        shown := displayFacetValue(dim, value.Value)
+        if m.facetSearch.dimension != dim || strings.Contains(shown, m.facetSearch.query) {
+            result = append(result, i)
+        }
+    }
+    return result
+}
+```
+
+displayFacetValue uses `(root subtree)` for module empty path, otherwise existing safe identifier escaping without width truncation. Initialise the editor with newSearchInput and use textinput.Model's SetValue, Value, Update and Blur as existing search_input.go does; do not introduce another editor or borrow raw search state. Editing precedes global shortcuts. Named changes invalidate projection/row/timeline caches; query-only changes do not alter raw search anchors or result filters. Leaving facets retains its one remembered dimension/query; starting search in another dimension replaces that narrowing explicitly.
+
+- [ ] **Step 5: GREEN and independent review.** `go test ./internal/tui -count=1`, including raw/search/response tests. Review unknown membership, root semantics, complete choices, control escaping, single-choice selection and key precedence.
+- [ ] **Step 6: Signed commit.** Commit `Add searchable resource and module filters` with execution record.
+
+### Task 4: Validate the workflow and document scope
+
+**Files:** Update README, TUI help/tests and affected goldens; add `internal/tui/testdata/golden/resources-60.txt`, `resources-70.txt`, `resources-100.txt`, `resources-160.txt` through the existing golden harness. Update both D plans' execution evidence.
+
+**Consumes:** D1/D2 behaviour and existing CI/golden/terminal workflow.
+
+**Produces:** Reviewed terminal evidence, final regression validation, user documentation and signed integration result.
+
+- [ ] **Step 1: Add integration assertions before updating outputs.** Run real key sequences Resources → facets → address/module selection → evidence → quality → Calls → raw request jump → return. Verify exact raw entry/line/column, query, anchor and scope survive evidence open/close. Repeated operation identities survive filtering; their new drill-down remains boundary E. Capture expected diagnostic output; no mocked E2E.
+
+```go
+snapshot := l.CaptureQuality()
+m.resourceSelection = model.ResourceSelection{Addresses: map[string]bool{"aws_instance.a": true}}
+m.invalidateRows()
+if m.selectedResources().Selection.Baseline.TotalMs != 35 { t.Fatal("baseline drift") }
+if !reflect.DeepEqual(snapshot, l.CaptureQuality()) { t.Fatal("whole-log facts changed") }
+```
+
+- [ ] **Step 2: RED then intentional output changes.** Run `go test ./internal/tui -count=1` before golden updates. Extend golden fixtures for mixed/UI-only/RPC-only Resources, long names and lower-bound evidence. README/help explain operation versus inferred RPC time, approved filter scopes, module instance/root semantics, chooser versus result filtering and e versus i. Remove key-3 unavailable claims; do not promise operation drill-down.
+- [ ] **Step 3: Inspect goldens.** `go test ./internal/tui -update`; inspect every changed file with `scripts/read-golden.sh <filename>` plus raw styling diff. Verify 60/70/100/160 widths, reachable qualifications and retained quit/close actions. Reject unexplained collateral changes.
+- [ ] **Step 4: Real terminal validation.** Build `go build -o /tmp/tfli-resources ./cmd/tfli` and open sanitised captures in a PTY. At 100×30 exercise 3, f, resource / narrowing, Enter, o, table, e, scrolling, Esc, i, close, 4, Enter, Esc. Repeat nested quoted-key modules and context-only choices. Verify 10/20/5 totals, no-UI guidance, provider filtering preserving UI. At 60×15 exercise facet overlay/full evidence; at 60×9 page to final evidence section and close/quit. Record actual observations and sanitised output; no claimed manual verification without running it.
+- [ ] **Step 5: Separate cleanup and final checks.** A separate test-cleanup agent reviews completed tests; independently review edits without reducing behavioural coverage. Run `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`. Preserve existing linux/darwin amd64/arm64 CI build matrix and distinguish local/CI evidence. Rerun D1 resource benchmarks; investigate repeated projection cost before adding caches.
+- [ ] **Step 6: Whole-boundary independent review and signed evidence commit.** Review both plans against item 3: totals, original identity, missing-type priority, unknown membership, raw semantics, tier-specific filtering and unchanged whole-log quality. Resolve findings, rerun affected checks and commit `Document and verify Resources investigation`. Record commits, review, checks, golden/PTY evidence and any limitations. Integration requires Dan's instruction.
+
+## Coverage and remaining boundaries
+
+Task 1 migrates timing consumers without losing source identity. Task 2 provides observed rankings, empty states and complete scoped evidence. Task 3 supplies exact/module selection and literal narrowing. Task 4 verifies full interaction and documentation. D1 owns calculations; TUI never recomputes attribution or whole-log quality. E owns operation navigation/history, F profile data/text, G JSON, H comparison and I partial recovery.
+
+## Planning review — 10 September 2026
+
+Reviewed alongside D1 against item 3 and current TUI code. Self-review corrected the editor declaration to the existing textinput.Model/newSearchInput API. Independent review and the scoped D1 correction review found no remaining actionable issue. See D1's planning review for the existing-suite/build results. No application changes, new golden outputs or terminal implementation checks were performed in this planning task.
