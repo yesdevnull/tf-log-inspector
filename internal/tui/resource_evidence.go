@@ -69,19 +69,11 @@ func (m *Model) resourceEvidenceText() string {
 		fmt.Fprintf(&b, "  inferred Overlapping RPCs: %d, %s\n", r.OverlappingRPC.Count, durationTotalText(r.OverlappingRPC))
 		b.WriteString("  RPC evidence is inferred and partial.\n")
 		b.WriteString("  It does not recover every RPC call.\n")
-		b.WriteString("  UI timings are rounded to whole seconds, +/- 1s each.\n")
-		if r.UI.LowerBound {
-			b.WriteString("  Observed UI total and max are lower bounds (≥).\n")
-		}
-		unpositioned := 0
+		indices := make([]int, 0, len(r.Operations))
 		for _, op := range r.Operations {
-			if !m.log.UISpans[op.UIIndex].HasPosition() {
-				unpositioned++
-			}
+			indices = append(indices, op.UIIndex)
 		}
-		if unpositioned > 0 {
-			fmt.Fprintf(&b, "  Timeline position unavailable for %d of %d observed operations.\n", unpositioned, len(r.Operations))
-		}
+		m.writeUIQualifications(&b, r.UI, indices, "UI timings", "Observed UI total and max are lower bounds (≥).")
 		b.WriteByte('\n')
 	}
 	b.WriteString("BASELINE FILTERS\n")
@@ -102,6 +94,7 @@ func (m *Model) resourceEvidenceText() string {
 	b.WriteString("\nOBSERVED UI OPERATIONS\n")
 	writeEvidenceTotalWithNoun(&b, "selected UI", p.UI, "operation", "operations")
 	writeEvidenceTotalWithNoun(&b, "unnamed UI", p.UnnamedUI, "operation", "operations")
+	m.writeUIQualifications(&b, p.UI, p.UIIndices, "Selected UI timings, including unnamed operations", "Selected UI total is a lower bound (≥).")
 	b.WriteString("  UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply.\n")
 
 	b.WriteString("\nPRESELECTION RESOURCE EVIDENCE\n")
@@ -118,6 +111,25 @@ func (m *Model) resourceEvidenceText() string {
 		b.WriteString("  percentages unavailable: baseline has no observations\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func (m *Model) writeUIQualifications(b *strings.Builder, total model.DurationTotal, indices []int, timingSubject, lowerBoundLine string) {
+	if total.Count == 0 {
+		return
+	}
+	fmt.Fprintf(b, "  %s are rounded to whole seconds, +/- 1s each.\n", timingSubject)
+	if total.LowerBound {
+		b.WriteString("  " + lowerBoundLine + "\n")
+	}
+	unpositioned := 0
+	for _, i := range indices {
+		if !m.log.UISpans[i].HasPosition() {
+			unpositioned++
+		}
+	}
+	if unpositioned > 0 {
+		fmt.Fprintf(b, "  Timeline position unavailable for %d of %d observed operations.\n", unpositioned, len(indices))
+	}
 }
 
 func (m *Model) selectedResourceRow() *model.ResourceRow {

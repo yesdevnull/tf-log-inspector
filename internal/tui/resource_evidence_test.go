@@ -134,3 +134,24 @@ func TestResourceEvidenceLabelsSelectedRootModule(t *testing.T) {
 		t.Fatalf("root module evidence =\n%s", got)
 	}
 }
+
+func TestResourceEvidenceOutsideResourcesKeepsAggregateUIQualifications(t *testing.T) {
+	m := New(testLog(t, "resources-long-lower-bound.log"), "resources-long-lower-bound.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 70})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	got := unstyled(m.View())
+	for _, want := range []string{"selected UI: 1 operation, ≥4294967.3s", "rounded to whole seconds", "lower bound", "position unavailable"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Calls evidence missing %q:\n%s", want, got)
+		}
+	}
+
+	m = New(&model.Log{UISpans: []span.Span{
+		{Address: "aws_instance.selected", ResourceType: "aws_instance", DurationMs: 10, TimestampStatus: logfmt.TimestampValid},
+		{Address: "aws_instance.other", ResourceType: "aws_instance", DurationMs: 5, TimestampStatus: logfmt.TimestampMissing},
+	}}, "synthetic.log")
+	m.setView(ViewResources)
+	if got := m.resourceEvidenceText(); !strings.Contains(got, "Timeline position unavailable for 1 of 2 observed operations") {
+		t.Fatalf("selected row masked aggregate position qualification:\n%s", got)
+	}
+}
