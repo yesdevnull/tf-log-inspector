@@ -49,9 +49,9 @@ plans: [profile data and interval analysis](../plans/2026-09-10-profile-data-ana
 then [actionable text profiles](../plans/2026-09-10-actionable-text-profiles.md).
 The plans specify shared calculations and complete report data first, followed
 by physical source references, confidence-qualified identities, observed
-intervals and text-only list limits. They are proposed execution plans awaiting
-review; this does not mark Boundary F implemented or approve unrelated G/H/I
-decisions.
+intervals and text-only list limits. Dan approved both plans and subagent
+implementation. This approval is limited to Boundary F and does not approve
+unrelated G/H/I decisions.
 
 ## Evidence and relationship to existing designs
 

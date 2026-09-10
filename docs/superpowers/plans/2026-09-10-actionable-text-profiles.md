@@ -25,7 +25,7 @@
 
 ## Status and decisions
 
-Proposed Boundary F2 plan, authorised for planning on 10 September 2026. Implement after F1 passes review. Dan reviews these concrete plans before execution.
+Dan approved both Boundary F plans and subagent implementation on 10 September 2026. F1 passed independent review before F2 execution.
 
 1. `--limit N` applies only to text `--profile` in this boundary. Default 20; zero means all; negative, overflowing and malformed values fail before loading input or opening/truncating output. Explicit `--limit=20` or `--limit=0` with other modes also fails. Track presence using `FlagSet.Visit`; value alone cannot establish presence.
 2. Apply the limit independently to provider/type rankings, slowest RPC/UI lists and the interval list. Size/quality/denominators/analysis use all admitted or eligible positioned observations. A truncated heading says `top N of M`; an untruncated heading remains plain. No new resource aggregate text table is required by item 5.
@@ -59,7 +59,7 @@ func writeTimeline(b *strings.Builder, report Report, limit int) error
 
 `Render` validates `Limit`, builds once and calls `renderReport`. `renderReport` also validates options for direct package tests, builds output before writing, and returns writer errors unchanged. It must not mutate any report slices while sorting/limiting. Retain the existing `strings.Builder`/single-write structure; no streaming framework.
 
-- [ ] **Step 1: Write failing behaviour tests before replacing calculations.** Add a test using F1's report and explicit options:
+- [x] **Step 1: Write failing behaviour tests before replacing calculations.** Add a test using F1's report and explicit options:
 
 ```go
 func TestTextProfileOpensExactObservationEvidence(t *testing.T) {
@@ -78,9 +78,9 @@ Update old `Render` call sites to `TextOptions{Limit: DefaultLimit}` to compile,
 
 Add a parsed mixed-log case whose RPC and UI origins differ: the RPC interval section must print the RPC origin, never the UI origin. Pair it with UI-only and unknown-origin cases; assert the timestamp or explicit unavailable text against independently chosen fixture values. Add limit tests with more than 20 parsed observations and multiple providers/types: assert `Limit=1` restricts each applicable list, `Limit=0` includes all, totals are identical and heading denominators are full counts. Preserve writer-error tests using the existing failing writer. A writer returning a short count and nil error must be surfaced as `io.ErrShortWrite` rather than successful output.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -count=1`; record exact failed behaviours before implementation. Do not count the mechanical signature compilation failure as sufficient RED.
+- [x] **Step 2: Run RED.** `go test ./internal/profile -count=1`; record exact failed behaviours before implementation. Do not count the mechanical signature compilation failure as sufficient RED.
 
-- [ ] **Step 3: Render F1 data only.** Entry flow:
+- [x] **Step 3: Render F1 data only.** Entry flow:
 
 ```go
 func Render(w io.Writer, l *model.Log, options TextOptions) error {
@@ -127,8 +127,8 @@ if n != len(text) { return io.ErrShortWrite }
 return nil
 ```
 
-- [ ] **Step 4: Verify and review.** `go test ./internal/profile ./internal/tui -count=1`; inspect actual reports from RPC, UI-only, saturated and no-span sanitised fixtures. Independent review checks totals/limit separation, physical locations, source identity after position exclusions, escaping and all unavailable/zero distinctions. Separate cleanup follows.
-- [ ] **Step 5: Commit.** Signed commit `Render actionable timing profiles with source evidence` and record RED/GREEN/review results.
+- [x] **Step 4: Verify and review.** `go test ./internal/profile ./internal/tui -count=1`; inspect actual reports from RPC, UI-only, saturated and no-span sanitised fixtures. Independent review checks totals/limit separation, physical locations, source identity after position exclusions, escaping and all unavailable/zero distinctions. Separate cleanup follows.
+- [x] **Step 5: Commit.** Signed commit `Render actionable timing profiles with source evidence` and record RED/GREEN/review results.
 
 ## Task 2: Expose and validate the text-profile limit
 
@@ -136,7 +136,7 @@ return nil
 
 **Interfaces:** Change `runProfile` to `func runProfile(path, outPath string, stdout io.Writer, options profile.TextOptions) error`; consume task 1 `Render`. Existing `writeReport` owns same-file/symlink/hard-link protection and close-error handling.
 
-- [ ] **Step 1: Add failing CLI tests.** Use a real parsed fixture, capture both writers, and a path that would not exist if mode validation is correct:
+- [x] **Step 1: Add failing CLI tests.** Use a real parsed fixture, capture both writers, and a path that would not exist if mode validation is correct:
 
 ```go
 func TestLimitRejectedOutsideProfileBeforeOpeningInput(t *testing.T) {
@@ -157,9 +157,9 @@ func TestLimitRejectedOutsideProfileBeforeOpeningInput(t *testing.T) {
 
 Use `t.TempDir` for the scrub output sentinel instead of relying on the working directory. Add `--profile --limit=-1` with an existing sentinel output: no input load/truncation. Capture and assert malformed/overflow diagnostics and escaped controls. Test help documents default/zero/mode applicability; preserve existing `--version`/help precedence. Run real profiles with omitted limit, `--limit=1` and `--limit=0`, comparing output counts and unchanged totals. Retain same-file, hard-link and symbolic-link refusal tests for profile output; no TUI mock is needed for invalid flags because validation must precede dispatch.
 
-- [ ] **Step 2: Run RED.** `go test ./cmd/tfli -run 'Test.*Limit' -count=1`; confirm failures from the absent flag/semantics.
+- [x] **Step 2: Run RED.** `go test ./cmd/tfli -run 'Test.*Limit' -count=1`; confirm failures from the absent flag/semantics.
 
-- [ ] **Step 3: Add flag and early validation.** Register:
+- [x] **Step 3: Add flag and early validation.** Register:
 
 ```go
 limit := fs.Int("limit", profile.DefaultLimit, "maximum rows per text profile list (0 means all; --profile only)")
@@ -176,8 +176,8 @@ if *limit < 0 { return errors.New("--limit must be non-negative") }
 
 Pass `profile.TextOptions{Limit: *limit}` through `runProfile`. Keep errors escaped through the existing flag/main paths; do not print a second parser diagnostic. Update usage to separate diagnose from `--profile [--limit N] [-o report.txt] <logfile>`. README examples explain all-list scope, complete totals, physical source references, confidence, lower bounds and observed-gap limitations. Do not advertise comparison/JSON flags that are not implemented.
 
-- [ ] **Step 4: Verify and review.** Run `go test ./cmd/tfli ./internal/profile -count=1`, then final validation below. Independent reviewer checks all explicit flag combinations and no output mutation on validation errors. Separate cleanup preserves boundary/error coverage.
-- [ ] **Step 5: Commit.** Signed commit `Add explicit limits to text profile lists`. Record execution evidence and mark Boundary F implemented only after combined review.
+- [x] **Step 4: Verify and review.** Run `go test ./cmd/tfli ./internal/profile -count=1`, then final validation below. Independent reviewer checks all explicit flag combinations and no output mutation on validation errors. Separate cleanup preserves boundary/error coverage.
+- [x] **Step 5: Commit.** Signed commit `Add explicit limits to text profile lists`. Record execution evidence and mark Boundary F implemented only after combined review.
 
 ## Final validation
 
@@ -195,3 +195,34 @@ origins in text output. The contract and test requirements now include known,
 unknown and differing RPC/UI origins. Scoped re-review found no remaining
 issues and judged both F plans ready for Dan's review. No application code
 changed; only documentation validation was run.
+
+## Execution record
+
+Task 1 completed in signed commits `7c3cb16`, `9d0dba3` and `3c1a43d`.
+Behavioural RED preceded rendering changes. Review required full active-interval
+identity, explicit analysis states and precise evidence wording. The fixes passed
+scoped review. Separate cleanup detected lost assertions during the temporal file
+split; those were restored and independently reviewed. No task 1 finding remains;
+profile coverage is 94.6%, with all genuine regression tests retained.
+
+Task 2 implemented profile-only limits in signed commit `f50dd08`, with behavioural
+RED/GREEN and full-suite validation. Review required stronger real CLI coverage
+for provider/type limits and complete totals. Test-only commit `8330be9` adds
+independently expected row counts and totals for default, one-row and unlimited
+output. Cleanup also required explicit interval and UI-operation limit coverage;
+test-only commit `112fb6b` covers both with real fixtures. Scoped reviews approved
+all corrections. Separate cleanup retained the genuine tests, with no remaining
+concerns and CLI package coverage of 94.8%.
+
+Final local validation: `go test -race -count=1 ./...` passes for all eleven
+packages at `112fb6b`; lint reports zero issues and formatting is clean. Build,
+module tidy diff and checksum verification passed. The configured Linux/macOS
+amd64/arm64 matrix passed with `CGO_ENABLED=0`, `GOTOOLCHAIN=local` and
+`GOFLAGS=-mod=readonly`, building all packages and each trimpath CLI. Those builds
+used `f50dd08`; subsequent commits change tests only. Remote CI was not run.
+
+Manual CLI inspection covered RPC-only, UI-only, mixed-tier, partial positioning,
+saturated, no-duration and long/control-bearing sanitised input. Default, limited,
+unlimited and output-file reports preserve whole-capture totals; source identities,
+clock origins, lower bounds and timing qualifications remain visible. Existing TUI
+goldens are unchanged. The final combined review is pending.
