@@ -82,6 +82,42 @@ only those lines.
 The controller still owns independent review, separate test cleanup, real PTY
 acceptance, race/lint/module checks and the CI build matrix. Useful PTY routes
 are `resources-accounting.log` provider → Calls and
-`resources-modules.log` type `aws_instance` → Resources. No new persistent
-response fixture was added; existing history/response tests cover modal
-precedence and exact raw position restoration separately.
+`resources-modules.log` type `aws_instance` → Resources.
+
+## Review fixes
+
+Review identified two missing acceptance boundaries: the selected Types row was
+hidden at 60×9, and no single test composed aggregate navigation with a real
+reconstructed response. Both were reproduced before production changes:
+
+```text
+$ go test ./internal/tui -run '^(TestDrillDownShortTypesFrameShowsSelectedRouteTarget|TestDrillDownProviderCallRawResponseRoundTrip)$' -count=1
+--- FAIL: TestDrillDownShortTypesFrameShowsSelectedRouteTarget
+    selected type is hidden at 60x9
+--- FAIL: TestDrillDownProviderCallRawResponseRoundTrip
+    real reconstructed response did not open
+FAIL
+```
+
+The short-pane root cause was the full Types preamble plus header consuming all
+data height. Capping that preamble exposed the row, then the six columns still
+front-clipped its identity. The final narrow layout retains the identity and
+active sort column while removing trailing non-sort measurements until the
+identity has 12 columns. Full qualifications remain in help and evidence, and
+row ordering still uses the original selected sort before presentation columns
+are trimmed.
+
+The response fixture now parses a normal RPC completion and a real provider
+JSON entry under the same request ID. The workflow opens Provider → Calls →
+Raw, selects that scoped response entry, reconstructs and renders its body,
+dismisses it without changing raw line/column/search state, and returns through
+Calls to the exact Provider parent.
+
+```text
+$ go test ./internal/tui -run '^(TestDrillDownShortTypesFrameShowsSelectedRouteTarget|TestDrillDownProviderCallRawResponseRoundTrip)$' -count=1
+ok github.com/yesdevnull/tf-log-inspector/internal/tui
+$ go test ./internal/tui -count=1
+ok github.com/yesdevnull/tf-log-inspector/internal/tui
+```
+
+No golden files changed in the review fix.

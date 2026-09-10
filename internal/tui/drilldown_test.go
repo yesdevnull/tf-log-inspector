@@ -204,6 +204,79 @@ func TestDrillDownTypeRestoresParentAfterChildEditsAndResize(t *testing.T) {
 	}
 }
 
+func TestDrillDownShortTypesFrameShowsSelectedRouteTarget(t *testing.T) {
+	m := New(testLog(t, "resources-modules.log"), "resources-modules.log")
+	pressRune(t, &m, '2')
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	out := unstyled(m.View())
+	if !strings.Contains(out, "aws_instance") {
+		t.Fatalf("selected type is hidden at 60x9:\n%s", out)
+	}
+	if !strings.Contains(out, "↵ resources") {
+		t.Fatalf("visible type has no Resources route hint at 60x9:\n%s", out)
+	}
+}
+
+func TestDrillDownShortTypesFrameKeepsTheActiveSortColumn(t *testing.T) {
+	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	m.changeView(ViewTypes)
+	for sortCol := range typeColumns {
+		m.sortCol[ViewTypes] = sortCol
+		m.invalidateRows()
+		cols, _, visibleSort := visibleTypeColumns(typeColumns, m.rows(), sortCol, 58)
+		if visibleSort < 0 || visibleSort >= len(cols) || cols[visibleSort] != typeColumns[sortCol] {
+			t.Fatalf("sort column %q was dropped from narrow table", typeColumns[sortCol].header)
+		}
+	}
+}
+
+func TestDrillDownProviderCallRawResponseRoundTrip(t *testing.T) {
+	m := New(parsedDrillDownResponseLog(t), "response-drilldown.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	pressRune(t, &m, '1')
+	providerParent := m.captureNavigation()
+	providerFilter := m.filter()
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewCalls || len(m.history) != 1 {
+		t.Fatalf("provider drill-down = view %v, depth %d", m.view, len(m.history))
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog || len(m.history) != 2 {
+		t.Fatalf("call drill-down = view %v, depth %d", m.view, len(m.history))
+	}
+	responseEntry := -1
+	for _, entry := range m.raw.scope {
+		if strings.Contains(string(m.log.Bytes(m.log.Entries[entry])), `{"@message"`) {
+			responseEntry = entry
+			break
+		}
+	}
+	if responseEntry < 0 {
+		t.Fatal("scoped raw log does not contain the parsed response entry")
+	}
+	m.raw.top = responseEntry
+	m.raw.topLine, m.raw.column = 0, 7
+	m.raw.query, m.raw.lastQuery = "response", "provider"
+	m.raw.match = &rawMatch{entry: m.raw.top, line: 0, text: literalPosition{byteOffset: 1, column: 1}}
+	rawParent := cloneRawState(m.raw)
+	pressRune(t, &m, 'r')
+	if !m.response.open || !strings.Contains(m.renderCentre(100, 20), "composed response") {
+		t.Fatalf("real reconstructed response did not open:\n%s", m.renderCentre(100, 20))
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.response.open || m.raw.top != rawParent.top || m.raw.topLine != rawParent.topLine || m.raw.column != rawParent.column || m.raw.query != rawParent.query || m.raw.lastQuery != rawParent.lastQuery || m.raw.match == nil || *m.raw.match != *rawParent.match {
+		t.Fatal("response dismissal changed raw position or search state")
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewCalls || len(m.history) != 1 {
+		t.Fatalf("raw return = view %v, depth %d", m.view, len(m.history))
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewProviders || len(m.history) != 0 || m.selectedIdentity() != providerParent.identity || !reflect.DeepEqual(m.filter(), providerFilter) {
+		t.Fatal("calls return did not restore provider parent")
+	}
+}
+
 func parsedDrillDownLog(t *testing.T) *model.Log {
 	t.Helper()
 	const content = `# SYNTHETIC drill-down fixture; all values invented.
@@ -214,6 +287,23 @@ func parsedDrillDownLog(t *testing.T) *model.Log {
 2026-09-10T00:00:04.000Z [TRACE] provider-c: Received downstream response: tf_req_id=cccccccc-0000-4000-8000-000000000001 tf_resource_type=type-one tf_rpc=ReadResource tf_provider_addr=provider-c tf_req_duration_ms=31
 `
 	path := filepath.Join(t.TempDir(), "drilldown.log")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func parsedDrillDownResponseLog(t *testing.T) *model.Log {
+	t.Helper()
+	const content = `# SYNTHETIC response drill-down fixture; all values invented.
+2026-09-10T00:00:00.000Z [TRACE] provider.example: Received downstream response: tf_req_id=aaaaaaaa-0000-4000-8000-000000000001 tf_resource_type=example_item tf_rpc=ReadResource tf_provider_addr=provider-example tf_req_duration_ms=11
+2026-09-10T00:00:00.100Z [DEBUG] provider.example: {"@message":"composed response"} tf_req_id=aaaaaaaa-0000-4000-8000-000000000001
+`
+	path := filepath.Join(t.TempDir(), "response-drilldown.log")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

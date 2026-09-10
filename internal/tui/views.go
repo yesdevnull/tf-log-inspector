@@ -725,7 +725,65 @@ func (m *Model) renderList(w, h int) string {
 	if m.view == ViewTypes {
 		preamble = typesPreamble(m.selectedUISpans())
 	}
-	return renderTable(preamble, t.cols, m.sortCol[m.view], m.rows(), empty, m.selected, m.pane == PaneList, w, h)
+	rows := m.rows()
+	if len(rows) > 0 && len(preamble) > max(0, h-2) {
+		// Keep the selected row visible in short panes. The complete timing
+		// qualifications remain available in help and evidence.
+		preamble = preamble[:max(0, h-2)]
+	}
+	cols := t.cols
+	sortCol := m.sortCol[m.view]
+	if m.view == ViewTypes {
+		cols, rows, sortCol = visibleTypeColumns(cols, rows, sortCol, w)
+	}
+	return renderTable(preamble, cols, sortCol, rows, empty, m.selected, m.pane == PaneList, w, h)
+}
+
+// visibleTypeColumns drops non-sort measurement columns on narrow panes until
+// the resource type retains enough width to identify the selected route.
+func visibleTypeColumns(cols []column, rows []row, sortCol, w int) ([]column, []row, int) {
+	indices := make([]int, len(cols))
+	for i := range indices {
+		indices[i] = i
+	}
+	natural := columnWidths(headerCells(cols, 2), rows)
+	for len(indices) > 2 {
+		reserved := 2 * (len(indices) - 1)
+		for _, index := range indices[1:] {
+			reserved += natural[index]
+		}
+		if w-reserved >= 12 {
+			break
+		}
+		for i := len(indices) - 1; i > 0; i-- {
+			if indices[i] != sortCol {
+				indices = append(indices[:i], indices[i+1:]...)
+				break
+			}
+		}
+	}
+	if len(indices) == len(cols) {
+		return cols, rows, sortCol
+	}
+	visibleCols := make([]column, len(indices))
+	trimmed := make([]row, len(rows))
+	visibleSort := 0
+	for i, index := range indices {
+		visibleCols[i] = cols[index]
+		if index == sortCol {
+			visibleSort = i
+		}
+	}
+	for i, r := range rows {
+		trimmed[i] = r
+		trimmed[i].cells = make([]string, len(indices))
+		trimmed[i].numeric = make([]uint64, len(indices))
+		for j, index := range indices {
+			trimmed[i].cells[j] = r.cells[index]
+			trimmed[i].numeric[j] = r.numeric[index]
+		}
+	}
+	return visibleCols, trimmed, visibleSort
 }
 
 func (m *Model) fitCaptureGuidance(w, h int) string {
