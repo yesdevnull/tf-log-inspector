@@ -51,6 +51,8 @@ func (m *Model) workbenchView() string {
 			navigation = responseNavigation
 		} else if m.quality.open {
 			navigation = qualityNavigation
+		} else if m.showResourceEvidence {
+			navigation = resourceEvidenceNavigation
 		}
 		lines = append(lines, clipWidth(navigation, w))
 	}
@@ -76,6 +78,8 @@ func (m *Model) workbenchView() string {
 			status = qualityTitle
 		case m.showHelp:
 			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
+		case m.showResourceEvidence:
+			status = resourceEvidenceTitle
 		case m.view == ViewRawLog:
 			scope := "all entries"
 			if m.raw.scope != nil {

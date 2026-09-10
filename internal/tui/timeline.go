@@ -848,10 +848,9 @@ const timelineFilterNote = "Note: a filter is active -- everything below covers 
 // The two differ in both directions. A level-only selection filters the raw
 // log and no spans at all (see filter), so filterActive alone would qualify
 // figures that are the whole log's. A selection covering every value hides
-// nothing either. And the UI tier is narrowed through uiFilter's own
-// translation, so what a ticked provider hides there is not read off the
-// same map. Counting what survived answers all three at once, over slices
-// both already computed.
+// nothing either. Counting what survived answers both cases at once, over
+// slices already computed; D1 applies provider and method filters only to RPC
+// evidence and type/resource/module filters to the UI tier.
 func (m *Model) timelineNarrowed() bool {
 	tier, timing := m.timelineTiming()
 	switch tier {

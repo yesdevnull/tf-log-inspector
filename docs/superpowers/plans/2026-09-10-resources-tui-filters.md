@@ -113,8 +113,8 @@ Implement selectedRPCSpans analogously using original RPCIndices. Providers/Type
 
 Apply the approved type-only UI rule through the shared D1 projection; remove uiProviderTypes and any TUI wrapper once no consumer uses it. Update obsolete tests to the new contract while preserving type/nil/empty/raw-provider coverage. Do not add compatibility behaviour or remove recorded UI provider metadata.
 
-- [ ] **Step 4: GREEN and independent review.** GREEN passed with `go test ./internal/tui ./internal/model -count=1`. A focused run covered all ResourceSelection regressions plus existing unavailable/partial-position timeline cases. Final `go test ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff` and `go mod verify` passed; no golden changed. Independent review remains pending with the controller.
-- [ ] **Step 5: Signed commit.** Task files and execution evidence are ready for commit `Apply typed resource selection across timing views`; cleanup and independent review remain controller-owned.
+- [x] **Step 4: GREEN and independent review.** GREEN passed with `go test ./internal/tui ./internal/model -count=1`. A focused run covered all ResourceSelection regressions plus existing unavailable/partial-position timeline cases. Final `go test ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff` and `go mod verify` passed; no golden changed. Independent review approved commit `3951d14`.
+- [x] **Step 5: Signed commit.** Task 1 was committed as `3951d14`. Separate cleanup removed one redundant provider-translation case in `0a96d0f`; TUI statement coverage remained 96.4% and the before/after profiles were identical.
 
 ### Task 2: Add observed Resources and complete evidence access
 
@@ -137,7 +137,7 @@ resourceEvidenceViewport viewport.Model
 resource *model.ResourceRow
 ```
 
-- [ ] **Step 1: Write rendering/interaction tests.** Key 3 opens Resources. Two completions of A yield one row/two operations. UI-only works. RPC-only explains missing observed UI and offers `4 calls`, `2 types`, `i quality`, `e evidence`; no inferred replacement ranking. Distinguish filtered no matches, ungrouped unnamed UI and unavailable UI with rejected timing evidence. Preserve lower-bound/rounding/position qualifications and safely render long/control-containing identities.
+- [x] **Step 1: Write rendering/interaction tests.** Added behavioural coverage for key 3, grouped UI operations, inert Enter, observed-only sorting, distinct empty states, scope/qualification wording, safe identities, ordinary-width address visibility and full wrapped detail identity. Evidence tests cover the 10/20/5 partition, RPC-method-only filtering, UI operation nouns, zero observations versus measured zero, modal state preservation and 60-column scrolling.
 
 ```go
 func TestResourcesKeyAndEvidence(t *testing.T) {
@@ -154,8 +154,8 @@ func TestResourcesKeyAndEvidence(t *testing.T) {
 
 Render D1's 10/20/5 fixture: baseline 35, selected 10, other 20, unresolved 5; method filter changes baseline to 15 without changing UI. Remove unresolved call and assert excluded B is not called association failure. Cover missing-type priority across the three methods, no-context and unavailable denominator. Full C2 quality remains unchanged.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/tui -run 'Test(Resources|ResourceEvidence)' -count=1`; establish observable rendering/key failures after declarations compile.
-- [ ] **Step 3: Register and render.** Add enum/binding/switch/table cases, safe details and observed-column sorting. Resource row has resource pointer, noSpanIdx and nil rollup; predicates must never resolve it to RPC index zero. Keep the backing projected row in the cached projection. Explicit Resources detail dispatch avoids pretending its UI measurement is an RPC rollup.
+- [x] **Step 2: Run RED.** `go test ./internal/tui -run 'Test(Resources|ResourceEvidence)' -count=1` failed behaviourally after declarations compiled: key 3 remained on the old view, Resources rows reached the unhandled-view panic, and evidence did not open or render. A dedicated sorting RED then reported inferred column 4 instead of wrapping to address column 0; ordinary-width and UI-noun regressions separately exposed a missing address column and `call` wording.
+- [x] **Step 3: Register and render.** Registered Resources and its table/detail dispatch. Rows retain the cached projected `ResourceRow`, use `noSpanIdx`, rank only by observed columns and keep address/observed measurements ahead of supplementary inferred pairs when width is constrained. Enter remains inert.
 
 ```go
 rows = append(rows, row{
@@ -167,12 +167,12 @@ rows = append(rows, row{
 
 Give Resources cycleSort an explicit observed-only column list; retain existing sorts elsewhere. Address ties remain deterministic. Expand navigation short labels for six views; remove stale unbound-3 comments/tests/help. Keep active view and quit hint available at narrow widths. Enter on resource aggregate is inert and unadvertised until boundary E.
 
-- [ ] **Step 4: Implement evidence modal.** Bind e on timing views. Follow quality viewport sizing/input patterns. Existing active response/help/quality modals and text editing have precedence. Evidence arrows/j/k/PgUp/PgDn scroll, Esc/e close, q/Ctrl-C quit; other keys are swallowed. Do not change filters, selection, raw top/line/column, search query/anchor, request scope or timeline cursor.
+- [x] **Step 4: Implement evidence modal.** Bound `e` on timing views with response/help/quality precedence, a dedicated rewrapping viewport, scrolling and modal key swallowing. The panel renders escaped sorted baseline filters, selected/other/unresolved partitions, UI operations and every preselection bucket with duration lower bounds and denominator guidance.
 
 Render sorted escaped provider/type/method baseline filters (all/none/exact values), named selections, selected/other confidence subdivisions, unresolved potentially relevant work, and complete preselection resource buckets with counts/durations. Explain that these buckets and whole-log C2 confidence use different denominators; keep the latter in `i`. UI selected/unnamed totals remain separate. Zero denominator is unavailable, while zero duration with observations remains measured zero. Lower bounds remain flagged. Rewrap on resize; retain visible close/scroll/quit footer at short heights.
 
-- [ ] **Step 5: GREEN, inspection and independent review.** Focused tests then `go test ./internal/tui -count=1`. Exercise a 60-column short viewport requiring scrolling to reach every evidence section. Review escaping, denominator wording, scopes and original row identity.
-- [ ] **Step 6: Signed commit.** Commit `Show observed resources and selected RPC evidence`, including reviewed golden changes.
+- [ ] **Step 5: GREEN, inspection and independent review.** `go test ./internal/tui -run 'TestResourceDetailWraps|TestResources|TestResourceEvidence' -count=1`, `go test ./internal/tui -count=1` and final `go test ./...` passed (all 11 packages). Goldens were regenerated with `go test ./internal/tui -update -count=1`; `scripts/read-golden.sh help-60.txt` and `scripts/read-golden.sh layout-100.txt` plus the raw diff confirmed only key 3/evidence navigation and responsive hint changes. A PTY check found and drove fixes for ordinary-width address visibility, wrapped resource evidence/detail values, short Resources height and UI operation nouns; the 60x9 evidence panel reached every section by scrolling and retained close/quit guidance. Independent review remains pending with the controller.
+- [ ] **Step 6: Signed commit.** Task files and execution evidence are ready for signed commit `Show observed resources and selected RPC evidence`; controller-owned review and cleanup remain pending.
 
 ### Task 3: Add resource/module choices and literal narrowing
 

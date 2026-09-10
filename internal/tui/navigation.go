@@ -33,7 +33,7 @@ func (m *Model) navigation(w int) string {
 		labels[i] = " " + b.key + " " + b.name + " "
 	}
 	if lipgloss.Width(strings.Join(labels, hintSep)+hintSep+helpHint) > w {
-		short := []string{"prov", "types", "calls", "time", "log"}
+		short := []string{"prov", "types", "res", "calls", "time", "log"}
 		for i, b := range views {
 			labels[i] = " " + b.key + " " + short[i] + " "
 		}

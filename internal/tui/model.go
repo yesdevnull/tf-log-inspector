@@ -14,14 +14,12 @@ import (
 )
 
 // View identifies which of the top-level views the interface is showing.
-// View 3 (resource addresses) belongs to a later phase and has no key bound
-// to it yet: ViewCalls and ViewTimeline take the key numbers either side of
-// the gap it leaves.
 type View uint8
 
 const (
 	ViewProviders View = iota // key 1
 	ViewTypes                 // key 2
+	ViewResources             // key 3
 	ViewCalls                 // key 4
 	ViewTimeline              // key 5
 	ViewRawLog                // key 6
@@ -50,10 +48,6 @@ type viewBinding struct {
 // source of truth for what a number key does, what the centre pane calls
 // itself, and what the footer offers.
 //
-// Key "3" (resource addresses) is deliberately absent: it is specified but
-// unimplemented, so nothing binds it and nothing advertises it. Pressing it
-// falls through to a no-op rather than an index lookup into unbound state.
-//
 // The titles deliberately do not repeat the facet pane's section headers.
 // The facet pane's PROVIDERS is a list of values to FILTER by, ranked by
 // span count; the centre pane's BY PROVIDER is a rollup ranked by total
@@ -63,6 +57,7 @@ type viewBinding struct {
 var views = []viewBinding{
 	{key: "1", view: ViewProviders, title: "BY PROVIDER", name: "providers"},
 	{key: "2", view: ViewTypes, title: "BY RESOURCE TYPE", name: "types"},
+	{key: "3", view: ViewResources, title: "RESOURCES (observed UI)", name: "resources"},
 	{key: "4", view: ViewCalls, title: "CALLS", name: "calls"},
 	// TIMELINE here is a placeholder title: the timeline renders from its
 	// own state, not from rows(), so centreTitle overrides it at render
@@ -308,7 +303,9 @@ type Model struct {
 	// toggleFacetFocus): a terminal wide enough to show facets inline has
 	// nothing to overlay, and a flag left set there would pop the overlay
 	// open unasked the moment the terminal was narrowed.
-	showFacetOverlay bool
+	showFacetOverlay         bool
+	showResourceEvidence     bool
+	resourceEvidenceViewport viewport.Model
 
 	width, height int
 	quitting      bool
@@ -467,6 +464,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.quality.open {
 			return m.handleQualityKey(msg)
 		}
+		if m.showResourceEvidence {
+			return m.handleResourceEvidenceKey(msg)
+		}
 		if msg.Type == tea.KeySpace {
 			if m.pane == PaneFacets {
 				m.toggleFacetValue()
@@ -591,13 +591,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpViewport = viewport.Model{}
 		case "i":
 			m.openQuality()
+		case "e":
+			if m.view != ViewRawLog {
+				m.openResourceEvidence()
+			}
 		case "s":
 			m.cycleSort()
 		case "f":
 			m.toggleFacetFocus()
 		default:
-			// Key "3" (resource addresses) is not in viewKeys, so pressing
-			// it lands here and does nothing -- it is unbound, not broken.
 			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
 				m.setView(v)
 			}
@@ -650,7 +652,8 @@ func (m *Model) keepFocusOnADrawnPane() {
 
 // cycleSort is 's': it moves the sort to the next column of the table on
 // screen, wrapping back round to the column the view's builder already ranks
-// by after every column has had a turn.
+// by after every eligible column has had a turn. Resources excludes inferred
+// evidence columns because those values cannot rank an observed-operation view.
 //
 // A view with no table -- the timeline, the raw log -- has no entry in
 // tables, so the press does nothing there. That is the absence doing the
@@ -665,6 +668,19 @@ func (m *Model) keepFocusOnADrawnPane() {
 func (m *Model) cycleSort() {
 	t, ok := tables[m.view]
 	if !ok {
+		return
+	}
+	if m.view == ViewResources {
+		observedColumns := [...]int{2, 3, 0, 1}
+		for i, col := range observedColumns {
+			if m.sortCol[m.view] == col {
+				m.sortCol[m.view] = observedColumns[(i+1)%len(observedColumns)]
+				m.invalidateRows()
+				return
+			}
+		}
+		m.sortCol[m.view] = tables[m.view].defaultCol
+		m.invalidateRows()
 		return
 	}
 	m.sortCol[m.view] = (m.sortCol[m.view] + 1) % len(t.cols)

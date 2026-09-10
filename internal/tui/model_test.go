@@ -202,15 +202,6 @@ func TestAnUnhandledViewFailsLoudly(t *testing.T) {
 	}
 }
 
-// View 3 belongs to a later phase. Pressing it must do nothing.
-func TestUnimplementedViewKeysAreInert(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	got := update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	if got.ActiveView() != ViewTypes {
-		t.Errorf("key %q changed the view to %v, want it left on ViewTypes", '3', got.ActiveView())
-	}
-}
-
 // New starts focus on PaneList, so the cycle from there visits Detail, then
 // Facets, then back to List -- the same cycle order as always, just entered
 // at a different point. The terminal is wide enough for all three panes to

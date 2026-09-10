@@ -49,7 +49,8 @@ type row struct {
 	// Rows are built through callRow and rollupRow rather than as literals,
 	// so that invariant is established by construction instead of being
 	// restated at each site; isCall is the one question anything asks of it.
-	rollup *rollupDetail
+	rollup   *rollupDetail
+	resource *model.ResourceRow
 }
 
 // callRow builds the row standing for ONE span: its display cells, and the
@@ -203,6 +204,17 @@ var callColumns = []column{
 	{header: "provider", kind: tailIdentifierColumn},
 }
 
+var resourceColumns = []column{
+	{header: "address", kind: tailIdentifierColumn},
+	{header: "operations", kind: numericColumn},
+	{header: "UI total", kind: numericColumn},
+	{header: "UI max", kind: numericColumn},
+	{header: "inferred RPCs", kind: numericColumn},
+	{header: "inferred total", kind: numericColumn},
+	{header: "overlap RPCs", kind: numericColumn},
+	{header: "overlap total", kind: numericColumn},
+}
+
 // tableBinding is the table one view draws: its columns, and the index of
 // the column its row builder ALREADY ranks by.
 //
@@ -234,7 +246,8 @@ var tables = map[View]tableBinding{
 	ViewProviders: {cols: providerColumns, defaultCol: 1},
 	// model.JoinByResourceType ranks by UITotalMs descending, breaking ties
 	// by RPCTotalMs and then by name.
-	ViewTypes: {cols: typeColumns, defaultCol: 2},
+	ViewTypes:     {cols: typeColumns, defaultCol: 2},
+	ViewResources: {cols: resourceColumns, defaultCol: 2},
 	// callRows sorts by rankedBefore: duration descending, ties by RPC name.
 	ViewCalls: {cols: callColumns, defaultCol: 0},
 }
@@ -261,6 +274,8 @@ func (m *Model) rows() []row {
 		r = typeRows(m.selectedRPCSpans(), m.selectedUISpans())
 	case ViewCalls:
 		r = callRowsForIndices(m.log.RPCSpans, m.selectedResources().RPCIndices)
+	case ViewResources:
+		r = m.resourceRows()
 	case ViewTimeline:
 		// The timeline renders from m.timelineSpans() and model.PackLanes,
 		// not from rows(): a lane is neither a rollup of many spans nor one

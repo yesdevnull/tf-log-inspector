@@ -289,6 +289,9 @@ func (m *Model) footer(w int) string {
 	if m.showHelp {
 		return m.renderKeyHints(w)
 	}
+	if m.showResourceEvidence {
+		return clipWidth(resourceEvidenceNavigation, w) + "\n" + clipWidth(quitHint, w)
+	}
 	if m.blockedJump {
 		return styles.alert.Render(jumpBlockedNote)
 	}
@@ -498,7 +501,13 @@ const sortHint = "s sort"
 // The width is different in kind from focus: it decides what is DRAWN, and
 // a pane that is not drawn is not somewhere the reader can look.
 func (m *Model) actionKeys(w int) string {
-	keys := []string{"⇥ pane", "␣ facet"}
+	keys := []string{"⇥ pane"}
+	if w > detailInlineWidth {
+		keys = append(keys, "␣ facet")
+	}
+	if m.view != ViewRawLog {
+		keys = append(keys, "e evidence")
+	}
 	if m.view == ViewRawLog && !m.facetOverlayShowing(w) {
 		keys = append(keys, "↔ scroll")
 	}
@@ -525,7 +534,11 @@ func (m *Model) actionKeys(w int) string {
 		}
 		return strings.Join(append(keys, "/ search", esc, quitHint), hintSep)
 	}
-	return strings.Join(append(keys, "f facets", "/ search", esc, quitHint), hintSep)
+	keys = append(keys, "f facets")
+	if w > detailInlineWidth {
+		keys = append(keys, "/ search")
+	}
+	return strings.Join(append(keys, esc, quitHint), hintSep)
 }
 
 // escClearHint and escBackHint are Esc's two meanings, and exactly one is
@@ -650,6 +663,9 @@ func (m *Model) renderPanes(w, h int) string {
 	}
 	if m.showHelp {
 		return framePanes(h, pane{title: helpTitle, content: m.renderWorkbenchHelp(panelContentWidth(w), bodyH), width: w})
+	}
+	if m.showResourceEvidence {
+		return framePanes(h, pane{title: resourceEvidenceTitle, content: m.renderResourceEvidence(panelContentWidth(w), bodyH), width: w})
 	}
 	if m.facetOverlayShowing(w) {
 		return framePanes(h, pane{title: m.filterTitle(), focused: m.pane == PaneFacets, content: m.renderFacets(panelContentWidth(w), bodyH), width: w})
@@ -791,6 +807,8 @@ func (m *Model) renderCentre(w, h int) string {
 		return m.renderRawLog(w, h)
 	case ViewTimeline:
 		return m.renderTimeline(w, h)
+	case ViewResources:
+		return m.renderResources(w, h)
 	default:
 		return m.renderList(w, h)
 	}
@@ -1067,8 +1085,9 @@ func (m *Model) renderDetail(w, h int) (title, body string) {
 // the left, and the same argument slowestHeading already makes one level
 // down.
 const (
-	spanDetailTitle   = "SPAN DETAIL"
-	rollupDetailTitle = "GROUP DETAIL"
+	spanDetailTitle     = "SPAN DETAIL"
+	rollupDetailTitle   = "GROUP DETAIL"
+	resourceDetailTitle = "RESOURCE DETAIL"
 	// noSelectionTitle heads a pane with no row to describe, so it claims
 	// nothing about a span or a group: there is neither.
 	noSelectionTitle = "DETAIL"
@@ -1105,6 +1124,9 @@ func (m *Model) selectedDetail(w int) (string, []paneSection) {
 	}
 	if s, ok := m.spanForRow(r); ok {
 		return spanDetailTitle, []paneSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}
+	}
+	if r.resource != nil {
+		return resourceDetailTitle, resourceDetailSections(r.resource, w)
 	}
 	if r.rollup != nil {
 		return rollupDetailTitle, rollupDetailSections(r.rollup, w)

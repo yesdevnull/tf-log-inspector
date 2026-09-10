@@ -1,5 +1,5 @@
 [7m tfli [0m  [1;36mi limitations · plan.log[0m               [2m3 RPC spans, 0 UI spans[0m
- [36m1[0m providers    [36m2[0m types    [36m4[0m calls   [7m 5 timeline [0m   [36m6[0m raw log   [36m?[0m help
+ [36m1[0m prov    [36m2[0m types    [36m3[0m res    [36m4[0m calls   [7m 5 time [0m   [36m6[0m log   [36m?[0m help
 
 [36m╭▶[0m[1;36m Timeline (rpc) [0m[36m───────────────────────────╮[0m [2m╭─[0m[1;36m Span detail [0m[2m───────╮[0m
 [36m│[0m [7maws/1    [0m[32m   ░███████   ░██████████████████[0m [36m│[0m[2m [0m[2m│[0m [2;36mRPC[0m                 [2m│[0m
@@ -37,4 +37,4 @@
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m╰────────────────────────────────────────────╯[0m [2m╰─────────────────────╯[0m
 [2mDurations measured under logging; rankings approximate.[0m
-[36m⇥[0m pane  [36m␣[0m facet  [36m⏎[0m open  [36m↔[0m span  [36mf[0m facets  [36m/[0m search  [36mEsc[0m clear  [36mq[0m quit
+[36m⇥[0m pane  [36me[0m evidence  [36m⏎[0m open  [36m↔[0m span  [36mf[0m facets  [36mEsc[0m clear  [36mq[0m quit

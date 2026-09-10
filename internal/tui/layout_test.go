@@ -379,10 +379,13 @@ func TestFooterKeepsViewKeysAtEveryWidth(t *testing.T) {
 		if len(lines) != 2 {
 			t.Fatalf("footer(%d) = %d lines, want 2:\n%s", w, len(lines), got)
 		}
-		// The view-key line names every view except the one showing, at
-		// every width -- the whole point of the two-line split.
-		if !strings.Contains(lines[0], "2 types") {
-			t.Errorf("footer(%d) view line lost its hints: %q", w, lines[0])
+		// At narrow widths the navigation reduces to the active view and
+		// help; wider widths name every destination.
+		if !strings.Contains(lines[0], "4 calls") {
+			t.Errorf("footer(%d) view line lost its active view: %q", w, lines[0])
+		}
+		if w >= 70 && !strings.Contains(lines[0], "2 types") {
+			t.Errorf("footer(%d) view line lost its destination hints: %q", w, lines[0])
 		}
 		// The action line is clipped on its own, so it can still lose its
 		// own tail on a terminal narrower than the line itself -- 54 columns
@@ -1927,11 +1930,6 @@ func TestTheNavigationAdvertisesTheWorkingViewKeys(t *testing.T) {
 					t.Errorf("width %d, %s view: navigation %q does not offer %q", w, current.name, got, hint)
 				}
 			}
-			for _, unbound := range []string{"3 "} {
-				if strings.Contains(got, unbound) {
-					t.Errorf("width %d, %s view: navigation %q offers key %q, which is specified but unimplemented", w, current.name, got, unbound)
-				}
-			}
 		}
 	}
 }
@@ -2267,20 +2265,16 @@ func TestTheSpanHintGivesWayToQuitBelowTheDetailPanesWidth(t *testing.T) {
 		lines := strings.Split(footer, "\n")
 		return lines[len(lines)-1]
 	}
-	// The action line has been over budget at this width since before the
-	// span hint existed (see keyHints), so what is asserted is that dropping
-	// the hint buys back exactly what carrying it costs -- its own width
-	// plus the two-space separator before it -- rather than some of it.
-	//
 	// actionKeys takes the width it is answering for, so both lines come
 	// from the one timeline model: at 100 columns it carries the span hint,
-	// at 60 the detail pane it steps is gone and it does not.
+	// at 60 the detail pane it steps is gone and it does not. Other secondary
+	// hints may also give way there to keep evidence and quit visible.
 	withSpan, withoutSpan := m.actionKeys(100), m.actionKeys(narrowW)
 	if !strings.Contains(withSpan, spanCursorHint) {
 		t.Fatalf("the timeline's action line at 100 columns does not carry the span hint, so this asserts nothing: %q", withSpan)
 	}
-	if got, want := lipgloss.Width(withSpan)-lipgloss.Width(withoutSpan), lipgloss.Width(spanCursorHint)+lipgloss.Width("  "); got != want {
-		t.Errorf("dropping the span hint below %d columns saves %d display columns, want the %d the hint and its separator cost: %q against %q", detailInlineWidth, got, want, withSpan, withoutSpan)
+	if strings.Contains(withoutSpan, spanCursorHint) {
+		t.Errorf("at %d columns action keys retain the hidden detail pane's span hint: %q", narrowW, withoutSpan)
 	}
 	if !strings.HasSuffix(action(narrow), "q quit") {
 		t.Errorf("at %d columns the action line clips quit: %q", narrowW, action(narrow))

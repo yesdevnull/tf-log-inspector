@@ -5,6 +5,7 @@
 [2m│[0m [1;36mVIEWS[0m                                                    [2m│[0m
 [2m│[0m   [36m1[0m          providers                                   [2m│[0m
 [2m│[0m   [36m2[0m          types                                       [2m│[0m
+[2m│[0m   [36m3[0m          resources                                   [2m│[0m
 [2m│[0m   [36m4[0m          calls                                       [2m│[0m
 [2m│[0m   [36m5[0m          timeline                                    [2m│[0m
 [2m│[0m   [36m6[0m          raw log                                     [2m│[0m
@@ -31,10 +32,9 @@
 [2m│[0m [1;36mEVERYWHERE[0m                                               [2m│[0m
 [2m│[0m   [36m⇥ Tab[0m      move focus between panes                    [2m│[0m
 [2m│[0m   [36mi[0m          open capture quality; i or Esc returns      [2m│[0m
+[2m│[0m   [36me[0m          open resource evidence; e or Esc returns    [2m│[0m
 [2m│[0m   [36m?[0m          open or close this help (Esc closes it too) [2m│[0m
 [2m│[0m   [36m↑ ↓ j k[0m    scroll help; PgUp/PgDn move a page          [2m│[0m
-[2m│[0m   [36mq[0m          quit                                        [2m│[0m
-[2m│[0m                                                          [2m│[0m
 [2m╰──────────────────────────────────────────────────────────╯[0m
 [2m↑↓ scroll  PgUp/PgDn page  ?/Esc close help[0m
 [36mq[0m quit
