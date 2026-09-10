@@ -25,3 +25,11 @@ GREEN commands:
 - `/Users/dan/.codex/bin/codex-git diff --check` — passed
 
 Self-review checked that source ordinals, reported duration, timestamp status, saturation, context pairing, candidate selection and confidence remain independent of module metadata. It also checked malformed supplied modules, observed/address conflicts, root and descendant boundaries, indexed module distinctions, partial addresses, trailing separators, raw controls and multiple index suffixes. No Task 1 concern remains. Independent review is intentionally pending for the controller.
+
+## Round-one review fixes
+
+Review found that plain address segments accepted spaces, leading digits and expression punctuation; quoted keys containing `[` were rejected; and the `Context` and `Attribution` module comments did not explain the evidence flags. Added behavioural tests before changing production code.
+
+RED: `go test ./internal/model -run 'TestResourceModule(Rejects|Accepts)' -count=1` failed for `module.bad name`, `module.9name`, `module.bad+name`, a punctuated resource name, and `module.m["a[b"]`.
+
+GREEN: the same command passed after applying conservative Unicode identifier validation with ASCII hyphen support and relying on numeric/JSON key validation to reject multiple index suffixes. Comments now state that `ModuleKnown` and `ModuleInvalid` distinguish root from unavailable metadata. The original 43 model cases remain intact.

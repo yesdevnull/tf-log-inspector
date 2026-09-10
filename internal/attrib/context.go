@@ -52,9 +52,11 @@ type ctxHook struct {
 // zero-extent window occupies no instant and is never a candidate for
 // anything.
 type Context struct {
-	Entry         uint32
-	Address       string
-	Module        string // "" when the resource is not in a module
+	Entry   uint32
+	Address string
+	// Module is empty for observed root and unavailable metadata alike;
+	// ModuleKnown and ModuleInvalid distinguish those evidence states.
+	Module        string
 	ModuleKnown   bool
 	ModuleInvalid bool
 	Name          string

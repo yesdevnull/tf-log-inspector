@@ -63,8 +63,10 @@ type Attribution struct {
 	// Address is "" for Ambiguous and Unattributed. An Ambiguous span
 	// reports Candidates instead: naming one of several equally plausible
 	// resources would assert something the evidence does not support.
-	Address       string
-	Module        string // "" when the resource is not in a module
+	Address string
+	// Module is empty for observed root and unavailable metadata alike;
+	// ModuleKnown and ModuleInvalid distinguish those evidence states.
+	Module        string
 	ModuleKnown   bool
 	ModuleInvalid bool
 	Name          string

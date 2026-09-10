@@ -137,7 +137,19 @@ func splitAddress(address string) ([]string, bool) {
 }
 
 func validPlainSegment(segment string) bool {
-	return segment != "" && !strings.ContainsAny(segment, "[]\"")
+	for i, r := range segment {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '-' && !unicode.IsLetter(r) && !unicode.IsDigit(r) &&
+			!unicode.Is(unicode.Mn, r) && !unicode.Is(unicode.Mc, r) && !unicode.Is(unicode.Pc, r) {
+			return false
+		}
+	}
+	return segment != ""
 }
 
 func validNameSegment(segment string) bool {
@@ -145,7 +157,7 @@ func validNameSegment(segment string) bool {
 	if open < 0 {
 		return validPlainSegment(segment)
 	}
-	if !validPlainSegment(segment[:open]) || segment[len(segment)-1] != ']' || strings.Contains(segment[open+1:len(segment)-1], "[") {
+	if !validPlainSegment(segment[:open]) || segment[len(segment)-1] != ']' {
 		return false
 	}
 	key := segment[open+1 : len(segment)-1]

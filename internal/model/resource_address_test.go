@@ -50,10 +50,32 @@ func TestResourceModuleRejectsIncompleteOrUnsupportedAddresses(t *testing.T) {
 		`module.m["open].aws_instance.web`, `module.m.`, `module.m`,
 		`aws_instance`, `data.local_file`, `ephemeral.random_password`,
 		`module.m[0][1].aws_instance.web`, "aws_instance.we\nb",
+		`module.bad name.aws_instance.web`, `module.9name.aws_instance.web`,
+		`module.bad+name.aws_instance.web`, `module.m.aws_instance.web!`,
 	} {
 		if got := ResolveResourceModule(address, "", false); got.Known {
 			t.Errorf("ResolveResourceModule(%q) = %+v, want unknown", address, got)
 		}
+	}
+}
+
+func TestResourceModuleAcceptsConservativeTerraformIdentifiers(t *testing.T) {
+	for _, address := range []string{
+		`module._private.aws_instance.web`,
+		`module.app-name.aws_instance.web_2`,
+		`module.应用.aws_实例.网页2`,
+	} {
+		if got := ResolveResourceModule(address, "", false); !got.Known {
+			t.Errorf("ResolveResourceModule(%q) = %+v, want known", address, got)
+		}
+	}
+}
+
+func TestResourceModuleAcceptsOpeningBracketInsideQuotedKey(t *testing.T) {
+	const address = `module.m["a[b"].aws_instance.web`
+	got := ResolveResourceModule(address, "", false)
+	if !got.Known || got.Path != `module.m["a[b"]` {
+		t.Errorf("ResolveResourceModule(%q) = %+v, want quoted bracket retained", address, got)
 	}
 }
 
