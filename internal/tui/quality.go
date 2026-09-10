@@ -69,6 +69,8 @@ func (m *Model) qualityText(q model.CaptureQuality, reconstruction model.Reconst
 	writeQualityTier(&b, "UI", q.UI)
 
 	b.WriteString("\nANOMALIES\n")
+	b.WriteString("  Counts can overlap across stages and must not be totalled as bad lines.\n")
+	b.WriteString("  First samples use original one-based physical source lines; they are not exhaustive.\n")
 	if len(q.Issues) == 0 {
 		b.WriteString("  none recorded\n")
 	}
@@ -79,7 +81,7 @@ func (m *Model) qualityText(q model.CaptureQuality, reconstruction model.Reconst
 		}
 		if issue.Stage != stage {
 			stage = issue.Stage
-			fmt.Fprintf(&b, "  %s\n", logfmt.DisplayText(stage))
+			fmt.Fprintf(&b, "  %s — %s\n", logfmt.DisplayText(stage), qualityStageUnits(stage))
 		}
 		fmt.Fprintf(&b, "    %s: %d", logfmt.DisplayText(issue.Code), issue.Count)
 		if issue.FirstEntry != nil {
@@ -99,6 +101,7 @@ func (m *Model) qualityText(q model.CaptureQuality, reconstruction model.Reconst
 	b.WriteString("\nATTRIBUTION\n")
 	if !q.HasContext {
 		b.WriteString("  unavailable: no address context was recognised\n")
+		fmt.Fprintf(&b, "  nameable duration: unavailable / %dms (no address context)\n", q.RPCDurationMs)
 	} else {
 		if q.NameableShare == nil {
 			b.WriteString("  nameable duration: unavailable (total RPC duration is 0ms)\n")
@@ -154,18 +157,43 @@ func writeQualityTier(b *strings.Builder, name string, q model.TierQuality) {
 
 func (m *Model) qualityIndicator() string {
 	q := m.log.CaptureQuality()
-	limited := q.RPC.Rejected > 0 || q.UI.Rejected > 0 || q.RPC.Admitted > q.RPC.Positioned || q.UI.Admitted > q.UI.Positioned ||
-		q.RPC.DurationLowerBound || q.UI.DurationLowerBound || len(q.Issues) > 0 || !q.HasContext
-	if q.HasContext {
-		limited = limited || q.Attribution.ByConfidence[attrib.Overlapping] > 0 || q.Attribution.ByConfidence[attrib.Ambiguous] > 0 || q.Attribution.ByConfidence[attrib.Unattributed] > 0
-	}
-	if m.log.ReconstructionQuality().State == "failed" {
-		limited = true
-	}
-	if limited {
+	if qualityHasLimitations(q, m.log.ReconstructionQuality()) {
 		return "i limitations"
 	}
 	return "i quality"
+}
+
+func qualityHasLimitations(q model.CaptureQuality, reconstruction model.ReconstructionQuality) bool {
+	limited := q.RPC.Rejected > 0 || q.UI.Rejected > 0 || q.RPC.Admitted > q.RPC.Positioned || q.UI.Admitted > q.UI.Positioned ||
+		q.RPC.DurationLowerBound || q.UI.DurationLowerBound || len(q.Issues) > 0 || !q.HasContext
+	if q.HasContext {
+		limited = limited || q.Attribution.ByConfidence[attrib.Likely] > 0 || q.Attribution.ByConfidence[attrib.Overlapping] > 0 || q.Attribution.ByConfidence[attrib.Ambiguous] > 0 || q.Attribution.ByConfidence[attrib.Unattributed] > 0
+	}
+	if reconstruction.State == "failed" {
+		limited = true
+	}
+	return limited
+}
+
+func qualityStageUnits(stage string) string {
+	switch stage {
+	case "rpc_duration":
+		return "recognised RPC response records rejected at admission, or admitted spans with position or storage limitations"
+	case "ui_duration":
+		return "completion records rejected at admission; timestamp issues cover all decoded structured envelopes; admitted spans may have position or storage limitations"
+	case "ui_decode":
+		return "structured envelopes with JSON or schema issues"
+	case "context":
+		return "structured envelope and context events"
+	case "scan":
+		return "scanner events and saturated entry counters"
+	case "interning":
+		return "values not retained after an interning cap"
+	case "capability":
+		return "state flags; 1 means the request-tracking cap was reached"
+	default:
+		return "events recorded at this extraction stage"
+	}
 }
 
 func hasQualityIssue(issues []model.QualityIssue, stage, code string) bool {

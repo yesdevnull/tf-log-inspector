@@ -1,6 +1,7 @@
 package qualitytext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -41,6 +42,18 @@ func TestWriteCaptureQualityRendersValueFreeSummary(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("summary missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestWriteCaptureQualityRetainsNoContextDenominator(t *testing.T) {
+	for _, denominator := range []uint64{0, 30} {
+		q := model.CaptureQuality{RPCDurationMs: denominator}
+		var out strings.Builder
+		WriteCaptureQuality(&out, q)
+		want := fmt.Sprintf("unavailable / %dms (no address context)", denominator)
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("denominator %d hidden or fabricated:\n%s", denominator, out.String())
 		}
 	}
 }

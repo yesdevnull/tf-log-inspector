@@ -15,7 +15,7 @@ func WriteCaptureQuality(b *strings.Builder, q model.CaptureQuality) {
 	writeTierQuality(b, "UI", q.UI)
 	switch {
 	case !q.HasContext:
-		fmt.Fprintf(b, "  %-22s unavailable (no address context)\n", "nameable duration")
+		fmt.Fprintf(b, "  %-22s unavailable / %s (no address context)\n", "nameable duration", formatMs(q.RPCDurationMs))
 	case q.NameableShare == nil:
 		fmt.Fprintf(b, "  %-22s unavailable (total RPC duration is 0ms)\n", "nameable duration")
 	default:

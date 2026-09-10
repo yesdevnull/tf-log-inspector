@@ -230,7 +230,7 @@ func TestProfileAndStreamingDiagnoseReportTheSameCaptureQualityTotals(t *testing
 	for _, want := range []string{
 		"RPC timing records     2: admitted 1, rejected 1; duration 25ms",
 		"RPC positioning        1 observations, 25ms",
-		"nameable duration      unavailable (no address context)",
+		"nameable duration      unavailable / 25ms (no address context)",
 		"duration_missing",
 	} {
 		for _, mode := range []string{"--profile", "--diagnose"} {

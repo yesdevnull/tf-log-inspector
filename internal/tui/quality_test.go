@@ -9,7 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
+	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func qualityModel(t *testing.T, name string) *Model {
@@ -230,6 +232,50 @@ func TestQualityTimingShowsPositionedAndExcludedDurations(t *testing.T) {
 	for _, want := range []string{"duration 30ms", "positioned 1 / 10ms", "excluded 1 / 20ms"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("quality timing missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestQualityNoContextRetainsTheAdmittedRPCDurationDenominator(t *testing.T) {
+	m := New(&model.Log{}, "capture.log")
+	q := model.CaptureQuality{RPCDurationMs: 30}
+	text := m.qualityText(q, model.ReconstructionQuality{State: "not_checked"})
+	if !strings.Contains(text, "nameable duration: unavailable / 30ms (no address context)") {
+		t.Fatalf("no-context attribution hid or fabricated the denominator:\n%s", text)
+	}
+
+	q.RPCDurationMs = 0
+	text = m.qualityText(q, model.ReconstructionQuality{State: "not_checked"})
+	if !strings.Contains(text, "nameable duration: unavailable / 0ms (no address context)") {
+		t.Fatalf("zero-duration no-context state is not distinct:\n%s", text)
+	}
+}
+
+func TestLikelyOnlyAttributionIsALimitation(t *testing.T) {
+	q := model.BuildCaptureQuality(model.CaptureQualityInput{
+		RPCSpans:     []span.Span{{DurationMs: 10, EndMs: 10, TimestampStatus: logfmt.TimestampValid}},
+		Contexts:     []attrib.Context{{}},
+		Attributions: []attrib.Attribution{{Confidence: attrib.Likely}},
+	})
+	if q.Attribution.ByConfidence[attrib.Likely] != 1 || q.RPC.Admitted != q.RPC.Positioned || len(q.Issues) != 0 {
+		t.Fatalf("fixture did not isolate Likely-only attribution: %+v", q)
+	}
+	if !qualityHasLimitations(q, model.ReconstructionQuality{State: "not_checked"}) {
+		t.Fatal("Likely-only inferred attribution was labelled without limitations")
+	}
+}
+
+func TestQualityExplainsSourceSamplesAndAnomalyCountUnits(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	text := m.qualityText(m.log.CaptureQuality(), m.log.ReconstructionQuality())
+	for _, want := range []string{
+		"First samples use original one-based physical source lines",
+		"Counts can overlap across stages and must not be totalled as bad lines",
+		"recognised RPC response records rejected at admission",
+		"structured envelope and context events",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("quality explanation missing %q:\n%s", want, text)
 		}
 	}
 }

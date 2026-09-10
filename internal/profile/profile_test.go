@@ -48,7 +48,7 @@ func TestReportPresentsWholeCaptureQualityWithoutReconstructingResponses(t *test
 		"admitted 1, rejected 1; duration 25ms",
 		"RPC positioning        1 observations, 25ms",
 		"duration_missing",
-		"nameable duration      unavailable (no address context)",
+		"nameable duration      unavailable / 25ms (no address context)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
@@ -65,7 +65,7 @@ func TestReportMarksZeroAttributionDenominatorUnavailable(t *testing.T) {
 	if err := Render(&out, l); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "nameable duration      unavailable (no address context)") {
+	if !strings.Contains(out.String(), "nameable duration      unavailable / 0ms (no address context)") {
 		t.Fatalf("missing unavailable attribution share:\n%s", out.String())
 	}
 }
