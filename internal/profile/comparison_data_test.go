@@ -91,8 +91,13 @@ func TestBuildComparisonPreservesLowerBoundsAndAdmittedInvalidPositions(t *testi
 	for _, section := range got.Data.Sections {
 		for _, row := range section.Rows {
 			foundLowerBound = foundLowerBound || row.Before != nil && row.Before.LowerBound
-			if row.Before != nil && row.Before.LowerBound && row.Changes.TotalMs != nil {
-				t.Fatalf("lower-bound total change should be unavailable: %+v", row)
+			if row.Before != nil && row.Before.LowerBound {
+				if row.Changes.TotalMs != nil || row.Changes.MeanMs != nil || row.Changes.MaxMs != nil || row.Changes.TotalPercent != nil || row.Changes.MeanPercent != nil || row.Changes.MaxPercent != nil {
+					t.Fatalf("lower-bound timing changes should be unavailable: %+v", row.Changes)
+				}
+				if row.Changes.Count == nil {
+					t.Fatalf("lower-bound count change should remain defined: %+v", row.Changes)
+				}
 			}
 		}
 	}
@@ -112,15 +117,72 @@ func TestBuildComparisonPreservesLowerBoundsAndAdmittedInvalidPositions(t *testi
 func TestBuildComparisonDoesNotMutateReports(t *testing.T) {
 	before := comparisonReportFixture(t, "provider-rpc.log")
 	after := comparisonReportFixture(t, "resources-long-lower-bound.log")
-	beforeRPC, beforeUI := append([]Observation(nil), before.RPC...), append([]Observation(nil), before.UI...)
-	afterRPC, afterUI := append([]Observation(nil), after.RPC...), append([]Observation(nil), after.UI...)
-	beforeRPCRanking, beforeUIRanking := append([]int(nil), before.RPCRanking...), append([]int(nil), before.UIRanking...)
-	afterRPCRanking, afterUIRanking := append([]int(nil), after.RPCRanking...), append([]int(nil), after.UIRanking...)
-	if _, err := BuildComparison(before, after); err != nil {
+	beforeSnapshot := deepCopyReport(before)
+	afterSnapshot := deepCopyReport(after)
+	got, err := BuildComparison(before, after)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before.RPC, beforeRPC) || !reflect.DeepEqual(before.UI, beforeUI) || !reflect.DeepEqual(before.RPCRanking, beforeRPCRanking) || !reflect.DeepEqual(before.UIRanking, beforeUIRanking) ||
-		!reflect.DeepEqual(after.RPC, afterRPC) || !reflect.DeepEqual(after.UI, afterUI) || !reflect.DeepEqual(after.RPCRanking, afterRPCRanking) || !reflect.DeepEqual(after.UIRanking, afterUIRanking) {
+	if !reflect.DeepEqual(before, beforeSnapshot) || !reflect.DeepEqual(after, afterSnapshot) {
 		t.Fatal("comparison mutated report evidence or rankings")
+	}
+	if !reflect.DeepEqual(got.Before, beforeSnapshot) || !reflect.DeepEqual(got.After, afterSnapshot) {
+		t.Fatal("comparison did not retain complete reports")
+	}
+}
+
+func deepCopyReport(report Report) Report {
+	return cloneReflect(reflect.ValueOf(report)).Interface().(Report)
+}
+
+func cloneReflect(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		copy := reflect.New(value.Type().Elem())
+		copy.Elem().Set(cloneReflect(value.Elem()))
+		return copy
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		copy := reflect.New(value.Type()).Elem()
+		copy.Set(cloneReflect(value.Elem()))
+		return copy
+	case reflect.Struct:
+		copy := reflect.New(value.Type()).Elem()
+		copy.Set(value)
+		for i := 0; i < value.NumField(); i++ {
+			if copy.Field(i).CanSet() && copy.Field(i).CanInterface() {
+				copy.Field(i).Set(cloneReflect(value.Field(i)))
+			}
+		}
+		return copy
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		copy := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			copy.Index(i).Set(cloneReflect(value.Index(i)))
+		}
+		return copy
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		copy := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			copy.SetMapIndex(cloneReflect(iter.Key()), cloneReflect(iter.Value()))
+		}
+		return copy
+	default:
+		return value
 	}
 }
