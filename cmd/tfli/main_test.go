@@ -148,6 +148,7 @@ func TestRunDiagnoseDistinguishesObservedSourcesFromMissingSources(t *testing.T)
 	const applyStart = `{"@level":"info","@message":"aws_instance.example: Creating...","@module":"terraform.ui","@timestamp":"2026-09-10T00:00:00Z","hook":{"resource":{"addr":"aws_instance.example","resource":"aws_instance.example","resource_type":"aws_instance","resource_name":"example","resource_key":null,"implied_provider":"aws"},"action":"create"},"type":"apply_start"}`
 	const unmatchedRefresh = `{"@level":"info","@message":"aws_instance.example: Refresh complete","@module":"terraform.ui","@timestamp":"2026-09-10T00:00:00Z","hook":{"resource":{"addr":"aws_instance.example","resource":"aws_instance.example","resource_type":"aws_instance","resource_name":"example","resource_key":null,"implied_provider":"aws"}},"type":"refresh_complete"}`
 	const rejectedResponse = "2026-09-10T00:00:01.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ApplyResourceChange tf_req_duration_ms=broken\n"
+	const providerEntry = "2026-09-10T00:00:01.000Z [TRACE] provider.aws: configuring provider client\n"
 
 	cases := []struct {
 		name       string
@@ -175,6 +176,16 @@ func TestRunDiagnoseDistinguishesObservedSourcesFromMissingSources(t *testing.T)
 				"structured output was observed, but it yielded no usable",
 			},
 			contradict: "the terraform.ui stream, which the debug-logging",
+		},
+		{
+			name:  "non-RPC provider entry with address context",
+			input: applyStart + "\n" + providerEntry,
+			want: []string{
+				"response entries          0",
+				"provider entries          1",
+				"provider entries were observed, but no RPC duration was admitted",
+			},
+			contradict: "provider RPC evidence was observed",
 		},
 	}
 

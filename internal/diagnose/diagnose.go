@@ -715,29 +715,36 @@ func (r Report) Render(w io.Writer) error {
 	// which only makes sense once no tier at all could be selected.
 	structured := r.Stats.PhysicalLines > 0 &&
 		float64(r.Stats.StructuredLines)/float64(r.Stats.PhysicalLines) > structuredMajority
-	// hasRPCEvidence is true when the log carries any real RPC-related
-	// entries at all -- a majority-structured log can still be a mix of
-	// info-level UI-hook JSON and interleaved hclog RPC-trace lines, and on
-	// that log the flat claim "the counters below are expected to read
-	// zero" is simply false: it would sit printed directly above a nonzero
-	// response entries count.
-	hasRPCEvidence := r.Caps.ResponseEntries+r.Caps.RequestEntries+r.Caps.ProviderEntries > 0
+	// Response/request records establish RPC evidence. A provider component
+	// alone does not: ordinary provider messages count as provider entries too.
+	// Keep both facts so guidance never claims either kind of observed input is
+	// absent or overstates a generic provider entry as an RPC timing record.
+	hasRPCRecords := r.Caps.ResponseEntries+r.Caps.RequestEntries > 0
+	hasProviderEntries := r.Caps.ProviderEntries > 0
 	switch {
-	case structured && !hasRPCEvidence:
+	case structured && !hasRPCRecords && !hasProviderEntries:
 		fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON).\n")
 		fmt.Fprintf(b, "  It is info level only, so it never carries provider RPC\n")
 		fmt.Fprintf(b, "  entries -- the counters below are expected to read zero.\n")
 		fmt.Fprintf(b, "  Its per-resource timings, from Terraform's own UI hooks,\n")
 		fmt.Fprintf(b, "  appear in SLOWEST RESOURCES when this log has any.\n")
 		writeRPCCaptureHint(b)
-	case structured && hasRPCEvidence:
+	case structured && hasRPCRecords:
 		fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON),\n")
 		fmt.Fprintf(b, "  but it also carries provider RPC-related entries below --\n")
 		fmt.Fprintf(b, "  most likely hclog output interleaved with it. Its\n")
 		fmt.Fprintf(b, "  per-resource timings, from Terraform's own UI hooks, appear\n")
 		fmt.Fprintf(b, "  in SLOWEST RESOURCES when this log has any.\n")
-	case !r.TierUsable && hasRPCEvidence:
+	case structured && hasProviderEntries:
+		fmt.Fprintf(b, "  Most of this log is structured output (terraform.ui JSON),\n")
+		fmt.Fprintf(b, "  but it also carries provider entries below. Those entries\n")
+		fmt.Fprintf(b, "  do not establish that RPC timing records were captured.\n")
+	case !r.TierUsable && hasRPCRecords:
 		fmt.Fprintf(b, "  Provider RPC evidence was observed, but no admitted duration\n")
+		fmt.Fprintf(b, "  was available to profile.\n")
+		writeRPCCaptureHint(b)
+	case !r.TierUsable && hasProviderEntries:
+		fmt.Fprintf(b, "  Provider entries were observed, but no admitted RPC duration\n")
 		fmt.Fprintf(b, "  was available to profile.\n")
 		writeRPCCaptureHint(b)
 	case !r.TierUsable && r.Stats.StructuredLines > 0:
@@ -857,8 +864,11 @@ func (r Report) Render(w io.Writer) error {
 			// would read as "attribution ran and every span failed", which is
 			// a different and false claim from "there was nothing to
 			// attribute".
-			if r.Caps.ResponseEntries+r.Caps.ProviderEntries > 0 {
+			if r.Caps.ResponseEntries+r.Caps.RequestEntries > 0 {
 				fmt.Fprintf(b, "  provider RPC evidence was observed, but no duration was admitted\n")
+				fmt.Fprintf(b, "  for attribution\n")
+			} else if r.Caps.ProviderEntries > 0 {
+				fmt.Fprintf(b, "  provider entries were observed, but no RPC duration was admitted\n")
 				fmt.Fprintf(b, "  for attribution\n")
 			} else {
 				fmt.Fprintf(b, "  no provider RPC spans to attribute -- this log has\n")
