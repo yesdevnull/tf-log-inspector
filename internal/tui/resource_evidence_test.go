@@ -111,7 +111,7 @@ func TestResourceEvidenceMakesSelectedResourceDetailReachable(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	got := unstyled(m.View())
-	for _, want := range []string{"SELECTED RESOURCE ROW", address, "operations: 1", "lower bound", "position unavailable"} {
+	for _, want := range []string{"SELECTED RESOURCE ROW", address, "operations: 1", "lower bound", "position unavailable", "inferred and partial", "does not recover every RPC call"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("60-column evidence missing %q:\n%s", want, got)
 		}

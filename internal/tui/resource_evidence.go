@@ -67,6 +67,8 @@ func (m *Model) resourceEvidenceText() string {
 		fmt.Fprintf(&b, "  observed UI max: %s\n", durationMaxText(r.UI))
 		fmt.Fprintf(&b, "  inferred Contained/Likely RPCs: %d, %s\n", r.NamedRPC.Count, durationTotalText(r.NamedRPC))
 		fmt.Fprintf(&b, "  inferred Overlapping RPCs: %d, %s\n", r.OverlappingRPC.Count, durationTotalText(r.OverlappingRPC))
+		b.WriteString("  RPC evidence is inferred and partial.\n")
+		b.WriteString("  It does not recover every RPC call.\n")
 		b.WriteString("  UI timings are rounded to whole seconds, +/- 1s each.\n")
 		if r.UI.LowerBound {
 			b.WriteString("  Observed UI total and max are lower bounds (≥).\n")
