@@ -138,13 +138,7 @@ func (m *Model) timelineTitle() string {
 // packs their bars against the right of a mostly blank pane -- which is an
 // honest picture of when that work ran, not a scaling fault.
 func timelineWallClockMs(spans []span.Span) uint32 {
-	var wallClock uint32
-	for _, s := range spans {
-		if s.EndMs > wallClock {
-			wallClock = s.EndMs
-		}
-	}
-	return wallClock
+	return model.TimingWindowMs(spans)
 }
 
 // timelineLanes packs the timeline's current tier and active filter's spans
@@ -1243,7 +1237,7 @@ const maxStallsShown = 3
 // percentage is shown deciding which waits survive on a window long enough
 // for it to govern by TestALongWindowsPercentageDecidesWhichWaitsAreNamed.
 func stallThresholdMs(wallClock uint32) uint32 {
-	return max(wallClock/20, 1000)
+	return model.IntervalThresholdMs(wallClock)
 }
 
 // stallLane reports which lane contains the span at idx, so a stall can be
