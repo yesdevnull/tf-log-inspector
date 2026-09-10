@@ -32,15 +32,33 @@ func TestHistoryRestoresParentAfterRawChildFilterEdit(t *testing.T) {
 }
 
 func TestHistoryRestoresNilAndEmptyResourceSelections(t *testing.T) {
-	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
-	m.resourceSelection.Addresses = map[string]bool{}
-	m.resourceSelection.Modules = nil
-	frame := m.captureNavigation()
-	m.resourceSelection.Addresses["aws_instance.a"] = true
-	m.resourceSelection.Modules = map[string]bool{}
-	m.restoreNavigation(frame)
-	if m.resourceSelection.Addresses == nil || len(m.resourceSelection.Addresses) != 0 || m.resourceSelection.Modules != nil {
-		t.Fatalf("resource selections lost nil/empty distinction: %+v", m.resourceSelection)
+	for _, tc := range []struct {
+		name         string
+		dim          string
+		value        string
+		wantChildLen int
+		get          func(Model) map[string]bool
+	}{
+		{"resource", dimResource, "aws_instance.a", 2, func(m Model) map[string]bool { return m.resourceSelection.Addresses }},
+		{"module empty", dimModule, "", 0, func(m Model) map[string]bool { return m.resourceSelection.Modules }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+			if tc.get(m) != nil {
+				t.Fatal("fresh parent selection is not nil")
+			}
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+			setFacetCursor(t, &m, tc.dim, tc.value)
+			m.pane = PaneFacets
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeySpace})
+			if child := tc.get(m); child == nil || len(child) != tc.wantChildLen {
+				t.Fatalf("child key edit selection = %+v, want non-nil length %d", child, tc.wantChildLen)
+			}
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+			if tc.get(m) != nil {
+				t.Fatalf("nil parent selection restored as non-nil: %+v", tc.get(m))
+			}
+		})
 	}
 }
 
@@ -102,6 +120,13 @@ func TestHistoryModalEscPrecedesReturn(t *testing.T) {
 		{"help", func(m *Model) { pressRune(t, m, '?') }, func(m Model) bool { return !m.showHelp }},
 		{"quality", func(m *Model) { pressRune(t, m, 'i') }, func(m Model) bool { return !m.quality.open }},
 		{"resource evidence", func(m *Model) { m.showResourceEvidence = true }, func(m Model) bool { return !m.showResourceEvidence }},
+		{"response", func(m *Model) { pressRune(t, m, 'r') }, func(m Model) bool { return !m.response.open }},
+		{"raw search", func(m *Model) { pressRune(t, m, '/') }, func(m Model) bool { return !m.raw.searching }},
+		{"facet search", func(m *Model) {
+			m.pane = PaneFacets
+			setFacetCursor(t, m, dimResource, "aws_instance.a")
+			pressRune(t, m, '/')
+		}, func(m Model) bool { return !m.facetSearch.editing }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
