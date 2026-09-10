@@ -108,6 +108,8 @@ These are development builds; version-tag publishing is not configured.
     tfli --diagnose plan.log
     tfli --diagnose -o report.txt plan.log
     tfli --profile plan.log
+    tfli --profile --limit 5 plan.log
+    tfli --profile --limit 0 plan.log
     tfli --profile -o profile.txt plan.log
     tfli --scrub -o sanitised.log plan.log
     tfli --scrub --scrub-values private-values.txt -o sanitised.log plan.log
@@ -325,6 +327,20 @@ between a chatty provider and a quiet one are particularly unreliable.
 providers ranked by total duration, the slowest individual calls and
 resources, and concurrency. Use it to find the slow resource, not to share
 the result.
+
+Each ranked list shows at most 20 rows by default. `--limit N` applies that
+limit independently to every list; `--limit 0` shows every row. Limiting lists
+does not change whole-log counts, durations, concurrency totals or capture
+quality.
+
+Individual observations include their physical source line or line range in
+the input log. RPC resource addresses are inferred from nearby context and
+carry a confidence label such as contained, likely or overlapping; ambiguous
+and unattributed calls are identified explicitly. UI resource addresses are
+directly observed in Terraform's structured output. UI durations are reported
+to whole-second precision, and saturated durations and affected totals are
+shown as lower bounds. Observed gaps do not establish that Terraform was idle,
+and a long active observation does not prove that it made other work wait.
 
 ### What each mode discloses
 

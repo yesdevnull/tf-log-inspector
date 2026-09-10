@@ -51,6 +51,7 @@ func TestCommandDiagnosticsCannotControlTheTerminal(t *testing.T) {
 		"output path":  {"--diagnose", "-o", filepath.Join(t.TempDir(), control, "report.txt"), "../../testdata/provider-rpc.log"},
 		"flag":         {"--unknown-" + control},
 		"flag newline": {"--unknown-\nFORGED" + control},
+		"limit":        {"--profile", "--limit=1\nFORGED" + control, "../../testdata/provider-rpc.log"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, err := exec.Command(binary, args...).CombinedOutput()
@@ -275,6 +276,119 @@ func TestRunProfileOnFixture(t *testing.T) {
 	}
 	if !strings.Contains(sb.String(), "BY RESOURCE TYPE") {
 		t.Errorf("output missing BY RESOURCE TYPE:\n%s", sb.String())
+	}
+}
+
+func TestLimitRejectedOutsideProfileBeforeOpeningInput(t *testing.T) {
+	for _, args := range [][]string{
+		{"--limit=0", "missing.log"},
+		{"--diagnose", "--limit=20", "missing.log"},
+		{"--scrub", "--limit=1", "-o", filepath.Join(t.TempDir(), "unused.log"), "missing.log"},
+	} {
+		var stdout, stderr strings.Builder
+		err := run(args, &stdout, &stderr)
+		if err == nil || !strings.Contains(err.Error(), "--limit applies only to --profile") {
+			t.Fatalf("args %v: error %v", args, err)
+		}
+		if stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Fatal("unexpected output before mode validation")
+		}
+	}
+}
+
+func TestNegativeProfileLimitDoesNotOpenOrTruncateOutput(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "report.txt")
+	const sentinel = "keep this report\n"
+	if err := os.WriteFile(output, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr strings.Builder
+	err := run([]string{"--profile", "--limit=-1", "-o", output, filepath.Join(dir, "missing.log")}, &stdout, &stderr)
+	if err == nil || err.Error() != "--limit must be non-negative" {
+		t.Fatalf("error = %v, want negative-limit rejection", err)
+	}
+	got, readErr := os.ReadFile(output)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("output changed before limit validation: %q", got)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unexpected output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestLimitParseErrorsAreReportedOnce(t *testing.T) {
+	for name, value := range map[string]string{
+		"malformed": "many",
+		"overflow":  "999999999999999999999999999999999999999999999999999999",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			err := run([]string{"--profile", "--limit=" + value, "missing.log"}, &stdout, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "invalid value") || !strings.Contains(err.Error(), value) {
+				t.Fatalf("error = %v, want invalid value naming %q", err, value)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", stdout.String())
+			}
+			if got := strings.Count(stderr.String(), "invalid value"); got != 1 {
+				t.Fatalf("invalid-value diagnostic count = %d, want 1:\n%s", got, stderr.String())
+			}
+		})
+	}
+}
+
+func TestProfileLimitControlsEveryListWithoutChangingTotals(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "timeline-dense-lane.log")
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "default", args: []string{"--profile", path}, want: "SLOWEST CALLS (top 20 of 60)"},
+		{name: "one", args: []string{"--profile", "--limit=1", path}, want: "SLOWEST CALLS (top 1 of 60)"},
+		{name: "all", args: []string{"--profile", "--limit=0", path}, want: "source: line 77"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			if err := run(tc.args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("unexpected stderr: %q", stderr.String())
+			}
+			for _, want := range []string{tc.want, "RPC timing records     60: admitted 60, rejected 0; duration 2.4s", "RPC calls", "60"} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Errorf("missing %q:\n%s", want, stdout.String())
+				}
+			}
+			if tc.name == "all" && strings.Contains(stdout.String(), "SLOWEST CALLS (top ") {
+				t.Errorf("unlimited report still labels calls as truncated:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestLimitPreservesHelpAndVersionPrecedence(t *testing.T) {
+	var help strings.Builder
+	if err := run([]string{"--help", "--limit=1"}, io.Discard, &help); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !strings.Contains(help.String(), "maximum rows per text profile list") || !strings.Contains(help.String(), "default 20") || !strings.Contains(help.String(), "0 means all; --profile only") {
+		t.Fatalf("help does not document the limit contract:\n%s", help.String())
+	}
+
+	var versionOut, versionErr strings.Builder
+	if err := run([]string{"--version", "--limit=1"}, &versionOut, &versionErr); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if !strings.HasPrefix(versionOut.String(), "tfli ") || versionErr.Len() != 0 {
+		t.Fatalf("version output: stdout=%q stderr=%q", versionOut.String(), versionErr.String())
 	}
 }
 

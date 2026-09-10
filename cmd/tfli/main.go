@@ -47,6 +47,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
+		limit      = fs.Int("limit", profile.DefaultLimit, "maximum rows per text profile list (0 means all; --profile only)")
 		valuesPath = fs.String("scrub-values", "", "additional literal identifying values, one per line")
 		outPath    = fs.String("o", "", "write the selected report or scrubbed log to this file")
 		showVer    = fs.Bool("version", false, "print the version and exit")
@@ -54,7 +55,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	usage := func() {
 		// Usage is best-effort, matching flag.PrintDefaults' error handling.
 		_, _ = fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
-		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose|--profile [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --profile [--limit N] [-o report.txt] <logfile>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
 		_, _ = fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		_, _ = fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
@@ -89,10 +91,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return errors.New("expected exactly one log file argument")
 	}
-	valuesSet := false
+	valuesSet, limitSet := false, false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "scrub-values" {
+		switch f.Name {
+		case "scrub-values":
 			valuesSet = true
+		case "limit":
+			limitSet = true
 		}
 	})
 	modeCount := 0
@@ -107,6 +112,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if valuesSet && !*doScrub {
 		return errors.New("--scrub-values applies only to --scrub")
 	}
+	if limitSet && !*doProfile {
+		return errors.New("--limit applies only to --profile")
+	}
+	if *limit < 0 {
+		return errors.New("--limit must be non-negative")
+	}
 	switch {
 	case *doScrub:
 		if *outPath == "" {
@@ -114,7 +125,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		return runScrub(fs.Arg(0), *outPath, *valuesPath, stderr)
 	case *doProfile:
-		return runProfile(fs.Arg(0), *outPath, stdout)
+		return runProfile(fs.Arg(0), *outPath, stdout, profile.TextOptions{Limit: *limit})
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
 	default:
@@ -233,13 +244,13 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 }
 
 // runProfile loads path and writes the unmasked performance report.
-func runProfile(path, outPath string, stdout io.Writer) error {
+func runProfile(path, outPath string, stdout io.Writer, options profile.TextOptions) error {
 	l, err := model.Load(path)
 	if err != nil {
 		return err
 	}
 	return writeReport(stdout, path, outPath, func(w io.Writer) error {
-		return profile.Render(w, l, profile.TextOptions{Limit: profile.DefaultLimit})
+		return profile.Render(w, l, options)
 	})
 }
 
