@@ -75,7 +75,8 @@ func BuildCaptureQuality(in CaptureQualityInput) CaptureQuality {
 		}
 	}
 	issues := &q.Issues
-	addEvidenceIssues(issues, "rpc_duration", span.TimingEvidence{Rejected: in.RPCEvidence.Rejected, TimestampIssues: in.RPCEvidence.TimestampIssues})
+	addEvidenceIssues(issues, "rpc_duration", span.TimingEvidence{Rejected: in.RPCEvidence.Rejected})
+	addRPCPositionIssues(issues, in.RPCSpans)
 	addEvidenceIssues(issues, "ui_duration", span.TimingEvidence{Rejected: in.UIEvidence.Rejected, TimestampIssues: in.UIEvidence.TimestampIssues})
 	addIssueCount(issues, "ui_decode", "json_syntax", in.UIEvidence.SyntaxErrors)
 	addIssueCount(issues, "ui_decode", "schema_invalid", in.UIEvidence.SchemaErrors)
@@ -159,6 +160,26 @@ func addSpanIssues(dst *[]QualityIssue, stage string, spans []span.Span) {
 	}
 	addIssueCount(dst, stage, "duration_saturated", saturated)
 	addIssueCount(dst, stage, "start_clamped", clamped)
+}
+
+func addRPCPositionIssues(dst *[]QualityIssue, spans []span.Span) {
+	issues := make(map[string]span.IssueCount)
+	for _, s := range spans {
+		for _, code := range s.PositionReasons() {
+			if code == "duration_saturated" {
+				continue
+			}
+			issue := issues[code]
+			if issue.Count == 0 {
+				issue.FirstEntry = s.Entry
+			}
+			issue.Count++
+			issues[code] = issue
+		}
+	}
+	for code, issue := range issues {
+		addIssueCount(dst, "rpc_duration", code, issue)
+	}
 }
 
 // CaptureQuality returns a detached copy of the summary built during Load.

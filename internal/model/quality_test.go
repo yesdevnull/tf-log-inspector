@@ -146,6 +146,14 @@ func TestLoadBuildsStableQualityFromRealScan(t *testing.T) {
 	if q1.NameableShare == nil || *q1.NameableShare != 1.0/3.0 || q1.NameableMs != 10 || q1.RPCDurationMs != 30 {
 		t.Fatalf("nameable denominator = %+v", q1)
 	}
+	wantRPCPositionIssue := QualityIssue{Stage: "rpc_duration", Code: "timestamp_out_of_range", Count: 1, FirstEntry: uint32Pointer(3)}
+	if !containsIssue(q1.Issues, wantRPCPositionIssue) {
+		t.Fatalf("RPC position issue = %+v, want %+v", q1.Issues, wantRPCPositionIssue)
+	}
+	location, ok := l.SourceLocation(*wantRPCPositionIssue.FirstEntry)
+	if !ok || !strings.Contains(string(l.Data[location.StartByte:location.EndByte]), "tf_req_duration_ms=20") {
+		t.Fatalf("RPC position issue source = %+v, found=%t", location, ok)
+	}
 	if !containsIssueCode(q1.Issues, "context", "context_incomplete") {
 		t.Fatalf("incomplete context absent: %+v", q1.Issues)
 	}
@@ -194,15 +202,33 @@ func TestQualityAccessorsAreConcurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Go(func() {
+		<-start
+		_, _ = l.ProviderResponse(l.Entries[0])
+	})
 	for range 20 {
 		wg.Go(func() {
-			_, _ = l.ProviderResponse(l.Entries[0])
-			_ = l.ReconstructionQuality()
+			<-start
+			status := l.ReconstructionQuality()
+			switch status.State {
+			case "not_checked":
+			case "checked":
+				if status.Responses != 1 || status.Code != "" {
+					t.Errorf("partially published reconstruction status = %+v", status)
+				}
+			default:
+				t.Errorf("status during reconstruction = %+v", status)
+			}
 			_ = l.CaptureQuality()
 			_, _ = l.SourceLocation(0)
 		})
 	}
+	close(start)
 	wg.Wait()
+	if got := l.ReconstructionQuality(); got.State != "checked" || got.Responses != 1 {
+		t.Fatalf("final reconstruction status = %+v", got)
+	}
 }
 
 func containsIssue(issues []QualityIssue, want QualityIssue) bool {
