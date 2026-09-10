@@ -193,8 +193,8 @@ return true
 
 Resolver rules: validate supplied module before use; if observedKnown and malformed, return unknown. If observedKnown and a known address decomposition disagrees, return unknown. Otherwise valid observed module wins. With no observed module return address decomposition. Callers first reject ModuleInvalid; otherwise pass the retained ModuleKnown bit for spans, contexts and attributions alike, including explicit root. Never infer presence from nonempty strings.
 
-- [ ] **Step 5: Run GREEN and independent review.** Focused GREEN passed with `go test ./internal/span ./internal/model -run 'Test(UI.*Module|ResourceModule)' -count=1`; affected packages passed with `go test ./internal/span ./internal/model ./internal/attrib -count=1`; formatting and `go test ./...` passed. Round-one review found over-permissive identifiers, rejection of `[` inside a quoted key, and ambiguous module-field comments. Behavioural RED `go test ./internal/model -run 'TestResourceModule(Rejects|Accepts)' -count=1` failed on those identifier and key cases; the same command passed after the fixes. Scoped rereview then found the Unicode predicates omitted `Nl` and the `Other_ID_Start`/`Other_ID_Continue` properties. Behavioural RED `go test ./internal/model -run TestResourceModuleAcceptsConservativeTerraformIdentifiers -count=1` failed for representative ℘, Ⅰ and middle-dot cases; focused GREEN including malformed-input rejection passed after matching HCL's identifier classes. Self-review found no remaining Task 1 issue. Controller verification remains pending.
-- [x] **Step 6: Signed commit.** Staged the nine named files and execution record, then committed `Retain resource module evidence` with the wrapper and mandatory signing.
+- [x] **Step 5: Run GREEN and independent review.** Focused GREEN passed with `go test ./internal/span ./internal/model -run 'Test(UI.*Module|ResourceModule)' -count=1`; affected packages passed with `go test ./internal/span ./internal/model ./internal/attrib -count=1`; formatting and `go test ./...` passed. Round-one review found over-permissive identifiers, rejection of `[` inside a quoted key, and ambiguous module-field comments. Behavioural RED `go test ./internal/model -run 'TestResourceModule(Rejects|Accepts)' -count=1` failed on those identifier and key cases; the same command passed after the fixes. Scoped rereview then found the Unicode predicates omitted `Nl` and the `Other_ID_Start`/`Other_ID_Continue` properties. Behavioural RED `go test ./internal/model -run TestResourceModuleAcceptsConservativeTerraformIdentifiers -count=1` failed for representative ℘, Ⅰ and middle-dot cases; focused GREEN including malformed-input rejection passed after matching HCL's identifier classes. Both independent review verdicts were clean after the two fix rounds. Separate cleanup retained all 54 cases across the affected tests without edits.
+- [x] **Step 6: Signed commit.** Staged the nine named files and execution record, then committed `Retain resource module evidence` as 5c096bb, followed by signed review-fix commits 1847149 and d3f2885. Signature verification reported G for all three commits.
 
 ### Task 2: Build indexed observations and complete filter choices
 
@@ -204,7 +204,7 @@ Resolver rules: validate supplied module before use; if observedKnown and malfor
 
 **Produces:** DurationTotal, ResourceOperation, ResourceRow, ResourceChoice, ResourceIndex and BuildResourceIndex from the ledger.
 
-- [ ] **Step 1: Write index tests.** Repeated completions keep different actions, entries and original indices, including zero/unpositioned/saturated durations. Context-only and named-RPC-only addresses become choices without UI operations. Ambiguous candidates never become invented identities. Missing UI address still has an operation. Test real Load plus SourceLocation for distinct completions.
+- [x] **Step 1: Write index tests.** Repeated completions keep different actions, entries and original indices, including zero/unpositioned/saturated durations. Context-only and named-RPC-only addresses become choices without UI operations. Ambiguous candidates never become invented identities. Missing UI address still has an operation. Test real Load plus SourceLocation for distinct completions.
 
 ```go
 func TestResourceIndexRetainsOccurrences(t *testing.T) {
@@ -221,8 +221,8 @@ func TestResourceIndexRetainsOccurrences(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run RED.** `go test ./internal/model -run TestResourceIndex -count=1`; demonstrate occurrence and choice assertions fail after declarations compile.
-- [ ] **Step 3: Implement a source-order index.** Walk UI spans once, retaining unknown module for ModuleInvalid spans without resolver fallback. Apply the same invalid guard and retained presence bits to context choices and named RPC modules. Walk RPCSpans with original indices, resolve modules only for named Contained/Likely/Overlapping attribution and guard short/nil attribution slices. Union nonempty addresses from UI, context and named RPC evidence. Sort exact choices lexically; union known module paths and every ancestor, sorting root first. Conflicting known module facts for one choice yield unknown; absence may be supplemented by known evidence but cannot erase a contradiction. Preserve each operation's independent module fact. Returned slices must not alias mutable Log slices.
+- [x] **Step 2: Run RED.** `go test ./internal/model -run TestResourceIndex -count=1` failed after declarations compiled: occurrence and real-load tests received no operations, complete-evidence tests received no choices/modules/RPC modules, conflict/supplement and mutation tests received no returned slices, and DurationTotal remained zero. Preconditions were tightened after the first run so missing slices fail diagnostically rather than causing follow-on panics; the behavioural failures remained.
+- [x] **Step 3: Implement a source-order index.** Walk UI spans once, retaining unknown module for ModuleInvalid spans without resolver fallback. Apply the same invalid guard and retained presence bits to context choices and named RPC modules. Walk RPCSpans with original indices, resolve modules only for named Contained/Likely/Overlapping attribution and guard short/nil attribution slices. Union nonempty addresses from UI, context and named RPC evidence. Sort exact choices lexically; union known module paths and every ancestor, sorting root first. Conflicting known module facts for one choice yield unknown; absence may be supplemented by known evidence but cannot erase a contradiction. Preserve each operation's independent module fact. Returned slices must not alias mutable Log slices.
 
 ```go
 func (d *DurationTotal) add(s span.Span) {
@@ -235,8 +235,8 @@ func (d *DurationTotal) add(s span.Span) {
 
 Build once per capture; no source-byte rescans, response reconstruction or mutation of CaptureQuality. Index must not be reused with another Log.
 
-- [ ] **Step 4: Run GREEN and review.** `go test ./internal/model -count=1`; check deterministic order, conflict cases and returned-index mutation cannot alter source facts. Obtain independent review.
-- [ ] **Step 5: Signed commit.** Stage task files and record; commit `Index observed resource operations`.
+- [ ] **Step 4: Run GREEN and review.** `go test ./internal/model -run TestResourceIndex -count=1` and `go test ./internal/model -count=1` passed. `go test ./...` passed all 11 packages before commit, and the diff check was clean. Self-review covered deterministic order, all ModuleInvalid guards, explicit ModuleKnown handling, conflict persistence, short attribution slices and returned-index mutation isolation. Independent review remains pending with the controller.
+- [x] **Step 5: Signed commit.** Staged the two task files and this execution record, then committed `Index observed resource operations` with the wrapper and mandatory signing.
 
 ### Task 3: Select resources and reconcile admitted evidence
 
