@@ -186,3 +186,37 @@ func BenchmarkResourceSelect(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkResourceSelectBroadModules(b *testing.B) {
+	for _, moduleCount := range []int{10, 1_000} {
+		b.Run(fmt.Sprintf("Modules%d", moduleCount), func(b *testing.B) {
+			l := &Log{UISpans: make([]span.Span, 0, moduleCount*10)}
+			selected := make(map[string]bool, moduleCount)
+			for moduleIndex := range moduleCount {
+				module := fmt.Sprintf("module.group[%d]", moduleIndex)
+				selected[module] = true
+				for resourceIndex := range 10 {
+					l.UISpans = append(l.UISpans, span.Span{
+						Address:     fmt.Sprintf("%s.aws_instance.item_%d", module, resourceIndex),
+						Module:      module,
+						ModuleKnown: true,
+						DurationMs:  1,
+					})
+				}
+			}
+			index := BuildResourceIndex(l)
+			selection := ResourceSelection{Modules: selected}
+			wantUI := moduleCount * 10
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				got := SelectResources(l, index, Filter{}, selection)
+				if len(got.UIIndices) != wantUI || len(got.Rows) != wantUI {
+					b.Fatalf("projection sizes = UI %d, rows %d; want %d", len(got.UIIndices), len(got.Rows), wantUI)
+				}
+				benchmarkResourceProjection = got
+			}
+		})
+	}
+}

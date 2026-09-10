@@ -2,6 +2,7 @@ package model
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
@@ -39,24 +40,38 @@ func (s ResourceSelection) Match(address string, module ResourceModule) Membersh
 			addressMatch = MembershipSelected
 		}
 	}
+	if addressMatch == MembershipOther {
+		return MembershipOther
+	}
 	moduleMatch := MembershipSelected
 	if s.Modules != nil {
-		moduleMatch = MembershipOther
-		for parent, selected := range s.Modules {
-			if !selected {
-				continue
-			}
-			if !module.Known {
-				moduleMatch = MembershipUnknown
-				break
-			}
-			if ModuleContains(parent, module.Path) {
-				moduleMatch = MembershipSelected
-				break
-			}
-		}
+		moduleMatch = s.matchModule(module)
 	}
 	return combineMembership(addressMatch, moduleMatch)
+}
+
+func (s ResourceSelection) matchModule(module ResourceModule) Membership {
+	if !module.Known {
+		for _, selected := range s.Modules {
+			if selected {
+				return MembershipUnknown
+			}
+		}
+		return MembershipOther
+	}
+	segments, ok := moduleSegments(module.Path)
+	if !ok {
+		return MembershipOther
+	}
+	if s.Modules[""] {
+		return MembershipSelected
+	}
+	for end := 2; end <= len(segments); end += 2 {
+		if s.Modules[strings.Join(segments[:end], ".")] {
+			return MembershipSelected
+		}
+	}
+	return MembershipOther
 }
 
 func combineMembership(a, b Membership) Membership {

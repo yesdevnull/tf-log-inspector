@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -10,6 +11,57 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+func TestResourceSelectionModuleMatchingAllocationsDoNotGrowWithSelectedSiblings(t *testing.T) {
+	selection := func(count int) ResourceSelection {
+		modules := make(map[string]bool, count)
+		for i := range count {
+			modules[fmt.Sprintf("module.group[%d]", i)] = true
+		}
+		return ResourceSelection{Modules: modules}
+	}
+	module := ResourceModule{Path: "module.unselected.module.child[0]", Known: true}
+	measure := func(selected ResourceSelection) float64 {
+		return testing.AllocsPerRun(10, func() {
+			if got := selected.Match("aws_instance.example", module); got != MembershipOther {
+				t.Fatalf("membership = %v, want %v", got, MembershipOther)
+			}
+		})
+	}
+
+	small := measure(selection(10))
+	large := measure(selection(1_000))
+	if large > small+4 {
+		t.Fatalf("allocations grew with selected siblings: 10 = %.0f, 1000 = %.0f", small, large)
+	}
+}
+
+func TestResourceSelectionMatchesBroadModulesWithExactPaths(t *testing.T) {
+	modules := make(map[string]bool, 1_000)
+	for i := range 1_000 {
+		modules[fmt.Sprintf("module.group[%d]", i)] = true
+	}
+	modules[`module.quoted["a.b"]`] = true
+	selection := ResourceSelection{Modules: modules}
+
+	for _, tc := range []struct {
+		name   string
+		module ResourceModule
+		want   Membership
+	}{
+		{"selected sibling", ResourceModule{Path: "module.group[999]", Known: true}, MembershipSelected},
+		{"selected quoted ancestor", ResourceModule{Path: `module.quoted["a.b"].module.child[0]`, Known: true}, MembershipSelected},
+		{"different quoted key", ResourceModule{Path: `module.quoted["a"].module.child[0]`, Known: true}, MembershipOther},
+		{"invalid known path", ResourceModule{Path: `module.quoted["open]`, Known: true}, MembershipOther},
+		{"unknown module", ResourceModule{}, MembershipUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selection.Match("aws_instance.example", tc.module); got != tc.want {
+				t.Fatalf("membership = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestResourceSelectionMembership(t *testing.T) {
 	root := ResourceModule{Known: true}
