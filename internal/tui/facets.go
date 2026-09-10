@@ -65,7 +65,9 @@ func levelFacet(entries []logfmt.Entry) model.Facet {
 
 // resourceFacets builds whole-log choices from the cached resource index.
 // Counts are distinct resource addresses: one for an exact address and the
-// number of known addresses contained by a module subtree.
+// number of known addresses contained by a module subtree. A module's parent
+// is the nearest known structural ancestor, found independently of the
+// modules' lexical order.
 func resourceFacets(index model.ResourceIndex) []model.Facet {
 	resources := model.Facet{Name: dimResource, Values: make([]model.FacetValue, len(index.Choices))}
 	exactModuleCounts := make(map[string]int, len(index.Modules))
@@ -78,17 +80,29 @@ func resourceFacets(index model.ResourceIndex) []model.Facet {
 
 	parents := make([]int, len(index.Modules))
 	counts := make([]int, len(index.Modules))
-	stack := make([]int, 0, len(index.Modules))
+	moduleIndices := make(map[string]int, len(index.Modules))
+	for i, module := range index.Modules {
+		moduleIndices[module] = i
+	}
 	for i, module := range index.Modules {
 		parents[i] = -1
 		counts[i] = exactModuleCounts[module]
-		for len(stack) > 0 && !model.ModuleContains(index.Modules[stack[len(stack)-1]], module) {
-			stack = stack[:len(stack)-1]
+		for candidate := module; candidate != ""; {
+			dot := strings.LastIndex(candidate, ".")
+			if dot < 0 {
+				break
+			}
+			candidate = candidate[:dot]
+			if parent, ok := moduleIndices[candidate]; ok && model.ModuleContains(candidate, module) {
+				parents[i] = parent
+				break
+			}
 		}
-		if len(stack) > 0 {
-			parents[i] = stack[len(stack)-1]
+		if parents[i] < 0 && module != "" {
+			if root, ok := moduleIndices[""]; ok {
+				parents[i] = root
+			}
 		}
-		stack = append(stack, i)
 	}
 	for i := len(index.Modules) - 1; i >= 0; i-- {
 		if parents[i] >= 0 {
@@ -421,14 +435,23 @@ func (m *Model) clearFilters() {
 // facetFlatIndex converts the facet cursor's (dim, val) coordinate into a
 // single index over every dimension's values laid end to end, so
 // moveFacetCursor can move it with simple arithmetic rather than a
-// dimension-boundary switch in every direction.
+// dimension-boundary switch in every direction. An empty narrowed dimension
+// is an insertion point between the visible values before and after it.
 func (m Model) facetFlatIndex() int {
 	for i, cursor := range m.visibleFacetCursors() {
 		if cursor == m.facetCursor {
 			return i
 		}
 	}
-	return 0
+	return m.visibleFacetCountBefore(m.facetCursor.dim)
+}
+
+func (m Model) visibleFacetCountBefore(dim int) int {
+	count := 0
+	for d := 0; d < dim && d < len(m.facets); d++ {
+		count += len(m.visibleFacetIndices(m.facets[d].Name))
+	}
+	return count
 }
 
 func (m Model) visibleFacetCursors() []facetCursor {
@@ -442,8 +465,10 @@ func (m Model) visibleFacetCursors() []facetCursor {
 }
 
 // moveFacetCursor shifts the facet pane's cursor by delta through every
-// dimension's values in display order, clamped to stay within them. A log
-// with no facet values at all leaves the cursor untouched.
+// dimension's values in display order, clamped to stay within them. An empty
+// narrowed dimension acts as an insertion point: down selects the next
+// visible value and up selects the previous one. A log with no facet values
+// at all leaves the cursor untouched.
 func (m *Model) moveFacetCursor(delta int) {
 	cursors := m.visibleFacetCursors()
 	total := len(cursors)
@@ -451,6 +476,9 @@ func (m *Model) moveFacetCursor(delta int) {
 		return
 	}
 	idx := m.facetFlatIndex() + delta
+	if m.facetCursor.val < 0 && delta > 0 {
+		idx--
+	}
 	if idx < 0 {
 		idx = 0
 	}
@@ -519,6 +547,9 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			headerIdx = len(lines)
 		}
 		lines = append(lines, styles.title.Render(clipWidth(m.facetHeading(f.Name), w)))
+		if dimIdx == m.facetCursor.dim && m.facetCursor.val < 0 {
+			cursor = headerIdx
+		}
 		kind := facetValueKind(f.Name)
 		for _, valIdx := range m.visibleFacetIndices(f.Name) {
 			v := f.Values[valIdx]

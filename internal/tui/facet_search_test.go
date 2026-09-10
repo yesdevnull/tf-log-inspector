@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -110,6 +111,20 @@ func TestModuleFacetCountsDistinctAddressesInStructuralSubtrees(t *testing.T) {
 	}
 	if displayFacetValue(dimModule, "") != "(root subtree)" {
 		t.Fatalf("root display label = %q", displayFacetValue(dimModule, ""))
+	}
+}
+
+func TestModuleFacetCountsSurviveLexicalSiblingBetweenParentAndChild(t *testing.T) {
+	m := New(&model.Log{UISpans: []span.Span{
+		{Address: "module.a.module.child.aws_instance.x"},
+		{Address: "module.a-b.aws_instance.y"},
+	}}, "synthetic.log")
+	got := map[string]int{}
+	for _, value := range m.facetValues(dimModule) {
+		got[value.Value] = value.Count
+	}
+	if got[""] != 2 || got["module.a"] != 1 || got["module.a-b"] != 1 || got["module.a.module.child"] != 1 {
+		t.Fatalf("module counts across lexical sibling = %v", got)
 	}
 }
 
@@ -225,6 +240,38 @@ func TestFacetSearchRetainedQueryRemainsVisibleAndNamesItsEscapeAction(t *testin
 	}
 	if got := m.actionKeys(100); !strings.Contains(got, "Esc query") {
 		t.Fatalf("active chooser query has no specific Esc hint: %q", got)
+	}
+}
+
+func TestFacetSearchNoMatchKeepsDimensionAnchorForRenderingAndMovement(t *testing.T) {
+	rpcSpans := make([]span.Span, 20)
+	for i := range rpcSpans {
+		rpcSpans[i].ResourceType = fmt.Sprintf("type_%02d", i)
+	}
+	m := New(&model.Log{
+		RPCSpans: rpcSpans,
+		UISpans:  []span.Span{{Address: "aws_instance.only"}},
+	}, "synthetic.log")
+	setFacetCursor(t, &m, dimResource, "aws_instance.only")
+	m.pane = PaneFacets
+	m.facetSearch = facetSearchState{dimension: dimResource, query: "nomatch"}
+	m.clampFacetCursor()
+	if _, _, ok := m.cursorFacetValue(); ok {
+		t.Fatal("no-match resource dimension retained a selectable value")
+	}
+	if got := unstyled(m.renderFacets(60, 10)); !strings.Contains(got, "RESOURCES /nomatch") {
+		t.Fatalf("empty narrowed dimension lost its rendering anchor:\n%s", got)
+	}
+
+	m.moveFacetCursor(1)
+	if dim, value, ok := m.cursorFacetValue(); !ok || dim != dimModule || value != "" {
+		t.Fatalf("Down from empty resource dimension = %q/%q, ok %v; want root module", dim, value, ok)
+	}
+	setFacetCursor(t, &m, dimResource, "aws_instance.only")
+	m.clampFacetCursor()
+	m.moveFacetCursor(-1)
+	if dim, value, ok := m.cursorFacetValue(); !ok || dim != dimType || value != "type_19" {
+		t.Fatalf("Up from empty resource dimension = %q/%q, ok %v; want preceding resource type", dim, value, ok)
 	}
 }
 
