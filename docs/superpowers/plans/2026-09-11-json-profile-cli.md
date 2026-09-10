@@ -25,7 +25,7 @@
 
 ## Status and exact CLI decisions
 
-Dan authorised drafting G1/G2 on 11 September 2026. Proposed for approval; implement only after G1 passes its review/cleanup gates and Dan approves execution.
+Dan authorised drafting G1/G2 on 11 September 2026, then approved both plans and subagent execution. G1 passed review and cleanup before G2 started.
 
 ```text
 tfli --profile [--format text] [--limit N] [-o profile.txt] run.log
@@ -67,7 +67,7 @@ Consume G1's exact `profile.JSONMetadata{ToolVersion, InputBasename}` and `profi
 
 **Interfaces:** Produce profileOptions/runProfile above; consume F/G1 APIs. Existing `writeReport` remains the single owner of output descriptor identity, truncation and close-error handling.
 
-- [ ] **Step 1: Add failing CLI behaviour tests.** Start with this validation table; use a temp existing sentinel output for each case and verify no modification, stdout or stderr:
+- [x] **Step 1: Add failing CLI behaviour tests.** Start with this validation table; use a temp existing sentinel output for each case and verify no modification, stdout or stderr:
 
 ```go
 func TestProfileFormatValidationPrecedesFileAccess(t *testing.T) {
@@ -98,8 +98,8 @@ Add one positive real `run` invocation of `--profile --format json` decoded with
 
 Cover uppercase/unknown/control-bearing format values, help/version with format flags, repeated format flags (last value wins; explicit presence retained), explicit repeated limit ending at default, and negative/malformed/overflow limits. Capture parser diagnostics using existing test conventions; no raw ESC/control injection or extra successful JSON output. Do not reimplement stdlib flag parsing.
 
-- [ ] **Step 2: Run RED.** `go test ./cmd/tfli -run 'Test.*(Format|JSON)' -count=1`. Confirm absent flag/dispatch/validation failures; API compilation failures alone are insufficient.
-- [ ] **Step 3: Implement the small dispatch change.** Register and visit the new flag, then apply the checks:
+- [x] **Step 2: Run RED.** `go test ./cmd/tfli -run 'Test.*(Format|JSON)' -count=1`. Confirm absent flag/dispatch/validation failures; API compilation failures alone are insufficient.
+- [x] **Step 3: Implement the small dispatch change.** Register and visit the new flag, then apply the checks:
 
 ```go
 format := fs.String("format", "text", "profile output format: text or json (--profile only)")
@@ -127,8 +127,8 @@ return writeReport(stdout, path, outPath, func(w io.Writer) error {
 
 Only validated CLI values reach runProfile; migrated direct tests explicitly supply `Format: "text"` or `"json"`. Do not duplicate output-file logic. G1 marshals fully before writing, but unrelated existing output files still follow writeReport's established truncation policy on render failure; no new atomic replacement promise.
 
-- [ ] **Step 4: Verify and review.** `go test ./cmd/tfli ./internal/profile -count=1`, then full suite. Independent review checks every explicit-presence combination and ordering before file access; separate cleanup retains error/sentinel coverage.
-- [ ] **Step 5: Commit.** Signed commit `Expose complete JSON profile output`; record RED/GREEN and review evidence.
+- [x] **Step 4: Verify and review.** `go test ./cmd/tfli ./internal/profile -count=1`, then full suite. Independent review checks every explicit-presence combination and ordering before file access; separate cleanup retains error/sentinel coverage.
+- [x] **Step 5: Commit.** Signed commit `Expose complete JSON profile output`; record RED/GREEN and review evidence.
 
 ## Task 2: Lock down file output and document the JSON contract
 
@@ -180,3 +180,14 @@ Explicit default-valued flags are tracked by presence. The plans share exact
 encoding failure is not misrepresented as atomic file replacement. Comparison
 and JSON imports remain outside G. Documentation checks do not establish passing
 application tests; implementation and independent reviews are future work.
+
+## Execution record
+
+Task 1 completed in signed commit `fd9c261`, following behavioural flag/dispatch
+RED and focused GREEN. Independent spec/quality review approved with no findings.
+Separate cleanup retained all twenty behavioural cases across six tests, with
+94.7% CLI package coverage and no concerns. Full/race tests, build and vet pass.
+Manual compiled-command checks decoded RPC/UI/mixed/no-duration/saturated/partial
+JSON and confirmed reconstruction remains not checked. The mixed-tier default
+text output is byte-identical to the pre-G binary. Broader file-output tests and
+README work remain in task 2.
