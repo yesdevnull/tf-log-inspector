@@ -55,6 +55,22 @@ func TestComparisonSignedRanking(t *testing.T) {
 	}
 }
 
+func TestComparisonEqualExactDeltasUseRawKeyOrder(t *testing.T) {
+	rows := []ComparisonRow{
+		comparisonRankedRow("b", SignedChange{Magnitude: 7}),
+		comparisonRankedRow("a", SignedChange{Magnitude: 7}),
+		comparisonRankedRow("d", SignedChange{Negative: true, Magnitude: 7}),
+		comparisonRankedRow("c", SignedChange{Negative: true, Magnitude: 7}),
+	}
+	sortComparisonRows(rows)
+	want := []string{"a", "b", "c", "d"}
+	for index, name := range want {
+		if rows[index].Key.Provider != name {
+			t.Fatalf("row %d = %q, want %q", index, rows[index].Key.Provider, name)
+		}
+	}
+}
+
 func comparisonRankedRow(name string, change SignedChange) ComparisonRow {
 	return ComparisonRow{Key: ComparisonKey{Provider: name}, Changes: ComparisonChanges{TotalMs: &change}}
 }

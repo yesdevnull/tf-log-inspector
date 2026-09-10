@@ -37,6 +37,16 @@ func TestCompareSeparatesVolumeAndMean(t *testing.T) {
 	if row.Changes.MeanMs == nil || *row.Changes.MeanMs != 10 {
 		t.Fatalf("mean: %+v", row.Changes.MeanMs)
 	}
+	assertComparisonChanges(t, row.Changes, ComparisonChanges{
+		Count:        changePointer(SignedChange{Negative: true, Magnitude: 1}),
+		TotalMs:      changePointer(SignedChange{}),
+		MaxMs:        changePointer(SignedChange{Magnitude: 10}),
+		MeanMs:       float64Pointer(10),
+		CountPercent: float64Pointer(-50),
+		TotalPercent: float64Pointer(0),
+		MeanPercent:  float64Pointer(100),
+		MaxPercent:   float64Pointer(100),
+	})
 }
 
 func TestComparisonAvailabilityPresenceAndPercentages(t *testing.T) {
@@ -61,20 +71,32 @@ func TestComparisonAvailabilityPresenceAndPercentages(t *testing.T) {
 		byKey[row.Key.ResourceType] = row
 	}
 	same := byKey["same"]
-	if same.State != "matched" || same.Changes.TotalMs == nil || same.Changes.TotalMs.Magnitude != 10 ||
-		same.Changes.TotalPercent != nil || same.Changes.MeanPercent != nil || same.Changes.MaxPercent != nil {
+	if same.State != "matched" {
 		t.Fatalf("zero baseline row: %+v", same)
 	}
+	assertComparisonChanges(t, same.Changes, ComparisonChanges{
+		Count: changePointer(SignedChange{}), TotalMs: changePointer(SignedChange{Magnitude: 10}),
+		MaxMs: changePointer(SignedChange{Magnitude: 10}), MeanMs: float64Pointer(10),
+		CountPercent: float64Pointer(0),
+	})
 	added := byKey["added"]
-	if added.State != "added" || added.Before.Count != 0 || added.Before.MeanMs != nil || added.Before.MaxMs != nil ||
-		added.Changes.Count == nil || added.Changes.Count.Magnitude != 1 || added.Changes.TotalMs.Magnitude != 7 {
+	if added.State != "added" || added.Before.Count != 0 || added.Before.TotalMs != 0 ||
+		added.Before.MeanMs != nil || added.Before.MaxMs != nil {
 		t.Fatalf("added row: %+v", added)
 	}
+	assertComparisonChanges(t, added.Changes, ComparisonChanges{
+		Count: changePointer(SignedChange{Magnitude: 1}), TotalMs: changePointer(SignedChange{Magnitude: 7}),
+	})
 	removed := byKey["removed"]
-	if removed.State != "removed" || removed.After.Count != 0 || removed.After.MeanMs != nil || removed.After.MaxMs != nil ||
-		removed.Changes.TotalMs == nil || !removed.Changes.TotalMs.Negative || removed.Changes.TotalMs.Magnitude != 5 {
+	if removed.State != "removed" || removed.After.Count != 0 || removed.After.TotalMs != 0 ||
+		removed.After.MeanMs != nil || removed.After.MaxMs != nil {
 		t.Fatalf("removed row: %+v", removed)
 	}
+	assertComparisonChanges(t, removed.Changes, ComparisonChanges{
+		Count:        changePointer(SignedChange{Negative: true, Magnitude: 1}),
+		TotalMs:      changePointer(SignedChange{Negative: true, Magnitude: 5}),
+		CountPercent: float64Pointer(-100), TotalPercent: float64Pointer(-100),
+	})
 }
 
 func TestComparisonUnavailableTiers(t *testing.T) {
@@ -88,12 +110,180 @@ func TestComparisonUnavailableTiers(t *testing.T) {
 	}
 	row := got.Sections[0].Rows[0]
 	if row.State != "unavailable" || row.Before != nil || row.After == nil || row.After.MeanMs == nil ||
-		row.Changes.Count != nil {
+		row.After.Count != 1 || row.After.TotalMs != 0 || row.After.MaxMs == nil || *row.After.MaxMs != 0 {
 		t.Fatalf("unavailable row: %+v", row)
 	}
+	assertComparisonChanges(t, row.Changes, ComparisonChanges{})
 	if got.Sections[3].BeforeAvailable || got.Sections[3].AfterAvailable || len(got.Sections[3].Rows) != 0 {
 		t.Fatalf("disjoint UI tier: %+v", got.Sections[3])
 	}
+}
+
+func TestComparisonIdenticalRowHasDefinedZeroChanges(t *testing.T) {
+	input := ComparisonInput{RPC: []span.Span{{Provider: "p", DurationMs: 10}}}
+	got, err := Compare(input, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertComparisonChanges(t, got.Sections[0].Rows[0].Changes, ComparisonChanges{
+		Count: changePointer(SignedChange{}), TotalMs: changePointer(SignedChange{}),
+		MaxMs: changePointer(SignedChange{}), MeanMs: float64Pointer(0),
+		CountPercent: float64Pointer(0), TotalPercent: float64Pointer(0),
+		MeanPercent: float64Pointer(0), MaxPercent: float64Pointer(0),
+	})
+}
+
+func TestComparisonChangeFieldsByRowState(t *testing.T) {
+	tests := []struct {
+		name   string
+		before ComparisonInput
+		after  ComparisonInput
+		key    string
+		state  string
+		want   ComparisonChanges
+	}{
+		{
+			name:   "identical",
+			before: ComparisonInput{RPC: []span.Span{{ResourceType: "target", DurationMs: 10}}},
+			after:  ComparisonInput{RPC: []span.Span{{ResourceType: "target", DurationMs: 10}}},
+			key:    "target", state: "matched",
+			want: ComparisonChanges{
+				Count: changePointer(SignedChange{}), TotalMs: changePointer(SignedChange{}),
+				MaxMs: changePointer(SignedChange{}), MeanMs: float64Pointer(0),
+				CountPercent: float64Pointer(0), TotalPercent: float64Pointer(0),
+				MeanPercent: float64Pointer(0), MaxPercent: float64Pointer(0),
+			},
+		},
+		{
+			name: "matched",
+			before: ComparisonInput{RPC: []span.Span{
+				{ResourceType: "target", DurationMs: 10}, {ResourceType: "target", DurationMs: 10},
+			}},
+			after: ComparisonInput{RPC: []span.Span{{ResourceType: "target", DurationMs: 20}}},
+			key:   "target", state: "matched",
+			want: ComparisonChanges{
+				Count:   changePointer(SignedChange{Negative: true, Magnitude: 1}),
+				TotalMs: changePointer(SignedChange{}), MaxMs: changePointer(SignedChange{Magnitude: 10}),
+				MeanMs: float64Pointer(10), CountPercent: float64Pointer(-50),
+				TotalPercent: float64Pointer(0), MeanPercent: float64Pointer(100),
+				MaxPercent: float64Pointer(100),
+			},
+		},
+		{
+			name:   "added",
+			before: ComparisonInput{RPC: []span.Span{{ResourceType: "sentinel", DurationMs: 1}}},
+			after: ComparisonInput{RPC: []span.Span{
+				{ResourceType: "sentinel", DurationMs: 1}, {ResourceType: "target", DurationMs: 7},
+			}},
+			key: "target", state: "added",
+			want: ComparisonChanges{
+				Count:   changePointer(SignedChange{Magnitude: 1}),
+				TotalMs: changePointer(SignedChange{Magnitude: 7}),
+			},
+		},
+		{
+			name: "removed",
+			before: ComparisonInput{RPC: []span.Span{
+				{ResourceType: "sentinel", DurationMs: 1}, {ResourceType: "target", DurationMs: 5},
+			}},
+			after: ComparisonInput{RPC: []span.Span{{ResourceType: "sentinel", DurationMs: 1}}},
+			key:   "target", state: "removed",
+			want: ComparisonChanges{
+				Count:        changePointer(SignedChange{Negative: true, Magnitude: 1}),
+				TotalMs:      changePointer(SignedChange{Negative: true, Magnitude: 5}),
+				CountPercent: float64Pointer(-100), TotalPercent: float64Pointer(-100),
+			},
+		},
+		{
+			name:   "unavailable",
+			before: ComparisonInput{},
+			after:  ComparisonInput{RPC: []span.Span{{ResourceType: "target", DurationMs: 5}}},
+			key:    "target", state: "unavailable",
+			want: ComparisonChanges{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := Compare(test.before, test.after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var row *ComparisonRow
+			for index := range got.Sections[1].Rows {
+				if got.Sections[1].Rows[index].Key.ResourceType == test.key {
+					row = &got.Sections[1].Rows[index]
+					break
+				}
+			}
+			if row == nil || row.State != test.state {
+				t.Fatalf("row for %q: %+v", test.key, row)
+			}
+			assertComparisonChanges(t, row.Changes, test.want)
+		})
+	}
+}
+
+func TestComparisonEmptyInputs(t *testing.T) {
+	got, err := Compare(ComparisonInput{}, ComparisonInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Sections) != 5 || got.BeforeUnnamedUI != nil || got.AfterUnnamedUI != nil ||
+		got.ProviderIdentityStatus != "unknown" || len(got.BeforeProviders) != 0 || len(got.AfterProviders) != 0 {
+		t.Fatalf("comparison: %+v", got)
+	}
+	for _, section := range got.Sections {
+		if section.BeforeAvailable || section.AfterAvailable || len(section.Rows) != 0 {
+			t.Fatalf("section: %+v", section)
+		}
+	}
+}
+
+func TestComparisonCrossedTierAvailability(t *testing.T) {
+	got, err := Compare(
+		ComparisonInput{RPC: []span.Span{{Provider: "p", DurationMs: 2}}},
+		ComparisonInput{UI: []span.Span{{Address: "a", ResourceType: "r", RPC: "read", DurationMs: 3}}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := got.Sections[0]
+	if !rpc.BeforeAvailable || rpc.AfterAvailable || len(rpc.Rows) != 1 ||
+		rpc.Rows[0].Before == nil || rpc.Rows[0].After != nil || rpc.Rows[0].State != "unavailable" {
+		t.Fatalf("RPC section: %+v", rpc)
+	}
+	assertComparisonChanges(t, rpc.Rows[0].Changes, ComparisonChanges{})
+	ui := got.Sections[4]
+	if ui.BeforeAvailable || !ui.AfterAvailable || len(ui.Rows) != 1 ||
+		ui.Rows[0].Before != nil || ui.Rows[0].After == nil || ui.Rows[0].State != "unavailable" {
+		t.Fatalf("UI section: %+v", ui)
+	}
+	assertComparisonChanges(t, ui.Rows[0].Changes, ComparisonChanges{})
+}
+
+func TestComparisonUIOnlyKnownAddressWithEmptyAction(t *testing.T) {
+	input := ComparisonInput{UI: []span.Span{{Address: "resource.a", ResourceType: "resource", RPC: "", DurationMs: 4}}}
+	got, err := Compare(input, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		if got.Sections[index].BeforeAvailable || got.Sections[index].AfterAvailable || len(got.Sections[index].Rows) != 0 {
+			t.Fatalf("RPC section %d: %+v", index, got.Sections[index])
+		}
+	}
+	operations := got.Sections[4]
+	if !operations.BeforeAvailable || !operations.AfterAvailable || len(operations.Rows) != 1 ||
+		operations.Rows[0].Key.Address != "resource.a" || operations.Rows[0].Key.Action != "" ||
+		operations.Rows[0].State != "matched" {
+		t.Fatalf("operations: %+v", operations)
+	}
+	assertComparisonChanges(t, operations.Rows[0].Changes, ComparisonChanges{
+		Count: changePointer(SignedChange{}), TotalMs: changePointer(SignedChange{}),
+		MaxMs: changePointer(SignedChange{}), MeanMs: float64Pointer(0),
+		CountPercent: float64Pointer(0), TotalPercent: float64Pointer(0),
+		MeanPercent: float64Pointer(0), MaxPercent: float64Pointer(0),
+	})
 }
 
 func TestComparisonUIGroupingAndUnnamedAccounting(t *testing.T) {
@@ -274,4 +464,15 @@ func TestComparisonIncludesUnpositionedDurations(t *testing.T) {
 	if row.Before.TotalMs != math.MaxUint32 || row.Before.MaxMs == nil || *row.Before.MaxMs != math.MaxUint32 {
 		t.Fatalf("unpositioned duration: %+v", row.Before)
 	}
+}
+
+func assertComparisonChanges(t *testing.T, got, want ComparisonChanges) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changes = %+v, want %+v", got, want)
+	}
+}
+
+func changePointer(value SignedChange) *SignedChange {
+	return &value
 }
