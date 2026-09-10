@@ -99,3 +99,38 @@ func TestResourceEvidenceDistinguishesUnavailableFromMeasuredZero(t *testing.T) 
 		t.Fatalf("empty evidence did not explain unavailable denominator:\n%s", got)
 	}
 }
+
+func TestResourceEvidenceMakesSelectedResourceDetailReachable(t *testing.T) {
+	address := "module.app.aws_instance.accounting"
+	l := &model.Log{UISpans: []span.Span{{
+		Address: address, ResourceType: "aws_instance", DurationMs: 1000,
+		DurationSaturated: true, TimestampStatus: logfmt.TimestampMissing,
+	}}}
+	m := New(l, "synthetic.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	got := unstyled(m.View())
+	for _, want := range []string{"SELECTED RESOURCE ROW", address, "operations: 1", "lower bound", "position unavailable"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("60-column evidence missing %q:\n%s", want, got)
+		}
+	}
+
+	longAddress := "module." + strings.Repeat("long_key.", 12) + "aws_instance.accounting"
+	m = New(&model.Log{UISpans: []span.Span{{Address: longAddress, ResourceType: "aws_instance"}}}, "synthetic.log")
+	m.setView(ViewResources)
+	m.openResourceEvidence()
+	if content := m.resourceEvidenceText(); !strings.Contains(content, longAddress) {
+		t.Fatal("long selected address is absent from the scrollable evidence content")
+	}
+}
+
+func TestResourceEvidenceLabelsSelectedRootModule(t *testing.T) {
+	m := New(&model.Log{}, "empty.log")
+	m.resourceSelection.Modules = map[string]bool{"": true}
+	got := m.resourceEvidenceText()
+	if !strings.Contains(got, "module subtrees: (root subtree)") {
+		t.Fatalf("root module evidence =\n%s", got)
+	}
+}

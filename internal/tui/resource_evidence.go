@@ -59,13 +59,36 @@ func (m *Model) renderResourceEvidence(w, h int) string {
 func (m *Model) resourceEvidenceText() string {
 	p := m.selectedResources()
 	var b strings.Builder
+	if r := m.selectedResourceRow(); r != nil {
+		b.WriteString("SELECTED RESOURCE ROW (separate from baseline scope)\n")
+		fmt.Fprintf(&b, "  address: %s\n", logfmt.DisplayText(r.Address))
+		fmt.Fprintf(&b, "  operations: %d\n", r.UI.Count)
+		fmt.Fprintf(&b, "  observed UI total: %s\n", durationTotalText(r.UI))
+		fmt.Fprintf(&b, "  observed UI max: %s\n", durationMaxText(r.UI))
+		fmt.Fprintf(&b, "  inferred Contained/Likely RPCs: %d, %s\n", r.NamedRPC.Count, durationTotalText(r.NamedRPC))
+		fmt.Fprintf(&b, "  inferred Overlapping RPCs: %d, %s\n", r.OverlappingRPC.Count, durationTotalText(r.OverlappingRPC))
+		b.WriteString("  UI timings are rounded to whole seconds, +/- 1s each.\n")
+		if r.UI.LowerBound {
+			b.WriteString("  Observed UI total and max are lower bounds (≥).\n")
+		}
+		unpositioned := 0
+		for _, op := range r.Operations {
+			if !m.log.UISpans[op.UIIndex].HasPosition() {
+				unpositioned++
+			}
+		}
+		if unpositioned > 0 {
+			fmt.Fprintf(&b, "  Timeline position unavailable for %d of %d observed operations.\n", unpositioned, len(r.Operations))
+		}
+		b.WriteByte('\n')
+	}
 	b.WriteString("BASELINE FILTERS\n")
 	f := m.filter()
 	fmt.Fprintf(&b, "  providers (RPC only): %s\n", selectedValues(f.Providers))
 	fmt.Fprintf(&b, "  resource types (RPC and UI): %s\n", selectedValues(f.Types))
 	fmt.Fprintf(&b, "  RPC methods (RPC only): %s\n", selectedValues(f.RPCs))
 	fmt.Fprintf(&b, "  exact addresses: %s\n", selectedValues(m.resourceSelection.Addresses))
-	fmt.Fprintf(&b, "  module subtrees: %s\n", selectedValues(m.resourceSelection.Modules))
+	fmt.Fprintf(&b, "  module subtrees: %s\n", selectedModuleValues(m.resourceSelection.Modules))
 
 	b.WriteString("\nSELECTED RPC PARTITION\n")
 	writeEvidenceTotal(&b, "baseline", p.Selection.Baseline)
@@ -95,7 +118,31 @@ func (m *Model) resourceEvidenceText() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+func (m *Model) selectedResourceRow() *model.ResourceRow {
+	if m.view != ViewResources {
+		return nil
+	}
+	rows := m.rows()
+	if m.selected < 0 || m.selected >= len(rows) {
+		return nil
+	}
+	return rows[m.selected].resource
+}
+
 func selectedValues(values map[string]bool) string {
+	return selectedDisplayValues(values, logfmt.DisplayText)
+}
+
+func selectedModuleValues(values map[string]bool) string {
+	return selectedDisplayValues(values, func(value string) string {
+		if value == "" {
+			return "(root subtree)"
+		}
+		return logfmt.DisplayText(value)
+	})
+}
+
+func selectedDisplayValues(values map[string]bool, display func(string) string) string {
 	if values == nil {
 		return "all"
 	}
@@ -110,7 +157,7 @@ func selectedValues(values map[string]bool) string {
 	}
 	sort.Strings(selected)
 	for i := range selected {
-		selected[i] = logfmt.DisplayText(selected[i])
+		selected[i] = display(selected[i])
 	}
 	return strings.Join(selected, ", ")
 }

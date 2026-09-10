@@ -109,8 +109,8 @@ func TestResourcesDistinguishUnnamedRejectedAndFilteredEmpty(t *testing.T) {
 		prep func(*Model)
 		want string
 	}{
-		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, nil, "ungrouped because no exact address"},
-		{"rejected", &model.Log{UIEvidence: span.TimingEvidence{Records: 1, Rejected: map[string]span.IssueCount{"duration_missing": {Count: 1}}}}, nil, "structured completion records were rejected"},
+		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, nil, "no exact address: observed UI operations are ungrouped"},
+		{"rejected", &model.Log{UIEvidence: span.TimingEvidence{Records: 1, Rejected: map[string]span.IssueCount{"duration_missing": {Count: 1}}}}, nil, "completion records were rejected"},
 		{"filtered", &model.Log{UISpans: []span.Span{{Address: "aws_instance.a", ResourceType: "aws_instance"}}}, func(m *Model) {
 			m.resourceSelection.Addresses = map[string]bool{"aws_instance.a": false}
 			m.invalidateRows()
@@ -158,5 +158,29 @@ func TestResourceDetailWrapsTheFullEscapedAddress(t *testing.T) {
 		if !strings.Contains(prose, want) {
 			t.Errorf("resource detail lost %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestResourcesShortEmptyFramePrioritisesExplanation(t *testing.T) {
+	tests := []struct {
+		name string
+		log  *model.Log
+		want []string
+	}{
+		{"rpc only", &model.Log{RPCSpans: []span.Span{{ResourceType: "aws_instance"}}}, []string{"no observed UI resource operations", "4 calls", "e evidence"}},
+		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, []string{"ungrouped", "exact address"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New(tt.log, "synthetic.log")
+			m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+			m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+			got := unstyled(m.View())
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("short Resources frame missing %q:\n%s", want, got)
+				}
+			}
+		})
 	}
 }

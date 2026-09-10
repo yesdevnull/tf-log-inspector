@@ -66,22 +66,39 @@ func (m *Model) renderResources(w, h int) string {
 	switch {
 	case len(p.Rows) > 0:
 	case p.UnnamedUI.Count > 0:
-		empty = "observed UI operations are ungrouped because no exact address was recorded"
+		empty = "no exact address: observed UI operations are ungrouped."
 	case len(m.log.UISpans) == 0 && m.log.UIEvidence.Records > 0:
-		empty = "observed UI resource timing unavailable; structured completion records were rejected"
+		empty = "observed UI timing unavailable: completion records were rejected."
 	case len(m.log.UISpans) == 0 && len(m.log.RPCSpans) > 0:
-		empty = "no observed UI resource operations; use 4 calls, 2 types, i quality, or e evidence"
+		empty = "no observed UI resource operations.\nUse 4 calls, 2 types, i quality, or e evidence."
 	case m.filterActive():
 		empty = noMatchNote
 	default:
-		empty = "no observed UI resource operations"
+		empty = "no observed UI resource operations."
 	}
 	rows := m.rows()
+	if len(rows) == 0 {
+		return renderResourceEmpty(empty, w, h)
+	}
 	if len(rows) > 0 && len(preamble) > max(0, h-2) {
 		preamble = preamble[:max(0, h-2)]
 	}
 	cols, rows := visibleResourceColumns(resourceColumns, rows, w)
 	return renderTable(preamble, cols, m.sortCol[ViewResources], rows, empty, m.selected, m.pane == PaneList, w, h)
+}
+
+func renderResourceEmpty(message string, w, h int) string {
+	var lines []string
+	for _, paragraph := range strings.Split(message, "\n") {
+		lines = append(lines, wrapToWidth(paragraph, w)...)
+	}
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	for i := range lines {
+		lines[i] = styles.note.Render(lines[i])
+	}
+	return strings.Join(lines, "\n")
 }
 
 // visibleResourceColumns keeps the observed identity and measurements usable
