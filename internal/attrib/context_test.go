@@ -281,6 +281,23 @@ func TestKeyDecodesToValidAddressBracketSyntaxForBothJSONKinds(t *testing.T) {
 	}
 }
 
+func TestResourceKeyRejectsUnsupportedJSONShapesAsOneSchemaError(t *testing.T) {
+	for _, resourceKey := range []string{"true", "[]", "{}"} {
+		t.Run(resourceKey, func(t *testing.T) {
+			lines := fmt.Sprintf(`{"@level":"info","@timestamp":"2026-09-10T00:00:00Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.a","resource":"aws_instance.a","resource_type":"aws_instance","resource_name":"a","resource_key":%s},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-10T00:00:01Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.b","resource":"aws_instance.b","resource_type":7,"resource_name":"b","resource_key":%s},"action":"create"}}
+`, resourceKey, resourceKey)
+			c, contexts := collectLines(t, lines)
+			if len(contexts) != 0 {
+				t.Errorf("contexts = %+v, want none for resource_key %s", contexts, resourceKey)
+			}
+			if got, want := c.Evidence().SchemaErrors, (span.IssueCount{Count: 2, FirstEntry: 0}); got != want {
+				t.Errorf("SchemaErrors = %+v, want %+v for resource_key %s and a second bad field", got, want, resourceKey)
+			}
+		})
+	}
+}
+
 func TestUnclosedContextEndsAtLastTimestamp(t *testing.T) {
 	_, ctxs := collect(t, "testdata/context.log")
 	// Find the second orphan context, opened at 09:15:12 and never closed.

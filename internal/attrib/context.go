@@ -326,8 +326,25 @@ func parseContextHook(raw json.RawMessage) (*ctxHook, bool) {
 			schema = true
 		}
 	}
-	hook.Resource.ResourceKey = resourceFields["resource_key"]
+	resourceKey := resourceFields["resource_key"]
+	if validResourceKey(resourceKey) {
+		hook.Resource.ResourceKey = resourceKey
+	} else {
+		schema = true
+	}
 	return hook, schema
+}
+
+func validResourceKey(raw json.RawMessage) bool {
+	value := bytes.TrimSpace(raw)
+	if len(value) == 0 || bytes.Equal(value, []byte("null")) {
+		return true
+	}
+	if value[0] == '"' {
+		var decoded string
+		return json.Unmarshal(value, &decoded) == nil
+	}
+	return value[0] == '-' || value[0] >= '0' && value[0] <= '9'
 }
 
 // decodeKey renders hook.resource.resource_key, which may be null, a JSON
