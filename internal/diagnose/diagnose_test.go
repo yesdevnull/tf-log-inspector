@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,17 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestCaptureQualitySummaryPreservesWriterErrors(t *testing.T) {
+	want := errors.New("writer failed")
+	if err := (Report{}).Render(failingWriter{err: want}); !errors.Is(err, want) {
+		t.Fatalf("Render error = %v, want %v", err, want)
+	}
+}
 
 // fixture mirrors internal/model/log_test.go's helper of the same name --
 // this package has its own testdata-relative path from its own directory,
@@ -35,7 +47,8 @@ func build(t *testing.T, in string) Report {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	return Build(st, sn.Report(), b.Spans(), ui.Spans(), b.Evidence(), ui.Evidence(),
+	quality := qualityFromScan(st, sn.Report(), &b, &ui, &cc, &comps, &reqIDs)
+	return Build(st, sn.Report(), b.Spans(), ui.Spans(), quality,
 		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
 		c, &comps, 5*time.Millisecond)
 }
@@ -74,10 +87,30 @@ func renderFixture(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	r := Build(st, sn.Report(), b.Spans(), ui.Spans(), b.Evidence(), ui.Evidence(),
+	quality := qualityFromScan(st, sn.Report(), &b, &ui, &cc, &comps, &reqIDs)
+	r := Build(st, sn.Report(), b.Spans(), ui.Spans(), quality,
 		ui.Malformed(), ui.BackwardsTimestamps(), ui.Saturated(), &cc,
 		c, &comps, 5*time.Millisecond)
 	return render(t, r)
+}
+
+func qualityFromScan(st logfmt.Stats, caps span.Capabilities, b *span.ReportedBuilder, ui *span.UIHookBuilder, cc *attrib.ContextCollector, comps, reqIDs *logfmt.Interner) model.CaptureQuality {
+	rpcSpans := b.Spans()
+	contexts := cc.Contexts()
+	var attributions []attrib.Attribution
+	if len(contexts) > 0 {
+		attributions = attrib.Correlate(rpcSpans, st.FirstTS, contexts)
+	}
+	var uiOrigin time.Time
+	if origin, ok := ui.Origin(); ok {
+		uiOrigin = origin
+	}
+	return model.BuildCaptureQuality(model.CaptureQualityInput{
+		Stats: st, Caps: caps, RPCSpans: rpcSpans, UISpans: ui.Spans(),
+		RPCEvidence: b.Evidence(), UIEvidence: ui.Evidence(), UIOrigin: uiOrigin,
+		Contexts: contexts, ContextEvidence: cc.Evidence(), Attributions: attributions,
+		ComponentOverflow: comps.Overflowed(), RequestIDOverflow: reqIDs.Overflowed(),
+	})
 }
 
 // Amendment 1 requires api_token to recur across entries before its key is
@@ -159,8 +192,8 @@ func TestReportRecordsTierAndSpans(t *testing.T) {
 	if r.SlowestMs != 5000 {
 		t.Errorf("SlowestMs = %d, want 5000", r.SlowestMs)
 	}
-	if r.TotalSpanMs != 5000 {
-		t.Errorf("TotalSpanMs = %d, want 5000", r.TotalSpanMs)
+	if r.Quality.RPC.DurationMs != 5000 {
+		t.Errorf("Quality.RPC.DurationMs = %d, want 5000", r.Quality.RPC.DurationMs)
 	}
 }
 
@@ -551,13 +584,14 @@ func TestReportDistinctCompsCountsAGenuineNoneComponent(t *testing.T) {
 	}
 }
 
-// --- Final fix wave, Fix 6: total span time is labelled as a sum that can overlap. ---
-
-func TestReportLabelsTotalSpanTimeAsSumWithOverlaps(t *testing.T) {
+func TestReportUsesCaptureQualityForAdmittedDuration(t *testing.T) {
 	in := `2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=5000` + "\n"
 	out := render(t, build(t, in))
-	if !strings.Contains(out, "total span time (sum, overlaps)") {
-		t.Errorf("report does not caveat total span time as a sum that can overlap:\n%s", out)
+	if !strings.Contains(out, "admitted 1, rejected 0; duration 5.0s") || !strings.Contains(out, "RPC positioning        1 observations, 5.0s") {
+		t.Errorf("report does not show the admitted capture duration:\n%s", out)
+	}
+	if strings.Contains(out, "total span time") {
+		t.Errorf("report duplicates capture duration in SPANS:\n%s", out)
 	}
 }
 
@@ -806,8 +840,8 @@ func TestReportWallClockUnavailableWhenNeitherSourceExists(t *testing.T) {
 func TestReportWallClockUnavailableWhenUIDurationHasNoParsedTimestamp(t *testing.T) {
 	const in = `{"@level":"info","@timestamp":"bad","type":"apply_complete","hook":{"elapsed_seconds":1}}`
 	r := build(t, in+"\n")
-	if r.UISpanCount != 1 || r.UITotalSpanMs != 1000 {
-		t.Fatalf("UI timing = %d spans/%dms, want one admitted 1000ms duration", r.UISpanCount, r.UITotalSpanMs)
+	if r.UISpanCount != 1 || r.Quality.UI.DurationMs != 1000 {
+		t.Fatalf("UI timing = %d spans/%dms, want one admitted 1000ms duration", r.UISpanCount, r.Quality.UI.DurationMs)
 	}
 	out := render(t, r)
 	if !strings.Contains(out, "log wall-clock       unavailable") {
@@ -941,7 +975,8 @@ func TestReportMasksHostileResourceTypeAndAction(t *testing.T) {
 	var comps logfmt.Interner
 	c := NewCollector(&comps)
 	var cc attrib.ContextCollector
-	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, span.TimingEvidence{}, span.TimingEvidence{}, 0, 0, 0, &cc, c, &comps, 0)
+	quality := model.BuildCaptureQuality(model.CaptureQualityInput{UISpans: uiSpans})
+	r := Build(logfmt.Stats{}, span.Capabilities{}, nil, uiSpans, quality, 0, 0, 0, &cc, c, &comps, 0)
 
 	if len(r.SlowestResources) != 1 {
 		t.Fatalf("SlowestResources has %d rows, want 1", len(r.SlowestResources))
@@ -1038,6 +1073,9 @@ func TestReportSurfacesUIHookMalformedLinesInAnomalies(t *testing.T) {
 	}
 	if !strings.Contains(out, "UI-hook lines malformed 1") {
 		t.Errorf("report does not surface the malformed UI-hook line count:\n%s", out)
+	}
+	if !strings.Contains(out, "ui_decode issues") || !strings.Contains(out, "json_syntax") {
+		t.Errorf("capture quality omits the malformed-only UI reason:\n%s", out)
 	}
 }
 
@@ -1320,7 +1358,7 @@ func TestCandidateBreakdownOrderIsDeterministic(t *testing.T) {
 
 func TestReportRendersCoverageAndConfidence(t *testing.T) {
 	out := renderFixture(t, fixture(t, "two-tier.log"))
-	for _, want := range []string{"nameable share", "contained", "likely", "ambiguous", "unattributed"} {
+	for _, want := range []string{"nameable duration", "contained", "likely", "ambiguous", "unattributed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report is missing %q:\n%s", want, out)
 		}
@@ -1335,21 +1373,24 @@ func TestBuildKeepsUnavailablePositionsInAttributionCoverageDenominator(t *testi
 	if !r.HasSpans {
 		t.Fatal("HasSpans = false, want admitted RPC evidence measured")
 	}
-	if r.Coverage.Spans != 2 || r.Coverage.TotalMs != 30 {
-		t.Fatalf("coverage = %+v, want 2 spans and 30ms; unavailable positions stay in the denominator", r.Coverage)
+	if r.Quality.Attribution.Spans != 2 || r.Quality.Attribution.TotalMs != 30 {
+		t.Fatalf("coverage = %+v, want 2 spans and 30ms; unavailable positions stay in the denominator", r.Quality.Attribution)
 	}
 }
 
 func TestReportRendersTimingEvidenceReasons(t *testing.T) {
-	r := Report{RPCEvidence: span.TimingEvidence{
-		Records:         2,
-		Rejected:        map[string]span.IssueCount{"duration_missing": {Count: 1}},
-		TimestampIssues: map[string]span.IssueCount{"timestamp_before_origin": {Count: 1}},
-		SyntaxErrors:    span.IssueCount{Count: 1},
-		SchemaErrors:    span.IssueCount{Count: 1},
+	first := uint32(7)
+	r := Report{Quality: model.CaptureQuality{
+		RPC: model.TierQuality{Records: 2, Admitted: 1, Rejected: 1, Positioned: 1},
+		Issues: []model.QualityIssue{
+			{Stage: "rpc_duration", Code: "duration_missing", Count: 1, FirstEntry: &first},
+			{Stage: "rpc_duration", Code: "timestamp_before_origin", Count: 1, FirstEntry: &first},
+			{Stage: "rpc_duration", Code: "json_syntax", Count: 1, FirstEntry: &first},
+			{Stage: "rpc_duration", Code: "schema_invalid", Count: 1, FirstEntry: &first},
+		},
 	}}
 	out := render(t, r)
-	for _, want := range []string{"RPC timing rejected duration_missing 1", "RPC timing timestamps timestamp_before_origin 1", "RPC timing syntax errors 1", "RPC timing schema errors 1"} {
+	for _, want := range []string{"duration_missing", "timestamp_before_origin", "json_syntax", "schema_invalid"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q:\n%s", want, out)
 		}
@@ -1561,18 +1602,16 @@ func TestReportDoesNotPrintAnUnmarkedZeroNameableShareWhenEverySpanIsZeroMs(t *t
 	if !r.HasSpans {
 		t.Fatal("HasSpans = false; this test proves nothing (needs at least one RPC span)")
 	}
-	if r.Coverage.TotalMs != 0 {
-		t.Fatalf("Coverage.TotalMs = %d, want 0 -- test premise requires every span to measure 0ms", r.Coverage.TotalMs)
+	if r.Quality.Attribution.TotalMs != 0 {
+		t.Fatalf("Quality.Attribution.TotalMs = %d, want 0 -- test premise requires every span to measure 0ms", r.Quality.Attribution.TotalMs)
 	}
 
 	out := render(t, r)
-	section := out[strings.Index(out, "ADDRESS ATTRIBUTION"):]
-	section = section[:strings.Index(section, "\n\n")]
-	if strings.Contains(section, "0.0%") {
-		t.Errorf("report renders an unmarked 0.0%% nameable share from a guarded 0/0:\n%s", section)
+	if strings.Contains(out, "nameable duration      0.0%") {
+		t.Errorf("report renders an unmarked 0.0%% nameable share from a guarded 0/0:\n%s", out)
 	}
-	if !strings.Contains(section, "0ms") {
-		t.Errorf("report does not explain that every span measured 0ms:\n%s", section)
+	if !strings.Contains(out, "unavailable (total RPC duration is 0ms)") {
+		t.Errorf("report does not explain that every span measured 0ms:\n%s", out)
 	}
 }
 

@@ -550,7 +550,7 @@ func TestLoadedMixedTimingKeepsAdmittedTotalsAndChoosesRPC(t *testing.T) {
 	if err := profile.Render(&report, l); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(report.String(), "30ms total") || !strings.Contains(report.String(), "positioned duration   10ms (1 excluded, 20ms)") {
+	if !strings.Contains(report.String(), "duration 30ms") || !strings.Contains(report.String(), "positioned duration   10ms (1 excluded, 20ms)") {
 		t.Errorf("profile does not retain the same admitted/positioned totals:\n%s", report.String())
 	}
 }

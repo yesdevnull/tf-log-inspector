@@ -207,8 +207,25 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 		return fmt.Errorf("scanning %s: %w", path, err)
 	}
 	elapsed := time.Since(started)
+	rpcSpans := builder.Spans()
+	uiSpans := uiBuilder.Spans()
+	contexts := cc.Contexts()
+	var attributions []attrib.Attribution
+	if len(contexts) > 0 {
+		attributions = attrib.Correlate(rpcSpans, stats.FirstTS, contexts)
+	}
+	var uiOrigin time.Time
+	if origin, ok := uiBuilder.Origin(); ok {
+		uiOrigin = origin
+	}
+	quality := model.BuildCaptureQuality(model.CaptureQualityInput{
+		Stats: stats, Caps: sniffer.Report(), RPCSpans: rpcSpans, UISpans: uiSpans,
+		RPCEvidence: builder.Evidence(), UIEvidence: uiBuilder.Evidence(), UIOrigin: uiOrigin,
+		Contexts: contexts, ContextEvidence: cc.Evidence(), Attributions: attributions,
+		ComponentOverflow: comps.Overflowed(), RequestIDOverflow: reqIDs.Overflowed(),
+	})
 
-	report := diagnose.Build(stats, sniffer.Report(), builder.Spans(), uiBuilder.Spans(), builder.Evidence(), uiBuilder.Evidence(),
+	report := diagnose.Build(stats, sniffer.Report(), rpcSpans, uiSpans, quality,
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 

@@ -77,7 +77,7 @@ func TestRunDiagnoseOnFixture(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	out := sb.String()
-	for _, want := range []string{"tfli diagnostic report", "selected tier             reported", "spans built          2"} {
+	for _, want := range []string{"tfli diagnostic report", "selected tier             reported", "RPC timing records     2: admitted 2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -205,6 +205,42 @@ func TestRunProfileOnFixture(t *testing.T) {
 	}
 	if !strings.Contains(sb.String(), "BY RESOURCE TYPE") {
 		t.Errorf("output missing BY RESOURCE TYPE:\n%s", sb.String())
+	}
+}
+
+func TestProfileAndStreamingDiagnoseReportTheSameCaptureQualityTotals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quality.log")
+	const captured = "customer_secret_value"
+	input := "2026-09-04T09:15:03.000Z [TRACE] provider.customer: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=25 customer_field=" + captured + "\n" +
+		"2026-09-04T09:15:03.100Z [TRACE] provider.customer: Received downstream response: tf_rpc=ReadResource customer_field=" + captured + "\n"
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outputs := make(map[string]string)
+	for _, mode := range []string{"--profile", "--diagnose"} {
+		var stdout, stderr strings.Builder
+		if err := run([]string{mode, path}, &stdout, &stderr); err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("%s wrote stderr: %q", mode, stderr.String())
+		}
+		outputs[mode] = stdout.String()
+	}
+	for _, want := range []string{
+		"RPC timing records     2: admitted 1, rejected 1; duration 25ms",
+		"RPC positioning        1 observations, 25ms",
+		"nameable duration      unavailable (no address context)",
+		"duration_missing",
+	} {
+		for _, mode := range []string{"--profile", "--diagnose"} {
+			if !strings.Contains(outputs[mode], want) {
+				t.Errorf("%s missing shared quality fact %q:\n%s", mode, want, outputs[mode])
+			}
+		}
+	}
+	if strings.Contains(outputs["--diagnose"], captured) {
+		t.Fatalf("diagnose disclosed captured values:\n%s", outputs["--diagnose"])
 	}
 }
 

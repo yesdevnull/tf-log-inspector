@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +14,61 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestCaptureQualitySummaryPreservesWriterErrors(t *testing.T) {
+	want := errors.New("writer failed")
+	if err := Render(failingWriter{err: want}, &model.Log{}); !errors.Is(err, want) {
+		t.Fatalf("Render error = %v, want %v", err, want)
+	}
+}
+
+func TestReportPresentsWholeCaptureQualityWithoutReconstructingResponses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "quality.log")
+	input := "2026-09-04T09:15:03.000Z [TRACE] provider.test: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=25\n" +
+		"2026-09-04T09:15:03.100Z [TRACE] provider.test: Received downstream response: tf_rpc=ReadResource\n"
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Render(&out, l); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"CAPTURE QUALITY (whole log)",
+		"RPC timing records     2",
+		"admitted 1, rejected 1; duration 25ms",
+		"RPC positioning        1 observations, 25ms",
+		"duration_missing",
+		"nameable duration      unavailable (no address context)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	if got := l.ReconstructionQuality(); got.State != "not_checked" {
+		t.Fatalf("profile reconstructed provider bodies: %+v", got)
+	}
+}
+
+func TestReportMarksZeroAttributionDenominatorUnavailable(t *testing.T) {
+	l := &model.Log{}
+	var out bytes.Buffer
+	if err := Render(&out, l); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "nameable duration      unavailable (no address context)") {
+		t.Fatalf("missing unavailable attribution share:\n%s", out.String())
+	}
+}
 
 func TestReportEscapesDecodedTerminalControls(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "controls.log")

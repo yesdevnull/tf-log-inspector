@@ -191,14 +191,11 @@ type ResourceTypeTotal struct {
 type Report struct {
 	Stats              logfmt.Stats
 	Caps               span.Capabilities
-	RPCEvidence        span.TimingEvidence
-	UIEvidence         span.TimingEvidence
+	Quality            model.CaptureQuality
 	Tier               span.Fidelity
 	TierUsable         bool
 	SpanCount          int
-	ClampedSpans       int
 	SlowestMs          uint32
-	TotalSpanMs        uint64
 	Elapsed            time.Duration
 	TopFieldKeys       []Template // keys seen on two or more entries, sorted, capped
 	WithheldFieldKeys  uint64     // distinct keys withheld for appearing on only one entry
@@ -213,10 +210,8 @@ type Report struct {
 	// UI-hook figures. These describe span.UIHookBuilder's spans, which sit
 	// on their own timeline (see the doc comment on span.Span.StartMs) and
 	// so are never summed with the RPC-tier figures above.
-	UISpanCount    int
-	UISlowestMs    uint32
-	UITotalSpanMs  uint64
-	UIClampedSpans int
+	UISpanCount int
+	UISlowestMs uint32
 	// UIWallClockMs spans the first and last parseable timestamps on structured
 	// lines. UIWallClockAvailable distinguishes coincident parsed endpoints
 	// from a capture with no usable clock.
@@ -251,10 +246,9 @@ type Report struct {
 	// already guards resource type and action names against, so it is
 	// masked the same way before ever becoming a histogram key (see Build).
 	HookTypes []Template // every structured-output "type" value and its count
-	Coverage  attrib.Coverage
-	// CandidateBreakdown is Coverage.Candidates in deterministic, renderable
-	// order (see candidateBreakdown) -- the spec's "what the candidate-count
-	// distribution is across them" figure, computed alongside Coverage since
+	// CandidateBreakdown is Quality.Attribution.Candidates in deterministic,
+	// renderable order (see candidateBreakdown) -- the spec's "what the candidate-count
+	// distribution is across them" figure, computed alongside attribution since
 	// nothing cheaper yields it. Populated only when Coverage itself is (see
 	// HasSpans).
 	CandidateBreakdown []CandidateCount
@@ -319,10 +313,16 @@ const maxResourceRows = 10
 // cc is the same scan's attrib.ContextCollector: its hook-type histogram and
 // address contexts are what let this report measure attribution coverage
 // without ever naming an address itself.
-func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span, rpcEvidence, uiEvidence span.TimingEvidence,
+func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans []span.Span, quality model.CaptureQuality,
 	uiMalformed, uiBackwards, uiSaturated uint64, cc *attrib.ContextCollector,
 	c *Collector, comps *logfmt.Interner, elapsed time.Duration) Report {
-	tier, usable := model.PreferredTiming(&model.Log{RPCSpans: spans, UISpans: uiSpans})
+	var tier span.Fidelity
+	usable := quality.RPC.Admitted > 0 || quality.UI.Admitted > 0
+	if quality.RPC.Admitted > 0 {
+		tier = span.FidelityReported
+	} else if quality.UI.Admitted > 0 {
+		tier = span.FidelityUIReported
+	}
 	topFieldKeys, withheldFieldKeys := recurringTopN(c.fieldKeys, maxFieldKeys)
 	topComponents, withheldComponents := recurringTopN(c.compCount, maxTemplates)
 	topTemplates, withheldTemplates := recurringTopN(c.templates, maxTemplates)
@@ -350,8 +350,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	r := Report{
 		Stats:              st,
 		Caps:               caps,
-		RPCEvidence:        rpcEvidence,
-		UIEvidence:         uiEvidence,
+		Quality:            quality,
 		Tier:               tier,
 		TierUsable:         usable,
 		SpanCount:          len(spans),
@@ -373,12 +372,8 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		UISaturatedDurations:  uiSaturated,
 	}
 	for _, s := range spans {
-		r.TotalSpanMs += uint64(s.DurationMs)
 		if s.DurationMs > r.SlowestMs {
 			r.SlowestMs = s.DurationMs
-		}
-		if s.StartClamped {
-			r.ClampedSpans++
 		}
 	}
 
@@ -395,12 +390,8 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 	typeTotals := map[string]*ResourceTypeTotal{}
 	actionCounts := map[string]uint64{}
 	for _, s := range uiSpans {
-		r.UITotalSpanMs += uint64(s.DurationMs)
 		if s.DurationMs > r.UISlowestMs {
 			r.UISlowestMs = s.DurationMs
-		}
-		if s.StartClamped {
-			r.UIClampedSpans++
 		}
 		// ResourceType and Action come straight from a structured-output
 		// line's JSON, with nothing upstream constraining their shape --
@@ -493,10 +484,9 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 			}
 		}
 		r.ZeroExtentContexts = int(cc.ZeroExtentContexts())
-		if len(spans) > 0 {
+		if quality.RPC.Admitted > 0 {
 			r.HasSpans = true
-			r.Coverage = attrib.Summarise(spans, attrib.Correlate(spans, st.FirstTS, ctxs))
-			r.CandidateBreakdown = candidateBreakdown(r.Coverage.Candidates)
+			r.CandidateBreakdown = candidateBreakdown(quality.Attribution.Candidates)
 		}
 		if !st.FirstTS.IsZero() && !cc.FirstTS().IsZero() {
 			r.StreamOffsetMs = cc.FirstTS().Sub(st.FirstTS).Milliseconds()
@@ -704,6 +694,7 @@ func (r Report) Render(w io.Writer) error {
 		fmt.Fprintf(b, "  none\n")
 	}
 	fmt.Fprintf(b, "\n")
+	writeCaptureQuality(b, r.Quality)
 
 	// EXTRACTION's labels vary widely in length -- "response duration
 	// fields" is the longest -- so a field-width specifier keeps the value
@@ -772,19 +763,11 @@ func (r Report) Render(w io.Writer) error {
 		r.Stats.ContinuationOnlyReqIDEntries, plural(r.Stats.ContinuationOnlyReqIDEntries, "y", "ies"))
 
 	fmt.Fprintf(b, "SPANS\n")
-	writeTimingEvidence(b, "RPC", r.RPCEvidence)
-	writeTimingEvidence(b, "UI", r.UIEvidence)
-	fmt.Fprintf(b, "  spans built          %d\n", r.SpanCount)
 	fmt.Fprintf(b, "  slowest span         %d ms\n", r.SlowestMs)
-	fmt.Fprintf(b, "  total span time (sum, overlaps) %d ms\n", r.TotalSpanMs)
-	fmt.Fprintf(b, "  starts clamped       %d\n", r.ClampedSpans)
 	// UI-hook spans sit on a different timeline from the RPC spans above
 	// (see span.Span's StartMs/EndMs doc comment) and are reported
 	// separately rather than folded into the figures above.
-	fmt.Fprintf(b, "  UI-hook spans built  %d\n", r.UISpanCount)
 	fmt.Fprintf(b, "  UI-hook slowest span %d ms\n", r.UISlowestMs)
-	fmt.Fprintf(b, "  UI-hook total time (sum, overlaps) %d ms\n", r.UITotalSpanMs)
-	fmt.Fprintf(b, "  UI-hook starts clamped %d\n", r.UIClampedSpans)
 	if len(r.UIActionCounts) > 0 {
 		fmt.Fprintf(b, "  UI-hook actions     ")
 		for _, a := range r.UIActionCounts {
@@ -876,23 +859,12 @@ func (r Report) Render(w io.Writer) error {
 			fmt.Fprintf(b, "  terraform.ui context but no TRACE-level provider RPC\n")
 			fmt.Fprintf(b, "  entries, so nothing was measured\n")
 		} else {
-			if r.Coverage.TotalMs == 0 {
-				// Every RPC span measured 0ms (e.g. a batch of genuinely
-				// instantaneous provider calls). NameableShare's
-				// TotalMs == 0 guard returns a plain 0 there, which would
-				// print identically to a real "nothing was nameable"
-				// measurement -- the same distinction !r.HasSpans already
-				// draws for "no spans at all", extended to its sibling case.
-				fmt.Fprintf(b, "  %-25s %s\n", "nameable share", "n/a (every span measured 0ms)")
-			} else {
-				fmt.Fprintf(b, "  %-25s %.1f%%\n", "nameable share", r.Coverage.NameableShare()*100)
-			}
 			for _, c := range []attrib.Confidence{
 				attrib.Contained, attrib.Likely, attrib.Overlapping,
 				attrib.Ambiguous, attrib.Unattributed,
 			} {
 				fmt.Fprintf(b, "  %-25s %d %s, %d ms\n", c.String(),
-					r.Coverage.ByConfidence[c], pluralSpans(r.Coverage.ByConfidence[c]), r.Coverage.MsByConfidence[c])
+					r.Quality.Attribution.ByConfidence[c], pluralSpans(r.Quality.Attribution.ByConfidence[c]), r.Quality.Attribution.MsByConfidence[c])
 			}
 			// Its own group, after the confidence list rather than nested
 			// inside it: indenting this under the ambiguous row read as
@@ -998,29 +970,61 @@ func (r Report) Render(w io.Writer) error {
 	return err
 }
 
-func writeTimingEvidence(b *strings.Builder, tier string, evidence span.TimingEvidence) {
-	fmt.Fprintf(b, "  %s timing records     %d\n", tier, evidence.Records)
-	if evidence.SyntaxErrors.Count > 0 {
-		fmt.Fprintf(b, "  %s timing syntax errors %d\n", tier, evidence.SyntaxErrors.Count)
+func writeCaptureQuality(b *strings.Builder, q model.CaptureQuality) {
+	fmt.Fprintf(b, "CAPTURE QUALITY (whole log)\n")
+	writeTierQuality(b, "RPC", q.RPC)
+	writeTierQuality(b, "UI", q.UI)
+	switch {
+	case !q.HasContext:
+		fmt.Fprintf(b, "  %-22s unavailable (no address context)\n", "nameable duration")
+	case q.NameableShare == nil:
+		fmt.Fprintf(b, "  %-22s unavailable (total RPC duration is 0ms)\n", "nameable duration")
+	default:
+		fmt.Fprintf(b, "  %-22s %s / %s (%.1f%%)\n", "nameable duration", formatMs(q.NameableMs), formatMs(q.RPCDurationMs), *q.NameableShare*100)
 	}
-	if evidence.SchemaErrors.Count > 0 {
-		fmt.Fprintf(b, "  %s timing schema errors %d\n", tier, evidence.SchemaErrors.Count)
+	if hasQualityIssue(q.Issues, "context", "context_incomplete") {
+		fmt.Fprintf(b, "  Context evidence is incomplete; this limits attribution and does not establish that an operation failed.\n")
 	}
-	writeIssueCounts(b, tier+" timing rejected", evidence.Rejected)
-	writeIssueCounts(b, tier+" timing timestamps", evidence.TimestampIssues)
+	stage := ""
+	for _, issue := range q.Issues {
+		if issue.Count == 0 {
+			continue
+		}
+		if issue.Stage != stage {
+			stage = issue.Stage
+			fmt.Fprintf(b, "  %s issues\n", stage)
+		}
+		fmt.Fprintf(b, "    %-24s %d", issue.Code, issue.Count)
+		if issue.FirstEntry != nil {
+			fmt.Fprintf(b, " (first entry %d)", *issue.FirstEntry)
+		}
+		fmt.Fprintln(b)
+	}
+	fmt.Fprintln(b)
 }
 
-func writeIssueCounts(b *strings.Builder, label string, issues map[string]span.IssueCount) {
-	keys := make([]string, 0, len(issues))
-	for code, issue := range issues {
-		if issue.Count > 0 {
-			keys = append(keys, code)
+func writeTierQuality(b *strings.Builder, name string, q model.TierQuality) {
+	total := formatMs(q.DurationMs)
+	if q.DurationLowerBound {
+		total += " (lower bound)"
+	}
+	fmt.Fprintf(b, "  %s timing records     %d: admitted %d, rejected %d; duration %s\n",
+		name, q.Records, q.Admitted, q.Rejected, total)
+	excluded := formatMs(q.ExcludedMs)
+	if q.DurationLowerBound && q.ExcludedMs > 0 {
+		excluded += " (lower bound)"
+	}
+	fmt.Fprintf(b, "  %s positioning        %d observations, %s; excluded %d observations, %s\n",
+		name, q.Positioned, formatMs(q.PositionedMs), q.Admitted-q.Positioned, excluded)
+}
+
+func hasQualityIssue(issues []model.QualityIssue, stage, code string) bool {
+	for _, issue := range issues {
+		if issue.Stage == stage && issue.Code == code && issue.Count > 0 {
+			return true
 		}
 	}
-	sort.Strings(keys)
-	for _, code := range keys {
-		fmt.Fprintf(b, "  %s %s %d\n", label, code, issues[code].Count)
-	}
+	return false
 }
 
 // writeRPCCaptureHint explains how to capture provider RPC entries. Debug
