@@ -1,6 +1,6 @@
 # JSON Profile Schema and Encoder Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Export complete, reproducible profile evidence as versioned JSON without coupling the wire format to internal model types.
 
@@ -184,7 +184,7 @@ Copy fields using the mapping tables; initialise output slices/maps even when em
 
 **Interfaces:** Consume `buildJSONProfile(Report,JSONMetadata) (jsonProfile,error)`. Produce `RenderJSON(io.Writer,Report,JSONMetadata) error` for G2. Existing package `writeText` owns single-write/short-write checks.
 
-- [ ] **Step 1: Add failing renderer tests.** Encode a real loaded fixture twice and require byte equality. Decode once into explicitly tagged test structs or `map[string]json.RawMessage`, then require EOF on a second decode. Assert literal root values/complete key sets, explicit null vs zero, `[]` vs null and numeric values from independent fixture expectations, not only comparisons to the same projection helper. Representative call:
+- [x] **Step 1: Add failing renderer tests.** Encode a real loaded fixture twice and require byte equality. Decode once into explicitly tagged test structs or `map[string]json.RawMessage`, then require EOF on a second decode. Assert literal root values/complete key sets, explicit null vs zero, `[]` vs null and numeric values from independent fixture expectations, not only comparisons to the same projection helper. Representative call:
 
 ```go
 var first, second bytes.Buffer
@@ -197,8 +197,8 @@ if !json.Valid(first.Bytes()) { t.Fatal("invalid JSON document") }
 
 Verify decoded newline/ESC/quotes/non-ASCII identifiers exactly match the original values, no `DisplayText` double escaping, no raw-body/ReqID/absolute-path fields, all arrays exceed 20 when appropriate, no mutation of Report slices, and text/JSON numerical parity on RPC/UI mixed and saturated fixtures. Exact output ends with one newline. Use existing failing/short writers: errors unchanged, short nil-error write becomes `io.ErrShortWrite`. Invalid mapping, invalid UTF-8 and non-finite synthetic fractions must fail with an untouched output buffer; encoder errors must not include input values. A failed writer may accept partial bytes, but the function must return failure, never claim atomic filesystem output.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run 'TestJSON' -count=1`; record behavioural failures once the signature compiles.
-- [ ] **Step 3: Marshal before writing.** Follow this entry flow:
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run 'TestJSON' -count=1`; record behavioural failures once the signature compiles.
+- [x] **Step 3: Marshal before writing.** Follow this entry flow:
 
 ```go
 func RenderJSON(w io.Writer, report Report, metadata JSONMetadata) error {
@@ -212,15 +212,15 @@ func RenderJSON(w io.Writer, report Report, metadata JSONMetadata) error {
 
 Standard JSON escaping is allowed; decoding must preserve identifiers. No warning banner/prose precedes or follows the document. Privacy and interpretation are encoded as qualifications and documented. Do not stream arrays before the whole document can be encoded, or add generation time. The public renderer accepts no limit.
 
-- [ ] **Step 4: Verify and review.** Run profile tests, full tests/build and the checks below. Independent reviewer inspects schema coverage, nullability, source references, determinism, write errors and privacy; separate test-cleanup pass preserves boundary coverage.
-- [ ] **Step 5: Commit.** Signed commit `Encode reproducible JSON profile reports`; record actual evidence before G2 starts.
+- [x] **Step 4: Verify and review.** Run profile tests, full tests/build and the checks below. Independent reviewer inspects schema coverage, nullability, source references, determinism, write errors and privacy; separate test-cleanup pass preserves boundary coverage.
+- [x] **Step 5: Commit.** Signed commit `Encode reproducible JSON profile reports`; record actual evidence before G2 starts.
 
 ## Final validation and G2 handoff
 
-- [ ] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
-- [ ] Decode examples with the standard library, verify deterministic bytes, complete schema keys and text parity; inspect no-duration and saturated documents.
-- [ ] Independent review and separate cleanup complete; signed commits and clean worktree. Record benchmark results without claiming remote CI ran.
-- [ ] G1 provides only the encoder/schema. G2 still owns mode selection, filename/version metadata, output protection tests and README usage.
+- [x] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
+- [x] Decode examples with the standard library, verify deterministic bytes, complete schema keys and text parity; inspect no-duration and saturated documents.
+- [x] Independent review and separate cleanup complete; signed commits and clean worktree. Record benchmark results without claiming remote CI ran.
+- [x] G1 provides only the encoder/schema. G2 still owns mode selection, filename/version metadata, output protection tests and README usage.
 
 ## Planning self-review
 
@@ -255,4 +255,13 @@ Local projection benchmarks: 1,000 observations used 128,465 ns/op, 327,039 B/op
 and 3,012 allocations/op; 10,000 used 1,118,756 ns/op, 3,216,656 B/op and 30,012
 allocations/op. These measurements are descriptive, not performance thresholds.
 The accidentally tracked scratch report is removed from tracking; this plan
-retains its durable evidence. Renderer and CLI implementation remain pending.
+retains its durable evidence.
+
+Task 2 completed in signed commits `3be17cd` and `2c6a062`. Behavioural RED
+preceded encoding. Review required exact encoded keys for every nested object
+and complete arrays beyond text limits; added assertions passed scoped review.
+A controlled JSON-tag mutation failed the intended assertion and was restored.
+Separate cleanup retained the additions, reports no concerns, and measured 97.0%
+profile coverage. Full/race tests, build, lint, vet, formatting and module checks
+pass. G1 is ready for G2; final combined review follows CLI integration. No remote
+CI ran. The schema reference's baseline and UTF-8 error wording is clarified.
