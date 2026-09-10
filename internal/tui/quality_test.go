@@ -267,12 +267,15 @@ func TestLikelyOnlyAttributionIsALimitation(t *testing.T) {
 
 func TestQualityExplainsSourceSamplesAndAnomalyCountUnits(t *testing.T) {
 	m := qualityModel(t, "capture.log")
-	text := m.qualityText(m.log.CaptureQuality(), m.log.ReconstructionQuality())
+	q := m.log.CaptureQuality()
+	q.Issues = append(q.Issues, model.QualityIssue{Stage: "scan", Code: "line_count_saturated", Count: 1})
+	text := m.qualityText(q, m.log.ReconstructionQuality())
 	for _, want := range []string{
 		"First samples use original one-based physical source lines",
 		"Counts can overlap across stages and must not be totalled as bad lines",
 		"recognised RPC response records rejected at admission",
 		"structured envelope and context events",
+		"timestamp issues count timestamped hclog entries; line_count_saturated counts excess physical continuation lines after an entry line counter reaches its cap",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("quality explanation missing %q:\n%s", want, text)

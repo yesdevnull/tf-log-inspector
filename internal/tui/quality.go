@@ -186,7 +186,7 @@ func qualityStageUnits(stage string) string {
 	case "context":
 		return "structured envelope and context events"
 	case "scan":
-		return "scanner events and saturated entry counters"
+		return "timestamp issues count timestamped hclog entries; line_count_saturated counts excess physical continuation lines after an entry line counter reaches its cap"
 	case "interning":
 		return "values not retained after an interning cap"
 	case "capability":
