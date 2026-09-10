@@ -1,359 +1,340 @@
 // Package profile renders a loaded model.Log as a plain-text performance
-// report for the user who captured it.
-//
-// This is the opposite safety posture from internal/diagnose: that package
-// exists so a report can be sent back to this project about a confidential
-// work log, so it masks addresses and withholds content. This package exists
-// so the user can see which of their own resources were slow, so it prints
-// real, unmasked resource addresses. Never reuse diagnose's masking here, and
-// never let this report's content leak into a diagnose report -- an
-// unmasked address is the one thing that must never appear in the other
-// package's output.
+// report for the user who captured it. It prints real, unmasked resource
+// addresses and must remain separate from the shareable diagnose report.
 package profile
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
-// maxRows caps SLOWEST CALLS and SLOWEST RESOURCES at their top N: enough to
-// see shape and rank, not a full listing.
-const maxRows = 20
+// DefaultLimit is the default maximum number of rows in each ranked list.
+const DefaultLimit = 20
 
-// typeColWidth is the fixed width given to the RPC-name column in SLOWEST
-// CALLS. It is truncated to this width before formatting -- see truncate --
-// so a name wider than its column can never shunt every column after it out
-// of alignment. A collision from that truncation is harmless here: an RPC
-// name is not the only thing distinguishing one row from another, since the
-// resource-type and provider columns follow it. actionColWidth is the same
-// idea for the UI-hook action column in SLOWEST RESOURCES, which has an even
-// smaller, closed vocabulary ("read", "apply", ...) and so never truncates
-// in practice.
-//
-// The resource-type column in all three tables (BY RESOURCE TYPE, SLOWEST
-// CALLS, SLOWEST RESOURCES) does not use a fixed width -- see
-// resourceTypeColWidth -- because a resource type is the one field where a
-// truncation collision is not harmless: two distinct types sharing a long
-// common prefix, e.g. azuread_service_principal_password and
-// azuread_service_principal_certificate, would otherwise render as the same
-// label.
+// TextOptions controls plain-text report presentation. A zero Limit prints
+// every row.
+type TextOptions struct{ Limit int }
+
 const (
-	typeColWidth   = 24
-	actionColWidth = 8
+	typeColWidth            = 24
+	maxResourceTypeColWidth = 49
 )
 
-// maxResourceTypeColWidth caps how wide a resource-type column is allowed to
-// grow to fit the data, rather than truncating at a fixed width the way
-// typeColWidth and actionColWidth do. Every trailing column next to a
-// resource-type column is either a fixed-width numeric or itself unbounded,
-// so widening the resource-type column costs only line length. The cap
-// exists only so one pathological name cannot blow a table out arbitrarily;
-// 49 is the longest resource type name observed in practice
-// (azuread_application_federated_identity_credential).
-const maxResourceTypeColWidth = 49
-
-// resourceTypeColWidth computes how wide a resource-type column must be to
-// render every one of the given values in full, capped at
-// maxResourceTypeColWidth. It starts from typeColWidth so a table with only
-// short type names still gets a column wide enough to be readable next to
-// the other columns.
-func resourceTypeColWidth(types []string) int {
-	width := typeColWidth
-	for _, t := range types {
-		t = logfmt.DisplayText(t)
-		if len(t) > width {
-			width = len(t)
-		}
+// Render builds and writes a profile report for l.
+func Render(w io.Writer, l *model.Log, options TextOptions) error {
+	if options.Limit < 0 {
+		return errors.New("profile limit must be non-negative")
 	}
-	if width > maxResourceTypeColWidth {
-		width = maxResourceTypeColWidth
-	}
-	return width
-}
-
-// truncate ellipsizes s to at most n bytes so a fixed-width column can never
-// overflow into the columns that follow it. A %-Ns verb only pads a short
-// string; it never shortens a long one, and real provider type names run
-// well past any width this report could reasonably use -- for example
-// azuread_application_federated_identity_credential.
-//
-// This slices by byte count, not rune count, so it would split a multi-byte
-// UTF-8 rune if one landed at the cut point. That is not reachable today:
-// every string passed to truncate is a Terraform RPC name or resource-type
-// identifier, and both are restricted to ASCII by Terraform's own naming
-// rules. Revisit this if truncate is ever applied to arbitrary text.
-func truncate(s string, n int) string {
-	s = logfmt.DisplayText(s)
-	if len(s) <= n {
-		return s
-	}
-	if n <= 3 {
-		return s[:n]
-	}
-	return s[:n-3] + "..."
-}
-
-// Render writes a profile report for l to w.
-func Render(w io.Writer, l *model.Log) error {
-	b := &strings.Builder{}
-
-	fmt.Fprintf(b, "tfli profile report\n====================\n\n")
-	fmt.Fprintf(b, "SIZE\n")
-	fmt.Fprintf(b, "  bytes                %d\n", l.Stats.Bytes)
-	fmt.Fprintf(b, "  RPC spans            %d\n", len(l.RPCSpans))
-	fmt.Fprintf(b, "  UI-hook spans        %d\n", len(l.UISpans))
-	fmt.Fprintf(b, "\n")
-	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n")
-	fmt.Fprintf(b, "--diagnose, this report is not safe to share.\n\n")
-	writeLoggingCaveat(b)
-	quality := l.CaptureQuality()
-	qualitytext.WriteCaptureQuality(b, quality)
-	rpcTiming := model.SelectTiming(l.RPCSpans)
-	if quality.UI.DurationLowerBound {
-		var saturated uint64
-		for _, issue := range quality.Issues {
-			if issue.Stage == "ui_duration" && issue.Code == "duration_saturated" {
-				saturated += issue.Count
-			}
-		}
-		fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", saturated)
-		fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\n")
-		fmt.Fprintf(b, "and timeline positions may be inaccurate.\n\n")
-	}
-
-	if len(l.RPCSpans) == 0 && len(l.UISpans) == 0 {
-		fmt.Fprintf(b, "NO SPANS\n")
-		fmt.Fprintf(b, "  This log has no spans to profile: no admitted timing observations.\n")
-		if l.Caps.ProviderEntries > 0 || l.Caps.ResponseEntries > 0 || l.Stats.StructuredLines > 0 {
-			fmt.Fprintf(b, "  Provider or structured-output evidence was observed, but\n")
-			fmt.Fprintf(b, "  it did not yield an admitted duration.\n")
-		} else {
-			fmt.Fprintf(b, "  Capture provider TRACE logs or terraform.ui completion hooks.\n")
-		}
-		_, err := io.WriteString(w, b.String())
-		return err
-	}
-
-	writeResourceTypeJoin(b, l.RPCSpans, l.UISpans)
-	writeProviderRollup(b, l.RPCSpans)
-	writeSlowestCalls(b, l.RPCSpans)
-	writeSlowestResources(b, l.UISpans)
-	if err := writeConcurrency(b, rpcTiming); err != nil {
-		return err
-	}
-
-	_, err := io.WriteString(w, b.String())
-	return err
-}
-
-// writeResourceTypeJoin renders BY RESOURCE TYPE from model.JoinByResourceType.
-func writeResourceTypeJoin(b *strings.Builder, rpcSpans, uiSpans []span.Span) {
-	rows := model.JoinByResourceType(rpcSpans, uiSpans)
-	if len(rows) == 0 {
-		return
-	}
-
-	fmt.Fprintf(b, "BY RESOURCE TYPE\n")
-	uiPresent := false
-	types := make([]string, len(rows))
-	for i, r := range rows {
-		if r.UIResources > 0 {
-			uiPresent = true
-		}
-		types[i] = r.ResourceType
-	}
-	width := resourceTypeColWidth(types)
-	if uiPresent {
-		// See writeSlowestResources for why UI-hook figures carry this
-		// caveat: it applies here too, since these UI totals are sums of the
-		// same whole-second, +/-1s measurements.
-		fmt.Fprintf(b, "  UI-hook figures are sums of measurements rounded to\n")
-		fmt.Fprintf(b, "  whole seconds, +/- 1s each.\n")
-	}
-	// The numeric columns are 9 wide, not 8: "RPC calls" and "RPC total" are
-	// themselves 9-character labels, and a %9s header narrower than its own
-	// label would overrun into the columns after it -- the same hazard
-	// truncate guards the resource-type column against, just on the header
-	// row instead of the data.
-	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n",
-		width, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
-	for _, r := range rows {
-		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n",
-			width, truncate(r.ResourceType, width), r.UIResources, formatMs(r.UITotalMs),
-			r.RPCCalls, formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs)))
-	}
-	fmt.Fprintf(b, "\n")
-}
-
-// writeProviderRollup renders BY PROVIDER from model.RollupBy. It is skipped
-// when there are no RPC spans: a provider rollup has no meaning over
-// UI-hook spans, which carry no provider name.
-func writeProviderRollup(b *strings.Builder, rpcSpans []span.Span) {
-	if len(rpcSpans) == 0 {
-		return
-	}
-	buckets := model.RollupBy(rpcSpans, func(s span.Span) string { return s.Provider })
-
-	fmt.Fprintf(b, "BY PROVIDER\n")
-	fmt.Fprintf(b, "  %8s %8s %8s  %s\n", "total", "calls", "max", "provider")
-	for _, bkt := range buckets {
-		fmt.Fprintf(b, "  %8s %8d %8s  %s\n",
-			formatMs(bkt.TotalMs), bkt.Count, formatMs(uint64(bkt.MaxMs)), logfmt.DisplayText(bkt.Key))
-	}
-	fmt.Fprintf(b, "\n")
-}
-
-// writeSlowestCalls renders SLOWEST CALLS: RPC spans sorted by duration
-// descending, top maxRows.
-func writeSlowestCalls(b *strings.Builder, rpcSpans []span.Span) {
-	if len(rpcSpans) == 0 {
-		return
-	}
-	rows := append([]span.Span(nil), rpcSpans...)
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].DurationMs != rows[j].DurationMs {
-			return rows[i].DurationMs > rows[j].DurationMs
-		}
-		return rows[i].RPC < rows[j].RPC
-	})
-	if len(rows) > maxRows {
-		fmt.Fprintf(b, "SLOWEST CALLS (top %d)\n", maxRows)
-		rows = rows[:maxRows]
-	} else {
-		fmt.Fprintf(b, "SLOWEST CALLS\n")
-	}
-	types := make([]string, len(rows))
-	for i, s := range rows {
-		types[i] = s.ResourceType
-	}
-	width := resourceTypeColWidth(types)
-	for _, s := range rows {
-		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
-			formatMs(uint64(s.DurationMs)), typeColWidth, truncate(s.RPC, typeColWidth),
-			width, truncate(s.ResourceType, width), logfmt.DisplayText(s.Provider))
-	}
-	fmt.Fprintf(b, "\n")
-}
-
-// writeSlowestResources renders SLOWEST RESOURCES: UI-hook spans sorted by
-// duration descending, top maxRows, with real, unmasked addresses.
-func writeSlowestResources(b *strings.Builder, uiSpans []span.Span) {
-	if len(uiSpans) == 0 {
-		return
-	}
-	rows := append([]span.Span(nil), uiSpans...)
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].DurationMs != rows[j].DurationMs {
-			return rows[i].DurationMs > rows[j].DurationMs
-		}
-		return rows[i].Address < rows[j].Address
-	})
-	if len(rows) > maxRows {
-		fmt.Fprintf(b, "SLOWEST RESOURCES (top %d)\n", maxRows)
-		rows = rows[:maxRows]
-	} else {
-		fmt.Fprintf(b, "SLOWEST RESOURCES\n")
-	}
-	// Terraform rounds a resource's start and end to the nearest second
-	// before subtracting them, so these figures are whole seconds carrying
-	// up to a second of error each -- see internal/diagnose's identical
-	// caveat on its own SLOWEST RESOURCES section.
-	fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n")
-	fmt.Fprintf(b, "  neighbouring rows are not reliably ordered.\n")
-	types := make([]string, len(rows))
-	for i, s := range rows {
-		types[i] = s.ResourceType
-	}
-	width := resourceTypeColWidth(types)
-	for _, s := range rows {
-		fmt.Fprintf(b, "  %8s  %-*s %-*s %s\n",
-			formatMs(uint64(s.DurationMs)), actionColWidth, truncate(s.RPC, actionColWidth),
-			width, truncate(s.ResourceType, width), logfmt.DisplayText(s.Address))
-	}
-	fmt.Fprintf(b, "\n")
-}
-
-// writeConcurrency renders CONCURRENCY for the RPC tier: peak concurrency,
-// summed span time, wall clock and their ratio.
-//
-// This deliberately does not call model.PackLanes or print a lane count.
-// PackLanes' lane count is a rendering construct for the phase-4 timeline --
-// every span, including a degenerate zero-duration one, needs a row to draw
-// it in, whether or not it overlaps anything -- not a profiling metric. For
-// a degenerate zero-duration span, PackLanes' lane count and
-// model.PeakConcurrency's peak measure different things and can legitimately
-// disagree (see the doc comment on PeakConcurrency), so printing both here
-// invites exactly the "these two numbers should match" reading that is
-// wrong.
-func writeConcurrency(b *strings.Builder, timing model.TimingSelection) error {
-	if timing.AdmittedCount == 0 {
-		return nil
-	}
-	if len(timing.Positioned) == 0 {
-		fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
-		fmt.Fprintf(b, "  unavailable: %d admitted observations (%s) have no usable positions\n\n", timing.AdmittedCount, formatMs(timing.AdmittedMs))
-		return nil
-	}
-	rpcSpans := timing.Positioned
-
-	var summed uint64
-	var wallClock uint32
-	var clamped bool
-	for _, s := range rpcSpans {
-		summed += uint64(s.DurationMs)
-		if s.EndMs > wallClock {
-			wallClock = s.EndMs
-		}
-		if s.StartClamped {
-			clamped = true
-		}
-	}
-
-	peak, err := model.PeakConcurrency(rpcSpans)
+	report, err := Build(l)
 	if err != nil {
 		return err
 	}
+	return renderReport(w, report, options)
+}
 
-	fmt.Fprintf(b, "CONCURRENCY (RPC tier)\n")
-	fmt.Fprintf(b, "  positioned duration   %s (%d excluded, %s)\n", formatMs(timing.PositionedMs), timing.ExcludedCount, formatMs(timing.ExcludedMs))
-	fmt.Fprintf(b, "  peak concurrency     %d\n", peak)
-	if clamped {
-		// A span whose reported duration exceeds its offset from the log's
-		// first entry has its start clamped to zero (span.Span.StartClamped),
-		// which shortens its timeline extent to [0, EndMs) while the duration
-		// printed beside it stays as reported. It therefore overlaps less of
-		// the run than that duration suggests, and peak concurrency can read
-		// low against the totals in the tables above. It contributes no
-		// concurrency at all only in the one case where it closed on the
-		// log's first timestamped entry, leaving an extent of [0, 0) -- see
-		// PeakConcurrency's doc comment on why a zero-extent span overlaps
-		// nothing. The number above is correct; this only explains it.
-		fmt.Fprintf(b, "  Note: one or more spans have a clamped start -- a span\n")
-		fmt.Fprintf(b, "  whose reported duration exceeds its offset from the\n")
-		fmt.Fprintf(b, "  log's first entry has its start clamped to zero, so it\n")
-		fmt.Fprintf(b, "  overlaps less of the run than its reported duration\n")
-		fmt.Fprintf(b, "  would suggest.\n")
+func renderReport(w io.Writer, report Report, options TextOptions) error {
+	if options.Limit < 0 {
+		return errors.New("profile limit must be non-negative")
 	}
-	fmt.Fprintf(b, "  summed span time     %s\n", formatMs(summed))
-	if wallClock > 0 {
-		fmt.Fprintf(b, "  wall clock           %s\n", formatMs(uint64(wallClock)))
-		fmt.Fprintf(b, "  summed / wall clock  %.1fx\n", float64(summed)/float64(wallClock))
+	b := &strings.Builder{}
+	fmt.Fprintf(b, "tfli profile report\n====================\n\n")
+	fmt.Fprintf(b, "SIZE\n  bytes                %d\n  RPC spans            %d\n  UI-hook spans        %d\n\n", report.Bytes, len(report.RPC), len(report.UI))
+	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n--diagnose, this report is not safe to share.\n\n")
+	writeLoggingCaveat(b)
+	qualitytext.WriteCaptureQuality(b, report.Quality)
+	writeSaturationWarning(b, report.Quality)
+	if len(report.RPC) == 0 && len(report.UI) == 0 {
+		fmt.Fprintf(b, "NO SPANS\n  This log has no spans to profile: no admitted timing observations.\n")
+		if report.Quality.ProviderEntries > 0 || report.Quality.RPC.Records > 0 || report.Quality.StructuredLines > 0 {
+			fmt.Fprintf(b, "  Provider or structured-output evidence was observed, but\n  it did not yield an admitted duration.\n")
+		} else {
+			fmt.Fprintf(b, "  Capture provider TRACE logs or terraform.ui completion hooks.\n")
+		}
+		return writeText(w, b.String())
+	}
+	writeResourceTypeJoin(b, report.Types, options.Limit)
+	writeProviderRollup(b, report.Providers, options.Limit)
+	if err := writeObservations(b, "SLOWEST CALLS", report.RPC, report.RPCRanking, options.Limit, report.HasContext, false); err != nil {
+		return err
+	}
+	if err := writeObservations(b, "SLOWEST RESOURCES", report.UI, report.UIRanking, options.Limit, report.HasContext, true); err != nil {
+		return err
+	}
+	if err := writeTimeline(b, report, options.Limit); err != nil {
+		return err
+	}
+	return writeText(w, b.String())
+}
+
+func writeText(w io.Writer, value string) error {
+	n, err := io.WriteString(w, value)
+	if err != nil {
+		return err
+	}
+	if n != len(value) {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func writeSaturationWarning(b *strings.Builder, quality model.CaptureQuality) {
+	if !quality.UI.DurationLowerBound {
+		return
+	}
+	var saturated uint64
+	for _, issue := range quality.Issues {
+		if issue.Stage == "ui_duration" && issue.Code == "duration_saturated" {
+			saturated += issue.Count
+		}
+	}
+	fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", saturated)
+	fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\nand timeline positions may be inaccurate.\n\n")
+}
+
+func limitedLength(length, limit int) int {
+	if limit > 0 && limit < length {
+		return limit
+	}
+	return length
+}
+
+func writeHeading(b *strings.Builder, name string, shown, total int) {
+	if shown < total {
+		fmt.Fprintf(b, "%s (top %d of %d)\n", name, shown, total)
+	} else {
+		fmt.Fprintf(b, "%s\n", name)
+	}
+}
+
+func resourceTypeColWidth(types []string) int {
+	width := typeColWidth
+	for _, value := range types {
+		width = max(width, len(logfmt.DisplayText(value)))
+	}
+	return min(width, maxResourceTypeColWidth)
+}
+
+func truncate(value string, width int) string {
+	value = logfmt.DisplayText(value)
+	if len(value) <= width {
+		return value
+	}
+	if width <= 3 {
+		return value[:width]
+	}
+	return value[:width-3] + "..."
+}
+
+func writeResourceTypeJoin(b *strings.Builder, rows []TypeSummary, limit int) {
+	if len(rows) == 0 {
+		return
+	}
+	shown := limitedLength(len(rows), limit)
+	writeHeading(b, "BY RESOURCE TYPE", shown, len(rows))
+	types := make([]string, shown)
+	uiPresent := false
+	for i, row := range rows[:shown] {
+		types[i] = row.ResourceType
+		uiPresent = uiPresent || row.UIResources > 0
+	}
+	if uiPresent {
+		fmt.Fprintf(b, "  UI-hook figures are sums of measurements rounded to\n  whole seconds, +/- 1s each.\n")
+	}
+	width := resourceTypeColWidth(types)
+	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n", width, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
+	for _, row := range rows[:shown] {
+		name := truncate(row.ResourceType, width)
+		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n", width, name, row.UIResources, formatLowerBoundMs(row.UITotalMs, row.UILowerBound), row.RPCCalls, formatMs(row.RPCTotalMs), formatMs(uint64(row.RPCMaxMs)))
+		if name != logfmt.DisplayText(row.ResourceType) {
+			fmt.Fprintf(b, "    resource type: %s\n", logfmt.DisplayText(row.ResourceType))
+		}
+	}
+	fmt.Fprintf(b, "\n")
+}
+
+func writeProviderRollup(b *strings.Builder, buckets []model.Bucket, limit int) {
+	if len(buckets) == 0 {
+		return
+	}
+	shown := limitedLength(len(buckets), limit)
+	writeHeading(b, "BY PROVIDER", shown, len(buckets))
+	fmt.Fprintf(b, "  %8s %8s %8s  %s\n", "total", "calls", "max", "provider")
+	for _, bucket := range buckets[:shown] {
+		fmt.Fprintf(b, "  %8s %8d %8s  %s\n", formatMs(bucket.TotalMs), bucket.Count, formatMs(uint64(bucket.MaxMs)), logfmt.DisplayText(bucket.Key))
+	}
+	fmt.Fprintf(b, "\n")
+}
+
+func writeObservations(b *strings.Builder, heading string, observations []Observation, ranking []int, limit int, hasContext, ui bool) error {
+	if len(observations) == 0 {
+		return nil
+	}
+	shown := limitedLength(len(ranking), limit)
+	writeHeading(b, heading, shown, len(ranking))
+	if ui {
+		fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n  neighbouring rows are not reliably ordered.\n")
+	}
+	for _, index := range ranking[:shown] {
+		if index < 0 || index >= len(observations) {
+			return errors.New("profile observation index out of range")
+		}
+		observation := observations[index]
+		s := observation.Span
+		duration := formatLowerBoundMs(uint64(s.DurationMs), ui && s.DurationSaturated)
+		if ui {
+			fmt.Fprintf(b, "  %8s  %s  %s\n    resource: %s (observed UI)\n", duration, logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Address))
+		} else {
+			fmt.Fprintf(b, "  %8s  %s  %s  %s\n", duration, logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Provider))
+			writeAttribution(b, observation.Attribution, hasContext)
+		}
+		writeSource(b, observation.Source)
 	}
 	fmt.Fprintf(b, "\n")
 	return nil
 }
 
-// formatMs renders a millisecond duration: whole milliseconds below one
-// second, seconds with one decimal place at or above it. Copied from
-// internal/diagnose rather than shared -- see the package doc comment on why
-// this report and diagnose's are kept free to diverge.
+func writeAttribution(b *strings.Builder, attribution attrib.Attribution, hasContext bool) {
+	if !hasContext {
+		fmt.Fprintf(b, "    resource: unavailable (no address context)\n")
+		return
+	}
+	switch attribution.Confidence {
+	case attrib.Ambiguous:
+		fmt.Fprintf(b, "    resource: ambiguous (%d candidates)\n", attribution.Candidates)
+	case attrib.Unattributed:
+		fmt.Fprintf(b, "    resource: unattributed\n")
+	default:
+		fmt.Fprintf(b, "    resource: %s (%s)\n", logfmt.DisplayText(attribution.Address), attribution.Confidence)
+	}
+}
+
+func writeSource(b *strings.Builder, source *model.SourceLocation) {
+	if source == nil || source.StartLine == 0 {
+		fmt.Fprintf(b, "    source: unavailable\n")
+	} else if source.StartLine == source.EndLine {
+		fmt.Fprintf(b, "    source: line %d\n", source.StartLine)
+	} else {
+		fmt.Fprintf(b, "    source: lines %d-%d\n", source.StartLine, source.EndLine)
+	}
+}
+
+func writeTimeline(b *strings.Builder, report Report, limit int) error {
+	if report.Timeline.Tier == nil {
+		return nil
+	}
+	tier := *report.Timeline.Tier
+	analysis := report.Timeline.Analysis
+	origin, observations := report.Quality.RPC.Origin, report.RPC
+	if tier == span.FidelityUIReported {
+		origin, observations = report.Quality.UI.Origin, report.UI
+	}
+	fmt.Fprintf(b, "CONCURRENCY (%s tier)\n", tier)
+	if origin == nil {
+		fmt.Fprintf(b, "  clock origin: unavailable\n")
+	} else {
+		fmt.Fprintf(b, "  clock origin: %s\n", origin.UTC().Format(time.RFC3339Nano))
+	}
+	fmt.Fprintf(b, "  interval offsets are milliseconds from this tier origin\n")
+	timing := analysis.Timing
+	fmt.Fprintf(b, "  positioned duration   %s (%d excluded, %s)\n", formatMs(timing.PositionedMs), timing.ExcludedCount, formatLowerBoundMs(timing.ExcludedMs, timing.ExcludedLowerBound))
+	if timing.ExcludedCount > 0 {
+		keys := make([]string, 0, len(timing.Exclusions))
+		for reason := range timing.Exclusions {
+			keys = append(keys, reason)
+		}
+		sort.Strings(keys)
+		for _, reason := range keys {
+			fmt.Fprintf(b, "    excluded: %s %d\n", logfmt.DisplayText(reason), timing.Exclusions[reason])
+		}
+	}
+	if analysis.Metrics == nil {
+		fmt.Fprintf(b, "  temporal metrics: unavailable\n")
+		writeTimelineQualification(b)
+		return nil
+	}
+	metrics := analysis.Metrics
+	fmt.Fprintf(b, "  window %s\n  peak concurrency %d\n  busy union %s\n", formatMs(uint64(metrics.WindowMs)), metrics.Peak, formatMs(uint64(metrics.BusyMs)))
+	if metrics.BusyFraction == nil {
+		fmt.Fprintf(b, "  busy / window unavailable\n")
+	} else {
+		fmt.Fprintf(b, "  busy / window %.1f%%\n", *metrics.BusyFraction*100)
+	}
+	fmt.Fprintf(b, "  positioned reported-duration sum %s\n", formatMs(timing.PositionedMs))
+	if metrics.WindowMs == 0 {
+		fmt.Fprintf(b, "  summed / window unavailable\n")
+	} else {
+		fmt.Fprintf(b, "  summed / window %.1fx\n", float64(timing.PositionedMs)/float64(metrics.WindowMs))
+	}
+	for _, observation := range observations {
+		if observation.Span.HasPosition() && observation.Span.StartClamped {
+			fmt.Fprintf(b, "  Note: one or more spans have a clamped start, so timeline extents may be shorter than reported durations.\n")
+			break
+		}
+	}
+	intervals := append([]model.Stall(nil), analysis.Intervals...)
+	sort.Slice(intervals, func(i, j int) bool {
+		di, dj := intervals[i].EndMs-intervals[i].StartMs, intervals[j].EndMs-intervals[j].StartMs
+		if di != dj {
+			return di > dj
+		}
+		if intervals[i].StartMs != intervals[j].StartMs {
+			return intervals[i].StartMs < intervals[j].StartMs
+		}
+		return intervals[i].EndMs < intervals[j].EndMs
+	})
+	shown := limitedLength(len(intervals), limit)
+	if len(intervals) == 0 {
+		fmt.Fprintf(b, "  no qualifying intervals at or above %s\n", formatMs(uint64(analysis.ThresholdMs)))
+	} else {
+		writeHeading(b, "QUALIFYING INTERVALS", shown, len(intervals))
+		for _, interval := range intervals[:shown] {
+			fmt.Fprintf(b, "  %dms-%dms  ", interval.StartMs, interval.EndMs)
+			if interval.MinRunning == interval.MaxRunning {
+				fmt.Fprintf(b, "%d of %d running\n", interval.MinRunning, interval.Capacity)
+			} else {
+				fmt.Fprintf(b, "%d-%d of %d running\n", interval.MinRunning, interval.MaxRunning, interval.Capacity)
+			}
+			if interval.Blocking < 0 {
+				fmt.Fprintf(b, "    blocking observation: none running\n")
+				continue
+			}
+			if interval.Blocking >= len(report.Timeline.PositionedIndices) {
+				return errors.New("profile interval observation index out of range")
+			}
+			original := report.Timeline.PositionedIndices[interval.Blocking]
+			if original < 0 || original >= len(observations) {
+				return errors.New("profile interval observation index out of range")
+			}
+			observation := observations[original]
+			fmt.Fprintf(b, "    blocking observation: %s %s %s\n", logfmt.DisplayText(observation.Span.RPC), logfmt.DisplayText(observation.Span.ResourceType), logfmt.DisplayText(observation.Span.Provider))
+			writeSource(b, observation.Source)
+		}
+	}
+	writeTimelineQualification(b)
+	return nil
+}
+
+func writeTimelineQualification(b *strings.Builder) {
+	fmt.Fprintf(b, "  Observed gaps and active spans do not establish Terraform idleness\n  or a dependency-critical path.\n\n")
+}
+
+func formatLowerBoundMs(ms uint64, lowerBound bool) string {
+	if lowerBound {
+		return "≥" + formatMs(ms)
+	}
+	return formatMs(ms)
+}
+
 func formatMs(ms uint64) string {
 	if ms < 1000 {
 		return fmt.Sprintf("%dms", ms)
@@ -361,13 +342,6 @@ func formatMs(ms uint64) string {
 	return fmt.Sprintf("%.1fs", float64(ms)/1000)
 }
 
-// writeLoggingCaveat qualifies durations and rankings because logging overhead
-// varies with each call's output. It precedes the no-spans early return so the
-// qualification remains visible on every report path.
 func writeLoggingCaveat(b *strings.Builder) {
-	fmt.Fprintf(b, "Durations here are measured under logging, which is not\n")
-	fmt.Fprintf(b, "free: one workspace planned in 24.1s unlogged and 522.2s\n")
-	fmt.Fprintf(b, "with debug plus provider TRACE. A call that logs heavily\n")
-	fmt.Fprintf(b, "is inflated more than one that waits, so rankings are\n")
-	fmt.Fprintf(b, "approximate and absolute times do not transfer.\n\n")
+	fmt.Fprintf(b, "Durations here are measured under logging, which is not\nfree: one workspace planned in 24.1s unlogged and 522.2s\nwith debug plus provider TRACE. A call that logs heavily\nis inflated more than one that waits, so rankings are\napproximate and absolute times do not transfer.\n\n")
 }

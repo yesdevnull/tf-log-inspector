@@ -547,7 +547,7 @@ func TestLoadedMixedTimingKeepsAdmittedTotalsAndChoosesRPC(t *testing.T) {
 		t.Fatalf("timeline = tier %v positioned %d admitted %d excluded %d, want RPC/1/30/20", tier, len(timing.Positioned), timing.AdmittedMs, timing.ExcludedMs)
 	}
 	var report strings.Builder
-	if err := profile.Render(&report, l); err != nil {
+	if err := profile.Render(&report, l, profile.TextOptions{Limit: profile.DefaultLimit}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(report.String(), "duration 30ms") || !strings.Contains(report.String(), "positioned duration   10ms (1 excluded, 20ms)") {

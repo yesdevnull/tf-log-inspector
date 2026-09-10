@@ -239,7 +239,7 @@ func runProfile(path, outPath string, stdout io.Writer) error {
 		return err
 	}
 	return writeReport(stdout, path, outPath, func(w io.Writer) error {
-		return profile.Render(w, l)
+		return profile.Render(w, l, profile.TextOptions{Limit: profile.DefaultLimit})
 	})
 }
 

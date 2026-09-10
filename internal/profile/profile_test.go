@@ -21,7 +21,7 @@ func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestCaptureQualitySummaryPreservesWriterErrors(t *testing.T) {
 	want := errors.New("writer failed")
-	if err := Render(failingWriter{err: want}, &model.Log{}); !errors.Is(err, want) {
+	if err := Render(failingWriter{err: want}, &model.Log{}, TextOptions{Limit: DefaultLimit}); !errors.Is(err, want) {
 		t.Fatalf("Render error = %v, want %v", err, want)
 	}
 }
@@ -38,7 +38,7 @@ func TestReportPresentsWholeCaptureQualityWithoutReconstructingResponses(t *test
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Render(&out, l); err != nil {
+	if err := Render(&out, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -62,7 +62,7 @@ func TestReportPresentsWholeCaptureQualityWithoutReconstructingResponses(t *test
 func TestReportMarksZeroAttributionDenominatorUnavailable(t *testing.T) {
 	l := &model.Log{}
 	var out bytes.Buffer
-	if err := Render(&out, l); err != nil {
+	if err := Render(&out, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "nameable duration      unavailable / 0ms (no address context)") {
@@ -94,7 +94,7 @@ func TestReportEscapesRPCFields(t *testing.T) {
 				DurationMs: 1, EndMs: 1, RPC: malicious, Provider: malicious, ResourceType: malicious,
 			}}}
 			var out strings.Builder
-			if err := Render(&out, l); err != nil {
+			if err := Render(&out, l, TextOptions{Limit: DefaultLimit}); err != nil {
 				t.Fatal(err)
 			}
 			if strings.ContainsAny(out.String(), "\x1b\a") || strings.Contains(out.String(), "\x9b") {
@@ -131,7 +131,7 @@ func render(t *testing.T, path string) string {
 		t.Fatalf("Load: %v", err)
 	}
 	var sb strings.Builder
-	if err := Render(&sb, l); err != nil {
+	if err := Render(&sb, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	return sb.String()
@@ -229,7 +229,7 @@ func TestReportKeepsColumnsAlignedWithLongResourceType(t *testing.T) {
 		},
 	}
 	var sb strings.Builder
-	if err := Render(&sb, l); err != nil {
+	if err := Render(&sb, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	rows := tableRows(t, sb.String(), "BY RESOURCE TYPE")
@@ -253,7 +253,7 @@ func TestReportDistinguishesResourceTypesWithLongCommonPrefix(t *testing.T) {
 		},
 	}
 	var sb strings.Builder
-	if err := Render(&sb, l); err != nil {
+	if err := Render(&sb, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	rows := tableRows(t, sb.String(), "SLOWEST CALLS")
@@ -283,7 +283,7 @@ func TestReportNotesClampedStartsUnderConcurrency(t *testing.T) {
 		},
 	}
 	var sb strings.Builder
-	if err := Render(&sb, l); err != nil {
+	if err := Render(&sb, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	out := sb.String()
@@ -302,7 +302,7 @@ func TestReportOmitsClampedNoteWhenNoSpanIsClamped(t *testing.T) {
 		},
 	}
 	var sb strings.Builder
-	if err := Render(&sb, l); err != nil {
+	if err := Render(&sb, l, TextOptions{Limit: DefaultLimit}); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 	if strings.Contains(sb.String(), "clamped") {
