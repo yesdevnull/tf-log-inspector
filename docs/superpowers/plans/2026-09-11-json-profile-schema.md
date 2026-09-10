@@ -25,7 +25,7 @@
 
 ---
 
-## Status and proposed approach
+## Status and approach
 
 Dan authorised drafting G1/G2 on 11 September 2026, after F merged locally at `529a6fd`, then approved both plans and subagent implementation. Execution evidence is recorded below.
 
@@ -238,9 +238,9 @@ Standard JSON escaping is allowed; decoding must preserve identifiers. No warnin
 The plan uses the inspected fields of `Report`, `CaptureQuality`,
 `ResourceProjection`, `Attribution` and `ReconstructionQuality`. The sole domain
 addition is the reconstruction snapshot; its accessor already exists. G1 and G2
-use the same metadata/renderer signatures. No test execution is claimed for
-these documentation-only plans. Exact schema and UTF-8 failure behaviour remain
-proposed for Dan's approval, with no backward-compatibility commitment.
+use the same metadata/renderer signatures. Planning did not establish passing
+application tests; execution evidence follows. Dan approved the exact schema and
+UTF-8 failure behaviour above. No backward-compatibility commitment was introduced.
 
 ## Execution record
 
@@ -265,3 +265,12 @@ Separate cleanup retained the additions, reports no concerns, and measured 97.0%
 profile coverage. Full/race tests, build, lint, vet, formatting and module checks
 pass. G1 is ready for G2; final combined review follows CLI integration. No remote
 CI ran. The schema reference's baseline and UTF-8 error wording is clarified.
+
+Boundary G completed after G2 integration. Independent whole-branch review of
+`529a6fd..1b78fc9` found no actionable issues and judged the work ready to merge.
+It checked schema/nullability, source and observation identities, deterministic
+encoding, privacy, CLI validation, output safety and tests. G2 records the final
+fresh race/lint/build/module checks, local four-platform build matrix and text
+parity evidence. All task review findings were addressed and separately cleaned;
+there are no deferred findings or controller rulings. Integration awaits Dan's
+decision; nothing was pushed or merged.

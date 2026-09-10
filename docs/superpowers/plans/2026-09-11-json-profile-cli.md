@@ -136,7 +136,7 @@ Only validated CLI values reach runProfile; migrated direct tests explicitly sup
 
 **Interfaces:** Exercise `run` as the user entry point; no new production API. G1 schema reference is `docs/profile-json-v1.md`.
 
-- [ ] **Step 1: Add real end-to-end output regressions.** Exercise JSON stdout and `-o` against sanitised RPC-only, UI-only, mixed, no-duration and saturated fixtures. Copy one fixture under two directories using the same basename: output bytes must match. Change only the basename: decoded input.basename changes, all other decoded data remains equal. Verify `-o` writes no stdout, produces exactly one complete document, and no absolute temp directory appears. Source locations and counts must match independent fixture values, not values obtained from the same JSON projection.
+- [x] **Step 1: Add real end-to-end output regressions.** Exercise JSON stdout and `-o` against sanitised RPC-only, UI-only, mixed, no-duration and saturated fixtures. Copy one fixture under two directories using the same basename: output bytes must match. Change only the basename: decoded input.basename changes, all other decoded data remains equal. Verify `-o` writes no stdout, produces exactly one complete document, and no absolute temp directory appears. Source locations and counts must match independent fixture values, not values obtained from the same JSON projection.
 
 Add JSON to same-path, symlink and hard-link input/output refusal tests. Read the input bytes before and after each attempt; require an error and identical bytes. Retain platform handling from existing tests. Example success-path structure:
 
@@ -151,8 +151,8 @@ if !json.Valid(data) { t.Fatal("output file is not JSON") }
 
 Follow that structural check with decoded schema/source/count assertions. Cover missing input, output-open failure using a directory, failing stdout and short stdout using real writer-error boundary helpers already used in the repo. Preserve returned errors; no swallowed error may look like successful output. Test input identifiers with newline/ESC/quotes/non-ASCII round-trip through real parsing and JSON decoding. Do not place private logs or credentials into fixtures.
 
-- [ ] **Step 2: Run the focused tests.** `go test ./cmd/tfli -run 'Test.*JSON' -count=1`. This task strengthens an existing feature; passing tests are legitimate coverage, not evidence of a new behavioural RED. Any production defect uncovered requires a failing regression before its smallest fix, followed by review.
-- [ ] **Step 3: Document commands and disclosure.** Add these examples and link the schema reference:
+- [x] **Step 2: Run the focused tests.** `go test ./cmd/tfli -run 'Test.*JSON' -count=1`. This task strengthens an existing feature; passing tests are legitimate coverage, not evidence of a new behavioural RED. Any production defect uncovered requires a failing regression before its smallest fix, followed by review.
+- [x] **Step 3: Document commands and disclosure.** Add these examples and link the schema reference:
 
 ```text
 tfli --profile --format json run.log
@@ -160,15 +160,15 @@ tfli --profile --format json -o profile.json run.log
 ```
 
 Explain complete data/no limit, versioned schema, explicit nulls vs zero, integer milliseconds, separate RPC/UI clocks and durations, full source references, confidence/lower bounds and local-only entry identities. JSON contains unmasked identifiers but excludes raw response/log bodies; review before sharing. Default text remains unchanged. No JSON import, compare command or compatibility commitment is advertised.
-- [ ] **Step 4: Verify and review.** Run the full checks below; independently inspect representative JSON documents and decode them. Independent whole-G review checks G1/G2 together; separate cleanup covers these tests. Address all actionable findings, then update both plans and only Boundary G's spec status.
-- [ ] **Step 5: Commit.** Signed commit `Verify and document JSON profile workflows`; record actual local/remote evidence without claiming H or I completion.
+- [x] **Step 4: Verify and review.** Run the full checks below; independently inspect representative JSON documents and decode them. Independent whole-G review checks G1/G2 together; separate cleanup covers these tests. Address all actionable findings, then update both plans and only Boundary G's spec status.
+- [x] **Step 5: Commit.** Signed commit `Verify and document JSON profile workflows`; record actual local/remote evidence without claiming H or I completion.
 
 ## Final validation
 
-- [ ] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
-- [ ] Existing CI matrix: Linux/macOS × amd64/arm64 with `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOFLAGS=-mod=readonly`; build all packages and CLI with `-trimpath` into task-specific `/tmp` paths. Distinguish local checks from remote CI.
-- [ ] Text default output unchanged, JSON complete and deterministic, no schema leak of raw data/internal IDs; all errors propagate and input alias tests pass.
-- [ ] Independent combined review and separate cleanup complete; signed history, whitespace and clean-worktree checks. Finish with Dan's integration decision; do not infer permission to push or merge.
+- [x] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
+- [x] Existing CI matrix: Linux/macOS × amd64/arm64 with `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, `GOFLAGS=-mod=readonly`; build all packages and CLI with `-trimpath` into task-specific `/tmp` paths. Distinguish local checks from remote CI.
+- [x] Text default output unchanged, JSON complete and deterministic, no schema leak of raw data/internal IDs; all errors propagate and input alias tests pass.
+- [x] Independent combined review and separate cleanup complete; signed history, whitespace and clean-worktree checks. Finish with Dan's integration decision; do not infer permission to push or merge.
 
 ## Planning self-review
 
@@ -179,7 +179,7 @@ Explicit default-valued flags are tracked by presence. The plans share exact
 `JSONMetadata` and `RenderJSON` signatures. Existing writer ownership is retained;
 encoding failure is not misrepresented as atomic file replacement. Comparison
 and JSON imports remain outside G. Documentation checks do not establish passing
-application tests; implementation and independent reviews are future work.
+application tests; implementation and independent review evidence follows.
 
 ## Execution record
 
@@ -201,4 +201,10 @@ Focused and full tests pass. Controller race checks passed all eleven packages,
 lint reported zero issues, and formatting/build/module checks passed. Linux and
 macOS amd64/arm64 package and trimmed CLI builds passed locally with CGO disabled,
 local toolchain and readonly modules; remote CI has not run. Combined review
-remains before Boundary G completion.
+completed over `529a6fd..1b78fc9` with no actionable issues and a ready-to-merge
+verdict. The review checked schema/nullability, source and observation identities,
+deterministic encoding, privacy, CLI validation, output safety and tests. All
+task review findings were addressed and separately cleaned; there are no deferred
+findings or controller rulings. Boundary G is complete; H and I are unimplemented.
+Signed history and whitespace checks pass. Integration awaits Dan's decision;
+nothing was pushed or merged.

@@ -64,9 +64,13 @@ On 11 September 2026, after Boundary F merged locally at `529a6fd`, Dan
 authorised drafting Boundary G as two sequential plans:
 [JSON profile schema and encoder](../plans/2026-09-11-json-profile-schema.md),
 then [JSON profile CLI integration](../plans/2026-09-11-json-profile-cli.md).
-The plans propose exact schema fields, nullability, encoding and option
-validation for review. This authorises planning, not application implementation,
-and does not change the status of Boundaries H or I.
+Dan approved both plans and subagent implementation. Boundary G completed on
+11 September 2026: complete versioned JSON profiles are available through
+`--profile --format json`, with explicit nullability, source references,
+deterministic encoding and protected file output. Combined review of
+`529a6fd..1b78fc9` found no actionable issues. Both plans record task reviews,
+separate test cleanup, race/lint/build checks and decoded output inspection.
+This completion applies only to G; Boundaries H and I remain unimplemented.
 
 ## Evidence and relationship to existing designs
 
