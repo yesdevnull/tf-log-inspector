@@ -13,15 +13,15 @@ import (
 var errInvalidComparisonUTF8 = errors.New("comparison JSON contains invalid UTF-8")
 
 type jsonComparison struct {
-	SchemaVersion  uint8                    `json:"schema_version"`
-	Kind           string                   `json:"kind"`
-	ToolVersion    string                   `json:"tool_version"`
-	DurationUnit   string                   `json:"duration_unit"`
-	Before         jsonCapture              `json:"before"`
-	After          jsonCapture              `json:"after"`
-	Comparability  jsonComparability        `json:"comparability"`
-	Sections       []jsonComparisonSection  `json:"sections"`
-	Qualifications jsonComparisonQualifiers `json:"qualifications"`
+	SchemaVersion  uint8                   `json:"schema_version"`
+	Kind           string                  `json:"kind"`
+	ToolVersion    string                  `json:"tool_version"`
+	DurationUnit   string                  `json:"duration_unit"`
+	Before         jsonCapture             `json:"before"`
+	After          jsonCapture             `json:"after"`
+	Comparability  jsonComparability       `json:"comparability"`
+	Sections       []jsonComparisonSection `json:"sections"`
+	Qualifications []string                `json:"qualifications"`
 }
 
 type jsonComparability struct {
@@ -82,18 +82,6 @@ type jsonComparisonChanges struct {
 	MaxPercent   *float64     `json:"max_percent"`
 }
 
-type jsonComparisonQualifiers struct {
-	UnmaskedIdentifiers                string `json:"unmasked_identifiers"`
-	LoggingAffectsDurations            string `json:"logging_affects_durations"`
-	RPCAndUIMeasureDifferentWork       string `json:"rpc_and_ui_measure_different_work"`
-	UIDurationRounding                 string `json:"ui_duration_rounding"`
-	ObservedChangesAreNotCausal        string `json:"observed_changes_are_not_causal"`
-	AddedRemovedAreObservationPresence string `json:"added_removed_are_observation_presence"`
-	IndependentScrubAliasesMayDiffer   string `json:"independent_scrub_aliases_may_differ"`
-	LoggingConfigurationUnknown        string `json:"logging_configuration_unknown"`
-	LowerBoundsDoNotDefineTimingDeltas string `json:"lower_bounds_do_not_define_timing_deltas"`
-}
-
 func RenderComparisonJSON(w io.Writer, report ComparisonReport, metadata ComparisonMetadata) error {
 	doc, err := buildComparisonJSON(report, metadata)
 	if err != nil {
@@ -151,6 +139,9 @@ func comparisonSectionJSON(section model.ComparisonSection) (jsonComparisonSecti
 	}
 	w := jsonComparisonSection{Kind: section.Kind, Tier: section.Tier, BeforeAvailable: section.BeforeAvailable, AfterAvailable: section.AfterAvailable, Rows: make([]jsonComparisonRow, 0, len(section.Rows))}
 	for _, row := range section.Rows {
+		if err := validStrings(row.State); err != nil {
+			return jsonComparisonSection{}, errInvalidComparisonUTF8
+		}
 		if row.State != "matched" && row.State != "added" && row.State != "removed" && row.State != "unavailable" {
 			return jsonComparisonSection{}, errors.New("comparison JSON has invalid row state")
 		}
@@ -217,8 +208,8 @@ func comparisonJSONError(err error) error {
 	}
 	return err
 }
-func comparisonQualifications() jsonComparisonQualifiers {
-	return jsonComparisonQualifiers{"identifiers are unmasked", "logging affects measured durations", "RPC and UI durations measure different overlapping work", "UI durations are rounded by up to one second per observation", "observed changes do not establish causes", "added and removed indicate observation presence", "independently scrubbed aliases may differ", "logging configuration equivalence is unknown", "lower bounds do not define timing deltas"}
+func comparisonQualifications() []string {
+	return []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
 }
 
 func finiteComparisonJSON(doc jsonComparison) bool {

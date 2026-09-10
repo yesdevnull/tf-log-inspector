@@ -89,7 +89,7 @@ apply independent limits.
 
 ## Qualifications
 
-`qualifications` is an object with these fields in this order:
+`qualifications` is an array of string codes in this order:
 
 `unmasked_identifiers`, `logging_affects_durations`,
 `rpc_and_ui_measure_different_work`, `ui_duration_rounding`,
@@ -97,7 +97,7 @@ apply independent limits.
 `independent_scrub_aliases_may_differ`, `logging_configuration_unknown`, and
 `lower_bounds_do_not_define_timing_deltas`.
 
-The values disclose that identifiers are unmasked; logging changes measured
+The codes disclose that identifiers are unmasked; logging changes measured
 durations; RPC and UI-hook durations measure different, overlapping work and
 must not be added, subtracted, or treated as interchangeable; UI durations can
 differ by up to one second due to rounding; observed changes do not prove

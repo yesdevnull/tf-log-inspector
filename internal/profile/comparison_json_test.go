@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func TestComparisonJSONCompleteContract(t *testing.T) {
@@ -83,7 +84,14 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	for name, value := range firstChanges {
 		assertJSONNull(t, "unavailable "+name, value)
 	}
-	assertJSONKeys(t, "qualifications", decodeJSONObject(t, root["qualifications"]), "unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas")
+	var qualifications []string
+	if err := json.Unmarshal(root["qualifications"], &qualifications); err != nil {
+		t.Fatal(err)
+	}
+	wantQualifications := []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
+	if !reflect.DeepEqual(qualifications, wantQualifications) {
+		t.Fatalf("qualifications = %#v, want %#v", qualifications, wantQualifications)
+	}
 	if !reflect.DeepEqual(report, original) {
 		t.Fatal("renderer mutated report")
 	}
@@ -155,6 +163,9 @@ func TestComparisonJSONValidationAndWriterFailures(t *testing.T) {
 		{"row state", func(r *ComparisonReport, _ *ComparisonMetadata) {
 			r.Data.Sections = []model.ComparisonSection{{Kind: "rpc_providers", Tier: "rpc", Rows: []model.ComparisonRow{{State: "other"}}}}
 		}, "comparison JSON has invalid row state"},
+		{"row state utf8", func(r *ComparisonReport, _ *ComparisonMetadata) {
+			r.Data.Sections = []model.ComparisonSection{{Kind: "rpc_providers", Tier: "rpc", Rows: []model.ComparisonRow{{State: "\xff"}}}}
+		}, "comparison JSON contains invalid UTF-8"},
 		{"nonfinite", func(r *ComparisonReport, _ *ComparisonMetadata) {
 			v := math.Inf(1)
 			r.Data.Sections = []model.ComparisonSection{{
@@ -183,6 +194,84 @@ func TestComparisonJSONValidationAndWriterFailures(t *testing.T) {
 	}
 	if err := RenderComparisonJSON(shortWriter{}, valid, ComparisonMetadata{}); !errors.Is(err, io.ErrShortWrite) {
 		t.Fatalf("short write=%v", err)
+	}
+}
+
+func TestComparisonJSONEncodesCalculatedChangesAndLowerBounds(t *testing.T) {
+	comparison, err := model.Compare(
+		model.ComparisonInput{
+			RPC: []span.Span{{Provider: "matched", DurationMs: 10}, {Provider: "matched", DurationMs: 30}, {Provider: "removed", DurationMs: 5}},
+			UI:  []span.Span{{Address: "resource.lower", RPC: "apply", ResourceType: "type", DurationMs: 10, DurationSaturated: true}},
+		},
+		model.ComparisonInput{
+			RPC: []span.Span{{Provider: "matched", DurationMs: 20}, {Provider: "matched", DurationMs: 30}, {Provider: "matched", DurationMs: 40}, {Provider: "added", DurationMs: 7}},
+			UI:  []span.Span{{Address: "resource.lower", RPC: "apply", ResourceType: "type", DurationMs: 20}},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := ComparisonReport{Before: Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, After: Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, Data: comparison}
+	var out bytes.Buffer
+	if err := RenderComparisonJSON(&out, report, ComparisonMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	sections := decodeJSONArray(t, decodeJSONObject(t, out.Bytes())["sections"])
+	rpcRows := decodeJSONArray(t, sections[0]["rows"])
+	matched := comparisonJSONRowByKey(t, rpcRows, "provider", "matched")
+	assertComparisonSummary(t, matched["before"], "2", "40", "20", "30", "false")
+	assertComparisonSummary(t, matched["after"], "3", "90", "30", "40", "false")
+	changes := decodeJSONObject(t, matched["changes"])
+	for key, want := range map[string]string{"count": "1", "total_ms": "50", "mean_ms": "10", "max_ms": "10", "count_percent": "50", "total_percent": "125", "mean_percent": "50"} {
+		assertJSONLiteral(t, changes, key, want)
+	}
+	var maxPercent float64
+	if err := json.Unmarshal(changes["max_percent"], &maxPercent); err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(maxPercent-100.0/3.0) > 1e-12 {
+		t.Fatalf("max percent = %v", maxPercent)
+	}
+
+	added := comparisonJSONRowByKey(t, rpcRows, "provider", "added")
+	assertComparisonSummary(t, added["before"], "0", "0", "null", "null", "false")
+	addedChanges := decodeJSONObject(t, added["changes"])
+	assertJSONLiteral(t, addedChanges, "count", "1")
+	assertJSONLiteral(t, addedChanges, "total_ms", "7")
+	for _, key := range []string{"mean_ms", "max_ms", "count_percent", "total_percent", "mean_percent", "max_percent"} {
+		assertJSONNull(t, "added "+key, addedChanges[key])
+	}
+
+	uiRows := decodeJSONArray(t, sections[4]["rows"])
+	lower := comparisonJSONRowByKey(t, uiRows, "address", "resource.lower")
+	lowerChanges := decodeJSONObject(t, lower["changes"])
+	assertJSONLiteral(t, lowerChanges, "count", "0")
+	assertJSONLiteral(t, lowerChanges, "count_percent", "0")
+	for _, key := range []string{"total_ms", "mean_ms", "max_ms", "total_percent", "mean_percent", "max_percent"} {
+		assertJSONNull(t, "lower bound "+key, lowerChanges[key])
+	}
+}
+
+func comparisonJSONRowByKey(t *testing.T, rows []map[string]json.RawMessage, field, value string) map[string]json.RawMessage {
+	t.Helper()
+	for _, row := range rows {
+		var got string
+		if err := json.Unmarshal(decodeJSONObject(t, row["key"])[field], &got); err != nil {
+			t.Fatal(err)
+		}
+		if got == value {
+			return row
+		}
+	}
+	t.Fatalf("row %s=%q not found", field, value)
+	return nil
+}
+
+func assertComparisonSummary(t *testing.T, raw json.RawMessage, count, total, mean, max, lower string) {
+	t.Helper()
+	summary := decodeJSONObject(t, raw)
+	for key, want := range map[string]string{"count": count, "total_ms": total, "mean_ms": mean, "max_ms": max, "lower_bound": lower} {
+		assertJSONLiteral(t, summary, key, want)
 	}
 }
 
