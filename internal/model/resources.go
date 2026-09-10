@@ -68,16 +68,16 @@ func BuildResourceIndex(l *Log) ResourceIndex {
 	modules := make(map[string]struct{})
 
 	for i, s := range l.UISpans {
-		module := moduleFromEvidence(s.Address, s.Module, s.ModuleKnown, s.ModuleInvalid)
+		module, unavailable := moduleFromEvidence(s.Address, s.Module, s.ModuleKnown, s.ModuleInvalid)
 		index.Operations = append(index.Operations, ResourceOperation{UIIndex: i, Module: module})
 		addKnownModule(modules, module)
-		addChoice(choices, s.Address, module)
+		addChoice(choices, s.Address, module, unavailable)
 	}
 
 	for _, c := range l.Contexts {
-		module := moduleFromEvidence(c.Address, c.Module, c.ModuleKnown, c.ModuleInvalid)
+		module, unavailable := moduleFromEvidence(c.Address, c.Module, c.ModuleKnown, c.ModuleInvalid)
 		addKnownModule(modules, module)
-		addChoice(choices, c.Address, module)
+		addChoice(choices, c.Address, module, unavailable)
 	}
 
 	for i := range l.RPCSpans {
@@ -85,10 +85,10 @@ func BuildResourceIndex(l *Log) ResourceIndex {
 			continue
 		}
 		a := l.Attribs[i]
-		module := moduleFromEvidence(a.Address, a.Module, a.ModuleKnown, a.ModuleInvalid)
+		module, unavailable := moduleFromEvidence(a.Address, a.Module, a.ModuleKnown, a.ModuleInvalid)
 		index.RPCModules[i] = module
 		addKnownModule(modules, module)
-		addChoice(choices, a.Address, module)
+		addChoice(choices, a.Address, module, unavailable)
 	}
 
 	addresses := make([]string, 0, len(choices))
@@ -100,7 +100,7 @@ func BuildResourceIndex(l *Log) ResourceIndex {
 	for _, address := range addresses {
 		fact := choices[address]
 		module := fact.module
-		if fact.conflict {
+		if fact.unavailable || fact.conflict {
 			module = ResourceModule{}
 		}
 		index.Choices = append(index.Choices, ResourceChoice{Address: address, Module: module})
@@ -115,15 +115,19 @@ func BuildResourceIndex(l *Log) ResourceIndex {
 }
 
 type choiceModule struct {
-	module   ResourceModule
-	conflict bool
+	module ResourceModule
+	// unavailable records supplied evidence that could not be reconciled.
+	// It stays sticky so later evidence cannot make a contradiction disappear.
+	unavailable bool
+	conflict    bool
 }
 
-func moduleFromEvidence(address, observed string, observedKnown, invalid bool) ResourceModule {
+func moduleFromEvidence(address, observed string, observedKnown, invalid bool) (ResourceModule, bool) {
 	if invalid {
-		return ResourceModule{}
+		return ResourceModule{}, true
 	}
-	return ResolveResourceModule(address, observed, observedKnown)
+	module := ResolveResourceModule(address, observed, observedKnown)
+	return module, observedKnown && !module.Known
 }
 
 func namedConfidence(confidence attrib.Confidence) bool {
@@ -135,11 +139,12 @@ func namedConfidence(confidence attrib.Confidence) bool {
 	}
 }
 
-func addChoice(choices map[string]choiceModule, address string, module ResourceModule) {
+func addChoice(choices map[string]choiceModule, address string, module ResourceModule, unavailable bool) {
 	if address == "" {
 		return
 	}
 	fact := choices[address]
+	fact.unavailable = fact.unavailable || unavailable
 	if module.Known {
 		if fact.module.Known && fact.module.Path != module.Path {
 			fact.conflict = true

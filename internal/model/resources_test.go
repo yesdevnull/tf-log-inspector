@@ -108,6 +108,44 @@ func TestResourceIndexKnownEvidenceSupplementsUnknownWithoutErasingConflicts(t *
 	}
 }
 
+func TestResourceIndexSuppliedUnavailableModuleEvidenceIsSticky(t *testing.T) {
+	const address = `module.a.aws_instance.x`
+	knownUI := span.Span{Address: address, Module: `module.a`, ModuleKnown: true}
+	knownContext := attrib.Context{Address: address, Module: `module.a`, ModuleKnown: true}
+	cases := []struct {
+		name               string
+		log                Log
+		wantOperationKnown bool
+	}{
+		{"UI contradiction before known context", Log{UISpans: []span.Span{{Address: address, Module: `module.b`, ModuleKnown: true}}, Contexts: []attrib.Context{knownContext}}, false},
+		{"UI invalid before known context", Log{UISpans: []span.Span{{Address: address, ModuleInvalid: true}}, Contexts: []attrib.Context{knownContext}}, false},
+		{"UI malformed before known context", Log{UISpans: []span.Span{{Address: address, Module: `module.`, ModuleKnown: true}}, Contexts: []attrib.Context{knownContext}}, false},
+		{"context contradiction after known UI", Log{UISpans: []span.Span{knownUI}, Contexts: []attrib.Context{{Address: address, Module: `module.b`, ModuleKnown: true}}}, true},
+		{"context invalid after known UI", Log{UISpans: []span.Span{knownUI}, Contexts: []attrib.Context{{Address: address, ModuleInvalid: true}}}, true},
+		{"context malformed after known UI", Log{UISpans: []span.Span{knownUI}, Contexts: []attrib.Context{{Address: address, Module: `module.`, ModuleKnown: true}}}, true},
+		{"named RPC contradiction after known UI", Log{UISpans: []span.Span{knownUI}, RPCSpans: []span.Span{{}}, Attribs: []attrib.Attribution{{Address: address, Module: `module.b`, ModuleKnown: true, Confidence: attrib.Contained}}}, true},
+		{"named RPC invalid after known UI", Log{UISpans: []span.Span{knownUI}, RPCSpans: []span.Span{{}}, Attribs: []attrib.Attribution{{Address: address, ModuleInvalid: true, Confidence: attrib.Contained}}}, true},
+		{"named RPC malformed after known UI", Log{UISpans: []span.Span{knownUI}, RPCSpans: []span.Span{{}}, Attribs: []attrib.Attribution{{Address: address, Module: `module.`, ModuleKnown: true, Confidence: attrib.Contained}}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BuildResourceIndex(&tc.log)
+			if len(got.Choices) != 1 {
+				t.Fatalf("choices=%+v, want one exact address", got.Choices)
+			}
+			if got.Choices[0] != (ResourceChoice{Address: address}) {
+				t.Errorf("choice=%+v, want sticky unknown module", got.Choices[0])
+			}
+			if got.Operations[0].Module.Known != tc.wantOperationKnown {
+				t.Errorf("operation module=%+v, want Known=%v independently of aggregate choice", got.Operations[0].Module, tc.wantOperationKnown)
+			}
+			if len(got.RPCModules) > 0 && got.RPCModules[0].Known {
+				t.Errorf("RPC module=%+v, want its independently unresolved fact", got.RPCModules[0])
+			}
+		})
+	}
+}
+
 func TestResourceIndexLoadedCompletionsRetainDistinctSourceLocations(t *testing.T) {
 	l, err := Load(fixture(t, "structured-ui.log"))
 	if err != nil {
