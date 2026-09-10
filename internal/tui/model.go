@@ -274,16 +274,9 @@ type Model struct {
 	// unused rather than special-cased: an unused int costs nothing, where a
 	// gap in the indexing would have to be remembered at every access.
 	viewSelected [viewCount]int
-	// returnTo is the view Enter jumped OUT of, and hasReturn whether there
-	// is one. Together they are what Esc spends to put the reader back.
-	//
-	// It is set after the jump's own setView and cleared by every other one,
-	// so it names a jump the reader actually made rather than the last view
-	// they happened to be in: gone to the timeline and back to the raw log
-	// by hand, there is nothing to return FROM, and Esc keeps the meaning
-	// the footer has always given it.
-	returnTo  View
-	hasReturn bool
+	// history holds complete parent states for explicit investigation jumps.
+	// Manual view keys clear it, while Esc restores and spends one frame.
+	history []navigationFrame
 	// blockedJump records that the last Enter refused to jump because the
 	// active filter hides the target entry (see jumpToSpan). It is a
 	// derivation of one keypress and the filter it was pressed under, so
@@ -521,7 +514,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			//
 			// Clearing is otherwise global, regardless of which pane has
 			// focus -- the spec binds it that way, not to the facet pane.
-			if m.returnFromJump() {
+			if m.returnFromHistory() {
 				break
 			}
 			if m.facetSearch.query != "" {
@@ -621,7 +614,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f":
 			m.toggleFacetFocus()
 		default:
-			if v, ok := viewKeys[msg.String()]; ok && v != m.view {
+			if v, ok := viewKeys[msg.String()]; ok {
 				m.setView(v)
 			}
 		}
@@ -758,24 +751,17 @@ func (m *Model) toggleFacetFocus() {
 // else is no longer something to undo. The raw log's scope goes the same
 // way, for the same reason: it too belongs to the jump that made it.
 func (m *Model) setView(v View) {
+	m.history = nil
+	m.raw.scope = nil
+	m.changeView(v)
+}
+
+func (m *Model) changeView(v View) {
 	m.viewSelected[m.view] = m.selected
 	m.view = v
 	m.keepFocusOnADrawnPane()
 	m.selected = m.viewSelected[v]
-	m.hasReturn = false
-	m.raw.scope = nil
 	m.invalidateRows()
-}
-
-// returnFromJump puts the reader back where Enter took them from, and
-// reports whether there was anywhere to go. The row comes back with the
-// view, setView restoring that view's own cursor.
-func (m *Model) returnFromJump() bool {
-	if !m.hasReturn {
-		return false
-	}
-	m.setView(m.returnTo)
-	return true
 }
 
 // invalidateRows drops any cached rows so they are rebuilt from the current

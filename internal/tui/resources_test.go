@@ -42,7 +42,7 @@ func TestResourcesGroupObservedOperationsAndDoNotOpenOne(t *testing.T) {
 	}
 	before := m.view
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.view != before || m.hasReturn || m.selectedRowOpens() {
+	if m.view != before || len(m.history) != 0 || m.selectedRowOpens() {
 		t.Fatal("Enter opened an arbitrary operation from a resource aggregate")
 	}
 }

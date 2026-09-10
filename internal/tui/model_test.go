@@ -554,10 +554,9 @@ func TestEscReturnsFromAJumpToTheRowItLeft(t *testing.T) {
 	}
 }
 
-// The return is spent once. A second Esc is the ordinary one, so the reader
-// who wants their filter cleared presses Esc again rather than finding the
-// key has changed meaning permanently.
-func TestASecondEscClearsTheFilter(t *testing.T) {
+// A child filter edit belongs to the child frame. Returning restores the
+// parent's filter exactly, and the following Esc applies to that parent.
+func TestReturningDiscardsAChildFilterEdit(t *testing.T) {
 	// Jump FIRST and narrow afterwards. A filter applied before the jump
 	// can hide the entry Enter was aiming at, which Enter refuses rather
 	// than landing somewhere misleading (see jumpToSpan) -- leaving no jump
@@ -573,12 +572,12 @@ func TestASecondEscClearsTheFilter(t *testing.T) {
 	m.pane = PaneList
 
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
-	if !m.filterActive() {
-		t.Errorf("the first Esc cleared the filter as well as returning; it should only return")
+	if m.filterActive() {
+		t.Errorf("the first Esc retained a child filter edit in the parent")
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.filterActive() {
-		t.Errorf("the second Esc did not clear the filter")
+		t.Errorf("the second Esc changed the already-clear parent filter")
 	}
 }
 

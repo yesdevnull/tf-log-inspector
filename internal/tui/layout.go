@@ -527,7 +527,7 @@ func (m *Model) actionKeys(w int) string {
 		keys = append(keys, scopeHint)
 	}
 	esc := escClearHint
-	if m.hasReturn {
+	if len(m.history) > 0 {
 		esc = escBackHint
 	} else if m.facetSearch.query != "" {
 		esc = escQueryHint
@@ -551,7 +551,7 @@ func (m *Model) actionKeys(w int) string {
 // to be undone, then the filters. Advertising the wrong one is worse than
 // advertising neither -- a reader pressing Esc to clear a filter and landing
 // in another view has been told something false about the key -- so the hint
-// asks the same hasReturn the handler does.
+// asks the same history depth the handler does.
 //
 // "back" is a column shorter than "clear", so the switch cannot push the
 // action line over its budget: the widest line carrying it is the calls

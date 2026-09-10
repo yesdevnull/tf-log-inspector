@@ -1663,7 +1663,7 @@ func TestAScopedJumpResetsTheLineOffset(t *testing.T) {
 
 // A UI-hook span's ReqID is always 0 (span.uihook.go), and ScopeFor answers
 // id 0 with nil (see its own doc comment), so jumping in from a UI-tier
-// timeline span leaves hasReturn standing with no scope to name. That empty
+// timeline span leaves history standing with no scope to name. That empty
 // pane still owes its "Esc" claim the truth: Esc there goes back to the
 // timeline rather than clearing the filter, so the pane must say "goes
 // back" and not the ordinary noMatchNote's "clears it", which would be
@@ -1678,7 +1678,7 @@ func TestAnEmptyUnscopedPaneReachedFromTheTimelineNamesEscsReturn(t *testing.T) 
 	if m.raw.scope != nil {
 		t.Fatalf("the jumped-to span carries a scope, so this test does not reach the branch it names")
 	}
-	if !m.hasReturn {
+	if len(m.history) == 0 {
 		t.Fatalf("the jump left no return, so this test does not reach the branch it names")
 	}
 	showOnly(t, &m, dimLevel)

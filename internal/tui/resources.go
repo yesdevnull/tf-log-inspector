@@ -16,6 +16,7 @@ func (m *Model) resourceRows() []row {
 	for i := range projection.Rows {
 		r := &projection.Rows[i]
 		rows[i] = row{
+			identity: selectionIdentity{kind: "resource", value: r.Address},
 			cells:    []string{logfmt.DisplayText(r.Address), strconv.FormatUint(r.UI.Count, 10), durationTotalText(r.UI), durationMaxText(r.UI), strconv.FormatUint(r.NamedRPC.Count, 10), durationTotalText(r.NamedRPC), strconv.FormatUint(r.OverlappingRPC.Count, 10), durationTotalText(r.OverlappingRPC)},
 			numeric:  []uint64{0, r.UI.Count, r.UI.TotalMs, uint64(r.UI.MaxMs), r.NamedRPC.Count, r.NamedRPC.TotalMs, r.OverlappingRPC.Count, r.OverlappingRPC.TotalMs},
 			spanIdx:  noSpanIdx,
@@ -72,7 +73,7 @@ func (m *Model) renderResources(w, h int) string {
 	case len(m.log.UISpans) == 0 && len(m.log.RPCSpans) > 0:
 		empty = "no observed UI resource operations.\nUse 4 calls, 2 types, i quality, or e evidence."
 	case m.filterActive():
-		empty = noMatchNote
+		empty = m.noMatchTail()
 	default:
 		empty = "no observed UI resource operations."
 	}

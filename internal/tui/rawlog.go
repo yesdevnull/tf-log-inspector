@@ -212,12 +212,13 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 		return
 	}
 
-	// Recorded AFTER setView, which spends any mark already standing: this
-	// jump is the one Esc should undo, not whatever earlier jump the reader
-	// has since navigated away from.
-	from := m.view
-	m.setView(ViewRawLog)
-	m.returnTo, m.hasReturn = from, true
+	// Capture only after every refusal check above has passed, so an invalid
+	// or hidden target cannot add a history frame.
+	parent := m.captureNavigation()
+	m.history = append(m.history, parent)
+	m.changeView(ViewRawLog)
+	m.raw.match = nil
+	m.raw.notFound = false
 	m.raw.column = 0
 	if len(scope) > 0 {
 		// jumpContextLines is NOT applied here: the scope already supplies

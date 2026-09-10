@@ -16,6 +16,7 @@ import (
 // row is one line of the centre pane's list, already formatted into display
 // cells.
 type row struct {
+	identity selectionIdentity
 	// cells holds exactly one formatted cell per column of the column list
 	// this row's view is paired with in renderList -- providerRows with
 	// providerColumns, typeRows with typeColumns, callRows with
@@ -56,7 +57,7 @@ type row struct {
 // callRow builds the row standing for ONE span: its display cells, and the
 // index into m.log.RPCSpans of the span it is.
 func callRow(cells []string, numeric []uint64, spanIdx int) row {
-	return row{cells: cells, numeric: numeric, spanIdx: spanIdx}
+	return row{cells: cells, numeric: numeric, spanIdx: spanIdx, identity: selectionIdentity{kind: "rpc", index: spanIdx}}
 }
 
 // rollupRow builds the row standing for a GROUP of spans: its display cells,
@@ -412,6 +413,7 @@ func providerRows(rpcSpans []span.Span) []row {
 				slowest: g.slowest,
 			},
 		)
+		rows[i].identity = selectionIdentity{kind: "provider", value: b.Key}
 	}
 	return rows
 }
@@ -454,6 +456,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
 			},
 		)
+		rows[i].identity = selectionIdentity{kind: "type", value: model.FacetKey(r.ResourceType)}
 	}
 	return rows
 }
@@ -648,7 +651,7 @@ const noMatchNote = "nothing matches the filter -- Esc clears it"
 // noMatchTail names whichever thing Esc will actually do, so a note and the
 // footer above it cannot advertise one key two ways.
 func (m Model) noMatchTail() string {
-	if m.hasReturn {
+	if len(m.history) > 0 {
 		return "nothing matches the filter -- Esc goes back"
 	}
 	return noMatchNote
@@ -705,7 +708,7 @@ func (m *Model) renderList(w, h int) string {
 	}
 	empty := noRowsNote
 	if m.filterActive() {
-		empty = noMatchNote
+		empty = m.noMatchTail()
 	}
 	// The columns come from tables, which the sort cycle and the header
 	// marker read as well, so the table DRAWN and the table sorted cannot
