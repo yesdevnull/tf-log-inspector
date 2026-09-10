@@ -59,6 +59,31 @@ func (m *Model) renderResourceEvidence(w, h int) string {
 func (m *Model) resourceEvidenceText() string {
 	p := m.selectedResources()
 	var b strings.Builder
+	if index, ok := m.selectedUIOperation(); ok {
+		s := m.log.UISpans[index]
+		action := logfmt.DisplayText(s.RPC)
+		if action == "" {
+			action = "unavailable"
+		}
+		b.WriteString("SELECTED OBSERVED UI OPERATION\n")
+		fmt.Fprintf(&b, "  address: %s\n", logfmt.DisplayText(s.Address))
+		fmt.Fprintf(&b, "  action: %s\n", action)
+		if location, ok := m.log.SourceLocation(s.Entry); ok {
+			fmt.Fprintf(&b, "  source: %s, line %d", logfmt.DisplayText(m.name), location.StartLine)
+			if location.EndLine != location.StartLine {
+				fmt.Fprintf(&b, "-%d", location.EndLine)
+			}
+			b.WriteByte('\n')
+		} else {
+			b.WriteString("  source: unavailable\n")
+		}
+		fmt.Fprintf(&b, "  observed UI duration: %s\n", durationTotalText(operationDuration(s.DurationMs, s.DurationSaturated)))
+		m.writeUIQualifications(&b, operationDuration(s.DurationMs, s.DurationSaturated), []int{index}, "UI timing", "Observed UI duration is a lower bound (≥).")
+		if s.StartClamped {
+			b.WriteString("  Operation start was clamped to the capture origin.\n")
+		}
+		b.WriteByte('\n')
+	}
 	if r := m.selectedResourceRow(); r != nil {
 		b.WriteString("SELECTED RESOURCE ROW (separate from baseline scope)\n")
 		fmt.Fprintf(&b, "  address: %s\n", logfmt.DisplayText(r.Address))
@@ -133,7 +158,7 @@ func (m *Model) writeUIQualifications(b *strings.Builder, total model.DurationTo
 }
 
 func (m *Model) selectedResourceRow() *model.ResourceRow {
-	if m.view != ViewResources {
+	if m.view != ViewResources || m.resourceOperations {
 		return nil
 	}
 	rows := m.rows()

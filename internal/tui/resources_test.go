@@ -28,7 +28,7 @@ func TestResourcesKeyAndEvidence(t *testing.T) {
 	}
 }
 
-func TestResourcesGroupObservedOperationsAndDoNotOpenOne(t *testing.T) {
+func TestResourcesGroupObservedOperationsAndOpenTheirList(t *testing.T) {
 	l := &model.Log{UISpans: []span.Span{
 		{Address: "aws_instance.b", DurationMs: 5, ResourceType: "aws_instance"},
 		{Address: "aws_instance.a", DurationMs: 10, ResourceType: "aws_instance"},
@@ -40,10 +40,9 @@ func TestResourcesGroupObservedOperationsAndDoNotOpenOne(t *testing.T) {
 	if len(rows) != 2 || rows[0].resource.Address != "aws_instance.a" || rows[0].resource.UI.Count != 2 {
 		t.Fatalf("resource rows = %+v, want A first with two operations", rows)
 	}
-	before := m.view
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.view != before || len(m.history) != 0 || m.selectedRowOpens() {
-		t.Fatal("Enter opened an arbitrary operation from a resource aggregate")
+	if m.view != ViewResources || !m.resourceOperations || len(m.history) != 1 || len(m.rows()) != 2 || m.selectedRowOpens() {
+		t.Fatal("Enter did not open the two observed operations without inventing source")
 	}
 }
 

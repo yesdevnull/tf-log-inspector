@@ -131,9 +131,11 @@ type Model struct {
 	resourceProjectionCached bool
 	resourceSelection        model.ResourceSelection
 
-	view     View
-	pane     Pane
-	selected int
+	view               View
+	pane               Pane
+	selected           int
+	resourceOperations bool
+	operationSort      int
 
 	// sortCol is which column each table view's rows are sorted by, indexed
 	// by View. It is per view because a column index names a DIFFERENT
@@ -533,6 +535,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.openAggregate() {
 					break
 				}
+				if m.openResourceOperations() {
+					break
+				}
 				if spans, idx, ok := m.jumpTarget(); ok {
 					m.jumpToSpan(spans, idx)
 				}
@@ -679,24 +684,24 @@ func (m *Model) keepFocusOnADrawnPane() {
 // that reorders this list does -- a facet toggle, a view switch -- and
 // invalidateRows is what clamps it against the list it rebuilds.
 func (m *Model) cycleSort() {
-	t, ok := tables[m.view]
+	t, ok := m.activeTable()
 	if !ok {
 		return
 	}
-	if m.view == ViewResources {
+	if m.view == ViewResources && !m.resourceOperations {
 		observedColumns := [...]int{2, 3, 0, 1}
 		for i, col := range observedColumns {
-			if m.sortCol[m.view] == col {
-				m.sortCol[m.view] = observedColumns[(i+1)%len(observedColumns)]
+			if m.activeSort() == col {
+				m.setActiveSort(observedColumns[(i+1)%len(observedColumns)])
 				m.invalidateRows()
 				return
 			}
 		}
-		m.sortCol[m.view] = tables[m.view].defaultCol
+		m.setActiveSort(tables[m.view].defaultCol)
 		m.invalidateRows()
 		return
 	}
-	m.sortCol[m.view] = (m.sortCol[m.view] + 1) % len(t.cols)
+	m.setActiveSort((m.activeSort() + 1) % len(t.cols))
 	m.invalidateRows()
 }
 
@@ -752,6 +757,7 @@ func (m *Model) toggleFacetFocus() {
 func (m *Model) setView(v View) {
 	m.history = nil
 	m.raw.scope = nil
+	m.resourceOperations = false
 	m.changeView(v)
 }
 

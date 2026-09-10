@@ -125,8 +125,8 @@ func TestRepeatedResourceOperationsKeepOriginalIdentitiesThroughSelection(t *tes
 		t.Fatalf("f left aggregate focus on pane %v, want list", m.pane)
 	}
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.view != ViewResources || len(m.history) != 0 {
-		t.Fatal("aggregate Enter crossed the operation drill-down boundary")
+	if m.view != ViewResources || !m.resourceOperations || len(m.history) != 1 || len(m.rows()) != 2 {
+		t.Fatal("aggregate Enter did not open the repeated operations")
 	}
 }
 

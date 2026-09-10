@@ -1977,7 +1977,9 @@ func TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens(t *testing.T) {
 	for _, b := range views {
 		m := update(t, base, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(b.key)})
 		got := footerOf(m.View())
-		opens := update(t, m, tea.KeyMsg{Type: tea.KeyEnter}).ActiveView() != m.ActiveView()
+		beforeView, beforeHistory, beforeOperations := m.ActiveView(), len(m.history), m.resourceOperations
+		after := update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		opens := after.ActiveView() != beforeView || len(after.history) != beforeHistory || after.resourceOperations != beforeOperations
 		if opens {
 			sawBoth[0] = true
 		} else {

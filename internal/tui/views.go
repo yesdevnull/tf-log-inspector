@@ -216,6 +216,38 @@ var resourceColumns = []column{
 	{header: "overlap total", kind: numericColumn},
 }
 
+var operationColumns = []column{
+	{header: "address", kind: tailIdentifierColumn},
+	{header: "action", kind: headIdentifierColumn},
+	{header: "duration", kind: numericColumn},
+	{header: "source", kind: numericColumn},
+}
+
+var operationTable = tableBinding{cols: operationColumns, defaultCol: 2}
+
+func (m *Model) activeTable() (tableBinding, bool) {
+	if m.view == ViewResources && m.resourceOperations {
+		return operationTable, true
+	}
+	t, ok := tables[m.view]
+	return t, ok
+}
+
+func (m *Model) activeSort() int {
+	if m.view == ViewResources && m.resourceOperations {
+		return m.operationSort
+	}
+	return m.sortCol[m.view]
+}
+
+func (m *Model) setActiveSort(col int) {
+	if m.view == ViewResources && m.resourceOperations {
+		m.operationSort = col
+		return
+	}
+	m.sortCol[m.view] = col
+}
+
 // tableBinding is the table one view draws: its columns, and the index of
 // the column its row builder ALREADY ranks by.
 //
@@ -276,7 +308,11 @@ func (m *Model) rows() []row {
 	case ViewCalls:
 		r = callRowsForIndices(m.log.RPCSpans, m.selectedResources().RPCIndices)
 	case ViewResources:
-		r = m.resourceRows()
+		if m.resourceOperations {
+			r = m.operationRows()
+		} else {
+			r = m.resourceRows()
+		}
 	case ViewTimeline:
 		// The timeline renders from m.timelineSpans() and model.PackLanes,
 		// not from rows(): a lane is neither a rollup of many spans nor one
@@ -296,8 +332,8 @@ func (m *Model) rows() []row {
 	// the builder's own order -- including its own tie-break, which a
 	// generic sort by one column knows nothing about -- is what reaches the
 	// table. See tableBinding.
-	if t, ok := tables[m.view]; ok && m.sortCol[m.view] != t.defaultCol {
-		sortRows(t.cols, r, m.sortCol[m.view])
+	if t, ok := m.activeTable(); ok && m.activeSort() != t.defaultCol {
+		sortRows(t.cols, r, m.activeSort())
 	}
 	m.rowsCache = r
 	m.rowsCached = true
@@ -360,6 +396,12 @@ func (m *Model) jumpTarget() (spans []span.Span, idx int, ok bool) {
 		}
 		_, spans := m.timelineSpans()
 		return spans, idx, true
+	}
+	if index, ok := m.selectedUIOperation(); ok {
+		if _, ok := m.log.SourceLocation(m.log.UISpans[index].Entry); !ok {
+			return nil, 0, false
+		}
+		return m.log.UISpans, index, true
 	}
 	r, ok := m.selectedRow()
 	if !ok || !r.isCall() {
@@ -713,7 +755,7 @@ func (m *Model) renderList(w, h int) string {
 	// come to be two different tables. Only the preamble is left to select
 	// here, and everything else renderTable needs is the same for every
 	// table view, so the call itself is made once.
-	t, ok := tables[m.view]
+	t, ok := m.activeTable()
 	if !ok {
 		// ViewRawLog and ViewTimeline never reach here -- renderCentre
 		// routes them to renderRawLog and renderTimeline respectively -- so
@@ -732,7 +774,7 @@ func (m *Model) renderList(w, h int) string {
 		preamble = preamble[:max(0, h-2)]
 	}
 	cols := t.cols
-	sortCol := m.sortCol[m.view]
+	sortCol := m.activeSort()
 	if m.view == ViewTypes {
 		cols, rows, sortCol = visibleTypeColumns(cols, rows, sortCol, w)
 	}

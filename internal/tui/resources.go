@@ -43,6 +43,9 @@ func durationMaxText(d model.DurationTotal) string {
 }
 
 func (m *Model) renderResources(w, h int) string {
+	if m.resourceOperations {
+		return m.renderResourceOperations(w, h)
+	}
 	p := m.selectedResources()
 	preamble := []string{
 		"Scopes: UI type/resource/module; RPC provider/type/method/resource/module.",
@@ -85,7 +88,7 @@ func (m *Model) renderResources(w, h int) string {
 		preamble = preamble[:max(0, h-2)]
 	}
 	cols, rows := visibleResourceColumns(resourceColumns, rows, w)
-	return renderTable(preamble, cols, m.sortCol[ViewResources], rows, empty, m.selected, m.pane == PaneList, w, h)
+	return renderTable(preamble, cols, m.activeSort(), rows, empty, m.selected, m.pane == PaneList, w, h)
 }
 
 func renderResourceEmpty(message string, w, h int) string {

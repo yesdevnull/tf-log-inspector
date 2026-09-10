@@ -14,20 +14,22 @@ type selectionIdentity struct {
 }
 
 type navigationFrame struct {
-	view              View
-	pane              Pane
-	selected          int
-	identity          selectionIdentity
-	sortCol           [viewCount]int
-	viewSelected      [viewCount]int
-	excludedFacets    map[string]map[string]bool
-	resourceSelection model.ResourceSelection
-	facetCursor       facetCursor
-	facetDimension    string
-	facetQuery        string
-	showFacetOverlay  bool
-	raw               rawLogState
-	timeline          timelineState
+	view               View
+	pane               Pane
+	selected           int
+	identity           selectionIdentity
+	sortCol            [viewCount]int
+	viewSelected       [viewCount]int
+	excludedFacets     map[string]map[string]bool
+	resourceSelection  model.ResourceSelection
+	facetCursor        facetCursor
+	facetDimension     string
+	facetQuery         string
+	showFacetOverlay   bool
+	raw                rawLogState
+	timeline           timelineState
+	resourceOperations bool
+	operationSort      int
 }
 
 func cloneExclusions(src map[string]map[string]bool) map[string]map[string]bool {
@@ -67,6 +69,7 @@ func (m *Model) captureNavigation() navigationFrame {
 		facetCursor: m.facetCursor, facetDimension: m.facetSearch.dimension,
 		facetQuery: m.facetSearch.query, showFacetOverlay: m.showFacetOverlay,
 		raw: cloneRawState(m.raw), timeline: m.timeline,
+		resourceOperations: m.resourceOperations, operationSort: m.operationSort,
 	}
 }
 
@@ -88,6 +91,8 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.facetSearch.input.CursorEnd()
 	m.showFacetOverlay = frame.showFacetOverlay
 	m.timeline = frame.timeline
+	m.resourceOperations = frame.resourceOperations
+	m.operationSort = frame.operationSort
 	m.selected = frame.selected
 	m.changeView(frame.view)
 	m.restoreIdentity(frame.identity, frame.selected)

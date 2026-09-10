@@ -28,6 +28,24 @@ func (m *Model) openAggregate() bool {
 	return true
 }
 
+func (m *Model) openResourceOperations() bool {
+	if m.view != ViewResources || m.resourceOperations {
+		return false
+	}
+	r, ok := m.selectedRow()
+	if !ok || r.resource == nil {
+		return false
+	}
+	parent := m.captureNavigation()
+	m.resourceSelection.Addresses = map[string]bool{r.resource.Address: true}
+	m.resourceOperations = true
+	m.operationSort = 2
+	m.history = append(m.history, parent)
+	m.changeView(ViewResources)
+	m.selected = 0
+	return true
+}
+
 func (m *Model) aggregateTarget() (View, string, string, bool) {
 	r, ok := m.selectedRow()
 	if !ok {
@@ -63,7 +81,15 @@ func (m *Model) enterHint() string {
 		}
 		return "↵ resources"
 	}
+	if m.view == ViewResources && !m.resourceOperations {
+		if r, ok := m.selectedRow(); ok && r.resource != nil {
+			return "↵ operations"
+		}
+	}
 	if _, _, ok := m.jumpTarget(); ok {
+		if m.resourceOperations {
+			return "↵ log"
+		}
 		return openHint
 	}
 	return ""

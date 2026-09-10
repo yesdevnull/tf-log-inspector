@@ -515,7 +515,7 @@ func (m *Model) actionKeys(w int) string {
 	if m.detailPaneDrawn(w) && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)
 	}
-	if _, sortable := tables[m.view]; sortable && len(m.rows()) > 0 {
+	if _, sortable := m.activeTable(); sortable && len(m.rows()) > 0 {
 		keys = append(keys, sortHint)
 	}
 	if m.raw.scope != nil {
@@ -847,6 +847,9 @@ func (m *Model) centreTitle() string {
 	if m.view == ViewTimeline {
 		return m.timelineTitle()
 	}
+	if m.view == ViewResources && m.resourceOperations {
+		return "OBSERVED UI OPERATIONS"
+	}
 	return viewTitle(m.view)
 }
 
@@ -1086,9 +1089,10 @@ func (m *Model) renderDetail(w, h int) (title, body string) {
 // the left, and the same argument slowestHeading already makes one level
 // down.
 const (
-	spanDetailTitle     = "SPAN DETAIL"
-	rollupDetailTitle   = "GROUP DETAIL"
-	resourceDetailTitle = "RESOURCE DETAIL"
+	spanDetailTitle      = "SPAN DETAIL"
+	rollupDetailTitle    = "GROUP DETAIL"
+	resourceDetailTitle  = "RESOURCE DETAIL"
+	operationDetailTitle = "OPERATION DETAIL"
 	// noSelectionTitle heads a pane with no row to describe, so it claims
 	// nothing about a span or a group: there is neither.
 	noSelectionTitle = "DETAIL"
@@ -1122,6 +1126,9 @@ func (m *Model) selectedDetail(w int) (string, []paneSection) {
 	r, ok := m.selectedRow()
 	if !ok {
 		return noSelectionTitle, nothing
+	}
+	if index, ok := m.selectedUIOperation(); ok {
+		return operationDetailTitle, m.operationDetailSections(index, w)
 	}
 	if s, ok := m.spanForRow(r); ok {
 		return spanDetailTitle, []paneSection{spanDetailLines(s, m.log.AttributionForEntry(s.Entry), hasContext, w)}

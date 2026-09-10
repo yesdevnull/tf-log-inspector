@@ -169,8 +169,8 @@ func TestDrillDownEnterHintMatchesAggregateRoute(t *testing.T) {
 		t.Fatalf("call hint = %q, want %q", got, openHint)
 	}
 	call.changeView(ViewResources)
-	if got := call.enterHint(); got != "" {
-		t.Fatalf("resource hint = %q, want empty", got)
+	if got := call.enterHint(); got != "↵ operations" {
+		t.Fatalf("resource hint = %q, want operations", got)
 	}
 	if got := provider.actionKeys(100); !strings.Contains(got, "↵ calls") {
 		t.Fatalf("provider footer omits route: %q", got)
