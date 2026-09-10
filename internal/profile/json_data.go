@@ -31,6 +31,12 @@ type jsonInput struct {
 	Basename string `json:"basename"`
 	Bytes    uint64 `json:"bytes"`
 }
+type jsonCapture struct {
+	Input     jsonInput            `json:"input"`
+	Tiers     jsonTiers            `json:"tiers"`
+	Quality   jsonQuality          `json:"quality"`
+	UnnamedUI *jsonComparisonTotal `json:"unnamed_ui"`
+}
 type jsonTiers struct {
 	RPC jsonTier `json:"rpc"`
 	UI  jsonTier `json:"ui"`
@@ -205,18 +211,8 @@ type jsonInterval struct {
 }
 
 func buildJSONProfile(r Report, metadata JSONMetadata) (jsonProfile, error) {
-	if err := validStrings(metadata.ToolVersion, metadata.InputBasename); err != nil {
+	if err := validateCaptureJSON(r, metadata.ToolVersion, metadata.InputBasename); err != nil {
 		return jsonProfile{}, err
-	}
-	for reason := range r.Quality.RPC.Exclusions {
-		if err := validStrings(reason); err != nil {
-			return jsonProfile{}, err
-		}
-	}
-	for reason := range r.Quality.UI.Exclusions {
-		if err := validStrings(reason); err != nil {
-			return jsonProfile{}, err
-		}
 	}
 	for reason := range r.Timeline.Analysis.Timing.Exclusions {
 		if err := validStrings(reason); err != nil {
@@ -254,6 +250,36 @@ func buildJSONProfile(r Report, metadata JSONMetadata) (jsonProfile, error) {
 	}
 	d.Timeline = t
 	return d, nil
+}
+
+func captureJSON(r Report, basename string, unnamedUI *model.ComparisonTotal) (jsonCapture, error) {
+	if err := validateCaptureJSON(r, basename); err != nil {
+		return jsonCapture{}, err
+	}
+	quality, err := qualityJSON(r)
+	if err != nil {
+		return jsonCapture{}, err
+	}
+	return jsonCapture{
+		Input:     jsonInput{Basename: basename, Bytes: r.Bytes},
+		Tiers:     jsonTiers{RPC: tierJSON(r.Quality.RPC), UI: tierJSON(r.Quality.UI)},
+		Quality:   quality,
+		UnnamedUI: comparisonTotalJSON(unnamedUI),
+	}, nil
+}
+
+func validateCaptureJSON(r Report, values ...string) error {
+	if err := validStrings(values...); err != nil {
+		return err
+	}
+	for _, exclusions := range []map[string]uint64{r.Quality.RPC.Exclusions, r.Quality.UI.Exclusions} {
+		for reason := range exclusions {
+			if err := validStrings(reason); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 func sourceJSON(s *model.SourceLocation) *jsonSource {
 	if s == nil {
