@@ -73,7 +73,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "\\", what: "show the whole log again, after opening a call"},
 		}},
 		{title: "FILTERING", entries: []helpEntry{
-			{keys: "␣ Space", what: "untick the value under the cursor to hide it"},
+			{keys: "␣ Space", what: "toggle value; modules may inherit inclusion"},
 			{keys: "o", what: "show only that value -- again undoes it"},
 			{keys: "f", what: "show the facets and give them the keyboard"},
 			{keys: "Esc", what: "leave call; clear chooser query; then filters"},
@@ -167,6 +167,7 @@ func renderHelp(w, h int) string {
 		"Resource/module / narrows only the chooser.",
 		"Space or o changes results.",
 		"(root subtree) includes every known descendant.",
+		"[+] module is included through a selected ancestor.",
 		"Module instance keys remain exact.",
 		"e shows selected-scope evidence; i shows whole-log quality.",
 	} {

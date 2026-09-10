@@ -136,6 +136,56 @@ func TestModuleFacetNaturalWidthMeasuresTheRootDisplayLabel(t *testing.T) {
 	}
 }
 
+func TestModuleFacetShowsInclusionInheritedFromSelectedAncestor(t *testing.T) {
+	m := New(&model.Log{UISpans: []span.Span{
+		{Address: "aws_instance.root"},
+		{Address: "module.app.aws_instance.a"},
+		{Address: "module.other.aws_instance.b"},
+	}}, "synthetic.log")
+	m.pane = PaneFacets
+	setFacetCursor(t, &m, dimModule, "module.app")
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.selectedUISpans()); got != 3 {
+		t.Fatalf("unticking child under selected root retained %d observations, want 3", got)
+	}
+	lines := strings.Split(m.renderFacets(60, 20), "\n")
+	appLine := facetLineContaining(t, lines, " module.app ")
+	if got := unstyled(appLine); !strings.HasPrefix(got, "[+] ") {
+		t.Fatalf("inherited module line = %q, want [+] marker", got)
+	}
+	if strings.Contains(appLine, "\x1b[2m") {
+		t.Fatalf("inherited module is dimmed as excluded: %q", appLine)
+	}
+	if got := unstyled(renderHelp(60, 200)); !strings.Contains(got, "[+] module is included through a selected ancestor.") {
+		t.Fatalf("help does not explain inherited module inclusion:\n%s", got)
+	}
+
+	setFacetCursor(t, &m, dimModule, "")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if got := len(m.selectedUISpans()); got != 1 {
+		t.Fatalf("unticking root left %d observations, want only the selected sibling", got)
+	}
+	appLine = facetLineContaining(t, strings.Split(m.renderFacets(24, 20), "\n"), " module.app ")
+	if got := unstyled(appLine); !strings.HasPrefix(got, "[ ] ") {
+		t.Fatalf("excluded module line = %q, want unchecked marker", got)
+	}
+	if !strings.Contains(appLine, "\x1b[2m") {
+		t.Fatalf("genuinely excluded module is not dimmed: %q", appLine)
+	}
+}
+
+func facetLineContaining(t *testing.T, lines []string, value string) string {
+	t.Helper()
+	for _, line := range lines {
+		if strings.Contains(unstyled(line), value) {
+			return line
+		}
+	}
+	t.Fatalf("no facet line contains %q in:\n%s", value, unstyled(strings.Join(lines, "\n")))
+	return ""
+}
+
 func TestFacetTypesUnionUITierWithoutAddingUIProviders(t *testing.T) {
 	l := &model.Log{
 		RPCSpans: []span.Span{{Provider: "registry/rpc", RPC: "Read", ResourceType: "rpc_type"}},

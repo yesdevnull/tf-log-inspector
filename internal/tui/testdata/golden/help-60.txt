@@ -22,7 +22,7 @@
 [2m│[0m   [36m\[0m          show the whole log again, after opening a … [2m│[0m
 [2m│[0m                                                          [2m│[0m
 [2m│[0m [1;36mFILTERING[0m                                                [2m│[0m
-[2m│[0m   [36m␣ Space[0m    untick the value under the cursor to hide … [2m│[0m
+[2m│[0m   [36m␣ Space[0m    toggle value; modules may inherit inclusion [2m│[0m
 [2m│[0m   [36mo[0m          show only that value -- again undoes it     [2m│[0m
 [2m│[0m   [36mf[0m          show the facets and give them the keyboard  [2m│[0m
 [2m│[0m   [36mEsc[0m        leave call; clear chooser query; then filt… [2m│[0m

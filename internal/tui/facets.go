@@ -255,7 +255,8 @@ func firstFacetCursor(facets []model.Facet) facetCursor {
 
 // toggleFacetValue flips whether the facet pane's cursor value is ticked,
 // and invalidates any cached rows so the next render reflects the change.
-// Unticking a value hides it; ticking it back restores it, and re-ticking a
+// Unticking a value removes its explicit selection; ticking it back restores
+// it. A module can remain included through a selected ancestor. Re-ticking a
 // dimension's last excluded value returns that dimension to unconstrained
 // -- the state a fresh model starts in, rather than an allow-list naming
 // every value (see allowedFacetValues).
@@ -553,16 +554,23 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 		kind := facetValueKind(f.Name)
 		for _, valIdx := range m.visibleFacetIndices(f.Name) {
 			v := f.Values[valIdx]
-			// One lookup, named: the checkbox and the dimming are two
-			// renderings of this one fact, and reading it twice leaves
-			// nothing saying they are the same fact.
+			// Named values begin with one explicit-selection lookup. An
+			// unchecked module then asks ResourceSelection whether a selected
+			// ancestor includes it; Match resolves ancestors with map lookups.
 			excluded := m.excludedFacets[f.Name][v.Value]
+			inherited := false
 			if namedFacetDimension(f.Name) {
 				selected := m.namedFacetSelection(f.Name)
 				excluded = selected != nil && !selected[v.Value]
+				if excluded && f.Name == dimModule {
+					membership := model.ResourceSelection{Modules: selected}.Match("", model.ResourceModule{Path: v.Value, Known: true})
+					inherited = membership == model.MembershipSelected
+				}
 			}
 			check := "x"
-			if excluded {
+			if inherited {
+				check = "+"
+			} else if excluded {
 				check = " "
 			}
 			// Every line is built at the full pane width, cursor or not:
@@ -576,7 +584,7 @@ func (m Model) facetLines(w int) (lines []string, cursor, headerIdx int) {
 			case dimIdx == m.facetCursor.dim && valIdx == m.facetCursor.val:
 				cursor = len(lines)
 				line = cursorBar(line, w, focused)
-			case excluded:
+			case excluded && !inherited:
 				// An unticked value recedes, so what the filter still
 				// admits reads at a glance rather than by inspecting the
 				// character inside each bracket. The cursor's own line is

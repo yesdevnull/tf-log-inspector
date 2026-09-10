@@ -148,7 +148,9 @@ operations. RPC evidence also uses provider and RPC-method selections; those
 two filters do not imply a provider or method for UI operations. In the facet
 pane, `/` narrows the visible resource or module choices without changing the
 result set. Use `Space` to toggle a choice or `o` to select it alone. Module
-instance keys remain exact. The explicit `(root subtree)` choice includes every
+instance keys remain exact. Module subtrees combine with OR semantics, so an
+unticked child remains included when an ancestor is selected; `[+]` marks that
+inherited inclusion. The explicit `(root subtree)` choice includes every
 resource with a known module path, including descendants. Unknown module
 evidence does not become root.
 
