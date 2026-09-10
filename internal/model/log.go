@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
@@ -24,6 +25,7 @@ import (
 // log ever turns up large enough to need it.
 type Log struct {
 	responseOnce     sync.Once
+	responseChecked  atomic.Bool
 	responses        []logfmt.ProviderJSON
 	responseErr      error
 	sourceLinesOnce  sync.Once
@@ -32,6 +34,7 @@ type Log struct {
 	Entries          []logfmt.Entry
 	Comps            *logfmt.Interner
 	Stats            logfmt.Stats
+	quality          CaptureQuality
 
 	// RPCSpans and UISpans are kept apart rather than concatenated. Their
 	// StartMs/EndMs sit on different zero points -- see the doc comment on
@@ -108,10 +111,18 @@ func Load(path string) (*Log, error) {
 		ctxs    []attrib.Context
 		attribs []attrib.Attribution
 	)
-	if len(cc.Contexts()) > 0 {
-		ctxs = cc.Contexts()
+	collectedContexts := cc.Contexts()
+	contextEvidence := cc.Evidence()
+	if len(collectedContexts) > 0 {
+		ctxs = collectedContexts
 		attribs = attrib.Correlate(rpcSpans, stats.FirstTS, ctxs)
 	}
+	uiSpans := ub.Spans()
+	rpcEvidence := rb.Evidence()
+	uiEvidence := ub.Evidence()
+	caps := sniffer.Report()
+	componentOverflow := comps.Overflowed()
+	requestIDOverflow := reqIDs.Overflowed()
 
 	result := &Log{
 		Data:                 data,
@@ -119,17 +130,31 @@ func Load(path string) (*Log, error) {
 		Comps:                comps,
 		Stats:                stats,
 		RPCSpans:             rpcSpans,
-		UISpans:              ub.Spans(),
-		RPCEvidence:          rb.Evidence(),
-		UIEvidence:           ub.Evidence(),
+		UISpans:              uiSpans,
+		RPCEvidence:          rpcEvidence,
+		UIEvidence:           uiEvidence,
 		UISaturatedDurations: ub.Saturated(),
-		Caps:                 sniffer.Report(),
+		Caps:                 caps,
 		Contexts:             ctxs,
 		Attribs:              attribs,
 	}
 	if origin, ok := ub.Origin(); ok {
 		result.UIOrigin = origin
 	}
+	result.quality = BuildCaptureQuality(CaptureQualityInput{
+		Stats:             stats,
+		Caps:              caps,
+		RPCSpans:          rpcSpans,
+		UISpans:           uiSpans,
+		RPCEvidence:       rpcEvidence,
+		UIEvidence:        uiEvidence,
+		UIOrigin:          result.UIOrigin,
+		Contexts:          ctxs,
+		ContextEvidence:   contextEvidence,
+		Attributions:      attribs,
+		ComponentOverflow: componentOverflow,
+		RequestIDOverflow: requestIDOverflow,
+	})
 	return result, nil
 }
 
@@ -144,6 +169,7 @@ func (l *Log) Bytes(e logfmt.Entry) []byte {
 func (l *Log) ProviderResponse(e logfmt.Entry) (logfmt.ProviderJSON, error) {
 	l.responseOnce.Do(func() {
 		l.responses, l.responseErr = logfmt.ReconstructProviderJSON(string(l.Data))
+		l.responseChecked.Store(true)
 	})
 	if l.responseErr != nil {
 		return logfmt.ProviderJSON{}, l.responseErr
