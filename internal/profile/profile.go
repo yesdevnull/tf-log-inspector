@@ -7,15 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
-	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // DefaultLimit is the default maximum number of rows in each ranked list.
@@ -226,106 +223,6 @@ func writeSource(b *strings.Builder, source *model.SourceLocation) {
 	} else {
 		fmt.Fprintf(b, "    source: lines %d-%d\n", source.StartLine, source.EndLine)
 	}
-}
-
-func writeTimeline(b *strings.Builder, report Report, limit int) error {
-	if report.Timeline.Tier == nil {
-		return nil
-	}
-	tier := *report.Timeline.Tier
-	analysis := report.Timeline.Analysis
-	origin, observations := report.Quality.RPC.Origin, report.RPC
-	if tier == span.FidelityUIReported {
-		origin, observations = report.Quality.UI.Origin, report.UI
-	}
-	fmt.Fprintf(b, "CONCURRENCY (%s tier)\n", tier)
-	if origin == nil {
-		fmt.Fprintf(b, "  clock origin: unavailable\n")
-	} else {
-		fmt.Fprintf(b, "  clock origin: %s\n", origin.UTC().Format(time.RFC3339Nano))
-	}
-	fmt.Fprintf(b, "  interval offsets are milliseconds from this tier origin\n")
-	timing := analysis.Timing
-	fmt.Fprintf(b, "  positioned duration   %s (%d excluded, %s)\n", formatMs(timing.PositionedMs), timing.ExcludedCount, formatLowerBoundMs(timing.ExcludedMs, timing.ExcludedLowerBound))
-	if timing.ExcludedCount > 0 {
-		keys := make([]string, 0, len(timing.Exclusions))
-		for reason := range timing.Exclusions {
-			keys = append(keys, reason)
-		}
-		sort.Strings(keys)
-		for _, reason := range keys {
-			fmt.Fprintf(b, "    excluded: %s %d\n", logfmt.DisplayText(reason), timing.Exclusions[reason])
-		}
-	}
-	if analysis.Metrics == nil {
-		fmt.Fprintf(b, "  temporal metrics: unavailable\n")
-		writeTimelineQualification(b)
-		return nil
-	}
-	metrics := analysis.Metrics
-	fmt.Fprintf(b, "  window %s\n  peak concurrency %d\n  busy union %s\n", formatMs(uint64(metrics.WindowMs)), metrics.Peak, formatMs(uint64(metrics.BusyMs)))
-	if metrics.BusyFraction == nil {
-		fmt.Fprintf(b, "  busy / window unavailable\n")
-	} else {
-		fmt.Fprintf(b, "  busy / window %.1f%%\n", *metrics.BusyFraction*100)
-	}
-	fmt.Fprintf(b, "  positioned reported-duration sum %s\n", formatMs(timing.PositionedMs))
-	if metrics.WindowMs == 0 {
-		fmt.Fprintf(b, "  summed / window unavailable\n")
-	} else {
-		fmt.Fprintf(b, "  summed / window %.1fx\n", float64(timing.PositionedMs)/float64(metrics.WindowMs))
-	}
-	for _, observation := range observations {
-		if observation.Span.HasPosition() && observation.Span.StartClamped {
-			fmt.Fprintf(b, "  Note: one or more spans have a clamped start, so timeline extents may be shorter than reported durations.\n")
-			break
-		}
-	}
-	intervals := append([]model.Stall(nil), analysis.Intervals...)
-	sort.Slice(intervals, func(i, j int) bool {
-		di, dj := intervals[i].EndMs-intervals[i].StartMs, intervals[j].EndMs-intervals[j].StartMs
-		if di != dj {
-			return di > dj
-		}
-		if intervals[i].StartMs != intervals[j].StartMs {
-			return intervals[i].StartMs < intervals[j].StartMs
-		}
-		return intervals[i].EndMs < intervals[j].EndMs
-	})
-	shown := limitedLength(len(intervals), limit)
-	if len(intervals) == 0 {
-		fmt.Fprintf(b, "  no qualifying intervals at or above %s\n", formatMs(uint64(analysis.ThresholdMs)))
-	} else {
-		writeHeading(b, "QUALIFYING INTERVALS", shown, len(intervals))
-		for _, interval := range intervals[:shown] {
-			fmt.Fprintf(b, "  %dms-%dms  ", interval.StartMs, interval.EndMs)
-			if interval.MinRunning == interval.MaxRunning {
-				fmt.Fprintf(b, "%d of %d running\n", interval.MinRunning, interval.Capacity)
-			} else {
-				fmt.Fprintf(b, "%d-%d of %d running\n", interval.MinRunning, interval.MaxRunning, interval.Capacity)
-			}
-			if interval.Blocking < 0 {
-				fmt.Fprintf(b, "    blocking observation: none running\n")
-				continue
-			}
-			if interval.Blocking >= len(report.Timeline.PositionedIndices) {
-				return errors.New("profile interval observation index out of range")
-			}
-			original := report.Timeline.PositionedIndices[interval.Blocking]
-			if original < 0 || original >= len(observations) {
-				return errors.New("profile interval observation index out of range")
-			}
-			observation := observations[original]
-			fmt.Fprintf(b, "    blocking observation: %s %s %s\n", logfmt.DisplayText(observation.Span.RPC), logfmt.DisplayText(observation.Span.ResourceType), logfmt.DisplayText(observation.Span.Provider))
-			writeSource(b, observation.Source)
-		}
-	}
-	writeTimelineQualification(b)
-	return nil
-}
-
-func writeTimelineQualification(b *strings.Builder) {
-	fmt.Fprintf(b, "  Observed gaps and active spans do not establish Terraform idleness\n  or a dependency-critical path.\n\n")
 }
 
 func formatLowerBoundMs(ms uint64, lowerBound bool) string {
