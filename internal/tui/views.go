@@ -333,11 +333,9 @@ func (m *Model) selectedRow() (row, bool) {
 	return rows[m.selected], true
 }
 
-// selectedRowOpens reports whether Enter has anything to open: a call row's
-// own span in the table views, or the timeline's selected span, which has no
-// row at all. It is what the footer's open hint is shown on, built on
-// jumpTarget, so the hint and the Enter handler cannot come to disagree
-// about what there is to open.
+// selectedRowOpens reports whether the current selection resolves to one
+// span that Enter can open in the raw log. Aggregate investigations use
+// aggregateTarget instead.
 func (m *Model) selectedRowOpens() bool {
 	_, _, ok := m.jumpTarget()
 	return ok
@@ -345,8 +343,8 @@ func (m *Model) selectedRowOpens() bool {
 
 // jumpTarget resolves what Enter would jump to right now: the span slice and
 // the index within it jumpToSpan should be given, and whether there is one
-// at all. It is the single predicate both selectedRowOpens (the footer's
-// open hint) and the Enter handler ask, generalising row.isCall -- which
+// at all. It is the predicate both selectedRowOpens and the Enter handler
+// ask, generalising row.isCall -- which
 // answers the question for one table row -- over the timeline, which has no
 // rows of its own and resolves through selectedTimelineSpan instead.
 //

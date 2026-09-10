@@ -445,14 +445,9 @@ const sortHint = "s sort"
 // and TestNoViewsActionLineOutgrowsTheNarrowestThreePaneWidth is what holds
 // the widest of them inside the budget.
 //
-// The open hint is shown only where Enter has something to open: a call
-// row's own span in the table views, or the timeline's selected span, which
-// has no row of its own. A rollup row stands for a group and resolves to no
-// single span, so in the two rollup views the key returns immediately, and
-// in the raw log there is no row or span to press it over at all.
-// Advertising a key that does nothing is the defect this package removes
-// wherever it finds it, and this hint would be inert in three of the five
-// views.
+// The Enter hint is route-specific: providers and RPC-backed types name
+// Calls, UI-only types name Resources, and individual spans keep the raw
+// open hint. Views without a valid target advertise nothing.
 //
 // The span hint is the SAME rule read the other way: a working key
 // advertised nowhere. ←/→ (and h/l) are the only way to reach any span in a
@@ -495,8 +490,8 @@ const sortHint = "s sort"
 // key table (see helpGroups), which is where a shortcut belongs.
 //
 // Each hint asks a predicate built on the same state its key handler reads
-// -- selectedRowOpens through jumpTarget, selectedLaneStepsThroughSpans
-// through timelineLanes -- so the footer cannot come to advertise a key the
+// -- enterHint through aggregateTarget and jumpTarget,
+// selectedLaneStepsThroughSpans through timelineLanes -- so the footer cannot come to advertise a key the
 // handler has stopped acting on. None asks which pane has focus: Enter is
 // inert from the detail pane the way space is inert outside the facet pane,
 // and "␣ facet" is shown regardless for the same reason -- a hint that
@@ -514,8 +509,8 @@ func (m *Model) actionKeys(w int) string {
 	if m.view == ViewRawLog && !m.facetOverlayShowing(w) {
 		keys = append(keys, "↔ scroll")
 	}
-	if m.selectedRowOpens() {
-		keys = append(keys, openHint)
+	if hint := m.enterHint(); hint != "" {
+		keys = append(keys, hint)
 	}
 	if m.detailPaneDrawn(w) && m.selectedLaneStepsThroughSpans() {
 		keys = append(keys, spanCursorHint)

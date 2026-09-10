@@ -1983,7 +1983,8 @@ func TestTheFooterOffersTheOpenKeyOnlyWhereEnterOpens(t *testing.T) {
 		} else {
 			sawBoth[1] = true
 		}
-		if strings.Contains(got, "⏎ open") != opens {
+		hint := m.enterHint()
+		if (hint != "") != opens || (hint != "" && !strings.Contains(got, hint)) {
 			verb := "does not offer"
 			if !opens {
 				verb = "offers"

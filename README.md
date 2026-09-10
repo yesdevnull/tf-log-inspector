@@ -123,6 +123,16 @@ The top tab bar highlights the active view; its number keys switch views.
 input. The filter title counts hidden values. Raw Log uses the available width
 without a Detail panel and reports its position in the status bar.
 
+With the list focused, `Enter` on a Providers row opens Calls restricted to
+that provider, while preserving every other active facet. `Enter` on a Types
+row opens its selected RPC calls when any remain; a type represented only by
+selected UI operations opens Resources instead. `Esc` restores the parent
+view, filters, sort and selection exactly. An investigation can continue into
+a call's Raw Log entry and return one level at a time. Modal response, search,
+help, quality and evidence panels close before this history is unwound. A
+numbered view key starts a separate investigation and clears that history,
+including when it names the current view.
+
 `?` opens the complete key guide. Scroll it with arrows, `j`/`k` or
 `PgUp`/`PgDn`; the timing explanation follows the shortcuts. The main views
 keep a compact timing qualification beside their action hints.

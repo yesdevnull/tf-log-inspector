@@ -17,7 +17,7 @@
 [2m│[0m   [36mPgUp PgDn[0m  page through raw log or response                                                    [2m│[0m
 [2m│[0m   [36mr[0m          open reconstructed response; r or Esc returns                                       [2m│[0m
 [2m│[0m   [36m↑ ↓ j k[0m    scroll the reconstructed response                                                   [2m│[0m
-[2m│[0m   [36m⏎ Enter[0m    open the selected call in the raw log                                               [2m│[0m
+[2m│[0m   [36m↵ ⏎ Enter[0m  open selected provider/type or call                                                 [2m│[0m
 [2m│[0m   [36ms[0m          sort by the next column, in the table views                                         [2m│[0m
 [2m│[0m   [36m\[0m          show the whole log again, after opening a call                                      [2m│[0m
 [2m│[0m                                                                                                  [2m│[0m
@@ -25,7 +25,7 @@
 [2m│[0m   [36m␣ Space[0m    toggle value; modules may inherit inclusion                                         [2m│[0m
 [2m│[0m   [36mo[0m          show only that value -- again undoes it                                             [2m│[0m
 [2m│[0m   [36mf[0m          show the facets and give them the keyboard                                          [2m│[0m
-[2m│[0m   [36mEsc[0m        leave call; clear chooser query; then filters                                       [2m│[0m
+[2m│[0m   [36mEsc[0m        return; then clear query or filters                                                 [2m│[0m
 [2m│[0m   [36m/[0m          narrow resources/modules; search log/response                                       [2m│[0m
 [2m│[0m   [36mn N[0m        step to the next or previous match                                                  [2m│[0m
 [2m│[0m                                                                                                  [2m│[0m

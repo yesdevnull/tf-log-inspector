@@ -193,14 +193,11 @@ func TestRawLogPagingIsClamped(t *testing.T) {
 	}
 }
 
-// Enter on a rollup row (every ViewProviders row is one) has no span to jump
-// to, so it must be inert rather than jumping to entry 0. Enter asks
-// row.isCall, the same predicate the detail pane asks before reading a
-// span's fields, so the two cannot disagree about which rows carry one.
-func TestEnterOnARollupRowIsInert(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-hcp.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+// Resource aggregates remain inert until operation navigation is available.
+func TestEnterOnAResourceRollupRowIsInert(t *testing.T) {
+	m := update(t, New(testLog(t, "resources-accounting.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.ActiveView() != ViewProviders {
+	if m.ActiveView() != ViewResources {
 		t.Errorf("enter on a rollup row changed the view to %v", m.ActiveView())
 	}
 }

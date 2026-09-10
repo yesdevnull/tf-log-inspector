@@ -525,15 +525,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clearFilters()
 		case "enter":
-			// Enter jumps to the log entry that closed the selected span: a
-			// call row's own span in the table views -- a rollup row stands
-			// for a group and resolves to no single span, so there is
-			// nothing to jump to there -- or the timeline's selected span,
-			// which has no row at all. jumpTarget is the single predicate
-			// for what that is, asked here and by the footer's open hint
-			// (selectedRowOpens), so the two cannot disagree about what
-			// Enter does.
+			// Aggregate rows first open a scoped investigation. Individual
+			// calls and timeline spans then open their source entry. Each
+			// route shares its predicate with enterHint, so the footer and
+			// the key handler cannot disagree.
 			if m.pane == PaneList {
+				if m.openAggregate() {
+					break
+				}
 				if spans, idx, ok := m.jumpTarget(); ok {
 					m.jumpToSpan(spans, idx)
 				}
