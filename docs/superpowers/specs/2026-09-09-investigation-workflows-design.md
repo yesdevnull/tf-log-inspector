@@ -32,6 +32,14 @@ aggregate UI evidence qualification fix in `69d1fb9`; no finding remains. This
 completion applies only to Boundary D. The other draft boundaries and review
 decisions retain their existing status.
 
+On 10 September 2026 Dan approved planning Boundary E as two sequential plans:
+[navigation history and aggregate drill-down](../plans/2026-09-10-investigation-navigation.md),
+then [resource operation drill-down](../plans/2026-09-10-resource-operation-navigation.md).
+This approves item 4's navigation behaviour, including singleton drill-down,
+parent-state restoration with Esc and numbered views ending the history chain.
+The plans remain subject to review before implementation; other draft boundaries
+retain their existing status.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response
@@ -741,8 +749,9 @@ The following decisions are proposed for review unless marked approved:
 
 1. Resources ranks observed UI operations and shows inferred RPC evidence
    separately, retaining the existing restriction on inferred rankings.
-2. Explicit drill-down restores parent filters and positions through Esc;
-   manual numbered view changes end the history chain.
+2. **Boundary E planning scope approved by Dan, 10 September 2026:** explicit
+   drill-down restores parent filters and positions through Esc; manual numbered
+   view changes end the history chain. Implementation awaits plan approval.
 3. JSON exports complete structured results; text alone has an explicit limit.
 4. **Comparison scope approved by Dan, 9 September 2026:** accept two raw logs
    and emit text/JSON. The comparison design proposes no automatic pass/fail
