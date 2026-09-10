@@ -150,8 +150,10 @@ structured UI stream and retain its whole-second rounding and lower-bound
 qualifications. The associated RPC counts and time are inferred, partial
 evidence split into Contained/Likely and weaker Overlapping groups; they do not
 replace the observed ranking or recover every provider call. `Enter` on a
-resource aggregate is intentionally inert because individual operation
-navigation is not yet available.
+resource opens its observed operations. From there, `Enter` opens the selected
+operation's source and `c` opens inferred calls for the current resource
+selection. Those calls are not assigned to an individual UI operation. `Esc`
+returns through each parent; a numbered view starts a new navigation path.
 
 Resource type, exact-resource and module-subtree selections apply to UI
 operations. RPC evidence also uses provider and RPC-method selections; those

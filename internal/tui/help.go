@@ -67,6 +67,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "← → h l", what: "scroll horizontally in raw log or response"},
 			{keys: "PgUp PgDn", what: "page through raw log or response"},
 			{keys: "r", what: "open reconstructed response; r or Esc returns"},
+			{keys: "c", what: "open inferred calls from resource operations"},
 			{keys: "↑ ↓ j k", what: "scroll the reconstructed response"},
 			{keys: "↵ ⏎ Enter", what: "open selected provider/type or call"},
 			{keys: "s", what: "sort by the next column, in the table views"},

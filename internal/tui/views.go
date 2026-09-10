@@ -225,9 +225,15 @@ var operationColumns = []column{
 
 var operationTable = tableBinding{cols: operationColumns, defaultCol: 2}
 
+var associatedCallColumns = append(append([]column(nil), callColumns...), column{header: "confidence", kind: headIdentifierColumn})
+var associatedCallTable = tableBinding{cols: associatedCallColumns, defaultCol: 0}
+
 func (m *Model) activeTable() (tableBinding, bool) {
 	if m.view == ViewResources && m.resourceOperations {
 		return operationTable, true
+	}
+	if m.view == ViewCalls && m.associatedCalls {
+		return associatedCallTable, true
 	}
 	t, ok := tables[m.view]
 	return t, ok
@@ -237,12 +243,19 @@ func (m *Model) activeSort() int {
 	if m.view == ViewResources && m.resourceOperations {
 		return m.operationSort
 	}
+	if m.view == ViewCalls && m.associatedCalls {
+		return m.associatedCallSort
+	}
 	return m.sortCol[m.view]
 }
 
 func (m *Model) setActiveSort(col int) {
 	if m.view == ViewResources && m.resourceOperations {
 		m.operationSort = col
+		return
+	}
+	if m.view == ViewCalls && m.associatedCalls {
+		m.associatedCallSort = col
 		return
 	}
 	m.sortCol[m.view] = col
@@ -306,7 +319,12 @@ func (m *Model) rows() []row {
 	case ViewTypes:
 		r = typeRows(m.selectedRPCSpans(), m.selectedUISpans())
 	case ViewCalls:
-		r = callRowsForIndices(m.log.RPCSpans, m.selectedResources().RPCIndices)
+		indices := m.selectedResources().RPCIndices
+		if m.associatedCalls {
+			r = m.associatedCallRows(indices)
+		} else {
+			r = callRowsForIndices(m.log.RPCSpans, indices)
+		}
 	case ViewResources:
 		if m.resourceOperations {
 			r = m.operationRows()
@@ -679,6 +697,20 @@ func callRowsForIndices(rpcSpans []span.Span, idx []int) []row {
 	return rows
 }
 
+func (m *Model) associatedCallRows(indices []int) []row {
+	rows := callRowsForIndices(m.log.RPCSpans, indices)
+	hasContext := m.log.HasAddressContext()
+	for i := range rows {
+		confidence := noAddressContextValue
+		if hasContext {
+			confidence = m.log.AttributionForEntry(m.log.RPCSpans[rows[i].spanIdx].Entry).Confidence.String()
+		}
+		rows[i].cells = append(rows[i].cells, confidence)
+		rows[i].numeric = append(rows[i].numeric, 0)
+	}
+	return rows
+}
+
 // noMatchNote is what a pane says when the active filter has left it with
 // nothing to show. Without it an empty pane is byte-identical to one caused
 // by a parse failure or by opening the wrong file, and a reader who cannot
@@ -747,7 +779,9 @@ func (m *Model) renderList(w, h int) string {
 		return m.fitCaptureGuidance(w, h)
 	}
 	empty := noRowsNote
-	if m.filterActive() {
+	if m.associatedCalls && (m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) {
+		empty = "No named RPC associations in this selection"
+	} else if m.filterActive() {
 		empty = m.noMatchTail()
 	}
 	// The columns come from tables, which the sort cycle and the header
@@ -766,6 +800,16 @@ func (m *Model) renderList(w, h int) string {
 	var preamble []string
 	if m.view == ViewTypes {
 		preamble = typesPreamble(m.selectedUISpans())
+	}
+	if m.view == ViewCalls && m.associatedCalls {
+		if m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
+			preamble = []string{"Calls for current selection", "Confidence describes resource attribution."}
+		} else {
+			preamble = []string{"Inferred RPC associations for current selection", "Not assigned to an individual UI operation."}
+			if len(m.rows()) == 0 {
+				preamble = append(preamble, wrapToWidth("This does not establish that no provider calls occurred.", w)...)
+			}
+		}
 	}
 	rows := m.rows()
 	if len(rows) > 0 && len(preamble) > max(0, h-2) {

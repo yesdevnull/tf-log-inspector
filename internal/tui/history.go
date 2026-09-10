@@ -30,6 +30,8 @@ type navigationFrame struct {
 	timeline           timelineState
 	resourceOperations bool
 	operationSort      int
+	associatedCalls    bool
+	associatedCallSort int
 }
 
 func cloneExclusions(src map[string]map[string]bool) map[string]map[string]bool {
@@ -70,6 +72,7 @@ func (m *Model) captureNavigation() navigationFrame {
 		facetQuery: m.facetSearch.query, showFacetOverlay: m.showFacetOverlay,
 		raw: cloneRawState(m.raw), timeline: m.timeline,
 		resourceOperations: m.resourceOperations, operationSort: m.operationSort,
+		associatedCalls: m.associatedCalls, associatedCallSort: m.associatedCallSort,
 	}
 }
 
@@ -93,6 +96,8 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.timeline = frame.timeline
 	m.resourceOperations = frame.resourceOperations
 	m.operationSort = frame.operationSort
+	m.associatedCalls = frame.associatedCalls
+	m.associatedCallSort = frame.associatedCallSort
 	m.selected = frame.selected
 	m.changeView(frame.view)
 	m.restoreIdentity(frame.identity, frame.selected)

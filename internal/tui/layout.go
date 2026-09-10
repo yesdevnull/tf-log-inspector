@@ -506,6 +506,9 @@ func (m *Model) actionKeys(w int) string {
 	if m.view != ViewRawLog {
 		keys = append(keys, "e evidence")
 	}
+	if m.view == ViewResources && m.resourceOperations {
+		keys = append(keys, "c calls")
+	}
 	if m.view == ViewRawLog && !m.facetOverlayShowing(w) {
 		keys = append(keys, "↔ scroll")
 	}
@@ -539,10 +542,10 @@ func (m *Model) actionKeys(w int) string {
 		keys = append(keys, "/ narrow")
 	}
 	keys = append(keys, esc, quitHint)
-	if m.view == ViewResources {
+	if m.view == ViewResources || m.associatedCalls {
 		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
 			removed := false
-			for _, secondary := range []string{sortHint, "f facets"} {
+			for _, secondary := range []string{sortHint, "f facets", "␣ facet", m.enterHint(), "⇥ pane"} {
 				for i, key := range keys {
 					if key == secondary {
 						keys = append(keys[:i], keys[i+1:]...)

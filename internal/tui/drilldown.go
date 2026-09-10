@@ -46,6 +46,22 @@ func (m *Model) openResourceOperations() bool {
 	return true
 }
 
+// openAssociatedCalls opens the RPC observations admitted by the operation
+// list's current selection. The operation row is deliberately not consulted:
+// attribution relates calls to named resources, not to an individual UI hook.
+func (m *Model) openAssociatedCalls() bool {
+	if m.view != ViewResources || !m.resourceOperations {
+		return false
+	}
+	parent := m.captureNavigation()
+	m.history = append(m.history, parent)
+	m.resourceOperations = false
+	m.associatedCalls = true
+	m.changeView(ViewCalls)
+	m.selected = 0
+	return true
+}
+
 func (m *Model) aggregateTarget() (View, string, string, bool) {
 	r, ok := m.selectedRow()
 	if !ok {

@@ -136,6 +136,8 @@ type Model struct {
 	selected           int
 	resourceOperations bool
 	operationSort      int
+	associatedCalls    bool
+	associatedCallSort int
 
 	// sortCol is which column each table view's rows are sorted by, indexed
 	// by View. It is per view because a column index names a DIFFERENT
@@ -546,6 +548,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		case "c":
+			if m.pane == PaneList {
+				m.openAssociatedCalls()
+			}
 		case "left", "h":
 			// Arrows act on the focused timeline or raw log. Search input
 			// captures these keys before view navigation.
@@ -762,6 +768,7 @@ func (m *Model) setView(v View) {
 	m.history = nil
 	m.raw.scope = nil
 	m.resourceOperations = false
+	m.associatedCalls = false
 	m.changeView(v)
 }
 
