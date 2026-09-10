@@ -72,6 +72,14 @@ deterministic encoding and protected file output. Combined review of
 separate test cleanup, race/lint/build checks and decoded output inspection.
 This completion applies only to G; Boundaries H and I remain unimplemented.
 
+On 11 September 2026, after G merged locally at `801a917`, Dan authorised
+drafting Boundary H as two sequential plans:
+[comparison model and schema](../plans/2026-09-11-run-comparison-model.md), then
+[comparison renderers and CLI](../plans/2026-09-11-run-comparison-cli.md).
+The drafts define exact grouping, availability, deltas, ordering, wire fields
+and two-input output protection for review. This authorises planning only;
+Boundary H implementation and Boundary I retain their existing status.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response
@@ -544,9 +552,9 @@ timeline position. Rejection counters must not replace per-observation validity.
 
 ## 7. JSON profiles and CLI run comparison
 
-### CLI contract — proposed new options
+### CLI contract — profile options and proposed comparison mode
 
-These are proposed interfaces, not existing flags:
+The profile forms are implemented by F/G; the comparison forms are proposed:
 
 ```text
 tfli --profile --format json -o profile.json run.log
