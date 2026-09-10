@@ -72,6 +72,37 @@ func TestJSONProjectionRetainsCompleteOrderedEvidence(t *testing.T) {
 		if l.ReconstructionQuality().State != "not_checked" || d.Quality.Reconstruction.State != "not_checked" {
 			t.Fatalf("%s: reconstruction triggered", path)
 		}
+		switch path {
+		case "../../testdata/two-tier.log":
+			if d.Tiers.RPC.Admitted != 3 || d.Tiers.RPC.DurationMs != 410 || d.Tiers.UI.Admitted != 3 || d.Tiers.UI.DurationMs != 6000 || d.Timeline.Tier == nil || *d.Timeline.Tier != "rpc" || d.Timeline.Status != "complete" || d.Timeline.ClockOrigin == nil || *d.Timeline.ClockOrigin != "2026-09-03T23:15:03.4Z" {
+				t.Fatalf("two-tier evidence = tiers=%+v timeline=%+v", d.Tiers, d.Timeline)
+			}
+			if got := []string{d.Aggregates.ResourceTypes[0].ResourceType, d.Aggregates.ResourceTypes[1].ResourceType, d.Aggregates.ResourceTypes[2].ResourceType}; !reflect.DeepEqual(got, []string{"aws_instance", "local_file", "aws_subnet"}) {
+				t.Fatalf("two-tier type order = %v", got)
+			}
+			if d.Aggregates.ResourceTypes[0].UI.TotalMs != 5000 || d.Aggregates.ResourceTypes[0].RPC.TotalMs != 370 || d.Aggregates.ResourceTypes[0].UI.Count != 2 || d.Aggregates.ResourceTypes[0].RPC.Count != 2 {
+				t.Fatalf("separate two-tier totals = %+v", d.Aggregates.ResourceTypes[0])
+			}
+		case "../../testdata/resources-long-lower-bound.log":
+			if len(d.UIObservations) != 1 || !d.UIObservations[0].DurationLowerBound || d.UIObservations[0].DurationMs != ^uint32(0) || d.UIObservations[0].Position.Reasons[0] != "duration_saturated" || d.Tiers.UI.Excluded != 1 || !d.Aggregates.UI.LowerBound || !d.Aggregates.ResourceTypes[0].UI.LowerBound || d.Timeline.Status != "unavailable" {
+				t.Fatalf("lower-bound fixture = ui=%+v tier=%+v timeline=%+v", d.UIObservations, d.Tiers.UI, d.Timeline)
+			}
+		case "../../testdata/core-only.log":
+			if d.Timeline.Tier != nil || d.Timeline.Metrics != nil || d.Quality.Attribution != nil || d.Tiers.RPC.DurationAvailable || d.Tiers.UI.DurationAvailable {
+				t.Fatalf("core-only absence = %+v %+v", d.Timeline, d.Quality)
+			}
+		case "../tui/testdata/resource-association-confidence.log":
+			got := make([]string, len(d.RPCObservations))
+			for i, row := range d.RPCObservations {
+				got[i] = row.Attribution.Confidence
+			}
+			if !reflect.DeepEqual(got, []string{"unattributed", "contained", "likely", "overlapping", "ambiguous", "unattributed"}) {
+				t.Fatalf("fixture confidence order = %v", got)
+			}
+			if d.Quality.NameableMs != 1500 || d.Quality.RPCDurationMs != 4000 || d.Quality.NameableShare == nil || *d.Quality.NameableShare != 0.375 {
+				t.Fatalf("fixture quality totals = %+v", d.Quality)
+			}
+		}
 	}
 }
 
