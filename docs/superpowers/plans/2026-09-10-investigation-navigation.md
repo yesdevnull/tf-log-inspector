@@ -247,6 +247,23 @@ The aggregate row identity must never come from rendered cell text, which may co
 
 ## Final validation and handoff
 
+### Peer-review follow-up
+
+Dan authorised all three subsequent peer-review findings on 10 September 2026.
+Signed commit `d3eed9f` preserves remembered numbered-view cursors when restoring
+history, makes blocked-jump guidance follow Esc's history/query/filter order,
+and keeps associated-call qualifications complete in short split layouts.
+Each regression failed before its production fix. Independent verification
+marked all three resolved with no collateral findings; separate test cleanup
+retained all three tests (11 scenarios), with TUI coverage at 96.1%.
+
+The full race suite, package build and lint pass. Independent uncached full-suite
+verification also passes. Real PTY checks at 70×9 and 100×9 confirm complete
+populated and empty associated-call qualifications, with the selected call and
+confidence still visible. Automated checks also retain the 60×9 case. These
+follow-up checks did not repeat the earlier cross-platform build matrix. No
+merge or push was performed.
+
 - [x] `go test -race -count=1 ./...` and `go build ./...`.
 - [x] `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`.
 - [x] Match `.github/workflows/ci.yml` build matrix: linux/darwin × amd64/arm64, `CGO_ENABLED=0`, build all packages and `-trimpath` CLI. Use the repository's existing CI environment settings; do not add a runner or dependency.
