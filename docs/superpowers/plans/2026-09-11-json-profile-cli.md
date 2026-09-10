@@ -190,4 +190,15 @@ Separate cleanup retained all twenty behavioural cases across six tests, with
 Manual compiled-command checks decoded RPC/UI/mixed/no-duration/saturated/partial
 JSON and confirmed reconstruction remains not checked. The mixed-tier default
 text output is byte-identical to the pre-G binary. Broader file-output tests and
-README work remain in task 2.
+README work completed in task 2.
+
+Task 2 completed in signed commit `3681ad6`. Real stdout/file regressions cover
+five fixture classes, basename identity, control/Unicode round-tripping, output
+errors and same-path/symlink/hard-link input preservation. No production defect
+was found. Independent task review approved with no findings; separate cleanup
+retained all cases with no concerns and measured 95.1% CLI package coverage.
+Focused and full tests pass. Controller race checks passed all eleven packages,
+lint reported zero issues, and formatting/build/module checks passed. Linux and
+macOS amd64/arm64 package and trimmed CLI builds passed locally with CGO disabled,
+local toolchain and readonly modules; remote CI has not run. Combined review
+remains before Boundary G completion.
