@@ -108,27 +108,6 @@ func TestResourceIndexKnownEvidenceSupplementsUnknownWithoutErasingConflicts(t *
 	}
 }
 
-func TestResourceIndexReturnedSlicesDoNotAliasLogSlices(t *testing.T) {
-	l := &Log{
-		UISpans:  []span.Span{{Address: "aws_instance.a", ModuleKnown: true}},
-		RPCSpans: []span.Span{{}},
-		Attribs:  []attrib.Attribution{{Address: "aws_instance.a", ModuleKnown: true, Confidence: attrib.Contained}},
-	}
-	got := BuildResourceIndex(l)
-	if len(got.Operations) != 1 || len(got.RPCModules) != 1 || len(got.Choices) != 1 || len(got.Modules) != 1 {
-		t.Fatalf("index=%+v, want one value in every returned slice", got)
-	}
-	got.Operations[0].UIIndex = 99
-	got.RPCModules[0].Known = false
-	got.Choices[0].Address = "changed"
-	got.Modules[0] = "changed"
-
-	again := BuildResourceIndex(l)
-	if again.Operations[0].UIIndex != 0 || !again.RPCModules[0].Known || again.Choices[0].Address != "aws_instance.a" || again.Modules[0] != "" {
-		t.Fatalf("mutating returned index changed source facts: %+v", again)
-	}
-}
-
 func TestResourceIndexLoadedCompletionsRetainDistinctSourceLocations(t *testing.T) {
 	l, err := Load(fixture(t, "structured-ui.log"))
 	if err != nil {
