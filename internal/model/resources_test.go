@@ -127,7 +127,8 @@ func TestResourceIndexSuppliedUnavailableModuleEvidenceIsSticky(t *testing.T) {
 		{"named RPC invalid after known UI", Log{UISpans: []span.Span{knownUI}, RPCSpans: []span.Span{{}}, Attribs: []attrib.Attribution{{Address: address, ModuleInvalid: true, Confidence: attrib.Contained}}}, true},
 		{"named RPC malformed after known UI", Log{UISpans: []span.Span{knownUI}, RPCSpans: []span.Span{{}}, Attribs: []attrib.Attribution{{Address: address, Module: `module.`, ModuleKnown: true, Confidence: attrib.Contained}}}, true},
 	}
-	for _, tc := range cases {
+	for i := range cases {
+		tc := &cases[i]
 		t.Run(tc.name, func(t *testing.T) {
 			got := BuildResourceIndex(&tc.log)
 			if len(got.Choices) != 1 {

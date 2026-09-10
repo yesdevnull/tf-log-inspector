@@ -242,7 +242,7 @@ Build once per capture; no source-byte rescans, response reconstruction or mutat
 
 ### Task 3: Select resources and reconcile admitted evidence
 
-**Files:** Create `internal/model/resource_selection.go`, `internal/model/resource_selection_test.go`; extend `internal/model/resources_test.go`.
+**Files:** Create `internal/model/resource_selection.go`, `internal/model/resource_selection_test.go`. Selection and projection regressions belong together in the new selection test file; existing index tests remain in `resources_test.go`.
 
 **Consumes:** Tasks 1/2, Filter.MatchSpan, HasAddressContext, confidence and Span.HasPosition.
 
@@ -310,7 +310,7 @@ for _, op := range index.Operations {
 
 Use original indices for attributions, never repeated linear AttributionForEntry lookup. Selection.Active means a non-nil named dimension. Evidence always covers the base-filtered preselection RPCs; UI scope is separately represented. Severity/request scope do not enter either calculation. No timestamp alignment, inferred provider or position-derived duration.
 
-- [ ] **Step 5: Run GREEN and review.** Focused GREEN `go test ./internal/model -run 'TestResource(Selection|Projection)' -count=1` passed, followed by `go test ./internal/model ./internal/span ./internal/attrib -count=1`, `go test ./...` (all 11 packages), `go build ./...` and a clean diff check. Self-review checked count/duration partition sums, missing-type priority, inactive index retention, independent module facts, source ordering, observed-only ranking and unchanged capture quality. Independent review and separate test cleanup remain pending with the controller.
+- [x] **Step 5: Run GREEN and review.** Focused GREEN `go test ./internal/model -run 'TestResource(Selection|Projection)' -count=1` passed, followed by `go test ./internal/model ./internal/span ./internal/attrib -count=1`, `go test ./...` (all 11 packages), `go build ./...` and a clean diff check. Self-review checked count/duration partition sums, missing-type priority, inactive index retention, independent module facts, source ordering, observed-only ranking and unchanged capture quality. Independent behavioural and quality review approved Task 3 at `0d3076c`. Separate cleanup reviewed all six test functions and retained every case without edits. The planned file list was reconciled with the implementation: selection and projection regressions belong together in `resource_selection_test.go`, while existing index tests remain in `resources_test.go`.
 - [x] **Step 6: Signed commit.** Stage the two task files and execution record; commit `Select resource evidence with reconciling totals` using the wrapper with mandatory signing and hooks enabled.
 
 ### Task 4: Validate cost, clean tests and hand off D1
@@ -321,7 +321,7 @@ Use original indices for attributions, never repeated linear AttributionForEntry
 
 **Produces:** Repeatable performance evidence and reviewed runnable integration commit.
 
-- [ ] **Step 1: Add benchmarks.** Setup 10,000 addresses, three UI operations each and 100,000 RPCs across named/unresolved states outside timing. Benchmark BuildResourceIndex separately from repeated SelectResources, unconstrained and selective provider/resource/module cases. Consume results, report allocations and document fixture counts/Go/OS/CPU. No machine-specific pass threshold.
+- [x] **Step 1: Add benchmarks.** `resources_benchmark_test.go` builds 10,000 module-qualified addresses, three UI operations per address and 100,000 RPCs divided across Contained, Likely, Overlapping, Ambiguous and Unattributed states before resetting the timer. It benchmarks BuildResourceIndex separately from unconstrained, provider-plus-exact-resource and provider-plus-module SelectResources calls. Every result is consumed and checked for retained original observations; each benchmark reports fixture counts and allocations.
 
 ```go
 // After building synthetic l/index outside the timed region:
@@ -333,10 +333,10 @@ for b.Loop() {
 }
 ```
 
-- [ ] **Step 2: Measure.** `go test ./internal/model -run '^$' -bench 'BenchmarkResource' -benchmem -benchtime=200ms -count=3`. Investigate source rescans/quadratic lookups before adding caches; no new storage/parallel loading design.
+- [x] **Step 2: Measure.** `go test ./internal/model -run '^$' -bench 'BenchmarkResource' -benchmem -benchtime=200ms -count=3` passed on Go 1.27.1, Darwin 24.6.0 arm64, Apple M4. Median results were BuildResourceIndex 45.09ms, 20,173,152B and 450,098 allocations; unconstrained SelectResources 5.98ms, 12,897,010B and 30,152 allocations; provider plus exact resource 2.16ms, 664B and 13 allocations; provider plus module 12.41ms, 3,935,206B and 120,342 allocations. Inspection found no source-byte rescans or collection-size-dependent nested lookup. Module selection structurally parses the selected and observed module paths for each match, which explains its measured allocation cost; D2 owns projection reuse between relevant filter changes, so D1 adds no cache or storage design.
 - [ ] **Step 3: Separate test cleanup.** Dispatch a different agent with test-cleanup after implementation. Preserve original-index, tri-state and real parser coverage; review cleanup edits independently.
-- [ ] **Step 4: Final checks.** Run `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`. Require pristine expected output, zero lint issues and no format/module diff. Existing CI builds linux/darwin amd64/arm64; distinguish local from CI verification.
-- [ ] **Step 5: Whole-D1 independent review and signed evidence commit.** Review item 3 and D2's interface dependencies, resolve findings and record actual checks/commit. Commit `Verify resource evidence and selection`. D2 starts from this reviewed result; do not claim the screen exists yet.
+- [x] **Step 4: Final checks.** Local `go test -race -count=1 ./...` passed all 11 packages; `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .` and `go mod tidy -diff` exited cleanly; `go mod verify` reported all modules verified. The first lint run exposed a Task 2 table loop copying a Log containing sync.Once; changing it to iterate by pointer made the focused regression and lint pass before the full gate was repeated. These are local Darwin/arm64 results; the existing CI matrix remains responsible for linux/darwin amd64/arm64 builds.
+- [ ] **Step 5: Whole-D1 independent review and signed evidence commit.** The benchmark implementation, verification evidence and Task 3 plan reconciliation are ready for commit `Verify resource evidence and selection`. The controller still owns Task 4 cleanup/review, whole-D1 review and D2 dependency review. D2 starts only after those checks; no resource screen is claimed here.
 
 ## Coverage review
 
