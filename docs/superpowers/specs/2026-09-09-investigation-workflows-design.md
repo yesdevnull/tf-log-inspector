@@ -43,6 +43,16 @@ the final focus-restoration and filtered-empty guidance fixes in `c64c0f0`;
 no finding remains. Both plans record tests, terminal checks and separate test
 cleanup. Other draft boundaries retain their existing status.
 
+On 10 September 2026, after Boundary E and its peer-review fixes merged into
+local main at `e21f366`, Dan authorised starting Boundary F with two sequential
+plans: [profile data and interval analysis](../plans/2026-09-10-profile-data-analysis.md),
+then [actionable text profiles](../plans/2026-09-10-actionable-text-profiles.md).
+The plans specify shared calculations and complete report data first, followed
+by physical source references, confidence-qualified identities, observed
+intervals and text-only list limits. They are proposed execution plans awaiting
+review; this does not mark Boundary F implemented or approve unrelated G/H/I
+decisions.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response
