@@ -26,7 +26,7 @@
 
 ## Status, dependencies and behaviour
 
-Planning scope approved by Dan on 10 September 2026; implementation awaits review of both E1/E2 plans. Read E1 and its final evidence before executing this plan. The base Resources projection exists at `85d58a7`; E1's new interfaces are requirements here, not claims about that commit.
+Dan approved this plan and authorised subagent implementation on 10 September 2026. Both tasks are implemented and individually reviewed; combined E1/E2 review is complete. E1 completed before E2 began. The base Resources projection exists at `85d58a7`; E1's interfaces were added in the preceding implementation commits.
 
 Enter on a Resources aggregate snapshots the parent, replaces `resourceSelection.Addresses` with the exact clicked singleton, preserves all other dimensions and opens observed operations. The list shows action, observed duration and exact physical source line; full address and qualifications remain accessible in detail and the scrollable `e` panel. Repeated actions/addresses remain separate by original UI index. Source opening is available even when the observation has no timeline position.
 
@@ -174,7 +174,7 @@ Use Enter dispatch order: aggregate provider/type route, resource-operation rout
 
 **Interfaces:** Consumes task 1's operation mode and E1's snapshot stack. Produces `func (m *Model) openAssociatedCalls() bool` and `associatedCalls bool` presentation context. The call list still uses `selectedResources().RPCIndices`, `callRowsForIndices` and existing attribution confidence; no new model association function.
 
-- [ ] **Step 1: Write a failing real-key association workflow.**
+- [x] **Step 1: Write a failing real-key association workflow.**
 
 ```go
 func TestResourceAssociatedCallsPreserveSelectionAndReturn(t *testing.T) {
@@ -210,9 +210,9 @@ correct per-call confidence/no-context labels. This is distinct from an empty
 allow-list. Repeat a nil-address but active-module selection to retain the named
 module-selection semantics.
 
-- [ ] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestResourceAssociated' -count=1`; `c` currently has no route.
+- [x] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestResourceAssociated' -count=1`; `c` currently has no route.
 
-- [ ] **Step 3: Implement the context-preserving transition.**
+- [x] **Step 3: Implement the context-preserving transition.**
 
 ```go
 func (m *Model) openAssociatedCalls() bool {
@@ -235,19 +235,19 @@ Extend `activeTable` to return the associated-call table binding and build rows 
 
 When no selected RPC observations remain under an address/module constraint, render “No named RPC associations in this selection” and “This does not establish that no provider calls occurred.” Without either constraint, use the ordinary Calls no-matches/no-data distinction instead. Keep `e evidence` and accurate Esc-back guidance available; do not fabricate zero UI durations or broaden filters to make a call appear. If user edits facets to deliberately widen the child selection, update context wording to the current selection and continue using the existing model projection.
 
-- [ ] **Step 4: Verify integration, docs and real terminal behaviour.** Run focused tests and `go test ./internal/tui -count=1`. Complete type → Resources → operation → Raw → Esc → operations → `c` Calls → Raw → response → back through every parent. Verify parent sort/filters/identity after child edits; empty results, no named RPCs, lower bounds, modal precedence, request expansion, number-key reset and 100×30 → 60×9 resize. Confirm operation selection is not presented as temporal RPC ownership. Update README/help with `c`, distinct numbered navigation and return semantics. Regenerate only intentional goldens using the existing update mechanism, inspect each rendered golden via `scripts/read-golden.sh` and its raw styling diff. Independent review then separate test cleanup must pass.
+- [x] **Step 4: Verify integration, docs and real terminal behaviour.** Run focused tests and `go test ./internal/tui -count=1`. Complete type → Resources → operation → Raw → Esc → operations → `c` Calls → Raw → response → back through every parent. Verify parent sort/filters/identity after child edits; empty results, no named RPCs, lower bounds, modal precedence, request expansion, number-key reset and 100×30 → 60×9 resize. Confirm operation selection is not presented as temporal RPC ownership. Update README/help with `c`, distinct numbered navigation and return semantics. Regenerate only intentional goldens using the existing update mechanism, inspect each rendered golden via `scripts/read-golden.sh` and its raw styling diff. Independent review then separate test cleanup must pass.
 
-- [ ] **Step 5: Run final validation and commit.** Run the checklist below, then signed commit `Navigate from observed operations to inferred calls`. Record evidence in E1/E2 and mark Boundary E complete only after the combined implementation review passes. No remote merge/push is implied.
+- [x] **Step 5: Run final validation and commit.** Run the checklist below, then signed commit `Navigate from observed operations to inferred calls`. Record evidence in E1/E2 and mark Boundary E complete only after the combined implementation review passes. No remote merge/push is implied.
 
 ## Final validation
 
-- [ ] `go test -race -count=1 ./...`, `go build ./...`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`.
-- [ ] Match existing CI build matrix (linux/darwin × amd64/arm64, `CGO_ENABLED=0`, packages and `-trimpath` CLI), without introducing a tool or dependency. Report local versus remote checks accurately.
-- [ ] Real PTY evidence at 100×30 and 60×9, including operation source, associated empty Calls, response modal, history restoration and filters edited in a child. Do not substitute state assertions for terminal inspection.
-- [ ] Full E1/E2 independent review checks singleton replacement, nil/empty selections, repeated original identities, map isolation, responsive qualifications, confidence visibility, unchanged capture quality and no source/filter scope widening by navigation actions.
-- [ ] Check signed commits, diff whitespace and clean worktree; write completion evidence with no unsupported claims.
+- [x] `go test -race -count=1 ./...`, `go build ./...`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`.
+- [x] Match existing CI build matrix (linux/darwin × amd64/arm64, `CGO_ENABLED=0`, packages and `-trimpath` CLI), without introducing a tool or dependency. Report local versus remote checks accurately.
+- [x] Real PTY evidence at 100×30 and 60×9, including operation source, associated empty Calls, response modal, history restoration and filters edited in a child. Do not substitute state assertions for terminal inspection.
+- [x] Full E1/E2 independent review checks singleton replacement, nil/empty selections, repeated original identities, map isolation, responsive qualifications, confidence visibility, unchanged capture quality and no source/filter scope widening by navigation actions.
+- [x] Check signed commits, diff whitespace and clean worktree; write completion evidence with no unsupported claims.
 
-## Planning self-review
+## Planning self-review (before implementation)
 
 Item 4's resource singleton/operation/source requirements map to task 1; associated Calls, confidence and no-named-RPC wording map to task 2. E1 supplies parent restoration and aggregate routing; both tasks extend rather than bypass its snapshots. Active table/sort bindings handle the two contextual list variants without adding a numbered view. UI `RPC` contains the recorded hook action, and physical lines use the existing source-location index. This document specifies proposed code and tests; it does not claim they are implemented or passing.
 
@@ -261,4 +261,12 @@ were not run for this documentation-only change.
 
 ## Execution record
 
-Dan authorised both plans for subagent implementation on 10 September 2026. Task 1 completed in signed commits `1a3841a` and `8d0735e`. Required RED found one aggregate instead of two operations; focused tests, full suite and build pass. Review found and verified fixes for off-screen UI source targets at 60×9 and missing narrow Esc hints. Separate cleanup retained all 13 distinct tests. Real PTY confirms selected source entry5 is visible, Esc hints remain available, evidence exposes full address/action/source, and returns restore operations/aggregate. Task 2 and combined final review remain pending.
+Dan authorised both plans for subagent implementation on 10 September 2026. Task 1 completed in signed commits `1a3841a` and `8d0735e`. Required RED found one aggregate instead of two operations; focused tests, full suite and build pass. Review found and verified fixes for off-screen UI source targets at 60×9 and missing narrow Esc hints. Separate cleanup retained all 13 distinct tests. Real PTY confirms selected source entry 5 is visible, Esc hints remain available, evidence exposes full address/action/source, and returns restore operations/aggregate.
+
+Task 2 completed in signed commits `b6d743c`, `25dcf9a` and `3560ed8`. Behavioural RED confirmed that `c` had no route from operations. Independent review approved the implementation after two correction rounds covering compact scope qualifications, empty association wording, scoped Raw return hints and selection-boundary regressions. Separate cleanup retained all distinct behavioural coverage. Real PTY verified operations → associated Calls → Raw → reconstructed response and return through the parents, empty constrained Calls, and resizing from 60×9 to 100×30. The combined branch review is complete; see final verification below.
+
+## Final verification
+
+The combined E1/E2 review found missing parent focus restoration and misleading filtered-empty operation guidance. Signed commit `c64c0f0` fixes both. Independent scoped re-review marked both addressed with no new breakage; separate test cleanup retained all three added regression/boundary cases. A real 60×9 terminal now shows “nothing matches the filter -- Esc goes back” before and after the associated-Calls round trip. A 160×30 terminal confirms restored list focus and immediate source reopening.
+
+At `c64c0f0`, all 11 packages pass `go test -race -count=1 ./...`. Build, formatting, module tidy/verification and lint pass. Local packages and `-trimpath` CLI build for linux/darwin × amd64/arm64 with CGO disabled; remote CI was not run. The preceding terminal checks cover 100×30, 60×9, resize, evidence, physical source, response reconstruction, constrained empty Calls and deliberately unconstrained current selection. All branch commits have good signatures and whitespace checks pass. Boundary E is complete; no merge or push was performed.

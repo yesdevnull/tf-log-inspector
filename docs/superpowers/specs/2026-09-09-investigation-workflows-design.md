@@ -37,8 +37,11 @@ On 10 September 2026 Dan approved planning Boundary E as two sequential plans:
 then [resource operation drill-down](../plans/2026-09-10-resource-operation-navigation.md).
 This approves item 4's navigation behaviour, including singleton drill-down,
 parent-state restoration with Esc and numbered views ending the history chain.
-The plans remain subject to review before implementation; other draft boundaries
-retain their existing status.
+Dan subsequently approved both plans and authorised subagent implementation.
+Boundary E completed on 10 September 2026. Independent combined review verified
+the final focus-restoration and filtered-empty guidance fixes in `c64c0f0`;
+no finding remains. Both plans record tests, terminal checks and separate test
+cleanup. Other draft boundaries retain their existing status.
 
 ## Evidence and relationship to existing designs
 
@@ -749,9 +752,9 @@ The following decisions are proposed for review unless marked approved:
 
 1. Resources ranks observed UI operations and shows inferred RPC evidence
    separately, retaining the existing restriction on inferred rankings.
-2. **Boundary E planning scope approved by Dan, 10 September 2026:** explicit
+2. **Boundary E approved and implemented, 10 September 2026:** explicit
    drill-down restores parent filters and positions through Esc; manual numbered
-   view changes end the history chain. Implementation awaits plan approval.
+   view changes end the history chain. Both implementation plans are complete.
 3. JSON exports complete structured results; text alone has an explicit limit.
 4. **Comparison scope approved by Dan, 9 September 2026:** accept two raw logs
    and emit text/JSON. The comparison design proposes no automatic pass/fail

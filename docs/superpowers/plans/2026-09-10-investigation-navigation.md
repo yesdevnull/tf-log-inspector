@@ -26,7 +26,7 @@
 
 ## Status and scope
 
-Planning scope approved by Dan on 10 September 2026. This plan is for review, not an implementation record. Work starts from Boundary D at `85d58a7` or a descendant containing it. No application code is changed by this document.
+Dan approved this plan and authorised subagent implementation on 10 September 2026. Both tasks are implemented and individually reviewed; combined E1/E2 review is complete. Work started from Boundary D at `85d58a7`. The execution record below distinguishes implementation evidence from the original planning notes.
 
 Deliver E1 before E2. E1 leaves Resources aggregate Enter inert, but type → Resources works. Response reconstruction remains modal and retains its current parser/policy. No new CLI flags, dependencies, attribution rules or measurement calculations.
 
@@ -247,13 +247,13 @@ The aggregate row identity must never come from rendered cell text, which may co
 
 ## Final validation and handoff
 
-- [ ] `go test -race -count=1 ./...` and `go build ./...`.
-- [ ] `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`.
-- [ ] Match `.github/workflows/ci.yml` build matrix: linux/darwin × amd64/arm64, `CGO_ENABLED=0`, build all packages and `-trimpath` CLI. Use the repository's existing CI environment settings; do not add a runner or dependency.
-- [ ] Review the full E1 diff, signed-commit status and real terminal evidence. Required workflows cover repeated frame pops, parent map isolation, stable identities, empty results and resize. Do not claim remote CI ran unless it did.
-- [ ] Update this plan with evidence; E2 consumes these interfaces only after E1 review passes.
+- [x] `go test -race -count=1 ./...` and `go build ./...`.
+- [x] `gofmt -d .`, `go mod tidy -diff`, `go mod verify`, `golangci-lint run --timeout=5m`.
+- [x] Match `.github/workflows/ci.yml` build matrix: linux/darwin × amd64/arm64, `CGO_ENABLED=0`, build all packages and `-trimpath` CLI. Use the repository's existing CI environment settings; do not add a runner or dependency.
+- [x] Review the full E1 diff, signed-commit status and real terminal evidence. Required workflows cover repeated frame pops, parent map isolation, stable identities, empty results and resize. Do not claim remote CI ran unless it did.
+- [x] Update this plan with evidence; E2 consumes these interfaces only after E1 review passes.
 
-## Planning self-review
+## Planning self-review (before implementation)
 
 Item 4 provider/type singleton selection maps to task 2; snapshots, identity fallback, modal precedence, backslash and manual navigation map to task 1. Resource operation and associated-call paths map explicitly to E2. Shared measurement/quality/source identity contracts remain unchanged. New interface names and existing package names were checked against `85d58a7`; no implementation or tests have been run for this proposed feature.
 
@@ -269,6 +269,12 @@ for this documentation-only change.
 
 Dan authorised subagent implementation of both plans on 10 September 2026. E1 task 1 is complete in signed commits `31367fe`, `a0d0772` and `8e6ce58`. Required RED reproduced child type-filter leakage; focused tests and the full Go suite pass. Independent spec/quality review approved after additional real-key modal/selection coverage; separate cleanup retained all distinct boundary tests.
 
-An empty named selection cannot initiate an E1 raw jump because no timing row remains. E1 verifies empty snapshot preservation directly and Enter inert through real handlers. E2 must verify the newly reachable empty-operation parent → c → Calls → Esc path. This staging was confirmed in review.
+An empty named selection cannot initiate an E1 raw jump because no timing row remains. E1 verifies empty snapshot preservation directly and Enter inert through real handlers. E2 verified the newly reachable empty-operation parent → c → Calls → Esc path. This staging was confirmed in review; its risk was overlooking another reachable empty-parent navigation path.
 
-E1 task 2 is complete in signed commits `f867107`, `1c15747` and `abf6e36`. Independent review approved singleton routes, missing metadata, full real-response navigation and the short-terminal fixes. Cleanup retained all distinct tests. At `abf6e36`, all 11 packages pass uncached race tests, lint reports zero issues, and package/trimpath CLI builds pass for linux/darwin × amd64/arm64. Module checks and formatting are clean. Real PTY at 100×30 verified provider → Calls → Raw, request expansion and nested return; 60×9 verified visible Types identity, non-default sort and type → Resources → back. All E1 commits have good signatures. Combined E1/E2 final review remains pending.
+E1 task 2 is complete in signed commits `f867107`, `1c15747` and `abf6e36`. Independent review approved singleton routes, missing metadata, full real-response navigation and the short-terminal fixes. Cleanup retained all distinct tests. At `abf6e36`, all 11 packages pass uncached race tests, lint reports zero issues, and package/trimpath CLI builds pass for linux/darwin × amd64/arm64. Module checks and formatting are clean. Real PTY at 100×30 verified provider → Calls → Raw, request expansion and nested return; 60×9 verified visible Types identity, non-default sort and type → Resources → back. All E1 commits have good signatures. Combined E1/E2 final review is complete; see final verification below.
+
+## Final verification
+
+The combined E1/E2 review found two omissions: saved keyboard focus was not restored, and filtered-empty operations claimed the log had no rows. Signed commit `c64c0f0` fixes both with real-key and rendered regressions. Independent scoped re-review marked both addressed with no new breakage. Separate cleanup retained all three new test cases.
+
+At `c64c0f0`, all 11 packages pass `go test -race -count=1 ./...`. Build, formatting, module tidy/verification and lint pass. Local package and `-trimpath` CLI builds pass for linux/darwin × amd64/arm64 with CGO disabled; remote CI was not run. Real terminal checks cover 100×30 and 60×9 navigation, source and response views, current-selection wording, empty child returns and resize. Additional 160×30 verification confirms focus restoration and immediate Enter after returning. Commit signatures and whitespace checks pass. Implementation is complete on the topic branch; no merge or push was performed.
