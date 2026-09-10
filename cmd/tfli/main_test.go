@@ -417,6 +417,74 @@ func TestProfileLimitControlsEveryListWithoutChangingTotals(t *testing.T) {
 	}
 }
 
+func TestProfileLimitControlsIntervalsAndResourcesWithoutChangingMetrics(t *testing.T) {
+	render := func(t *testing.T, path, limit string) string {
+		t.Helper()
+		var stdout, stderr strings.Builder
+		if err := run([]string{"--profile", "--limit=" + limit, path}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("unexpected stderr: %q", stderr.String())
+		}
+		return stdout.String()
+	}
+	section := func(t *testing.T, report, start, end string) string {
+		t.Helper()
+		startAt, endAt := strings.Index(report, start), strings.Index(report, end)
+		if startAt < 0 || endAt < 0 || startAt >= endAt {
+			t.Fatalf("cannot find report section %q to %q:\n%s", start, end, report)
+		}
+		return report[startAt:endAt]
+	}
+
+	t.Run("qualifying intervals", func(t *testing.T) {
+		path := filepath.Join("..", "..", "testdata", "timeline-many-stalls.log")
+		limited, all := render(t, path, "1"), render(t, path, "0")
+		if !strings.Contains(limited, "QUALIFYING INTERVALS (top 1 of 2)\n") || !strings.Contains(all, "QUALIFYING INTERVALS\n") {
+			t.Fatalf("interval headings do not show limited and unlimited modes:\nLIMITED:\n%s\nALL:\n%s", limited, all)
+		}
+		for name, report := range map[string]string{"limited": limited, "all": all} {
+			intervals := section(t, report, "QUALIFYING INTERVALS", "  Observed gaps")
+			wantRows := 2
+			if name == "limited" {
+				wantRows = 1
+			}
+			if got := strings.Count(intervals, "ms-"); got != wantRows {
+				t.Errorf("%s interval row count = %d, want %d:\n%s", name, got, wantRows, intervals)
+			}
+			for _, want := range []string{"peak concurrency 2", "busy union 17.0s", "busy / window 85.0%", "positioned reported-duration sum 17.2s"} {
+				if !strings.Contains(report, want) {
+					t.Errorf("%s report changed metric %q:\n%s", name, want, report)
+				}
+			}
+		}
+	})
+
+	t.Run("slowest resources", func(t *testing.T) {
+		path := filepath.Join("..", "..", "testdata", "structured-ui.log")
+		limited, all := render(t, path, "1"), render(t, path, "0")
+		if !strings.Contains(limited, "SLOWEST RESOURCES (top 1 of 2)\n") || !strings.Contains(all, "SLOWEST RESOURCES\n") {
+			t.Fatalf("resource headings do not show limited and unlimited modes:\nLIMITED:\n%s\nALL:\n%s", limited, all)
+		}
+		for name, report := range map[string]string{"limited": limited, "all": all} {
+			resources := section(t, report, "SLOWEST RESOURCES", "CONCURRENCY")
+			wantRows := 2
+			if name == "limited" {
+				wantRows = 1
+			}
+			if got := strings.Count(resources, " (observed UI)\n"); got != wantRows {
+				t.Errorf("%s resource row count = %d, want %d:\n%s", name, got, wantRows, resources)
+			}
+			for _, want := range []string{"UI timing records     2: admitted 2, rejected 0; duration 2.5s", "UI positioning        2 observations, 2.5s; excluded 0 observations, 0ms", "positioned reported-duration sum 2.5s"} {
+				if !strings.Contains(report, want) {
+					t.Errorf("%s report changed metric %q:\n%s", name, want, report)
+				}
+			}
+		}
+	})
+}
+
 func TestLimitPreservesHelpAndVersionPrecedence(t *testing.T) {
 	var help strings.Builder
 	if err := run([]string{"--help", "--limit=1"}, io.Discard, &help); err != nil {
