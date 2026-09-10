@@ -77,7 +77,7 @@ func IntervalThresholdMs(window uint32) uint32
 func AnalyseTiming(timing TimingSelection) (TimingAnalysis, error)
 ```
 
-- [ ] **Step 1: Write the failing arithmetic regression.** Use package `model`, standard testing, and the existing span/logfmt package imports:
+- [x] **Step 1: Write the failing arithmetic regression.** Use package `model`, standard testing, and the existing span/logfmt package imports:
 
 ```go
 func TestAnalyseTimingSeparatesBusyExtentFromDurations(t *testing.T) {
@@ -100,9 +100,9 @@ func TestAnalyseTimingSeparatesBusyExtentFromDurations(t *testing.T) {
 
 Add independent cases for nil input; all-unpositioned spans; mixed positioned/unpositioned durations and reasons; UI saturation; a positioned zero at offset zero; zeros at positive offsets; simultaneous handovers; mixed fidelity returning `ErrMixedTimelines`; leading gaps and multiple equal-length intervals. Use `TimestampStatus: logfmt.TimestampMissing` for missing timestamps and `DurationSaturated: true` for saturated UI observations, with `Fidelity: span.FidelityUIReported` for the UI tier. A nil metrics pointer distinguishes unavailable from a measured zero. Add a greater-than-three-interval case to prove this API is not the TUI's top-three presentation.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/model -run '^TestAnalyseTiming' -count=1`. An initially absent API is expected; after adding declarations, confirm the arithmetic assertions fail with an empty implementation before implementing calculations.
+- [x] **Step 2: Run RED.** `go test ./internal/model -run '^TestAnalyseTiming' -count=1`. An initially absent API is expected; after adding declarations, confirm the arithmetic assertions fail with an empty implementation before implementing calculations.
 
-- [ ] **Step 3: Implement using existing primitives.** The algorithm is:
+- [x] **Step 3: Implement using existing primitives.** The algorithm is:
 
 ```go
 func TimingWindowMs(positioned []span.Span) uint32 {
@@ -135,8 +135,8 @@ func AnalyseTiming(timing TimingSelection) (TimingAnalysis, error) {
 
 Keep intervals in their existing chronological order here; text ranking is F2. Replace the loop in the TUI's uncached wall-clock calculation with `model.TimingWindowMs(spans)` and the body of `stallThresholdMs` with `model.IntervalThresholdMs(wallClock)`. Preserve caching and selection. Existing TUI threshold/window tests must still pass; do not route per-frame rendering through a new full analysis or add duplicate sweeps.
 
-- [ ] **Step 4: Verify and review.** Run `go test ./internal/model ./internal/tui -count=1`. Existing timeline goldens should remain unchanged. Independent review checks clock separation, unavailable values, complete intervals, clamped/zero extents and unchanged TUI policy. Separate cleanup follows implementation; retain distinct boundary cases.
-- [ ] **Step 5: Commit.** Inspect status and whitespace, stage task paths explicitly, and make signed commit `Share complete timing analysis for profiles`.
+- [x] **Step 4: Verify and review.** Run `go test ./internal/model ./internal/tui -count=1`. Existing timeline goldens should remain unchanged. Independent review checks clock separation, unavailable values, complete intervals, clamped/zero extents and unchanged TUI policy. Separate cleanup follows implementation; retain distinct boundary cases.
+- [x] **Step 5: Commit.** Inspect status and whitespace, stage task paths explicitly, and make signed commit `Share complete timing analysis for profiles`.
 
 ## Task 2: Assemble complete profile data with original source identities
 
@@ -243,3 +243,7 @@ the sample arithmetic test and missing text clock-origin instructions in F2.
 Both are corrected; scoped re-review found no remaining issues. Links, code
 fences and whitespace checks pass. Application tests were not run for these
 documentation-only changes.
+
+## Execution record
+
+Dan approved both plans and subagent execution on 10 September 2026. F1 task 1 completed in signed commit `1b5af25`: behavioural RED, focused GREEN and full suite pass. Independent task review approved specification and quality with no findings. Separate test cleanup retained all eight tests/ten cases; model coverage 98.1%. Task 2 remains pending.
