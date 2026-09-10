@@ -343,16 +343,34 @@ func TestLimitParseErrorsAreReportedOnce(t *testing.T) {
 }
 
 func TestProfileLimitControlsEveryListWithoutChangingTotals(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "timeline-dense-lane.log")
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "default", args: []string{"--profile", path}, want: "SLOWEST CALLS (top 20 of 60)"},
-		{name: "one", args: []string{"--profile", "--limit=1", path}, want: "SLOWEST CALLS (top 1 of 60)"},
-		{name: "all", args: []string{"--profile", "--limit=0", path}, want: "source: line 77"},
+	const awsCall = "2022-12-15T00:16:20.800Z [TRACE] provider.aws: Received downstream response: tf_resource_type=aws_subnet tf_rpc=ApplyResourceChange tf_provider_addr=registry.terraform.io/hashicorp/aws tf_req_duration_ms=5\n"
+	const googleCall = "2022-12-15T00:16:21.400Z [TRACE] provider.google: Received downstream response: tf_resource_type=google_compute_instance tf_rpc=ApplyResourceChange tf_provider_addr=registry.terraform.io/hashicorp/google tf_req_duration_ms=8\n"
+	path := filepath.Join(t.TempDir(), "profile.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat(awsCall, 10)+strings.Repeat(googleCall, 11)), 0o600); err != nil {
+		t.Fatal(err)
 	}
+	section := func(t *testing.T, report, start, end string) string {
+		t.Helper()
+		startAt, endAt := strings.Index(report, start), strings.Index(report, end)
+		if startAt < 0 || endAt < 0 || startAt >= endAt {
+			t.Fatalf("cannot find report section %q to %q:\n%s", start, end, report)
+		}
+		return report[startAt:endAt]
+	}
+
+	cases := []struct {
+		name                string
+		args                []string
+		wantHeadings        []string
+		wantTypeRows        int
+		wantProviderRows    int
+		wantObservationRows int
+	}{
+		{name: "default", args: []string{"--profile", path}, wantHeadings: []string{"BY RESOURCE TYPE\n", "BY PROVIDER\n", "SLOWEST CALLS (top 20 of 21)\n"}, wantTypeRows: 2, wantProviderRows: 2, wantObservationRows: 20},
+		{name: "one", args: []string{"--profile", "--limit=1", path}, wantHeadings: []string{"BY RESOURCE TYPE (top 1 of 2)\n", "BY PROVIDER (top 1 of 2)\n", "SLOWEST CALLS (top 1 of 21)\n"}, wantTypeRows: 1, wantProviderRows: 1, wantObservationRows: 1},
+		{name: "all", args: []string{"--profile", "--limit=0", path}, wantHeadings: []string{"BY RESOURCE TYPE\n", "BY PROVIDER\n", "SLOWEST CALLS\n"}, wantTypeRows: 2, wantProviderRows: 2, wantObservationRows: 21},
+	}
+	reports := make(map[string]string, len(cases))
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr strings.Builder
@@ -362,15 +380,40 @@ func TestProfileLimitControlsEveryListWithoutChangingTotals(t *testing.T) {
 			if stderr.Len() != 0 {
 				t.Fatalf("unexpected stderr: %q", stderr.String())
 			}
-			for _, want := range []string{tc.want, "RPC timing records     60: admitted 60, rejected 0; duration 2.4s", "RPC calls", "60"} {
+			report := stdout.String()
+			reports[tc.name] = report
+			for _, want := range tc.wantHeadings {
 				if !strings.Contains(stdout.String(), want) {
 					t.Errorf("missing %q:\n%s", want, stdout.String())
 				}
 			}
-			if tc.name == "all" && strings.Contains(stdout.String(), "SLOWEST CALLS (top ") {
-				t.Errorf("unlimited report still labels calls as truncated:\n%s", stdout.String())
+
+			typeSection := section(t, report, "BY RESOURCE TYPE", "BY PROVIDER")
+			providerSection := section(t, report, "BY PROVIDER", "SLOWEST CALLS")
+			callsSection := section(t, report, "SLOWEST CALLS", "CONCURRENCY")
+			if got := strings.Count(typeSection, "  google_compute_instance") + strings.Count(typeSection, "  aws_subnet"); got != tc.wantTypeRows {
+				t.Errorf("resource-type row count = %d, want %d:\n%s", got, tc.wantTypeRows, typeSection)
+			}
+			if got := strings.Count(providerSection, "registry.terraform.io/hashicorp/"); got != tc.wantProviderRows {
+				t.Errorf("provider row count = %d, want %d:\n%s", got, tc.wantProviderRows, providerSection)
+			}
+			if got := strings.Count(callsSection, "    source: line "); got != tc.wantObservationRows {
+				t.Errorf("observation row count = %d, want %d:\n%s", got, tc.wantObservationRows, callsSection)
 			}
 		})
+	}
+
+	for _, report := range reports {
+		for _, want := range []string{
+			"RPC timing records     21: admitted 21, rejected 0; duration 138ms",
+			"RPC positioning        21 observations, 138ms; excluded 0 observations, 0ms",
+			"positioned observations 21 of 21 admitted",
+			"positioned reported-duration sum 138ms",
+		} {
+			if !strings.Contains(report, want) {
+				t.Errorf("limited report changed complete total %q:\n%s", want, report)
+			}
+		}
 	}
 }
 
