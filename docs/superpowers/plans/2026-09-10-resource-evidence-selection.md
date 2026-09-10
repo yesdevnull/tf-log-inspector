@@ -235,10 +235,10 @@ func (d *DurationTotal) add(s span.Span) {
 
 Build once per capture; no source-byte rescans, response reconstruction or mutation of CaptureQuality. Index must not be reused with another Log.
 
-- [ ] **Step 4: Run GREEN and review.** `go test ./internal/model -run TestResourceIndex -count=1` and `go test ./internal/model -count=1` passed. `go test ./...` passed all 11 packages before commit, and the diff check was clean. Self-review covered deterministic order, all ModuleInvalid guards, explicit ModuleKnown handling, conflict persistence, short attribution slices and returned-index mutation isolation. Independent review remains pending with the controller.
-- [x] **Step 5: Signed commit.** Staged the two task files and this execution record, then committed `Index observed resource operations` with the wrapper and mandatory signing.
+- [x] **Step 4: Run GREEN and review.** `go test ./internal/model -run TestResourceIndex -count=1` and `go test ./internal/model -count=1` passed. `go test ./...` passed all 11 packages before commit, and the diff check was clean. Self-review covered deterministic order, all ModuleInvalid guards, explicit ModuleKnown handling, conflict persistence, short attribution slices and returned-index mutation isolation. Independent review and scoped rereview completed after the sticky-unavailable fix. Separate cleanup removed one redundant test with unchanged coverage; all nine review regression cases were retained.
+- [x] **Step 5: Signed commit.** Implementation 135529c (`Index observed resource operations`), cleanup e86bcca and review fix d798788 were committed with the wrapper and mandatory signing.
 
-**Round-one review fix:** Review found that aggregate choices treated supplied invalid, malformed and address-contradictory module metadata like absent metadata, allowing a later known fact to erase the unavailable state. After cleanup commit e86bcca, nine regression cases covered all three unavailable states across UI, context and named-RPC evidence, with the contradiction tested before and after consistent evidence. `go test ./internal/model -run TestResourceIndexSuppliedUnavailableModuleEvidenceIsSticky -count=1` failed all nine cases before the fix and passed after a private sticky-unavailable bit was added to choice accumulation. The existing absent-unknown supplementation case still passes, and operation/RPC module facts remain independent. Focused index tests, the complete model package and `go test ./...` passed. The once-per-Log lifetime cannot be verified until D2 owns index construction. The signed fix commit uses subject `Preserve unavailable resource module evidence`; scoped rereview remains pending with the controller.
+**Round-one review fix:** Review found that aggregate choices treated supplied invalid, malformed and address-contradictory module metadata like absent metadata, allowing a later known fact to erase the unavailable state. After cleanup commit e86bcca, nine regression cases covered all three unavailable states across UI, context and named-RPC evidence, with the contradiction tested before and after consistent evidence. `go test ./internal/model -run TestResourceIndexSuppliedUnavailableModuleEvidenceIsSticky -count=1` failed all nine cases before the fix and passed after a private sticky-unavailable bit was added to choice accumulation. The existing absent-unknown supplementation case still passes, and operation/RPC module facts remain independent. Focused index tests, the complete model package and `go test ./...` passed. The once-per-Log lifetime cannot be verified until D2 owns index construction. Signed fix d798788 uses subject `Preserve unavailable resource module evidence`; scoped rereview completed with no remaining findings.
 
 ### Task 3: Select resources and reconcile admitted evidence
 
@@ -248,7 +248,7 @@ Build once per capture; no source-byte rescans, response reconstruction or mutat
 
 **Produces:** Remaining selection/evidence/projection declarations and SelectResources from the ledger.
 
-- [ ] **Step 1: Write the accounting regression.** A=10ms Contained, B=20ms Likely, unresolved=5ms; 1000ms UI for A. Selection A preserves B as other named work. A method filter removing B changes baseline from 35 to 15 without changing UI.
+- [x] **Step 1: Write the accounting regression.** A=10ms Contained, B=20ms Likely, unresolved=5ms; 1000ms UI for A. Selection A preserves B as other named work. A method filter removing B changes baseline from 35 to 15 without changing UI. Added membership, confidence priority, usability, grouping, tier and whole-log quality cases using real model logic and three loaded fixtures.
 
 ```go
 func TestResourceSelectionReconciles(t *testing.T) {
@@ -280,8 +280,8 @@ func TestResourceSelectionReconciles(t *testing.T) {
 
 Add cases for nil/empty/false allow-lists; OR within/AND across dimensions; matching address with unknown module versus definitely failing address; no-context; missing-type ReadResource/GetProviderSchema/unknown method; `(none)` type selection; zero/missing tiers; explicit zero; unpositioned durations; short attribution slices; Overlapping; repeated actions; UI-only/RPC-only/mixed; unnamed UI; saturation; root/indexed descendants. Assert both count and duration partition sums. Compare whole-log quality before/after.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/model -run 'TestResource(Selection|Projection)' -count=1`; record behavioural accounting and membership failures.
-- [ ] **Step 3: Implement three-valued matching.** Nil dimension is selected without testing metadata; empty non-nil dimension is other. Present exact identity decides address membership; missing identity is unknown. Module membership requires Known. Any definite dimension failure wins over unknown; otherwise unknown wins over selected. Only true map values are selected alternatives.
+- [x] **Step 2: Run RED.** After declarations compiled, `go test ./internal/model -run 'TestResource(Selection|Projection)' -count=1` failed the membership, reconciling baseline, missing-type priority, usable evidence, observed grouping and loaded-tier assertions against empty implementations. A test syntax typo was corrected before this behavioural run.
+- [x] **Step 3: Implement three-valued matching.** Nil dimension is selected without testing metadata; empty non-nil dimension is other. Present exact identity decides address membership; missing identity is unknown. Module membership requires Known. Any definite dimension failure wins over unknown; otherwise unknown wins over selected. Only true map values are selected alternatives.
 
 ```go
 func combineMembership(a, b Membership) Membership {
@@ -293,7 +293,7 @@ func combineMembership(a, b Membership) Membership {
 
 Inactive named selection passes missing metadata. For active RPC selection, no-context, unusable position and non-named attribution are unresolved, never an inferred Other from candidate names. Named attribution with a definite address mismatch remains Other even if module membership is unknown.
 
-- [ ] **Step 4: Implement baseline and rows in linear passes.** Admit RPCs using base provider/type/method filters. Count every admitted RPC in baseline; classify missing type first, then no-context, then Contained/Likely/Overlapping/Ambiguous/Unattributed. This partition does not replace C2's whole-log full confidence distribution. Compute selected/other/unresolved before discarding nonselected original indices. Selected/Other retain each confidence; row supplements combine Contained/Likely and keep Overlapping separate.
+- [x] **Step 4: Implement baseline and rows in linear passes.** Admit RPCs using base provider/type/method filters. Count every admitted RPC in baseline; classify missing type first, then no-context, then Contained/Likely/Overlapping/Ambiguous/Unattributed. This partition does not replace C2's whole-log full confidence distribution. Compute selected/other/unresolved before discarding nonselected original indices. Selected/Other retain each confidence; row supplements combine Contained/Likely and keep Overlapping separate.
 
 For UI apply only type and named filters. Count all selected UI in UI, unnamed selected UI in UnnamedUI; group others by exact address. Preserve operation indices in source order. RPC supplements attach only to existing named UI rows; context-only RPC evidence creates no ranked UI row. Sort rows descending UI total then exact address, retaining lower-bound flags.
 
@@ -310,8 +310,8 @@ for _, op := range index.Operations {
 
 Use original indices for attributions, never repeated linear AttributionForEntry lookup. Selection.Active means a non-nil named dimension. Evidence always covers the base-filtered preselection RPCs; UI scope is separately represented. Severity/request scope do not enter either calculation. No timestamp alignment, inferred provider or position-derived duration.
 
-- [ ] **Step 5: Run GREEN and review.** `go test ./internal/model ./internal/span ./internal/attrib -count=1`. Independently review each disjoint partition and missing-type priority, while retaining separate full confidence facts.
-- [ ] **Step 6: Signed commit.** Stage task files and record; commit `Select resource evidence with reconciling totals`.
+- [ ] **Step 5: Run GREEN and review.** Focused GREEN `go test ./internal/model -run 'TestResource(Selection|Projection)' -count=1` passed, followed by `go test ./internal/model ./internal/span ./internal/attrib -count=1`, `go test ./...` (all 11 packages), `go build ./...` and a clean diff check. Self-review checked count/duration partition sums, missing-type priority, inactive index retention, independent module facts, source ordering, observed-only ranking and unchanged capture quality. Independent review and separate test cleanup remain pending with the controller.
+- [x] **Step 6: Signed commit.** Stage the two task files and execution record; commit `Select resource evidence with reconciling totals` using the wrapper with mandatory signing and hooks enabled.
 
 ### Task 4: Validate cost, clean tests and hand off D1
 
