@@ -222,7 +222,7 @@ Report allocations and timings without absolute performance thresholds; inspect 
 
 **Interfaces:** Consume `model.Compare` and existing `profile.Report`; produce `ComparisonReport`, `ComparisonMetadata` and `BuildComparison` exactly as declared above. H2 consumes them without API renames.
 
-- [ ] **Step 1: Add failing assembly tests from real loaded captures.** Follow this structure, using the existing `model.Load` and `Build` APIs:
+- [x] **Step 1: Add failing assembly tests from real loaded captures.** Follow this structure, using the existing `model.Load` and `Build` APIs:
 
 ```go
 func TestBuildComparisonKeepsCaptureEvidence(t *testing.T) {
@@ -241,8 +241,8 @@ func TestBuildComparisonKeepsCaptureEvidence(t *testing.T) {
 ```
 
 Also compare `structured-ui.log` against `core-only.log` and `resources-long-lower-bound.log` against itself. Independently assert quality summaries unchanged, originals and ranks untouched, all sections present, saturated deltas null and unavailable sides null. Ensure invalid-position admitted observations survive adapter extraction. These fixtures already exist; no private captures.
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run TestBuildComparison -count=1`; after declaring the interface, require behavioural failure for missing rows/evidence before implementation.
-- [ ] **Step 3: Implement the thin adapter.** Extract span values with one loop per slice and call the model once:
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run TestBuildComparison -count=1`; after declaring the interface, require behavioural failure for missing rows/evidence before implementation.
+- [x] **Step 3: Implement the thin adapter.** Extract span values with one loop per slice and call the model once:
 
 ```go
 func comparisonInput(r Report) model.ComparisonInput {
@@ -258,8 +258,8 @@ func BuildComparison(before, after Report) (ComparisonReport, error) {
 }
 ```
 
-- [ ] **Step 4: Write `docs/comparison-json-v1.md`.** Include every field, section, ordering, nullability, numeric rule and qualification from the exact contract above, plus before/after direction, lower-bound rules, admitted-count meaning, disclosure and decoder `UseNumber` guidance. Link G's unchanged shared capture objects. This task defines the contract; H2 implements its encoder.
-- [ ] **Step 5: Verify and commit.** Run focused assembly tests, `go test ./...` and `go build ./...`. Independent task review and separate cleanup must pass before H2. Signed commit: `Assemble comparison reports and define JSON schema`. Record actual test/benchmark/review evidence in this plan; do not mark H complete yet.
+- [x] **Step 4: Write `docs/comparison-json-v1.md`.** Include every field, section, ordering, nullability, numeric rule and qualification from the exact contract above, plus before/after direction, lower-bound rules, admitted-count meaning, disclosure and decoder `UseNumber` guidance. Link G's unchanged shared capture objects. This task defines the contract; H2 implements its encoder.
+- [x] **Step 5: Verify and commit.** Run focused assembly tests, `go test ./...` and `go build ./...`. Independent task review and separate cleanup must pass before H2. Signed commit: `Assemble comparison reports and define JSON schema`. Record actual test/benchmark/review evidence in this plan; do not mark H complete yet.
 
 ## Acceptance mapping and self-review
 
@@ -294,4 +294,13 @@ Local benchmarks (Apple M4): 1k/10k repeated-key captures took 548,318/5,496,835
 ns/op with 13,376 B/op and 125 allocations each. Distinct-key captures took
 6,364,394/63,166,727 ns/op, 11,684,962/118,042,216 B/op and 90,385/901,413
 allocations. These are descriptive scaling measurements, not performance
-thresholds. Task 2 and H2 remain pending.
+thresholds.
+
+Task 2 completed in signed commits `08491df` and `0dcf86a`. Behavioural RED
+proved missing comparison assembly after the interface compiled. Focused tests,
+the full suite and build passed. Review requested complete report-retention
+checks and all lower-bound timing-null assertions; the test-only fix passed
+scoped re-review. Separate cleanup retained all four tests and the fix additions,
+with profile package tests passing. H1 is ready for H2. One minor documentation
+clarification is carried to H2 task 4: explicitly state that each key object
+contains only its section's applicable fields in the documented order.
