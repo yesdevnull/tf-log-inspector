@@ -80,9 +80,9 @@ func (m *Model) timelineTiming() (timelineTier, model.TimingSelection) {
 func (m *Model) filteredTimelineTiming() (timelineTier, model.TimingSelection) {
 	switch tier := timelineTierFor(m.log); tier {
 	case tierRPC:
-		return tier, model.SelectTiming(m.filter().SpansMatching(m.log.RPCSpans))
+		return tier, model.SelectTiming(m.selectedRPCSpans())
 	case tierUI:
-		return tier, model.SelectTiming(m.uiFilter().SpansMatching(m.log.UISpans))
+		return tier, model.SelectTiming(m.selectedUISpans())
 	default:
 		return tierNone, model.SelectTiming(nil)
 	}

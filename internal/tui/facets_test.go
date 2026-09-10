@@ -11,7 +11,36 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+func TestResourceSelectionKeepsUIUnderRPCFilters(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		dim   string
+		value string
+	}{
+		{name: "provider", dim: dimProvider, value: "p"},
+		{name: "method", dim: dimRPC, value: "ReadResource"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := &model.Log{
+				RPCSpans: []span.Span{{Provider: "p", RPC: "ReadResource", ResourceType: "aws_instance", DurationMs: 10}},
+				UISpans:  []span.Span{{Address: "aws_instance.a", ResourceType: "aws_instance", DurationMs: 1000}},
+			}
+			m := New(l, "synthetic.log")
+			m.setFacetExclusions(tc.dim, map[string]bool{tc.value: true})
+			m.invalidateRows()
+
+			if got := len(m.selectedRPCSpans()); got != 0 {
+				t.Errorf("selected RPC spans = %d, want 0", got)
+			}
+			if got := m.selectedUISpans(); len(got) != 1 || got[0].DurationMs != 1000 {
+				t.Errorf("selected UI spans = %+v, want the 1000ms observation", got)
+			}
+		})
+	}
+}
 
 // focusFacets tabs until the facet pane has focus, so a test can act on it
 // without depending on which pane New starts focused. It widens the terminal

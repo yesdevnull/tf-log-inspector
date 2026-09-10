@@ -634,6 +634,20 @@ func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	if len(spans) != 0 {
 		t.Errorf("spans = %d, want 0: the filter matches nothing", len(spans))
 	}
+
+	// Named selection obeys the same whole-log tier decision. This address
+	// has observed UI timing but no selected RPC, so falling back after
+	// selection would visibly replace an empty RPC timeline with UI timing.
+	l := testLog(t, "two-tier.log")
+	m = New(l, "two-tier.log")
+	m.resourceSelection = model.ResourceSelection{Addresses: map[string]bool{"local_file.config": true}}
+	m.invalidateRows()
+	if got := m.selectedUISpans(); len(got) != 1 || got[0].Address != "local_file.config" {
+		t.Fatalf("selected UI spans = %+v, want local_file.config", got)
+	}
+	if tier, spans := m.timelineSpans(); tier != tierRPC || len(spans) != 0 {
+		t.Fatalf("named timeline = tier %v with %d spans, want the whole log's RPC tier with no selected spans", tier, len(spans))
+	}
 }
 
 // A facet filter compacts timelineSpans' copy of m.log.RPCSpans (see

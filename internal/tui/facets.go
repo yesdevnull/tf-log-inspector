@@ -63,9 +63,8 @@ func levelFacet(entries []logfmt.Entry) model.Facet {
 // per dimension, every value the pane offers except the ones the reader has
 // unticked (allowedFacetValues).
 //
-// This is the filter as it applies to the RPC tier and to log entries. The
-// UI-hook tier is filtered by uiFilter instead, and every count or rollup
-// drawn from m.log.UISpans goes through that one.
+// This is the filter as it applies to the RPC tier and to log entries. D1's
+// resource projection applies only its type dimension to UI observations.
 func (m Model) filter() model.Filter {
 	return model.Filter{
 		Providers: m.allowedFacetValues(dimProvider),
@@ -114,78 +113,6 @@ func (m Model) facetValues(dim string) []model.FacetValue {
 		}
 	}
 	return nil
-}
-
-// uiFilter is the filter as it applies to the UI-hook tier: resource type
-// as the facet pane offers it, and provider TRANSLATED into the vocabulary
-// this tier speaks.
-//
-// The two tiers do not share a vocabulary. A UI-hook span's provider is
-// Terraform's implied provider ("azurerm") and its RPC is a hook action
-// ("create"); an RPC-tier span's are the full registry address
-// ("registry.terraform.io/hashicorp/azurerm") and a plugin-protocol method
-// ("ApplyResourceChange"). The facet pane is built from the RPC tier, so
-// every checkbox it offers is in the RPC tier's words, and applying one to
-// the UI tier verbatim matches nothing -- zeroing every UI figure on
-// screen, which is a zero meaning "you cannot see this" where the reader
-// reads "there was none".
-//
-// Resource type needs no translation: it is the field that means the same
-// thing on both sides, the reason model.JoinByResourceType keys on it and
-// on nothing else. Provider is translated by uiProviderTypes. RPC is not
-// applied at all: "create" and "ApplyResourceChange" name different things
-// -- a hook's action against a plugin-protocol method -- and no rule
-// relates them, so there is nothing to translate.
-func (m Model) uiFilter() model.Filter {
-	f := m.filter()
-	return model.Filter{Providers: uiProviderTypes(f.Providers), Types: f.Types}
-}
-
-// uiProviderTypes turns an allow-list of RPC-tier provider ADDRESSES into
-// one of the provider TYPE names the UI-hook tier carries, so unticking a
-// provider in the facet pane narrows both tiers to the same providers.
-//
-// A UI-hook span's provider is hook.resource.implied_provider, which is the
-// provider's type name ("azurerm"), and a registry address
-// ("registry.terraform.io/hashicorp/azurerm") ends in that same type name.
-// So the last "/"-separated segment of an allowed address is the value the
-// UI tier would spell it with, and a UI span passes when its provider is
-// the type of ANY allowed address. A nil allow-list is "no opinion" and
-// stays nil; an empty one admits nothing and stays empty, so unticking a
-// dimension's last value empties both tiers alike.
-//
-// LIMITATION -- not every provider address is in registry form. A provider
-// served without a ProviderAddr reports a bare "provider" for
-// tf_provider_addr, and internal/span substitutes the component name in its
-// place, producing addresses like
-// "provider.terraform-provider-github_v6.3.1" whose last segment is not a
-// type name at all. Nothing here can derive a type from one, so an
-// allow-list containing such an address does not narrow the UI tier on its
-// account: it matches every UI provider rather than excluding rows on a
-// derivation that cannot be trusted. Since the values within a dimension
-// are alternatives, one such address makes the whole dimension
-// unconstrained for this tier.
-//
-// Because every value starts ticked, the allow-list holds nearly the whole
-// dimension by default, so ONE address of that shape anywhere in the
-// capture is enough to keep this tier unconstrained however many providers
-// the reader unticks. That is the same failure the rule was written to
-// choose -- showing rows that could have been hidden, rather than hiding
-// rows on a guess -- but it is reached far more often now than when the
-// allow-list held only what the reader had picked out.
-func uiProviderTypes(allowed map[string]bool) map[string]bool {
-	if allowed == nil {
-		return nil
-	}
-	types := make(map[string]bool, len(allowed))
-	for addr := range allowed {
-		slash := strings.LastIndex(addr, "/")
-		if slash < 0 {
-			return nil
-		}
-		types[addr[slash+1:]] = true
-	}
-	return types
 }
 
 // allowedLevels turns the level dimension's allow-list of value names back
@@ -351,6 +278,9 @@ func (m *Model) setFacetExclusions(dim string, excluded map[string]bool) {
 // dimension (see toggleFacetValue), and this must stay true whatever a
 // later caller does with the map.
 func (m Model) filterActive() bool {
+	if m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil {
+		return true
+	}
 	for _, values := range m.excludedFacets {
 		if len(values) > 0 {
 			return true
@@ -362,10 +292,11 @@ func (m Model) filterActive() bool {
 // clearFilters re-ticks every facet value, restoring every view to the
 // unfiltered log. Esc is bound to this per the spec's key table.
 func (m *Model) clearFilters() {
-	if len(m.excludedFacets) == 0 {
+	if len(m.excludedFacets) == 0 && m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
 		return
 	}
 	m.excludedFacets = nil
+	m.resourceSelection = model.ResourceSelection{}
 	m.invalidateRows()
 }
 

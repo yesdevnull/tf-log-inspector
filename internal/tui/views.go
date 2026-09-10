@@ -253,15 +253,14 @@ func (m *Model) rows() []row {
 	if m.rowsCached {
 		return m.rowsCache
 	}
-	f := m.filter()
 	var r []row
 	switch m.view {
 	case ViewProviders:
-		r = providerRows(f.SpansMatching(m.log.RPCSpans))
+		r = providerRows(m.selectedRPCSpans())
 	case ViewTypes:
-		r = typeRows(f.SpansMatching(m.log.RPCSpans), m.uiFilter().SpansMatching(m.log.UISpans))
+		r = typeRows(m.selectedRPCSpans(), m.selectedUISpans())
 	case ViewCalls:
-		r = callRows(m.log.RPCSpans, f)
+		r = callRowsForIndices(m.log.RPCSpans, m.selectedResources().RPCIndices)
 	case ViewTimeline:
 		// The timeline renders from m.timelineSpans() and model.PackLanes,
 		// not from rows(): a lane is neither a rollup of many spans nor one
@@ -591,6 +590,13 @@ func callRows(rpcSpans []span.Span, f model.Filter) []row {
 			idx = append(idx, i)
 		}
 	}
+	return callRowsForIndices(rpcSpans, idx)
+}
+
+// callRowsForIndices ranks selected RPC spans while retaining indices into
+// the original Log.RPCSpans slice for detail and raw-log navigation.
+func callRowsForIndices(rpcSpans []span.Span, idx []int) []row {
+	idx = append([]int(nil), idx...)
 	// STABLE, because rankedBefore is not a total order: two calls of the
 	// same RPC name at the same duration are equal under it, which is the
 	// ordinary case on a real capture. Sorted unstably they arrive in
@@ -701,7 +707,7 @@ func (m *Model) renderList(w, h int) string {
 	}
 	var preamble []string
 	if m.view == ViewTypes {
-		preamble = typesPreamble(m.uiFilter().SpansMatching(m.log.UISpans))
+		preamble = typesPreamble(m.selectedUISpans())
 	}
 	return renderTable(preamble, t.cols, m.sortCol[m.view], m.rows(), empty, m.selected, m.pane == PaneList, w, h)
 }

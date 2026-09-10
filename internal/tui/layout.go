@@ -250,23 +250,9 @@ func header(m *Model) string {
 	if !m.filterActive() {
 		return fmt.Sprintf("tfli %s %s %s %s %s %d RPC spans, %d UI spans", headerSep, m.qualityIndicator(), headerSep, name, headerSep, rpc, ui)
 	}
-	f := m.filter()
+	projection := m.selectedResources()
 	return fmt.Sprintf("tfli %s %s %s %s %s %d of %d RPC spans, %d of %d UI spans",
-		headerSep, m.qualityIndicator(), headerSep, name, headerSep, countMatching(f, m.log.RPCSpans), rpc, countMatching(m.uiFilter(), m.log.UISpans), ui)
-}
-
-// countMatching counts the spans passing f. It exists rather than a call to
-// Filter.SpansMatching because the header is rebuilt on every frame and
-// SpansMatching materialises a slice: on a real capture that is thousands
-// of spans copied per keystroke, for two numbers.
-func countMatching(f model.Filter, spans []span.Span) int {
-	n := 0
-	for _, s := range spans {
-		if f.MatchSpan(s) {
-			n++
-		}
-	}
-	return n
+		headerSep, m.qualityIndicator(), headerSep, name, headerSep, len(projection.RPCIndices), rpc, len(projection.UIIndices), ui)
 }
 
 // footer is the line beneath the panes. It is the search prompt while a

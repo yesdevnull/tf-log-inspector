@@ -128,6 +128,14 @@ type Model struct {
 	log      *model.Log
 	name     string
 
+	// resourceIndex belongs to log for the Model's entire lifetime. The
+	// projection is the one shared selection for every timing consumer and
+	// is invalidated before rows and timeline derivatives are rebuilt.
+	resourceIndex            model.ResourceIndex
+	resourceProjection       model.ResourceProjection
+	resourceProjectionCached bool
+	resourceSelection        model.ResourceSelection
+
 	view     View
 	pane     Pane
 	selected int
@@ -329,7 +337,14 @@ func New(l *model.Log, path string) Model {
 	// FacetsForSpans builds: it is the one dimension drawn from entries
 	// rather than spans, and it filters only the raw log.
 	facets := append(model.FacetsForSpans(l.RPCSpans), levelFacet(l.Entries))
-	m := Model{log: l, name: filepath.Base(path), view: ViewCalls, pane: PaneList, facets: facets}
+	m := Model{
+		log:           l,
+		name:          filepath.Base(path),
+		view:          ViewCalls,
+		pane:          PaneList,
+		facets:        facets,
+		resourceIndex: model.BuildResourceIndex(l),
+	}
 	// Every table view starts on the column its own builder already ranks
 	// by, so the table is served in that builder's own order -- tie-break
 	// included -- until the reader moves the sort off it. A view with no
@@ -765,6 +780,8 @@ func (m *Model) returnFromJump() bool {
 // the timeline goes through setView, which sets m.view before calling this,
 // so the clamp runs on arrival against the filter in force then.
 func (m *Model) invalidateRows() {
+	m.resourceProjection = model.ResourceProjection{}
+	m.resourceProjectionCached = false
 	m.rowsCache = nil
 	m.rowsCached = false
 	m.timelineTierCache = tierNone

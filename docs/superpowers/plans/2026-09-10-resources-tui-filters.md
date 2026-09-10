@@ -72,7 +72,7 @@ func (m *Model) selectedRPCSpans() []span.Span
 func (m *Model) selectedUISpans() []span.Span
 ```
 
-- [ ] **Step 1: Write regressions before migration.** Excluding all providers/methods empties RPCs but preserves UI rows/durations and UI-only timeline. Type and named selections narrow applicable metadata in both tiers. Raw provider/severity semantics remain; type/resource/module/method filters cannot discard surrounding raw text. Use real parsed captures for integration and existing key helpers.
+- [x] **Step 1: Write regressions before migration.** Added behavioural coverage for provider/method filters preserving UI, original RPC index 2 surviving projection into Calls/detail/jump data, unpositioned UI remaining ranked but absent from the temporal slice, named filtering retaining the whole log's RPC timeline tier, raw visibility ignoring type/method/resource/module selection and Esc clearing named selection. Integration cases load `two-tier.log` through the real parser and use existing facet helpers.
 
 ```go
 func TestResourceSelectionKeepsUIUnderRPCFilters(t *testing.T) {
@@ -91,8 +91,8 @@ func TestResourceSelectionKeepsUIUnderRPCFilters(t *testing.T) {
 
 Also filter to an RPC originally at index 2 and assert its attribution/request/raw entry remain index 2's. Unpositioned UI remains ranked but unavailable in temporal projection. Named filtering must not switch a capture's chosen timeline tier from RPC to UI.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/tui -run TestResourceSelection -count=1`; demonstrate tier-scope and original-index failures after declarations compile.
-- [ ] **Step 3: Implement one selection cache.** Initialise index in New. Invalidate projection before existing row/timeline clamping/rebuild in invalidateRows. Call D1 with original Log, never prefiltered spans.
+- [x] **Step 2: Run RED.** `go test ./internal/tui -run TestResourceSelection -count=1` first failed to compile on the absent D2 declarations. After adding empty declared methods, the same command failed behaviourally on preserved UI, original indices, named timeline tier and unpositioned UI accounting. A later audit regression, `go test ./internal/tui -run TestResourceSelectionClearsWithOtherFilters -count=1`, failed because named-only selection survived Esc; it passed after the clear path was corrected.
+- [x] **Step 3: Implement one selection cache.** New builds one index for its Log; selectedResources calls D1 with that original Log and caches the projection until invalidateRows clears it before row/timeline rebuild. Providers, Types, Calls, Timeline, headers and the Types preamble consume the projection. Calls sort D1's original RPC indices and retain them in callRow. Timeline chooses its tier from the whole Log, then passes only that projected tier through SelectTiming. D1 owns the approved type-only UI rule, so the obsolete provider translation and its now-unused TUI wrapper were removed without a compatibility path; raw entry/request filtering still uses the base filter only.
 
 ```go
 func (m *Model) selectedResources() model.ResourceProjection {
@@ -111,10 +111,10 @@ func (m *Model) selectedUISpans() []span.Span {
 
 Implement selectedRPCSpans analogously using original RPCIndices. Providers/Types use the selected slices. Timeline passes only the already-chosen tier through existing SelectTiming. Calls construct rows from original RPCIndices and carry that original index into callRow; never pass a reindexed filtered slice to callRows. Headers, no-match guidance and counts use the same projection. Audit every direct SpansMatching/filterActive/timelineNarrowed consumer for named selection. Raw entryVisible/request scope keep base filters only.
 
-Replace the approved UI provider translation with type-only uiFilter; remove uiProviderTypes once no consumer uses it. Update obsolete tests to the new contract while preserving type/nil/empty/raw-provider coverage. Do not add compatibility behaviour or remove recorded UI provider metadata.
+Apply the approved type-only UI rule through the shared D1 projection; remove uiProviderTypes and any TUI wrapper once no consumer uses it. Update obsolete tests to the new contract while preserving type/nil/empty/raw-provider coverage. Do not add compatibility behaviour or remove recorded UI provider metadata.
 
-- [ ] **Step 4: GREEN and independent review.** `go test ./internal/tui ./internal/model -count=1`. Check existing timing validity tests. Inspect any intentional changed goldens using Task 4's procedure before committing.
-- [ ] **Step 5: Signed commit.** Stage task files and execution record; commit `Apply typed resource selection across timing views`.
+- [ ] **Step 4: GREEN and independent review.** GREEN passed with `go test ./internal/tui ./internal/model -count=1`. A focused run covered all ResourceSelection regressions plus existing unavailable/partial-position timeline cases. Final `go test ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff` and `go mod verify` passed; no golden changed. Independent review remains pending with the controller.
+- [ ] **Step 5: Signed commit.** Task files and execution evidence are ready for commit `Apply typed resource selection across timing views`; cleanup and independent review remain controller-owned.
 
 ### Task 2: Add observed Resources and complete evidence access
 

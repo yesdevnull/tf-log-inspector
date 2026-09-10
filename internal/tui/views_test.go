@@ -73,26 +73,10 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 	}
 }
 
-// The two tiers do not share a vocabulary for provider or RPC: a UI-hook
-// span carries Terraform's implied provider ("aws") and a hook action
-// ("create"), an RPC-tier span the full registry address and a
-// plugin-protocol method. The facet pane is built from the RPC tier, so the
-// only provider checkbox on offer is one no UI-hook span carries verbatim --
-// and applying it verbatim zeroed every UI figure on screen, a zero meaning
-// "you cannot see this" where the reader reads "there was none".
-//
-// The two provider vocabularies are relatable, so the checkbox is
-// TRANSLATED rather than dropped: a UI-hook span's provider is the
-// provider's type name, and a registry address ends in that same type name
-// (see uiProviderTypes). Leaving one provider ticked must therefore keep
-// the UI figures of the resource types that provider serves AND remove the
-// rows belonging to the providers unticked beside it -- rows that would
-// otherwise sit there carrying zeroes in every RPC column.
-//
-// mixed-provider-addrs.log is both cases in one fixture: local_file has
-// figures in both tiers under the provider left ticked, and
-// github_repository belongs to the one unticked.
-func TestAProviderFacetTranslatesIntoTheUITiersVocabulary(t *testing.T) {
+// Provider filters describe RPC evidence only. The UI rows remain observed
+// facts even when their apparent provider differs from the selected RPC
+// provider, while the RPC columns still narrow to the selected address.
+func TestAProviderFacetLeavesTheUITierIndependent(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	showOnly(t, &m, dimProvider, "registry.terraform.io/hashicorp/local")
@@ -103,37 +87,26 @@ func TestAProviderFacetTranslatesIntoTheUITiersVocabulary(t *testing.T) {
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 	// Cells in typeColumns' order: resource type, UI res., UI total,
 	// RPC calls, RPC total, RPC max.
-	want := []string{"local_file", "1", "1.0s", "1", "900ms", "900ms"}
-	got, _ := paneRowStartingWith(t, centre, want[0])
-	if !slices.Equal(got, want) {
-		t.Errorf("narrowed to the local provider, types row for local_file = %v, want %v -- the UI tier spells this provider \"local\" and must still be counted:\n%s", got, want, centre)
-	}
-	if _, _, ok := findPaneRow(centre, "github_repository"); ok {
-		t.Errorf("github_repository belongs to the unticked provider but survived the filter:\n%s", centre)
+	for _, want := range [][]string{
+		{"github_repository", "1", "4.0s", "0", "0s", "0s"},
+		{"local_file", "1", "1.0s", "1", "900ms", "900ms"},
+	} {
+		got, _ := paneRowStartingWith(t, centre, want[0])
+		if !slices.Equal(got, want) {
+			t.Errorf("narrowed to the local RPC provider, types row for %s = %v, want %v:\n%s", want[0], got, want, centre)
+		}
 	}
 	if !strings.Contains(centre, "whole seconds") {
 		t.Errorf("the UI-hook resolution caveat went with the UI figures, so nothing on screen qualifies them:\n%s", centre)
 	}
-	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "1 of 2 UI spans") {
-		t.Errorf("header = %q, want it to count the UI spans the types view actually shows", header)
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 2 UI spans") {
+		t.Errorf("header = %q, want provider filtering to preserve both UI observations", header)
 	}
 }
 
-// Not every provider address is in registry form. A provider served without
-// a ProviderAddr reports a bare "provider" for tf_provider_addr, and
-// internal/span substitutes the component name -- giving
-// "provider.terraform-provider-github_v6.3.1", whose last segment is a
-// binary name, not a provider type.
-//
-// No type can be derived from it, so leaving it ticked must not narrow the
-// UI tier at all: excluding rows on an untrustworthy derivation is the same
-// wrong answer as excluding them on an untranslated one.
-// mixed-provider-addrs.log carries UI-hook spans under two different implied
-// providers, so a rule that derived a type from that address anyway would
-// zero both rows at once. It is the same fixture
-// TestAProviderFacetTranslatesIntoTheUITiersVocabulary narrows the other
-// way, so the two rules are asserted against one log.
-func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
+// Bare component-derived provider addresses obey the same RPC-only scope as
+// registry addresses; their spelling cannot change observed UI membership.
+func TestABareProviderFacetLeavesTheUITierAlone(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	const bare = "provider.terraform-provider-github_v6.3.1"
@@ -151,7 +124,7 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
 		if !slices.Equal(got, want) {
-			t.Errorf("narrowed to a non-registry provider, types row for %s = %v, want %v -- no provider type can be derived from it, so it must exclude no UI row:\n%s", want[0], got, want, centre)
+			t.Errorf("narrowed to a bare RPC provider, types row for %s = %v, want %v:\n%s", want[0], got, want, centre)
 		}
 	}
 	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 2 UI spans") {
@@ -159,14 +132,9 @@ func TestAProviderFacetWithNoDerivableTypeLeavesTheUITierAlone(t *testing.T) {
 	}
 }
 
-// Unticking a provider dimension's EVERY value must empty both tiers. The
-// UI tier is reached through a translation (uiProviderTypes), and a
-// translation that reports "no opinion" whenever it is handed nothing to
-// translate turns the reader's last untick into an unfiltered UI tier: the
-// RPC columns go to zero while the UI columns beside them stay whole, which
-// reads as "these resources did no RPC work" rather than as a filter that
-// admits nothing.
-func TestUntickingEveryProviderEmptiesBothTiers(t *testing.T) {
+// An empty provider allow-list admits no RPC evidence but still cannot erase
+// observed UI operations, which carry no trustworthy provider relationship.
+func TestUntickingEveryProviderEmptiesOnlyTheRPCTier(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	if len(m.rows()) == 0 {
@@ -174,11 +142,11 @@ func TestUntickingEveryProviderEmptiesBothTiers(t *testing.T) {
 	}
 	showOnly(t, &m, dimProvider)
 
-	if got := m.rows(); len(got) != 0 {
-		t.Errorf("every provider unticked still lists %d types: %v", len(got), got)
+	if got := m.rows(); len(got) != 2 {
+		t.Errorf("every provider unticked lists %d types, want the two UI-only rows: %v", len(got), got)
 	}
-	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "0 of 2 UI spans") {
-		t.Errorf("header = %q, want no UI span shown -- the UI tier is filtered through a translation of the same checkboxes", header)
+	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "0 of 2 RPC spans, 2 of 2 UI spans") {
+		t.Errorf("header = %q, want provider filtering to empty RPCs and preserve UI", header)
 	}
 }
 
