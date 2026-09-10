@@ -53,6 +53,13 @@ intervals and text-only list limits. Dan approved both plans and subagent
 implementation. This approval is limited to Boundary F and does not approve
 unrelated G/H/I decisions.
 
+Boundary F completed on 10 September 2026. Combined review of
+`e21f366..112fb6b` approved the shared calculations, complete report data,
+actionable text profiles and independent list limits with no remaining findings.
+Both plans record behavioural tests, separate cleanup, race/lint/build checks
+and sanitised output inspection. This completion applies only to Boundary F;
+JSON export, comparison and response recovery retain their existing status.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response

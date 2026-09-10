@@ -1,6 +1,6 @@
 # Profile Data and Interval Analysis Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build complete, presentation-independent profile data and reuse the timeline's calculation policies for report analysis.
 
@@ -25,7 +25,7 @@
 
 ## Status and scope
 
-Dan authorised starting Boundary F and its two-plan split on 10 September 2026, after Boundary E merged locally at `e21f366`. This document is a proposed execution plan, not completed implementation. F1 precedes F2. Exact JSON field names, schema/version metadata, CLI comparison and response recovery remain boundaries G/H/I.
+Dan authorised starting Boundary F and its two-plan split on 10 September 2026, after Boundary E merged locally at `e21f366`, then approved both plans and subagent implementation. F1 completed its task reviews before F2 began. The execution record below records actual validation. Exact JSON field names, schema/version metadata, CLI comparison and response recovery remain boundaries G/H/I.
 
 The selected approach adds a small concrete report value rather than putting report calculations in the text renderer or building a generic report framework. The former would duplicate work in JSON/comparison; the latter adds unused abstractions. `profile.Build` computes the complete data once. F2 owns display limits and escaping.
 
@@ -228,10 +228,10 @@ Use `PreferredTiming(l)` once. For the chosen span slice call `SelectTiming` the
 
 ## Final validation and handoff
 
-- [ ] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
-- [ ] Verify existing timeline goldens unchanged and compare TUI/profile temporal values on sanitised RPC and UI fixtures. No TUI behaviour change is intended; inspect a real terminal if output changes.
-- [ ] Independent review and separate test cleanup complete; all findings resolved before F2.
-- [ ] Signed commits, clean status, whitespace checks; record actual evidence without marking F2/G/H implemented.
+- [x] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
+- [x] Verify existing timeline goldens unchanged and compare TUI/profile temporal values on sanitised RPC and UI fixtures. No TUI behaviour change is intended; inspect a real terminal if output changes.
+- [x] Independent review and separate test cleanup complete; all findings resolved before F2.
+- [x] Signed commits, clean status, whitespace checks; record actual evidence without marking F2/G/H implemented.
 
 ## Planning self-review
 
@@ -246,4 +246,12 @@ documentation-only changes.
 
 ## Execution record
 
-Dan approved both plans and subagent execution on 10 September 2026. F1 task 1 completed in signed commit `1b5af25`: behavioural RED, focused GREEN and full suite pass. Independent task review approved specification and quality with no findings. Separate test cleanup retained all eight tests/ten cases; model coverage 98.1%. Task 2 completed in signed commit `1400957`; independent specification/quality review approved with no findings, and separate cleanup retained all six tests (profile coverage 93.4%). Full race tests, build, lint, formatting and module checks pass. Existing TUI goldens are unchanged; validation of new text output follows in F2.
+Dan approved both plans and subagent execution on 10 September 2026. F1 task 1 completed in signed commit `1b5af25`: behavioural RED, focused GREEN and full suite pass. Independent task review approved specification and quality with no findings. Separate test cleanup retained all eight tests/ten cases; model coverage 98.1%. Task 2 completed in signed commit `1400957`; independent specification/quality review approved with no findings, and separate cleanup retained all six tests (profile coverage 93.4%). Full race tests, build, lint, formatting and module checks pass. Existing TUI goldens are unchanged.
+
+F2 subsequently completed, including real RPC/UI output checks and the existing
+TUI/profile admitted-versus-positioned parity regression. Final combined review
+of `e21f366..112fb6b` approved both plans with no actionable findings. Race tests
+passed for all eleven packages at `112fb6b`; lint and formatting also passed.
+The F2 execution record contains the successful local four-target build matrix,
+module checks and manual output evidence. Remote CI was not run. No findings or
+controller rulings remain; Boundary F is ready for Dan's integration decision.

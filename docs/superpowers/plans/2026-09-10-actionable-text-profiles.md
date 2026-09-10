@@ -1,6 +1,6 @@
 # Actionable Text Profiles Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make text profiles lead to exact source observations and explain observed concurrency, with explicit list limits and unchanged whole-capture totals.
 
@@ -181,10 +181,10 @@ Pass `profile.TextOptions{Limit: *limit}` through `runProfile`. Keep errors esca
 
 ## Final validation
 
-- [ ] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
-- [ ] Match existing CI matrix: linux/darwin × amd64/arm64, `CGO_ENABLED=0`, all packages and trimpath CLI. Report local versus remote checks accurately.
-- [ ] Inspect real CLI output for RPC-only, UI-only, mixed/partial, saturated, no-duration and long/control-bearing sanitised fixtures, including `-o`, default, limited and unlimited lists.
-- [ ] Full F1/F2 review and separate cleanup; no unresolved findings. Verify signed history, clean status and whitespace. Commit evidence in both plans/spec without claiming G/H/I completion.
+- [x] `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, `gofmt -d .`, `go mod tidy -diff`, `go mod verify`.
+- [x] Match existing CI matrix: linux/darwin × amd64/arm64, `CGO_ENABLED=0`, all packages and trimpath CLI. Report local versus remote checks accurately.
+- [x] Inspect real CLI output for RPC-only, UI-only, mixed/partial, saturated, no-duration and long/control-bearing sanitised fixtures, including `-o`, default, limited and unlimited lists.
+- [x] Full F1/F2 review and separate cleanup; no unresolved findings. Verify signed history, clean status and whitespace. Commit evidence in both plans/spec without claiming G/H/I completion.
 
 ## Planning self-review
 
@@ -225,4 +225,10 @@ Manual CLI inspection covered RPC-only, UI-only, mixed-tier, partial positioning
 saturated, no-duration and long/control-bearing sanitised input. Default, limited,
 unlimited and output-file reports preserve whole-capture totals; source identities,
 clock origins, lower bounds and timing qualifications remain visible. Existing TUI
-goldens are unchanged. The final combined review is pending.
+goldens are unchanged.
+
+Final combined review of `e21f366..112fb6b` approved specification, architecture
+and code quality with no actionable findings. All task review and cleanup
+findings are resolved; no deferred findings or controller rulings remain. Every
+commit through `0940be8` has a verified signature. Boundary F is implemented and
+ready for Dan's integration decision; nothing was pushed or merged.
