@@ -180,7 +180,7 @@ func Build(l *model.Log) (Report, error)
 
 `Build` accepts a non-nil loaded log. Return a clear error for nil rather than panic. It neither opens a file nor accepts formatting options. `Observation.Index` is original tier index, not a global cross-tier identity. F2 source text prints physical line ranges; G later chooses a wire schema rather than serialising this struct directly.
 
-- [ ] **Step 1: Add failing report tests.** Use the repository's real fixture and independent values:
+- [x] **Step 1: Add failing report tests.** Use the repository's real fixture and independent values:
 
 ```go
 func TestBuildRetainsAllObservedOperations(t *testing.T) {
@@ -204,9 +204,9 @@ func TestBuildRetainsAllObservedOperations(t *testing.T) {
 
 Extend with: more than 20 observations; ties with different providers/types/addresses and duplicate source occurrences; all confidence states using the sanitised association fixture in `internal/tui/testdata`; long/control-bearing identifiers; missing source locations in deliberately assembled logs; RPC durations without positions alongside positioned UI; rejected-only logs; lower-bound UI/type/resource totals. Prove `Build` leaves input slices/order and reconstruction status unchanged. Add a leading unpositioned RPC before the active interval's chosen observation, and assert `PositionedIndices[interval.Blocking]` names its original source entry, not a shifted array index.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run '^TestBuild' -count=1`; establish missing data/identity assertions fail before completing Build.
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run '^TestBuild' -count=1`; establish missing data/identity assertions fail before completing Build.
 
-- [ ] **Step 3: Assemble without new attribution rules.** Start from:
+- [x] **Step 3: Assemble without new attribution rules.** Start from:
 
 ```go
 report := Report{
@@ -223,8 +223,8 @@ Build type rows from `JoinByResourceType`, attach `UILowerBound` by a single pas
 
 Use `PreferredTiming(l)` once. For the chosen span slice call `SelectTiming` then `AnalyseTiming`; store its fidelity and append each positioned span's original index to `PositionedIndices` in input order. Do not switch tiers when analysis is unavailable. Preserve temporal errors rather than producing a zero summary. Keep `Report` complete: no `20`, no title, no escaped strings, no truncation or generation timestamps.
 
-- [ ] **Step 4: Verify and review.** Run `go test ./internal/model ./internal/profile ./internal/tui -count=1`, then full suite/build. Reviewer checks report completeness, deterministic ties, original source/attribution alignment, lower bounds, complete resource evidence and no raw-body/reconstruction side effect. Separate cleanup must retain behaviour coverage.
-- [ ] **Step 5: Commit.** Stage only task files and signed commit `Build complete profile data from observed evidence`. Record actual validation here before F2 starts.
+- [x] **Step 4: Verify and review.** Run `go test ./internal/model ./internal/profile ./internal/tui -count=1`, then full suite/build. Reviewer checks report completeness, deterministic ties, original source/attribution alignment, lower bounds, complete resource evidence and no raw-body/reconstruction side effect. Separate cleanup must retain behaviour coverage.
+- [x] **Step 5: Commit.** Stage only task files and signed commit `Build complete profile data from observed evidence`. Record actual validation here before F2 starts.
 
 ## Final validation and handoff
 
@@ -246,4 +246,4 @@ documentation-only changes.
 
 ## Execution record
 
-Dan approved both plans and subagent execution on 10 September 2026. F1 task 1 completed in signed commit `1b5af25`: behavioural RED, focused GREEN and full suite pass. Independent task review approved specification and quality with no findings. Separate test cleanup retained all eight tests/ten cases; model coverage 98.1%. Task 2 remains pending.
+Dan approved both plans and subagent execution on 10 September 2026. F1 task 1 completed in signed commit `1b5af25`: behavioural RED, focused GREEN and full suite pass. Independent task review approved specification and quality with no findings. Separate test cleanup retained all eight tests/ten cases; model coverage 98.1%. Task 2 completed in signed commit `1400957`; independent specification/quality review approved with no findings, and separate cleanup retained all six tests (profile coverage 93.4%). Full race tests, build, lint, formatting and module checks pass. Existing TUI goldens are unchanged; validation of new text output follows in F2.
