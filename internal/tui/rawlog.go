@@ -166,6 +166,10 @@ func (m Model) prevRawEntry(i int) (int, bool) {
 // timelineSpans), so the caller hands over whichever slice its own index
 // names rather than this function assuming one.
 func (m *Model) jumpToSpan(spans []span.Span, idx int) {
+	m.jumpToSpanWithContext(spans, idx, jumpContextLines)
+}
+
+func (m *Model) jumpToSpanWithContext(spans []span.Span, idx, contextLines int) {
 	if idx < 0 || idx >= len(spans) {
 		return
 	}
@@ -234,7 +238,7 @@ func (m *Model) jumpToSpan(spans []span.Span, idx int) {
 	// it above rather than pinned to the top of the pane with none of it in
 	// sight. Span.Entry is the entry that CLOSED the call, so the
 	// provider's traffic for it is behind, not ahead.
-	m.scrollRawLog(-jumpContextLines)
+	m.scrollRawLog(-contextLines)
 }
 
 // pageRawLog moves the raw log by delta screenfuls of LINES.

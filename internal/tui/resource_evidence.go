@@ -78,7 +78,7 @@ func (m *Model) resourceEvidenceText() string {
 			b.WriteString("  source: unavailable\n")
 		}
 		fmt.Fprintf(&b, "  observed UI duration: %s\n", durationTotalText(operationDuration(s.DurationMs, s.DurationSaturated)))
-		m.writeUIQualifications(&b, operationDuration(s.DurationMs, s.DurationSaturated), []int{index}, "UI timing", "Observed UI duration is a lower bound (≥).")
+		m.writeUIQualifications(&b, operationDuration(s.DurationMs, s.DurationSaturated), []int{index}, "Selected UI operation timings", "Observed UI duration is a lower bound (≥).")
 		if s.StartClamped {
 			b.WriteString("  Operation start was clamped to the capture origin.\n")
 		}

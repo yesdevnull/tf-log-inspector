@@ -538,7 +538,28 @@ func (m *Model) actionKeys(w int) string {
 	if m.facetSearchAvailable() {
 		keys = append(keys, "/ narrow")
 	}
-	return strings.Join(append(keys, esc, quitHint), hintSep)
+	keys = append(keys, esc, quitHint)
+	if m.view == ViewResources {
+		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
+			removed := false
+			for _, secondary := range []string{sortHint, "f facets"} {
+				for i, key := range keys {
+					if key == secondary {
+						keys = append(keys[:i], keys[i+1:]...)
+						removed = true
+						break
+					}
+				}
+				if removed {
+					break
+				}
+			}
+			if !removed {
+				break
+			}
+		}
+	}
+	return strings.Join(keys, hintSep)
 }
 
 // escClearHint and escBackHint are Esc's two meanings, and exactly one is

@@ -43,6 +43,30 @@ func TestResourceOperationsRetainRepeatedSourceIdentity(t *testing.T) {
 	}
 }
 
+func TestResourceOperationSourceTargetIsVisibleAtSixtyByNine(t *testing.T) {
+	m := New(testLog(t, "resources-modules.log"), "resources-modules.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &m, '3')
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := unstyled(m.View()); !strings.Contains(got, "Entry 5/6") || !strings.Contains(unstyled(strings.Join(m.rawLogLines(2), "\n")), "complete repeated nested resource") {
+		t.Fatalf("narrow source frame hid the selected UI entry:\n%s", got)
+	}
+}
+
+func TestResourceFootersKeepEscapeAndQuitAtSixtyColumns(t *testing.T) {
+	m := New(testLog(t, "resources-modules.log"), "resources-modules.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
+	pressRune(t, &m, '3')
+	if got := unstyled(m.footer(60)); !strings.Contains(got, escClearHint) || !strings.Contains(got, quitHint) {
+		t.Fatalf("aggregate footer lost clear or quit:\n%s", got)
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := unstyled(m.footer(60)); !strings.Contains(got, escBackHint) || !strings.Contains(got, quitHint) {
+		t.Fatalf("operation footer lost back or quit:\n%s", got)
+	}
+}
+
 func TestResourceOperationsSortAndOpenOriginalEntries(t *testing.T) {
 	m := newOperationTestModel()
 	if !m.openResourceOperations() {

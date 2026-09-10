@@ -55,3 +55,29 @@ Regenerated `resources-60.txt`, `resources-70.txt`, and `resources-160.txt`. `sc
 ## Self-review
 
 Reviewed production and test diffs for index-domain mistakes, accidental RPC treatment of UI rows, filter widening, stale sort/header routing, unsafe display text, and unavailable-source handling. No outstanding task-1 concern found. Independent review, test cleanup, final PTY and CI remain controller-owned as directed.
+
+## Test cleanup
+
+Reviewed every test function or case changed in `b9f5818..1a3841a`: seven new operation tests and four modified existing tests. All eleven were kept because they cover distinct navigation, identity, sorting, unavailable-source, qualification, selection-restoration, escaping, hint, or workflow behaviour. No slop-taxonomy match was found, so no test code was changed and the suite was not repeated.
+
+## Review fix round 1
+
+RED command:
+
+```text
+go test ./internal/tui -run 'TestResourceOperationSourceTargetIsVisibleAtSixtyByNine|TestResourceFootersKeepEscapeAndQuitAtSixtyColumns' -count=1
+--- FAIL: TestResourceOperationSourceTargetIsVisibleAtSixtyByNine
+    narrow source frame hid the selected UI entry; context occupied both raw rows
+--- FAIL: TestResourceFootersKeepEscapeAndQuitAtSixtyColumns
+    aggregate footer lost clear or quit
+FAIL
+```
+
+GREEN command:
+
+```text
+go test ./internal/tui -run 'TestResourceOperationSourceTargetIsVisibleAtSixtyByNine|TestResourceFootersKeepEscapeAndQuitAtSixtyColumns' -count=1
+ok github.com/yesdevnull/tf-log-inspector/internal/tui
+```
+
+UI source jumps now cap context from the actual raw pane line budget and place the target at the top of a 60×9 frame. RPC source jumps retain their established three-line behaviour. Resources footers discard secondary sort and facet hints when required to retain Enter, Esc and quit. The singular selected-operation timing copy was corrected. The regenerated `resources-60.txt` was inspected with `scripts/read-golden.sh`; its only change from task 1 is replacement of the clipped sort/facet tail with `Esc clear  q quit`.

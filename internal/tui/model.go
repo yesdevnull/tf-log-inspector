@@ -539,7 +539,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 				if spans, idx, ok := m.jumpTarget(); ok {
-					m.jumpToSpan(spans, idx)
+					if m.resourceOperations {
+						m.jumpToSpanWithContext(spans, idx, m.operationJumpContextLines())
+					} else {
+						m.jumpToSpan(spans, idx)
+					}
 				}
 			}
 		case "left", "h":

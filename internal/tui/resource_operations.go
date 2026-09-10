@@ -72,6 +72,11 @@ func (m *Model) renderResourceOperations(w, h int) string {
 	return renderTable(nil, cols, sortCol, rows, noRowsNote, m.selected, m.pane == PaneList, w, h)
 }
 
+func (m *Model) operationJumpContextLines() int {
+	visibleLines := paneBodyHeight(workbenchPaneHeight(m.height))
+	return min(jumpContextLines, max(0, visibleLines/2-1))
+}
+
 func visibleOperationColumns(cols []column, rows []row, sortCol, w int) ([]column, []row, int) {
 	if w >= 60 {
 		return cols, rows, sortCol
