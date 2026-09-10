@@ -177,7 +177,7 @@ Then initialise the new raw scope/position as today. Clear a previous raw match/
 
 **Interfaces:** Consumes task 1 snapshots/transitions/row identities and `selectedResources() model.ResourceProjection`. Produces `func (m *Model) openAggregate() bool`, `func (m *Model) aggregateTarget() (View, string, string, bool)`, `func (m *Model) restrictFacet(dim, value string)` and `func (m *Model) enterHint() string`. `aggregateTarget` returns destination, dimension, normalised unescaped facet key and availability; hints and execution consume the same predicate.
 
-- [ ] **Step 1: Add a failing real-key route test.**
+- [x] **Step 1: Add a failing real-key route test.**
 
 ```go
 func TestDrillDownProviderPreservesTypeAndRestoresParent(t *testing.T) {
@@ -212,9 +212,9 @@ Also test a fresh model with no preceding facet edits (`excludedFacets == nil`)
 and unavailable provider/type metadata. An unavailable type/provider row uses
 the existing `(none)` facet key and must admit the missing-value observations.
 
-- [ ] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestDrillDown' -count=1`; current aggregate Enter must fail the destination assertion.
+- [x] **Step 2: Confirm RED.** Run `go test ./internal/tui -run '^TestDrillDown' -count=1`; current aggregate Enter must fail the destination assertion.
 
-- [ ] **Step 3: Implement the shared route predicate and singleton selection.**
+- [x] **Step 3: Implement the shared route predicate and singleton selection.**
 
 ```go
 func (m *Model) restrictFacet(dim, value string) {
@@ -241,9 +241,9 @@ func (m *Model) openAggregate() bool {
 
 The aggregate row identity must never come from rendered cell text, which may contain visible control escaping. Use bucket/join keys for provider/type identity, normalise raw span values with `model.FacetKey` when matching those keys, and never attempt to reverse `(none)` into an empty string. Preserve the existing facet equivalence, including unavailable metadata; resource addresses remain exact and never pass through `FacetKey`. Resource rows remain inert until E2. All history-aware empty messages must say Esc returns when it will return.
 
-- [ ] **Step 4: Verify complete E1 workflows and documentation.** Run focused tests then `go test ./internal/tui -count=1`. Document Enter, Esc, modal precedence and numbered navigation. Test provider → Calls → Raw → reconstructed response → close → Calls → provider using a sanitised parsed response fixture and real reconstruction; retain exact raw line/column/search position during modal round-trip. Test type → Resources → Esc and child filtering/sorting/resize before return. Exercise 100×30 and 60×9 in a real PTY, including an empty child and same-view number key. Inspect intentional golden changes with `scripts/read-golden.sh` and raw diffs. Run independent review and separate test cleanup, then the final validation below.
+- [x] **Step 4: Verify complete E1 workflows and documentation.** Run focused tests then `go test ./internal/tui -count=1`. Document Enter, Esc, modal precedence and numbered navigation. Test provider → Calls → Raw → reconstructed response → close → Calls → provider using a sanitised parsed response fixture and real reconstruction; retain exact raw line/column/search position during modal round-trip. Test type → Resources → Esc and child filtering/sorting/resize before return. Exercise 100×30 and 60×9 in a real PTY, including an empty child and same-view number key. Inspect intentional golden changes with `scripts/read-golden.sh` and raw diffs. Run independent review and separate test cleanup, then the final validation below.
 
-- [ ] **Step 5: Commit.** Stage reviewed task files explicitly and signed commit `Open scoped investigations from provider and type rows`. Record review and validation evidence. Do not mark E2 or all of Boundary E complete.
+- [x] **Step 5: Commit.** Stage reviewed task files explicitly and signed commit `Open scoped investigations from provider and type rows`. Record review and validation evidence. Do not mark E2 or all of Boundary E complete.
 
 ## Final validation and handoff
 
@@ -270,3 +270,5 @@ for this documentation-only change.
 Dan authorised subagent implementation of both plans on 10 September 2026. E1 task 1 is complete in signed commits `31367fe`, `a0d0772` and `8e6ce58`. Required RED reproduced child type-filter leakage; focused tests and the full Go suite pass. Independent spec/quality review approved after additional real-key modal/selection coverage; separate cleanup retained all distinct boundary tests.
 
 An empty named selection cannot initiate an E1 raw jump because no timing row remains. E1 verifies empty snapshot preservation directly and Enter inert through real handlers. E2 must verify the newly reachable empty-operation parent → c → Calls → Esc path. This staging was confirmed in review.
+
+E1 task 2 is complete in signed commits `f867107`, `1c15747` and `abf6e36`. Independent review approved singleton routes, missing metadata, full real-response navigation and the short-terminal fixes. Cleanup retained all distinct tests. At `abf6e36`, all 11 packages pass uncached race tests, lint reports zero issues, and package/trimpath CLI builds pass for linux/darwin × amd64/arm64. Module checks and formatting are clean. Real PTY at 100×30 verified provider → Calls → Raw, request expansion and nested return; 60×9 verified visible Types identity, non-default sort and type → Resources → back. All E1 commits have good signatures. Combined E1/E2 final review remains pending.
