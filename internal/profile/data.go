@@ -36,16 +36,17 @@ type Timeline struct {
 
 // Report is the complete presentation-independent profile of one loaded log.
 type Report struct {
-	Bytes      uint64
-	Quality    model.CaptureQuality
-	HasContext bool
-	RPC, UI    []Observation
-	RPCRanking []int
-	UIRanking  []int
-	Providers  []model.Bucket
-	Types      []TypeSummary
-	Resources  model.ResourceProjection
-	Timeline   Timeline
+	Bytes          uint64
+	Quality        model.CaptureQuality
+	HasContext     bool
+	RPC, UI        []Observation
+	RPCRanking     []int
+	UIRanking      []int
+	Providers      []model.Bucket
+	Types          []TypeSummary
+	Resources      model.ResourceProjection
+	Timeline       Timeline
+	Reconstruction model.ReconstructionQuality
 }
 
 // Build assembles complete report data without reading files, formatting
@@ -56,9 +57,10 @@ func Build(l *model.Log) (Report, error) {
 	}
 
 	report := Report{
-		Bytes:      l.Stats.Bytes,
-		Quality:    l.CaptureQuality(),
-		HasContext: l.HasAddressContext(),
+		Bytes:          l.Stats.Bytes,
+		Quality:        l.CaptureQuality(),
+		HasContext:     l.HasAddressContext(),
+		Reconstruction: l.ReconstructionQuality(),
 		Providers: model.RollupBy(l.RPCSpans, func(s span.Span) string {
 			return s.Provider
 		}),

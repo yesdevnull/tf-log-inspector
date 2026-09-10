@@ -138,6 +138,24 @@ func TestBuildReportsLowerBoundsAndDoesNotMutateInput(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotsReconstructionWithoutTriggeringIt(t *testing.T) {
+	l, err := model.Load("../../testdata/resources-accounting.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Build(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) {
+		t.Fatalf("reconstruction snapshot = %+v", got.Reconstruction)
+	}
+	if after := l.ReconstructionQuality(); after.State != "not_checked" {
+		t.Fatalf("Build triggered reconstruction: %+v", after)
+	}
+}
+
 func TestBuildMapsTimelinePositionsToOriginalTierIndicesWithoutFallback(t *testing.T) {
 	valid := logfmt.TimestampValid
 	l := &model.Log{
