@@ -138,6 +138,24 @@ func BenchmarkResourceSelect(b *testing.B) {
 			wantRPC: resourceBenchmarkRPCs,
 		},
 		{
+			name:    "ProviderOnly",
+			base:    Filter{Providers: map[string]bool{"provider-a": true}},
+			wantUI:  resourceBenchmarkAddresses * resourceBenchmarkUIPerAddress,
+			wantRPC: resourceBenchmarkRPCs / 2,
+		},
+		{
+			name:    "ResourceOnly",
+			named:   ResourceSelection{Addresses: map[string]bool{fixture.selectedAddress: true}},
+			wantUI:  fixture.wantAddressUI,
+			wantRPC: fixture.wantAddressRPC,
+		},
+		{
+			name:    "ModuleOnly",
+			named:   ResourceSelection{Modules: map[string]bool{fixture.selectedModule: true}},
+			wantUI:  fixture.wantModuleUI,
+			wantRPC: fixture.wantModuleRPC,
+		},
+		{
 			name:    "ProviderAndResource",
 			base:    Filter{Providers: map[string]bool{"provider-a": true}},
 			named:   ResourceSelection{Addresses: map[string]bool{fixture.selectedAddress: true}},
