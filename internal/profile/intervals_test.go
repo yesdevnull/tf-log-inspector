@@ -62,6 +62,49 @@ func TestUIIntervalRetainsObservedResourceEvidence(t *testing.T) {
 	}
 }
 
+func TestPartialTimelineReportsCompleteQualifiedMetricsAndInterval(t *testing.T) {
+	tier := span.FidelityReported
+	fraction := 0.5
+	report := Report{
+		RPC:        []Observation{{Span: span.Span{DurationMs: 4000, RPC: "ReadResource", ResourceType: "aws_instance", Provider: "registry.terraform.io/hashicorp/aws"}}},
+		RPCRanking: []int{0},
+		Timeline: Timeline{Tier: &tier, PositionedIndices: []int{0}, Analysis: model.TimingAnalysis{
+			Timing: model.TimingSelection{
+				AdmittedCount: 3, AdmittedMs: 6000, PositionedMs: 4000,
+				ExcludedCount: 2, ExcludedMs: 2000,
+				Exclusions: map[string]uint64{"timestamp_missing": 1, "timestamp_invalid": 1},
+			},
+			Metrics:   &model.TimingMetrics{WindowMs: 8000, Peak: 2, BusyMs: 4000, BusyFraction: &fraction},
+			Intervals: []model.Stall{{StartMs: 1000, EndMs: 5000, MinRunning: 1, MaxRunning: 1, Capacity: 2, Blocking: 0}},
+		}},
+	}
+	got := renderTemporal(t, report)
+	for _, want := range []string{
+		"interval offsets are milliseconds from this tier origin",
+		"positioned observations 1 of 3 admitted",
+		"positioned duration   4.0s (2 excluded, 2.0s)",
+		"analysis: partial",
+		"window (zero to latest positioned end) 8.0s",
+		"peak concurrency 2",
+		"busy union 4.0s",
+		"busy / window 50.0%",
+		"positioned reported-duration sum 4.0s",
+		"summed / window 0.5x",
+		"1000ms-5000ms  1 of 2 running",
+		"Observed gaps do not establish Terraform idleness",
+		"observation does not prove it caused other work to wait",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+	invalid := strings.Index(got, "excluded: timestamp_invalid 1")
+	missing := strings.Index(got, "excluded: timestamp_missing 1")
+	if invalid < 0 || missing < 0 || invalid >= missing {
+		t.Errorf("exclusion reasons not sorted: invalid=%d missing=%d\n%s", invalid, missing, got)
+	}
+}
+
 func TestTemporalAnalysisStatesAndZeroWorkUseExactEvidenceWording(t *testing.T) {
 	cases := []struct {
 		name      string
