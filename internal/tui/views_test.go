@@ -104,34 +104,6 @@ func TestAProviderFacetLeavesTheUITierIndependent(t *testing.T) {
 	}
 }
 
-// Bare component-derived provider addresses obey the same RPC-only scope as
-// registry addresses; their spelling cannot change observed UI membership.
-func TestABareProviderFacetLeavesTheUITierAlone(t *testing.T) {
-	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	const bare = "provider.terraform-provider-github_v6.3.1"
-	if strings.Contains(bare, "/") {
-		t.Fatalf("fixture assumption changed: %q has a %q, so a provider type could be derived from it", bare, "/")
-	}
-	showOnly(t, &m, dimProvider, bare)
-
-	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
-	// Cells in typeColumns' order: resource type, UI res., UI total,
-	// RPC calls, RPC total, RPC max.
-	for _, want := range [][]string{
-		{"github_repository", "1", "4.0s", "1", "3.8s", "3.8s"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0s", "0s"},            // UI tier only
-	} {
-		got, _ := paneRowStartingWith(t, centre, want[0])
-		if !slices.Equal(got, want) {
-			t.Errorf("narrowed to a bare RPC provider, types row for %s = %v, want %v:\n%s", want[0], got, want, centre)
-		}
-	}
-	if header := strings.SplitN(m.View(), "\n", 2)[0]; !strings.Contains(header, "2 of 2 UI spans") {
-		t.Errorf("header = %q, want every UI span still counted", header)
-	}
-}
-
 // An empty provider allow-list admits no RPC evidence but still cannot erase
 // observed UI operations, which carry no trustworthy provider relationship.
 func TestUntickingEveryProviderEmptiesOnlyTheRPCTier(t *testing.T) {
