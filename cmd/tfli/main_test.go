@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -500,6 +501,102 @@ func TestLimitPreservesHelpAndVersionPrecedence(t *testing.T) {
 	}
 	if !strings.HasPrefix(versionOut.String(), "tfli ") || versionErr.Len() != 0 {
 		t.Fatalf("version output: stdout=%q stderr=%q", versionOut.String(), versionErr.String())
+	}
+}
+
+func TestProfileFormatValidationPrecedesFileAccess(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--format=text"}, "--format applies only to --profile"},
+		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile"},
+		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile"},
+		{[]string{"--profile", "--format=yaml"}, "--format must be text or json"},
+		{[]string{"--profile", "--format="}, "--format must be text or json"},
+		{[]string{"--profile", "--format=JSON"}, "--format must be text or json"},
+		{[]string{"--profile", "--format=json\x1b[31m"}, "--format must be text or json"},
+		{[]string{"--profile", "--format=json", "--limit=0"}, "--limit is not supported with --format json"},
+		{[]string{"--profile", "--format=json", "--limit=20"}, "--limit is not supported with --format json"},
+		{[]string{"--profile", "--format=json", "--limit=1", "--limit=20"}, "--limit is not supported with --format json"},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		output := filepath.Join(dir, "report.json")
+		if err := os.WriteFile(output, []byte("keep\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args := append(append([]string{}, tc.args...), "-o", output, filepath.Join(dir, "missing.log"))
+		var stdout, stderr bytes.Buffer
+		err := run(args, &stdout, &stderr)
+		if err == nil || err.Error() != tc.want {
+			t.Fatalf("%v: error = %v, want %q", args, err, tc.want)
+		}
+		data, readErr := os.ReadFile(output)
+		if readErr != nil || string(data) != "keep\n" || stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Fatalf("validation touched output: data=%q readErr=%v stdout=%q stderr=%q", data, readErr, stdout.Bytes(), stderr.Bytes())
+		}
+	}
+}
+
+func TestProfileFormatRepeatedFlagsUseLastValueAndRetainPresence(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "provider-rpc.log")
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"--profile", "--format=json", "--format=text", path}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(stdout.Bytes(), []byte("tfli profile report\n")) || stderr.Len() != 0 {
+		t.Fatalf("unexpected output: stdout=%q stderr=%q", stdout.Bytes(), stderr.Bytes())
+	}
+
+	err := run([]string{"--format=json", "--format=text", "missing.log"}, io.Discard, io.Discard)
+	if err == nil || err.Error() != "--format applies only to --profile" {
+		t.Fatalf("explicit repeated format outside profile: %v", err)
+	}
+}
+
+func TestProfileFormatPreservesHelpAndVersionPrecedence(t *testing.T) {
+	var help bytes.Buffer
+	if err := run([]string{"--help", "--format=json"}, io.Discard, &help); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !bytes.Contains(help.Bytes(), []byte("profile output format: text or json (--profile only)")) {
+		t.Fatalf("help does not document format:\n%s", help.Bytes())
+	}
+	if !bytes.Contains(help.Bytes(), []byte("tfli --profile [--format text] [--limit N]")) {
+		t.Fatalf("usage does not show profile format:\n%s", help.Bytes())
+	}
+
+	var versionOut, versionErr bytes.Buffer
+	if err := run([]string{"--version", "--format=json"}, &versionOut, &versionErr); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if got, want := versionOut.String(), "tfli "+version+"\n"; got != want || versionErr.Len() != 0 {
+		t.Fatalf("version output: stdout=%q, want %q; stderr=%q", got, want, versionErr.Bytes())
+	}
+}
+
+func TestNegativeAndInvalidLimitsPrecedeProfileFormatValidation(t *testing.T) {
+	t.Run("negative", func(t *testing.T) {
+		err := run([]string{"--profile", "--format=json", "--limit=-1", "missing.log"}, io.Discard, io.Discard)
+		if err == nil || err.Error() != "--limit must be non-negative" {
+			t.Fatalf("error = %v, want negative-limit rejection", err)
+		}
+	})
+	for name, value := range map[string]string{
+		"malformed": "many",
+		"overflow":  "999999999999999999999999999999999999999999999999999999",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			err := run([]string{"--profile", "--format=json", "--limit=" + value, "missing.log"}, io.Discard, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "invalid value") {
+				t.Fatalf("error = %v, want parser rejection", err)
+			}
+			if got := strings.Count(stderr.String(), "invalid value"); got != 1 {
+				t.Fatalf("invalid-value diagnostic count = %d, want 1:\n%s", got, stderr.String())
+			}
+		})
 	}
 }
 

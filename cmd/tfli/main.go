@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
@@ -47,6 +48,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
+		format     = fs.String("format", "text", "profile output format: text or json (--profile only)")
 		limit      = fs.Int("limit", profile.DefaultLimit, "maximum rows per text profile list (0 means all; --profile only)")
 		valuesPath = fs.String("scrub-values", "", "additional literal identifying values, one per line")
 		outPath    = fs.String("o", "", "write the selected report or scrubbed log to this file")
@@ -56,7 +58,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// Usage is best-effort, matching flag.PrintDefaults' error handling.
 		_, _ = fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose [-o report.txt] <logfile>\n")
-		_, _ = fmt.Fprintf(stderr, "       tfli --profile [--limit N] [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --profile [--format text] [--limit N] [-o report.txt] <logfile>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
 		_, _ = fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		_, _ = fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
@@ -91,9 +93,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return errors.New("expected exactly one log file argument")
 	}
-	valuesSet, limitSet := false, false
+	valuesSet, limitSet, formatSet := false, false, false
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
+		case "format":
+			formatSet = true
 		case "scrub-values":
 			valuesSet = true
 		case "limit":
@@ -118,6 +122,15 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *limit < 0 {
 		return errors.New("--limit must be non-negative")
 	}
+	if formatSet && !*doProfile {
+		return errors.New("--format applies only to --profile")
+	}
+	if *format != "text" && *format != "json" {
+		return errors.New("--format must be text or json")
+	}
+	if *format == "json" && limitSet {
+		return errors.New("--limit is not supported with --format json")
+	}
 	switch {
 	case *doScrub:
 		if *outPath == "" {
@@ -125,7 +138,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		return runScrub(fs.Arg(0), *outPath, *valuesPath, stderr)
 	case *doProfile:
-		return runProfile(fs.Arg(0), *outPath, stdout, profile.TextOptions{Limit: *limit})
+		return runProfile(fs.Arg(0), *outPath, stdout, profileOptions{
+			Format: *format,
+			Text:   profile.TextOptions{Limit: *limit},
+		})
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
 	default:
@@ -243,14 +259,29 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	return writeReport(stdout, path, outPath, report.Render)
 }
 
+type profileOptions struct {
+	Format string
+	Text   profile.TextOptions
+}
+
 // runProfile loads path and writes the unmasked performance report.
-func runProfile(path, outPath string, stdout io.Writer, options profile.TextOptions) error {
+func runProfile(path, outPath string, stdout io.Writer, options profileOptions) error {
 	l, err := model.Load(path)
 	if err != nil {
 		return err
 	}
+	if options.Format == "json" {
+		report, err := profile.Build(l)
+		if err != nil {
+			return err
+		}
+		metadata := profile.JSONMetadata{ToolVersion: version, InputBasename: filepath.Base(path)}
+		return writeReport(stdout, path, outPath, func(w io.Writer) error {
+			return profile.RenderJSON(w, report, metadata)
+		})
+	}
 	return writeReport(stdout, path, outPath, func(w io.Writer) error {
-		return profile.Render(w, l, options)
+		return profile.Render(w, l, options.Text)
 	})
 }
 
