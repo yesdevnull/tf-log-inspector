@@ -62,6 +62,39 @@ func TestHistoryRestoresNilAndEmptyResourceSelections(t *testing.T) {
 	}
 }
 
+func TestHistorySnapshotRestoresNonNilEmptyResourceSelections(t *testing.T) {
+	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	m.resourceSelection.Addresses = map[string]bool{}
+	m.resourceSelection.Modules = map[string]bool{}
+	frame := m.captureNavigation()
+	m.resourceSelection.Addresses["aws_instance.a"] = true
+	m.resourceSelection.Modules[""] = true
+	m.restoreNavigation(frame)
+	if m.resourceSelection.Addresses == nil || len(m.resourceSelection.Addresses) != 0 || m.resourceSelection.Modules == nil || len(m.resourceSelection.Modules) != 0 {
+		t.Fatalf("non-nil empty parent selections were not restored: %+v", m.resourceSelection)
+	}
+}
+
+func TestHistoryEnterIsInertWithEmptyResourceOrModuleSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		selection model.ResourceSelection
+	}{
+		{"resource", model.ResourceSelection{Addresses: map[string]bool{}}},
+		{"module", model.ResourceSelection{Modules: map[string]bool{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+			m.resourceSelection = tc.selection
+			m.invalidateRows()
+			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+			if m.view != ViewCalls || len(m.history) != 0 {
+				t.Fatalf("Enter with empty selection changed view/history: view %v depth %d", m.view, len(m.history))
+			}
+		})
+	}
+}
+
 func TestHistoryRestoresParentSortAndOriginalCall(t *testing.T) {
 	m := New(testLog(t, "provider-rpc.log"), "provider-rpc.log")
 	pressRune(t, &m, 's')
@@ -113,25 +146,29 @@ func TestHistoryRestoresRawSearchAndRequestState(t *testing.T) {
 
 func TestHistoryModalEscPrecedesReturn(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		open func(*Model)
-		shut func(Model) bool
+		name   string
+		open   func(*Model)
+		opened func(Model) bool
+		shut   func(Model) bool
 	}{
-		{"help", func(m *Model) { pressRune(t, m, '?') }, func(m Model) bool { return !m.showHelp }},
-		{"quality", func(m *Model) { pressRune(t, m, 'i') }, func(m Model) bool { return !m.quality.open }},
-		{"resource evidence", func(m *Model) { m.showResourceEvidence = true }, func(m Model) bool { return !m.showResourceEvidence }},
-		{"response", func(m *Model) { pressRune(t, m, 'r') }, func(m Model) bool { return !m.response.open }},
-		{"raw search", func(m *Model) { pressRune(t, m, '/') }, func(m Model) bool { return !m.raw.searching }},
+		{"help", func(m *Model) { pressRune(t, m, '?') }, func(m Model) bool { return m.showHelp }, func(m Model) bool { return !m.showHelp }},
+		{"quality", func(m *Model) { pressRune(t, m, 'i') }, func(m Model) bool { return m.quality.open }, func(m Model) bool { return !m.quality.open }},
+		{"resource evidence", func(m *Model) { m.showResourceEvidence = true }, func(m Model) bool { return m.showResourceEvidence }, func(m Model) bool { return !m.showResourceEvidence }},
+		{"response", func(m *Model) { pressRune(t, m, 'r') }, func(m Model) bool { return m.response.open }, func(m Model) bool { return !m.response.open }},
+		{"raw search", func(m *Model) { pressRune(t, m, '/') }, func(m Model) bool { return m.raw.searching }, func(m Model) bool { return !m.raw.searching }},
 		{"facet search", func(m *Model) {
 			m.pane = PaneFacets
 			setFacetCursor(t, m, dimResource, "aws_instance.a")
 			pressRune(t, m, '/')
-		}, func(m Model) bool { return !m.facetSearch.editing }},
+		}, func(m Model) bool { return m.facetSearch.editing }, func(m Model) bool { return !m.facetSearch.editing }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
 			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
 			tc.open(&m)
+			if !tc.opened(m) {
+				t.Fatal("modal did not open")
+			}
 			pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
 			if m.view != ViewRawLog || len(m.history) != 1 || !tc.shut(m) {
 				t.Fatalf("modal dismissal spent navigation history: view %v depth %d", m.view, len(m.history))
