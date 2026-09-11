@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
@@ -64,15 +66,15 @@ func TestResponseNavigationAndSearchPreservesRawPosition(t *testing.T) {
 	responseKey(m, "/")
 	responseKey(m, "needle")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.renderCentre(100, 8), "needle first") {
+	if !strings.Contains(unstyled(m.renderCentre(100, 8)), "needle first") {
 		t.Fatal("search did not reveal decoded message")
 	}
 	responseKey(m, "n")
-	if !strings.HasPrefix(m.renderCentre(100, 8), "needle second") {
+	if !strings.HasPrefix(unstyled(m.renderCentre(100, 8)), "needle second") {
 		t.Fatal("next match not shown")
 	}
 	responseKey(m, "N")
-	if !strings.HasPrefix(m.renderCentre(100, 8), "needle first") {
+	if !strings.HasPrefix(unstyled(m.renderCentre(100, 8)), "needle first") {
 		t.Fatal("previous match not shown")
 	}
 	for _, key := range []string{"1", "f", "s", "\\", "tab"} {
@@ -153,15 +155,15 @@ func TestResponseSearchVisitsOccurrencesOnOneLine(t *testing.T) {
 	responseKey(m, "/")
 	responseKey(m, "needle")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.renderCentre(12, 4), "needle first") {
+	if !strings.Contains(unstyled(m.renderCentre(12, 4)), "needle first") {
 		t.Fatal("first occurrence is hidden")
 	}
 	responseKey(m, "n")
-	if !strings.Contains(m.renderCentre(12, 4), "needle secon") {
+	if !strings.Contains(unstyled(m.renderCentre(12, 4)), "needle secon") {
 		t.Fatal("next occurrence on the same line is hidden")
 	}
 	responseKey(m, "N")
-	if !strings.Contains(m.renderCentre(12, 4), "needle first") {
+	if !strings.Contains(unstyled(m.renderCentre(12, 4)), "needle first") {
 		t.Fatal("previous occurrence on the same line is hidden")
 	}
 }
@@ -177,24 +179,147 @@ func TestResponseSearchMissAndEmptyInputPreserveOccurrence(t *testing.T) {
 	responseKey(m, "n")
 	second := m.renderCentre(12, 4)
 	responseKey(m, "n")
-	if got := m.renderCentre(12, 4); got != second || !strings.Contains(m.footer(40), "pattern not found") {
+	if got := m.renderCentre(12, 4); unstyled(got) != unstyled(second) || reversedText(got) != "" || !strings.Contains(m.footer(40), "pattern not found") {
 		t.Fatalf("miss moved response or hid footer: %q", got)
 	}
 	responseKey(m, "N")
-	if got := m.renderCentre(12, 4); got != first {
+	if got := m.renderCentre(12, 4); unstyled(got) != unstyled(first) {
 		t.Fatalf("miss discarded valid occurrence: %q", got)
 	}
 	responseKey(m, "/")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	responseKey(m, "n")
-	if got := m.renderCentre(12, 4); got != second {
+	if got := m.renderCentre(12, 4); unstyled(got) != unstyled(second) {
 		t.Fatalf("empty query replaced prior search: %q", got)
 	}
 	responseKey(m, "/")
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	responseKey(m, "N")
-	if got := m.renderCentre(12, 4); got != first {
+	if got := m.renderCentre(12, 4); unstyled(got) != unstyled(first) {
 		t.Fatalf("cancelled query replaced prior search: %q", got)
+	}
+}
+
+func TestResponseSearchHighlightTracksSubmittedOccurrenceWithoutMutatingState(t *testing.T) {
+	m := responseModel(t, `{"message":"needle first needle second"}`)
+	responseKey(m, "r")
+	m.renderResponse(80, 4)
+	responseKey(m, "/")
+	responseKey(m, "needle")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	m.renderResponse(80, 4)
+	lines := append([]string(nil), m.response.lines...)
+	match := *m.response.match
+	query := m.response.query
+	column := m.response.column
+	yOffset := m.response.viewport.YOffset
+	first := m.renderResponse(80, 4)
+	if reversedText(first) != "needle" || firstReversedGlyph(first) != strings.Index(unstyled(first), "needle") {
+		t.Fatalf("first response occurrence is not the sole reversed span: %q", first)
+	}
+	if !reflect.DeepEqual(m.response.lines, lines) || *m.response.match != match || m.response.query != query || m.response.column != column || m.response.viewport.YOffset != yOffset {
+		t.Fatal("rendering changed searchable response state")
+	}
+
+	responseKey(m, "n")
+	second := m.renderResponse(80, 4)
+	if reversedText(second) != "needle" || firstReversedGlyph(second) <= firstReversedGlyph(first) {
+		t.Fatalf("next response occurrence did not move the reversed span: %q", second)
+	}
+	responseKey(m, "n")
+	if got := m.renderResponse(80, 4); reversedText(got) != "" || !m.response.notFound {
+		t.Fatalf("failed response search retained a visible highlight: %q", got)
+	}
+	responseKey(m, "N")
+	if got := m.renderResponse(80, 4); reversedText(got) != "needle" || firstReversedGlyph(got) != firstReversedGlyph(first) {
+		t.Fatalf("reverse search did not recover the retained occurrence: %q", got)
+	}
+
+	responseKey(m, "/")
+	responseKey(m, "replacement")
+	if got := m.renderResponse(80, 4); reversedText(got) != "needle" {
+		t.Fatalf("editable response query replaced the submitted highlight: %q", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := m.renderResponse(80, 4); reversedText(got) != "needle" {
+		t.Fatalf("cancelled response query removed the submitted highlight: %q", got)
+	}
+}
+
+func TestResponseSearchHighlightHandlesDisplayedUnicodeControlsAndClipping(t *testing.T) {
+	message := "top\nCafe\u0301 👩‍💻 界界 needle-wide tail \x1b[2J\nbottom"
+	body, _ := json.Marshal(map[string]string{"@message": message})
+	m := responseModel(t, string(body))
+	responseKey(m, "r")
+	m.renderResponse(80, 4)
+
+	for _, tc := range []struct {
+		query, reversed string
+	}{
+		{"\u0301", "e\u0301"},
+		{"💻", "👩‍💻"},
+		{"界", "界"},
+		{"needle-wide", "needle-wide"},
+		{`\x1b[2J`, `\x1b[2J`},
+	} {
+		responseKey(m, "/")
+		responseKey(m, tc.query)
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		got := m.renderResponse(80, 4)
+		if reversedText(got) != tc.reversed {
+			t.Fatalf("displayed query %q reversed %q, want %q: %q", tc.query, reversedText(got), tc.reversed, got)
+		}
+		if strings.Contains(unstyled(got), "\x1b[2J") {
+			t.Fatalf("source control sequence reached rendered response: %q", got)
+		}
+	}
+
+	responseKey(m, "/")
+	responseKey(m, "needle-wide")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	clipped := m.renderResponse(5, 1)
+	if reversedText(clipped) != "needl" || lipgloss.Width(clipped) != 5 || lastSGR(clipped) != "\x1b[0m" {
+		t.Fatalf("right-clipped response match leaked or moved: %q", clipped)
+	}
+	m.response.column = m.response.match.text.column + 2
+	leftClipped := m.renderResponse(5, 1)
+	if reversedText(leftClipped) != "edle-" || lipgloss.Width(leftClipped) != 5 || lastSGR(leftClipped) != "\x1b[0m" {
+		t.Fatalf("left-clipped response match leaked or moved after resize: %q", leftClipped)
+	}
+}
+
+func TestResponseSearchHighlightPreservesFullHorizontalRangeAndManualNavigationClearsIt(t *testing.T) {
+	m := responseModel(t, `{"short":"needle","long":"`+strings.Repeat("x", 300)+`"}`)
+	responseKey(m, "r")
+	m.renderResponse(20, 1)
+	responseKey(m, "/")
+	responseKey(m, "needle")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	maximum := rawLogMaxColumn(m.response.lines, m.response.viewport.Width)
+	if got := reversedText(m.renderResponse(20, 1)); got != "needle" {
+		t.Fatalf("short visible line is not highlighted: %q", got)
+	}
+	if got := rawLogMaxColumn(m.response.lines, m.response.viewport.Width); got != maximum || m.response.viewport.TotalLineCount() != len(m.response.lines) {
+		t.Fatalf("styled slice replaced full response bounds: max %d, lines %d", got, m.response.viewport.TotalLineCount())
+	}
+	m.response.column = maximum
+	m.renderResponse(20, 1)
+	if m.response.column != maximum {
+		t.Fatalf("styling a short visible line clamped horizontal column to %d, want %d", m.response.column, maximum)
+	}
+	m.response.column = m.response.match.text.column
+	responseKey(m, "l")
+	if m.response.match != nil || reversedText(m.renderResponse(20, 1)) != "" {
+		t.Fatal("manual horizontal movement retained response highlighting")
+	}
+
+	responseKey(m, "/")
+	responseKey(m, "needle")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	responseKey(m, "j")
+	if m.response.match != nil || reversedText(m.renderResponse(20, 1)) != "" {
+		t.Fatal("manual vertical movement retained response highlighting")
 	}
 }
 
@@ -208,7 +333,7 @@ func TestResponseManualScrollingStartsRepeatFromVisiblePosition(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	responseKey(m, "l")
 	responseKey(m, "n")
-	if got := m.renderCentre(12, 4); !strings.Contains(got, "needle secon") {
+	if got := m.renderCentre(12, 4); !strings.Contains(unstyled(got), "needle secon") {
 		t.Fatalf("horizontal scroll reused the prior occurrence: %q", got)
 	}
 
@@ -220,7 +345,7 @@ func TestResponseManualScrollingStartsRepeatFromVisiblePosition(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	responseKey(m, "j")
 	responseKey(m, "N")
-	if got := m.renderCentre(20, 1); !strings.Contains(got, "needle second") {
+	if got := m.renderCentre(20, 1); !strings.Contains(unstyled(got), "needle second") {
 		t.Fatalf("vertical scroll reused the prior occurrence: %q", got)
 	}
 }
@@ -232,12 +357,12 @@ func TestResponseResizeClampsViewWithoutDiscardingOccurrence(t *testing.T) {
 	responseKey(m, "/")
 	responseKey(m, "needle")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.renderCentre(12, 4), "needle first") {
+	if !strings.Contains(unstyled(m.renderCentre(12, 4)), "needle first") {
 		t.Fatal("first occurrence is hidden")
 	}
 	m.renderCentre(200, 4)
 	responseKey(m, "n")
-	if got := m.renderCentre(12, 4); !strings.Contains(got, "needle secon") {
+	if got := m.renderCentre(12, 4); !strings.Contains(unstyled(got), "needle secon") {
 		t.Fatalf("resize discarded the successful occurrence: %q", got)
 	}
 }
@@ -249,11 +374,11 @@ func TestResponseSearchUsesDisplayColumnsAfterWideUnicode(t *testing.T) {
 	responseKey(m, "/")
 	responseKey(m, "needle")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(m.renderCentre(14, 4), "needle first") {
+	if !strings.Contains(unstyled(m.renderCentre(14, 4)), "needle first") {
 		t.Fatal("wide Unicode left the first occurrence hidden")
 	}
 	responseKey(m, "n")
-	if !strings.Contains(m.renderCentre(14, 4), "needle second") {
+	if !strings.Contains(unstyled(m.renderCentre(14, 4)), "needle second") {
 		t.Fatal("wide Unicode left the next occurrence hidden")
 	}
 }

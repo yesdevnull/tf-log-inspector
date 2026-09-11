@@ -187,6 +187,8 @@ In Raw Log, `←`/`→` (or `h`/`l`) scroll horizontally one display column at a
 time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `Delete`
 to edit the query. Long queries scroll with the cursor. `Enter` searches,
 `Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
+The active match is highlighted in Raw Log and reconstructed responses; `n`/`N`
+visit individual occurrences without wrapping.
 
 Press `g` with the Raw Log list focused to enter a physical source line number.
 A successful jump widens a filtered call view to the whole log and resets the

@@ -48,6 +48,10 @@ func TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing(t *t
 	beforeTop, beforeLine, beforeColumn := m.raw.top, m.raw.topLine, m.raw.column
 	beforeMatch := *m.raw.match
 	beforeQuery, beforeLastQuery := m.raw.query, m.raw.lastQuery
+	beforeRaw := m.renderRawLog(100, 10)
+	if reversedText(beforeRaw) != "recovered response" {
+		t.Fatalf("raw occurrence is not highlighted before opening response: %q", beforeRaw)
+	}
 
 	responseKey(&m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "Partial reconstruction") || !strings.Contains(got, "Decoded @message:") || !strings.Contains(got, "recovered response") {
@@ -56,12 +60,20 @@ func TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing(t *t
 	responseKey(&m, "/")
 	responseKey(&m, "needle third")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.response.match == nil || !strings.Contains(m.renderResponse(100, 10), "needle third") {
+	if got := m.renderResponse(100, 10); m.response.match == nil || !strings.Contains(unstyled(got), "needle third") || reversedText(got) != "needle third" {
 		t.Fatalf("decoded response search did not select needle third: match %+v\n%s", m.response.match, m.renderResponse(100, 10))
+	}
+	responseKey(&m, "n")
+	responseKey(&m, "n")
+	if got := m.renderResponse(100, 10); reversedText(got) != "" || !m.response.notFound {
+		t.Fatalf("failed response search retained styling: %q", got)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.response.open || m.raw.top != beforeTop || m.raw.topLine != beforeLine || m.raw.column != beforeColumn || m.raw.match == nil || *m.raw.match != beforeMatch || m.raw.query != beforeQuery || m.raw.lastQuery != beforeLastQuery || !reflect.DeepEqual(m.history, beforeHistory) {
 		t.Fatal("response return changed the exact raw occurrence or navigation history")
+	}
+	if got := m.renderRawLog(100, 10); got != beforeRaw || reversedText(got) != "recovered response" {
+		t.Fatalf("response return did not restore the raw highlight: %q", got)
 	}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})

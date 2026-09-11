@@ -306,14 +306,17 @@ func TestResponseNoticeLayoutPreservesBodyAndSearchState(t *testing.T) {
 	if got := m.renderResponse(60, 2); !strings.HasPrefix(got, "Partial reconstruction") || strings.Count(got, "\n") != 1 {
 		t.Fatalf("two-line response = %q", got)
 	}
-	if got := m.renderResponse(60, 8); !strings.Contains(got, "needle second") {
+	if got := m.renderResponse(60, 8); !strings.Contains(unstyled(got), "needle second") || reversedText(got) != "needle" {
 		t.Fatalf("enlarged response did not restore searched body: %q", got)
+	}
+	if got := m.renderResponse(60, 1); reversedText(got) != "" {
+		t.Fatalf("notice-only response highlighted notice text: %q", got)
 	}
 	if m.response.match == nil || *m.response.match != match || m.response.query != query || m.response.column != column {
 		t.Fatal("notice-only layout discarded response search state")
 	}
 	responseKey(&m, "n")
-	if got := m.renderResponse(60, 8); !strings.Contains(got, `\x1b[2J needle third`) {
+	if got := m.renderResponse(60, 8); !strings.Contains(unstyled(got), `\x1b[2J needle third`) || reversedText(got) != "needle" {
 		t.Fatalf("search did not advance across decoded controls: %q", got)
 	}
 }

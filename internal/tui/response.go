@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
@@ -135,10 +136,30 @@ func (m *Model) renderResponse(w, h int) string {
 	r.viewport.SetYOffset(r.viewport.YOffset)
 	r.column = min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))
 	r.viewport.SetXOffset(r.column)
-	if r.notice != "" {
-		return clipWidth(r.notice, w) + "\n" + r.viewport.View()
+	body := r.viewport.View()
+	if match := r.match; match != nil && !r.notFound {
+		start := r.viewport.YOffset
+		end := min(len(r.lines), start+bodyHeight)
+		if match.line >= start && match.line < end {
+			visible := make([]string, end-start)
+			for i := start; i < end; i++ {
+				line := r.lines[i]
+				if i == match.line {
+					line = renderLiteralMatch(line, r.query, match.text, styleRenderer.NewStyle())
+				}
+				visible[i-start] = ansi.Cut(line, r.column, r.column+w)
+			}
+			display := r.viewport
+			display.SetContent(strings.Join(visible, "\n"))
+			display.SetYOffset(0)
+			display.SetXOffset(0)
+			body = display.View()
+		}
 	}
-	return r.viewport.View()
+	if r.notice != "" {
+		return clipWidth(r.notice, w) + "\n" + body
+	}
+	return body
 }
 
 func (m *Model) handleResponseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
