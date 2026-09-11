@@ -96,15 +96,22 @@ Viewer and quality integration will be a separate second plan. Dan subsequently
 approved I1 subagent implementation after both plan-review findings were fixed
 and verified. I1 completed with parser and strict-policy tests through `d563e59`,
 task reviews, separate cleanup and all local validation checks. Independent
-whole-branch review of `f614493..2fd6200` found no actionable issues. I2 remains
-unimplemented, so Boundary I is not yet complete. I1 subsequently merged into
+whole-branch review of `f614493..2fd6200` found no actionable issues. I2 was still
+unimplemented at that point. I1 subsequently merged into
 local main at `04d28da`. Dan authorised drafting the
 [I2 viewer and quality implementation plan](../plans/2026-09-11-response-recovery-viewer.md).
 Dan approved JSON v2 with explicit recovery states for both profile and
 comparison output on 11 September 2026. After both peer-review findings were
 fixed and verified in `433c460`, Dan approved the revised I2 plan, including
-physical-line selection, and subagent implementation. I2 implementation is in
-progress; Boundary I is not yet complete.
+physical-line selection, and subagent implementation. I2 completed through
+`7ae5fca`, including physical-line recovery selection, safe status views, lazy
+quality states and coordinated profile/comparison JSON v2. All four task reviews,
+separate test-cleanup passes and scoped fixes are complete. Independent
+whole-branch review of `04d28da..7ae5fca` found no actionable issues. The full race
+suite, lint, build/module/format checks, Linux/macOS amd64/arm64 cross-builds,
+actual terminal journeys and decoded CLI JSON checks passed. The I2 plan records
+the requirement-by-requirement evidence. Boundary I is complete; integration into
+local main remains Dan's decision.
 
 ## Evidence and relationship to existing designs
 
