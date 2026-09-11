@@ -1,0 +1,7 @@
+2026-09-11T00:00:00.000Z [DEBUG] provider.a: {"@message":"first response\nneedle first\nneedle second"}
+2026-09-11T00:00:00.001Z [DEBUG] provider.b: {"broken":]}
+2026-09-11T00:00:00.002Z [DEBUG] provider.a: {"@message":"recovered response\nneedle third"}
+2026-09-11T00:00:00.003Z [DEBUG] provider.b: {"apparent_restart":true}
+2026-09-11T00:00:00.004Z [INFO] terraform: ordinary entry
+ordinary continuation
+2026-09-11T00:00:00.005Z [DEBUG] provider.a: {"unfinished":
