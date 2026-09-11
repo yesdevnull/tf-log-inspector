@@ -2,7 +2,6 @@ package logfmt
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,17 +24,20 @@ type providerJSONPending struct {
 	stack           []byte
 	quoted, escaped bool
 	last            byte
+	lastConsumed    int
 	ranges          []JSONFragment
 }
 
-// ReconstructProviderJSON joins timestamped fragments by exact provider
-// component. Physical line endings are transport bytes, not JSON payload.
-// Results follow the order in which messages start. Errors never quote input.
-func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
+// InspectProviderJSON joins timestamped fragments by exact provider component.
+// Physical line endings are transport bytes, not JSON payload. Inspection stops
+// at the first failure and retains messages completed before it.
+func InspectProviderJSON(text string) ProviderJSONResult {
 	var messages []ProviderJSON
 	pending := make(map[string]*providerJSONPending)
 	active := ""
+	lastLine := 0
 	for start, line := 0, 1; start < len(text); line++ {
+		lastLine = line
 		end := strings.IndexByte(text[start:], '\n')
 		next := len(text)
 		if end < 0 {
@@ -74,12 +76,16 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 				startLine = message.Fragments[0].Line
 			}
 			consumed, complete, reason := p.consume(raw[offset:])
+			p.lastConsumed = consumed
 			firstBytes := consumed
 			if len(message.Fragments) > 0 {
 				firstBytes = message.Fragments[0].End - message.Fragments[0].Start
 			}
 			if reason != "" {
-				return nil, providerJSONFailure(reason, line, startLine, len(message.Fragments)+1, p.body.Len(), firstBytes, consumed, providerJSONSyntaxOffset(p.body.String()))
+				ranges := append([]JSONFragment(nil), message.Fragments...)
+				ranges = append(ranges, JSONFragment{Start: start + offset, End: start + len(raw), Line: line})
+				diagnostic := newProviderJSONDiagnostic(reason, line, startLine, len(message.Fragments)+1, p.body.Len(), firstBytes, consumed, providerJSONSyntaxOffset(p.body.String()), ranges)
+				return ProviderJSONResult{Messages: completedProviderJSON(messages), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
 			}
 			for _, fragment := range p.ranges {
 				message.Fragments = append(message.Fragments, JSONFragment{Start: start + offset + fragment.Start, End: start + offset + fragment.End, Line: line})
@@ -87,21 +93,13 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 			if complete {
 				message.Text = p.body.String()
 				if !utf8.ValidString(message.Text) {
-					return nil, providerJSONFailure("UTF-8", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, 0)
+					diagnostic := newProviderJSONDiagnostic("UTF-8", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, 0, message.Fragments)
+					return ProviderJSONResult{Messages: completedProviderJSONExcept(messages, p.index), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
 				}
 				if !json.Valid([]byte(message.Text)) {
 					syntaxOffset := providerJSONSyntaxOffset(message.Text)
-					err := providerJSONFailure("JSON syntax", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, syntaxOffset)
-					// Syntax offsets are one-based payload bytes; source ranges
-					// exclude transport headers and interleaved UI events.
-					remaining := syntaxOffset
-					for _, fragment := range message.Fragments {
-						if remaining > 0 && remaining <= int64(fragment.End-fragment.Start) {
-							return nil, fmt.Errorf("%w; syntax source line %d", err, fragment.Line)
-						}
-						remaining -= int64(fragment.End - fragment.Start)
-					}
-					return nil, err
+					diagnostic := newProviderJSONDiagnostic("JSON syntax", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, syntaxOffset, message.Fragments)
+					return ProviderJSONResult{Messages: completedProviderJSONExcept(messages, p.index), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
 				}
 				delete(pending, comp)
 			}
@@ -109,23 +107,28 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 		start = next
 	}
 	if len(pending) != 0 {
-		for _, message := range messages {
-			if message.Text == "" {
-				return nil, fmt.Errorf("provider JSON at line %d: incomplete or invalid body", message.Fragments[0].Line)
+		var earliest *providerJSONPending
+		for _, p := range pending {
+			if earliest == nil || p.index < earliest.index {
+				earliest = p
 			}
 		}
+		message := messages[earliest.index]
+		startLine := message.Fragments[0].Line
+		firstBytes := message.Fragments[0].End - message.Fragments[0].Start
+		diagnostic := ProviderJSONDiagnostic{
+			Code:               "incomplete",
+			Line:               lastLine,
+			StartLine:          startLine,
+			FragmentCount:      len(message.Fragments),
+			JoinedBytes:        totalProviderJSONBytes(message.Fragments),
+			FirstFragmentBytes: firstBytes,
+			LastFragmentBytes:  earliest.lastConsumed,
+			Ranges:             append([]JSONFragment(nil), message.Fragments...),
+		}
+		return ProviderJSONResult{Messages: completedProviderJSON(messages), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
 	}
-	return messages, nil
-}
-
-// Diagnostics describe structure only. JSON parser error text can contain
-// source bytes and must never be included in a scrubbing failure.
-func providerJSONFailure(reason string, line, startLine, fragments, bytes, firstBytes, lastBytes int, syntaxOffset int64) error {
-	detail := fmt.Sprintf("%s; start line %d; fragments %d; joined bytes %d; first fragment bytes %d; last fragment bytes %d", reason, startLine, fragments, bytes, firstBytes, lastBytes)
-	if syntaxOffset > 0 {
-		detail += fmt.Sprintf("; syntax offset %d", syntaxOffset)
-	}
-	return fmt.Errorf("provider JSON at line %d: invalid body (%s)", line, detail)
+	return ProviderJSONResult{Messages: messages}
 }
 
 func providerJSONSyntaxOffset(text string) int64 {
