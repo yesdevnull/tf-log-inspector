@@ -569,8 +569,12 @@ Expected: all boundary-A acceptance journeys behave as specified; do not use pri
 ## Delivery record
 
 Boundary A is implemented on `feature/source-line-navigation`. Tasks 1–3
-passed independent review; review findings were resolved. Separate test-cleanup
-passes retained the behavioural and boundary tests without removals.
+passed independent review. Final whole-branch review found and the final fix
+wave corrected two rendering inconsistencies: trailing blank physical lines are
+retained as source targets, and a narrow Filters overlay no longer reports a
+position from the hidden Raw Log pane. Final review of that fix remains with the
+controller. Separate test-cleanup passes retained the earlier behavioural and
+boundary tests without removals.
 
 Final checks passed: `go test ./...`, `go test -race -count=1 ./...`,
 `golangci-lint run` (zero issues), `go build ./...`, formatting and whitespace
@@ -580,5 +584,9 @@ filtered-call jumps, exact Esc returns and resizing during prompt editing.
 
 The model lookup is in `0bf6234`, the TUI behaviour and coverage in `2b13b33`
 and `54c77b2`, and sharing guidance in `335010b`. Test-only fix `3d8df09`
-removes a lock copy from a table loop. All implementation commits are signed.
-Boundaries B–H remain separate future implementation plans.
+removes a lock copy from a table loop. Final fix `6f9fcbe` preserves trailing
+blank source rows for LF and CRLF captures and makes overlay status reflect the
+pane actually drawn. Focused regression tests, `go test ./...`,
+`go test -race -count=1 ./...`, `golangci-lint run` and `go build ./...` passed
+after that fix. All implementation commits are signed. Boundaries B–H remain
+separate future implementation plans.
