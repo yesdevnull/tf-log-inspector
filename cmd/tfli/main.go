@@ -48,8 +48,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
-		format     = fs.String("format", "text", "profile output format: text or json (--profile only)")
-		limit      = fs.Int("limit", profile.DefaultLimit, "maximum rows per text profile list (0 means all; --profile only)")
+		doCompare  = fs.Bool("compare", false, "compare two raw logs")
+		format     = fs.String("format", "text", "profile or comparison output format: text or json")
+		limit      = fs.Int("limit", profile.DefaultLimit, "maximum rows per text report list (0 means all)")
 		valuesPath = fs.String("scrub-values", "", "additional literal identifying values, one per line")
 		outPath    = fs.String("o", "", "write the selected report or scrubbed log to this file")
 		showVer    = fs.Bool("version", false, "print the version and exit")
@@ -59,6 +60,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		_, _ = fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose [-o report.txt] <logfile>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --profile [--format text] [--limit N] [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --compare [--format text] [--limit N] [-o comparison.txt] <before.log> <after.log>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
 		_, _ = fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
 		_, _ = fmt.Fprintf(stderr, "enable debug logging on a run and download its raw log.\n\n")
@@ -89,7 +91,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 		_, err := fmt.Fprintln(stdout, "tfli", version)
 		return err
 	}
-	if fs.NArg() != 1 {
+	if *doCompare && fs.NArg() != 2 {
+		fs.Usage()
+		return errors.New("expected exactly two log file arguments for --compare")
+	}
+	if !*doCompare && fs.NArg() != 1 {
 		fs.Usage()
 		return errors.New("expected exactly one log file argument")
 	}
@@ -105,25 +111,25 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	})
 	modeCount := 0
-	for _, selected := range []bool{*doDiagnose, *doProfile, *doScrub} {
+	for _, selected := range []bool{*doDiagnose, *doProfile, *doScrub, *doCompare} {
 		if selected {
 			modeCount++
 		}
 	}
 	if modeCount > 1 {
-		return errors.New("pass only one of --diagnose, --profile, or --scrub")
+		return errors.New("pass only one of --diagnose, --profile, --scrub, or --compare")
 	}
 	if valuesSet && !*doScrub {
 		return errors.New("--scrub-values applies only to --scrub")
 	}
-	if limitSet && !*doProfile {
-		return errors.New("--limit applies only to --profile")
+	if limitSet && !*doProfile && !*doCompare {
+		return errors.New("--limit applies only to --profile or --compare")
 	}
 	if *limit < 0 {
 		return errors.New("--limit must be non-negative")
 	}
-	if formatSet && !*doProfile {
-		return errors.New("--format applies only to --profile")
+	if formatSet && !*doProfile && !*doCompare {
+		return errors.New("--format applies only to --profile or --compare")
 	}
 	if *format != "text" && *format != "json" {
 		return errors.New("--format must be text or json")
@@ -142,6 +148,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 			Format: *format,
 			Text:   profile.TextOptions{Limit: *limit},
 		})
+	case *doCompare:
+		return runComparison(fs.Arg(0), fs.Arg(1), *outPath, stdout, comparisonOptions{
+			Format: *format,
+			Text:   profile.TextOptions{Limit: *limit},
+		})
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
 	default:
@@ -150,22 +161,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// looks exactly like a report written somewhere the user was not
 		// watching, which is how people lose work.
 		if *outPath != "" {
-			return errors.New("-o applies only to --diagnose, --profile, or --scrub")
+			return errors.New("-o applies only to --diagnose, --profile, --scrub, or --compare")
 		}
 		return runTUI(fs.Arg(0))
 	}
 }
 
 // writeReport sends render's output to outPath if set, otherwise to stdout.
-// Both --diagnose and --profile funnel their report through this so neither
+// Diagnose, profile and comparison funnel their reports through this so no
 // mode can regress the -o handling on its own.
-func writeReport(stdout io.Writer, inputPath, outPath string, render func(io.Writer) error) error {
+func writeReport(stdout io.Writer, inputPaths []string, outPath string, render func(io.Writer) error) error {
 	w := stdout
 	var out *os.File
 	if outPath != "" {
-		inputInfo, err := os.Stat(inputPath)
-		if err != nil {
-			return fmt.Errorf("checking %s: %w", inputPath, err)
+		var err error
+		inputInfos := make([]os.FileInfo, len(inputPaths))
+		for i, inputPath := range inputPaths {
+			inputInfo, err := os.Stat(inputPath)
+			if err != nil {
+				return fmt.Errorf("checking %s: %w", inputPath, err)
+			}
+			inputInfos[i] = inputInfo
 		}
 		// Open without truncation so the identity check applies to the
 		// descriptor we actually write, including symbolic and hard links.
@@ -178,9 +194,11 @@ func writeReport(stdout io.Writer, inputPath, outPath string, render func(io.Wri
 			_ = out.Close() // Preserve the Stat error; no output has been written.
 			return fmt.Errorf("checking %s: %w", outPath, err)
 		}
-		if os.SameFile(inputInfo, outputInfo) {
-			_ = out.Close() // No output has been written to the input file.
-			return fmt.Errorf("input %s and output %s are the same file", inputPath, outPath)
+		for i, inputInfo := range inputInfos {
+			if os.SameFile(inputInfo, outputInfo) {
+				_ = out.Close() // No output has been written to the input file.
+				return fmt.Errorf("input %s and output %s are the same file", inputPaths[i], outPath)
+			}
 		}
 		if outputInfo.Mode().IsRegular() {
 			if err := out.Truncate(0); err != nil {
@@ -256,7 +274,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 
-	return writeReport(stdout, path, outPath, report.Render)
+	return writeReport(stdout, []string{path}, outPath, report.Render)
 }
 
 type profileOptions struct {
@@ -276,11 +294,11 @@ func runProfile(path, outPath string, stdout io.Writer, options profileOptions) 
 			return err
 		}
 		metadata := profile.JSONMetadata{ToolVersion: version, InputBasename: filepath.Base(path)}
-		return writeReport(stdout, path, outPath, func(w io.Writer) error {
+		return writeReport(stdout, []string{path}, outPath, func(w io.Writer) error {
 			return profile.RenderJSON(w, report, metadata)
 		})
 	}
-	return writeReport(stdout, path, outPath, func(w io.Writer) error {
+	return writeReport(stdout, []string{path}, outPath, func(w io.Writer) error {
 		return profile.Render(w, l, options.Text)
 	})
 }

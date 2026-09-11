@@ -288,7 +288,7 @@ func TestLimitRejectedOutsideProfileBeforeOpeningInput(t *testing.T) {
 	} {
 		var stdout, stderr strings.Builder
 		err := run(args, &stdout, &stderr)
-		if err == nil || !strings.Contains(err.Error(), "--limit applies only to --profile") {
+		if err == nil || err.Error() != "--limit applies only to --profile or --compare" {
 			t.Fatalf("args %v: error %v", args, err)
 		}
 		if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -491,7 +491,7 @@ func TestLimitPreservesHelpAndVersionPrecedence(t *testing.T) {
 	if err := run([]string{"--help", "--limit=1"}, io.Discard, &help); err != nil {
 		t.Fatalf("help: %v", err)
 	}
-	if !strings.Contains(help.String(), "maximum rows per text profile list") || !strings.Contains(help.String(), "default 20") || !strings.Contains(help.String(), "0 means all; --profile only") {
+	if !strings.Contains(help.String(), "maximum rows per text report list") || !strings.Contains(help.String(), "default 20") || !strings.Contains(help.String(), "0 means all") {
 		t.Fatalf("help does not document the limit contract:\n%s", help.String())
 	}
 
@@ -509,9 +509,9 @@ func TestProfileFormatValidationPrecedesFileAccess(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--format=text"}, "--format applies only to --profile"},
-		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile"},
-		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile"},
+		{[]string{"--format=text"}, "--format applies only to --profile or --compare"},
+		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile or --compare"},
+		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile or --compare"},
 		{[]string{"--profile", "--format=yaml"}, "--format must be text or json"},
 		{[]string{"--profile", "--format="}, "--format must be text or json"},
 		{[]string{"--profile", "--format=JSON"}, "--format must be text or json"},
@@ -550,7 +550,7 @@ func TestProfileFormatRepeatedFlagsUseLastValueAndRetainPresence(t *testing.T) {
 	}
 
 	err := run([]string{"--format=json", "--format=text", "missing.log"}, io.Discard, io.Discard)
-	if err == nil || err.Error() != "--format applies only to --profile" {
+	if err == nil || err.Error() != "--format applies only to --profile or --compare" {
 		t.Fatalf("explicit repeated format outside profile: %v", err)
 	}
 }
@@ -560,7 +560,7 @@ func TestProfileFormatPreservesHelpAndVersionPrecedence(t *testing.T) {
 	if err := run([]string{"--help", "--format=json"}, io.Discard, &help); err != nil {
 		t.Fatalf("help: %v", err)
 	}
-	if !bytes.Contains(help.Bytes(), []byte("profile output format: text or json (--profile only)")) {
+	if !bytes.Contains(help.Bytes(), []byte("profile or comparison output format: text or json")) {
 		t.Fatalf("help does not document format:\n%s", help.Bytes())
 	}
 	if !bytes.Contains(help.Bytes(), []byte("tfli --profile [--format text] [--limit N]")) {
