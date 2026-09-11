@@ -94,5 +94,5 @@ func comparisonKeyLess(left, right ComparisonKey) bool {
 			return leftFields[index] < rightFields[index]
 		}
 	}
-	return false
+	return left.DurationSource < right.DurationSource
 }

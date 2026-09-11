@@ -170,8 +170,8 @@ func TestComparisonJSONIsOneDocumentAndOutputOnly(t *testing.T) {
 		t.Fatalf("decode after document = %v", err)
 	}
 	root := document.(map[string]any)
-	if root["schema_version"] != float64(2) {
-		t.Fatalf("schema version = %v, want 2", root["schema_version"])
+	if root["schema_version"] != float64(1) {
+		t.Fatalf("schema version = %v, want 1", root["schema_version"])
 	}
 	for _, side := range []string{"before", "after"} {
 		capture := root[side].(map[string]any)

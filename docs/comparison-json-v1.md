@@ -1,6 +1,6 @@
 # Comparison JSON v1
 
-This is the historical version 1 contract. The current CLI emits [Comparison JSON v2](comparison-json-v2.md).
+This is the current alpha contract. Profile and comparison JSON keep `schema_version: 1` until v1 is tagged. Breaking contract changes are permitted during the alpha; there are no compatibility export modes.
 
 Comparison JSON reports the observed differences between two complete profile
 captures. It contains no generated timestamp, absolute path, raw body,
@@ -41,8 +41,8 @@ on the identity sets. It does not establish provider-version equivalence.
 1. `rpc_providers` (`rpc`), keyed by `provider`.
 2. `rpc_resource_types` (`rpc`), keyed by `resource_type`.
 3. `rpc_methods` (`rpc`), keyed by `provider`, `resource_type`, `method`.
-4. `ui_resource_types` (`ui`), keyed by `resource_type`.
-5. `ui_operations` (`ui`), keyed by `address`, `action`.
+4. `ui_resource_types` (`ui`), keyed by `resource_type`, `duration_source`.
+5. `ui_operations` (`ui`), keyed by `address`, `action`, `duration_source`.
 
 Each section has `kind`, `tier`, `before_available`, `after_available`, and
 `rows`. A tier is available when its admitted observation slice is nonempty,
@@ -59,7 +59,9 @@ Each row has `key`, `state`, `before`, `after`, and `changes`. State is one of
 observation presence, not Terraform actions. If either whole tier is
 unavailable, the row is `unavailable`, the unavailable side is `null`, and all
 changes are `null`. When both tiers are available, absent groups have a zero
-count and total, with null mean and maximum.
+count and total, with null mean and maximum. For resource rows this availability rule applies independently to `duration_source`: if that source is absent from the entire other capture, its side is null and all changes are null, even when the other capture has resource observations from another source. An absent group has zero count and total only when that same source is available elsewhere in the capture. `before_available` and `after_available` remain whole-tier flags; individual rows can be unavailable despite both flags being true.
+
+The retained `ui` keys describe resource operations from `ui_elapsed`, `refresh_window`, or `cli_elapsed`. Source kinds never match each other. Capture `quality.duration_sources` exposes each side's observed source counts and durations, making source coverage changes visible. CLI durations remain comparable within their source despite having no timeline positions. Unnamed totals combine admitted unnamed resource observations as a capture summary and have no comparison delta.
 
 Each row's `key` object contains only the fields applicable to that section.
 Those fields appear in the order documented in the five-item section list
@@ -88,7 +90,7 @@ with `comparison duration total overflows uint64`.
 Rows preserve the complete deterministic model order. Within each section,
 exact total-duration changes rank positive increases first, then zero, then
 decreases nearest zero first. Rows without an exact total change are last and
-sorted by their raw key fields in table order, bytewise ascending. Lower-bound
+sorted by their raw identifier fields in table order, bytewise ascending, then duration source in the order `ui_elapsed`, `refresh_window`, `cli_elapsed`. Lower-bound
 rows do not participate in exact timing-change ranking. JSON includes every
 row, including unranked, unavailable, added, and removed rows; text views may
 apply independent limits.
@@ -98,15 +100,17 @@ apply independent limits.
 `qualifications` is an array of string codes in this order:
 
 `unmasked_identifiers`, `logging_affects_durations`,
-`rpc_and_ui_measure_different_work`, `ui_duration_rounding`,
+`rpc_and_ui_measure_different_work`, `ui_elapsed_duration_rounding`,
+`refresh_windows_are_hook_measurements`, `cli_elapsed_displayed_resolution`,
+`resource_duration_sources_not_interchangeable`,
 `observed_changes_are_not_causal`, `added_removed_are_observation_presence`,
 `independent_scrub_aliases_may_differ`, `logging_configuration_unknown`, and
 `lower_bounds_do_not_define_timing_deltas`.
 
 The codes disclose that identifiers are unmasked; logging changes measured
-durations; RPC and UI-hook durations measure different, overlapping work and
-must not be added, subtracted, or treated as interchangeable; UI durations can
-differ by up to one second due to rounding; observed changes do not prove
+durations; RPC and resource durations measure different, overlapping work and
+must not be added, subtracted, or treated as interchangeable; structured reported durations can
+differ by up to one second due to rounding; refresh windows measure hooks; CLI durations retain displayed resolution; unlike duration sources cannot define performance deltas; observed changes do not prove
 causality; added and removed rows indicate observation presence; independently
 scrubbed captures may use different aliases; logging equivalence is unknown;
 and lower bounds do not define timing deltas. Comparisons produce observations,

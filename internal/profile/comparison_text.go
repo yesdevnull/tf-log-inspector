@@ -42,7 +42,9 @@ func writeComparisonQualifications(b *strings.Builder, comparison model.Comparis
 	}
 	fmt.Fprintln(b, "  Provider identity strings do not establish matching provider versions.")
 	fmt.Fprintln(b, "  RPC calls and UI resource operations measure different, potentially overlapping work; they are not combined.")
-	fmt.Fprintln(b, "  UI durations are rounded by up to one second per observation.")
+	fmt.Fprintln(b, "  ui_elapsed durations are rounded by up to one second per observation.")
+	fmt.Fprintln(b, "  refresh_window measures a hook window; cli_elapsed retains displayed resolution and has no timeline position.")
+	fmt.Fprintln(b, "  Resource comparisons match duration sources; a source absent from a capture is unavailable, not a zero-duration improvement.")
 	fmt.Fprintln(b, "  added and removed mean observed evidence presence, not resource creation or destruction.")
 	fmt.Fprintln(b, "  Observed changes do not establish causes or a performance verdict.")
 	fmt.Fprintln(b, "  separately scrubbed aliases cannot be matched reliably.")
@@ -136,12 +138,14 @@ func comparisonKeyText(kind string, key model.ComparisonKey) string {
 	switch kind {
 	case "rpc_providers":
 		return "provider=" + d(key.Provider)
-	case "rpc_resource_types", "ui_resource_types":
+	case "rpc_resource_types":
 		return "resource_type=" + d(key.ResourceType)
+	case "ui_resource_types":
+		return "resource_type=" + d(key.ResourceType) + "  duration_source=" + key.DurationSource.String()
 	case "rpc_methods":
 		return "provider=" + d(key.Provider) + "  resource_type=" + d(key.ResourceType) + "  method=" + d(key.Method)
 	case "ui_operations":
-		return "address=" + d(key.Address) + "  action=" + d(key.Action)
+		return "address=" + d(key.Address) + "  action=" + d(key.Action) + "  duration_source=" + key.DurationSource.String()
 	default:
 		return "unknown"
 	}

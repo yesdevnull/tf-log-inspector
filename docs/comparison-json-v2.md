@@ -1,5 +1,7 @@
 # Comparison JSON v2
 
+Superseded reference: the alpha CLI emits [Comparison JSON v1](comparison-json-v1.md), which is the current authoritative contract and compares resource duration sources separately. The historical schema-version increment below is no longer emitted.
+
 Comparison JSON reports the observed differences between two complete profile
 captures. It contains no generated timestamp, absolute path, raw body,
 interned identifier, source observation array, or copied profile ranking list.

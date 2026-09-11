@@ -210,7 +210,7 @@ func TestJSONProjectionMapsAllConfidenceStates(t *testing.T) {
 	}
 }
 
-func TestReconstructionJSONMapsEveryV2State(t *testing.T) {
+func TestReconstructionJSONMapsEveryState(t *testing.T) {
 	tests := []struct {
 		name string
 		in   model.ReconstructionQuality
@@ -229,7 +229,7 @@ func TestReconstructionJSONMapsEveryV2State(t *testing.T) {
 				t.Fatal(err)
 			}
 			root := decodeJSONObject(t, out.Bytes())
-			assertJSONLiteral(t, root, "schema_version", "2")
+			assertJSONLiteral(t, root, "schema_version", "1")
 			reconstruction := decodeJSONObject(t, decodeJSONObject(t, root["quality"])["reconstruction"])
 			assertJSONKeys(t, "reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
 			for i, key := range []string{"state", "responses", "diagnostics", "code"} {
@@ -239,7 +239,7 @@ func TestReconstructionJSONMapsEveryV2State(t *testing.T) {
 	}
 }
 
-func TestReconstructionJSONRejectsInvalidV2Snapshots(t *testing.T) {
+func TestReconstructionJSONRejectsInvalidSnapshots(t *testing.T) {
 	tests := []struct {
 		name string
 		in   model.ReconstructionQuality
