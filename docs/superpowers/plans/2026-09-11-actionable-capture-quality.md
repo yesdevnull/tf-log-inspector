@@ -52,7 +52,7 @@
 
 There is one inspection command in flight per TUI capture. Repeated check actions join it rather than scheduling another command. The model's existing `sync.Once` also protects concurrent callers outside that TUI instance. Closing a view does not cancel the inspection, and no worker reads or writes `*tui.Model`.
 
-Use two result stages: an inspection-complete message contains the capture and inspection generation; a response-ready message contains the capture and response request ID. On inspection completion, resolve whichever response request is currently pending, using its saved original entry/line offset. The formatting command returns its result tagged with that request ID. Reject results for a different capture, a closed response, a newer request or a quitting model. Closing/reopening never reuses a request ID.
+Use two result stages: an inspection-complete message contains the capture and inspection generation; a response-ready message contains the capture and response request ID. On inspection completion, resolve whichever response request is currently waiting for inspection, using its saved original entry/line offset. Distinguish waiting for inspection from an already queued lookup/formatting command so one request cannot schedule presentation twice. The formatting command returns its result tagged with that request ID. Reject results for a different capture, a closed response, a newer request or a quitting model. Closing/reopening never reuses a request ID.
 
 The quality panel initially selects a `Check responses` action at the top. Opening the panel or rendering it never starts work. Keep that action identifiable after completion so publication cannot shift selection onto an unrelated anomaly. Checked results are cached; activating the action again displays the existing outcome rather than retrying a failed immutable capture.
 
@@ -123,7 +123,7 @@ Run focused model tests, `go test -race ./internal/model`, `go test ./...`, form
 
 ## Task 2: Non-blocking response checks and request-safe completion
 
-**Files:** create `internal/tui/response_check.go` and `response_check_test.go`; modify `response.go`, `model.go` and existing response/quality/recovery/search test helpers.
+**Files:** create `internal/tui/response_check.go` and `response_check_test.go`; modify `response.go`, `model.go`, `workbench.go` and existing response/quality/recovery/search test helpers.
 
 **Interfaces:**
 - Consume Task 1's model methods and existing `rawResponsePosition()`.
@@ -131,6 +131,7 @@ Run focused model tests, `go test -race ./internal/model`, `go test ./...`, form
 - Change `func (m *Model) openResponse() tea.Cmd`; the `r` dispatcher returns its command.
 - Produce `func responseInspectionCmd(l *model.Log, generation uint64) tea.Cmd`, `func responseSelectionCmd(l *model.Log, request responseRequest) tea.Cmd` and `func presentResponse(selection model.ProviderResponseSelection) responseState`.
 - Produce `func (m *Model) completeResponseInspection(msg responseInspectionDoneMsg) tea.Cmd` and `func (m *Model) completeResponseSelection(msg responseReadyMsg)`.
+- Produce `func (m *Model) queueResponseSelection() tea.Cmd` as the single scheduling gate and `func (m *Model) responseNavigationHint() string` for pending-aware guidance in both the response footer and workbench navigation.
 
 - [ ] **Step 1: Add failing deferred-command journeys.**
 
@@ -161,6 +162,8 @@ func TestResponseFirstRequestIsPendingBeforeCommandRuns(t *testing.T) {
 
 Test repeated `requestResponseCheck` returns no second command while running. Close the response before executing the inspection command; its completion must not reopen it. Also close/reopen at a different physical position, then deliver the old response-ready result after the newer result; only the newer request may remain visible. Deliver a completion from a different `*model.Log` and after quit; neither may change the current view.
 
+Cover publication before message delivery: start a check, execute its real command but hold the completion message, then open a response. The checked cache must schedule one response-selection command. Deliver the held inspection-complete message before that selection command finishes; it must return nil rather than queue another lookup/formatting pass. Execute the original selection command and verify the requested body appears. While waiting for inspection and while preparing the response, full `View()` output must advertise close/quit only, with no search, repeat-match or scroll hints. After completion those controls return.
+
 Run `go test ./internal/tui -run 'TestResponseFirstRequest|TestResponseCheck|TestResponseCompletion' -count=1` and record RED.
 
 - [ ] **Step 2: Implement the command/message protocol.**
@@ -188,7 +191,7 @@ type responseReadyMsg struct {
     presentation responseState
 }
 // Model: inspection responseInspectionState; nextResponseRequestID uint64
-// responseState: pending bool; request responseRequest
+// responseState: pending bool; resolving bool; request responseRequest
 
 func responseInspectionCmd(l *model.Log, generation uint64) tea.Cmd {
     return func() tea.Msg {
@@ -207,11 +210,25 @@ func (m *Model) requestResponseCheck() tea.Cmd {
 }
 ```
 
-On `openResponse`, increment `nextResponseRequestID`, snapshot the original raw entry and line offset, and initialise an open status view containing `Checking responses…` plus `Closing this view leaves the check running.` Set `pending=true`. If already checked, return `responseSelectionCmd` directly; otherwise return `requestResponseCheck`. A nil command while running means this response joins the existing check. Empty raw captures still permit the explicit whole-capture check; their invalid source request resolves to the existing no-response status.
+On `openResponse`, increment `nextResponseRequestID`, snapshot the original raw entry and line offset, and initialise an open status view containing `Checking responses…` plus `Closing this view leaves the check running.` Set `pending=true` and `resolving=false`. If already checked, return `queueResponseSelection`; otherwise call `requestResponseCheck`. Return its command if nonnil. If it returns nil, recheck the published outcome: a checked result queues selection, while a still-running check is joined without scheduling another command. This also handles publication between the two quality reads. Empty raw captures still permit the explicit whole-capture check; their invalid source request resolves to the existing no-response status.
 
-Inspection completion is handled as its own top-level message case, before key/modal routing. Reject a different capture, mismatched generation, duplicate completion when not running, or a quitting model. Mark the matching check no longer running. If a response is still open and pending, return `responseSelectionCmd(m.log, m.response.request)`; otherwise return nil. Quality results become visible through the model's published getters without reopening the quality panel.
+Inspection completion is handled as its own top-level message case, before key/modal routing. Reject a different capture, mismatched generation, duplicate completion when not running, or a quitting model. Mark the matching check no longer running and return `queueResponseSelection()`. That gate returns nil for a closed response or one already being prepared. Quality results become visible through the model's published getters without reopening the quality panel.
 
 ```go
+func (m *Model) queueResponseSelection() tea.Cmd {
+    r := &m.response
+    if m.quitting || !r.open || !r.pending || r.resolving {
+        return nil
+    }
+    if m.log.ReconstructionQuality().State == "not_checked" {
+        return nil
+    }
+    r.resolving = true // set before returning the command
+    r.lines = []string{"Preparing response…"}
+    r.viewport.SetContent(strings.Join(r.lines, "\n"))
+    return responseSelectionCmd(m.log, r.request)
+}
+
 func responseSelectionCmd(l *model.Log, request responseRequest) tea.Cmd {
     return func() tea.Msg {
         selection := model.ProviderResponseSelection{State: "none"}
@@ -226,7 +243,16 @@ func responseSelectionCmd(l *model.Log, request responseRequest) tea.Cmd {
 
 Extract the existing formatting/escaping body of `openResponse` into `presentResponse`: initialise its own viewport and return a complete `responseState`, without reading a TUI model. Preserve fragment counts, decoded messages, incomplete/unavailable statuses and the partial-capture notice. `responseSelectionCmd` runs only after inspection is checked, keeping lookup and potentially large formatting outside Update.
 
-On response-ready, require the same log, an open pending response, matching `request.id` and `!m.quitting`; transfer the presentation and retain the current request value. Set `pending=false`. Closing and quit keep their current meanings; while pending, accept close/quit but swallow search and scroll keys. The footer must retain close and quit guidance, including in the composed workbench.
+On response-ready, require the same log, an open pending and resolving response, matching `request.id` and `!m.quitting`; transfer the presentation and retain the current request value. Set `pending=false` and `resolving=false`. Closing and quit keep their current meanings; while pending, accept close/quit but swallow search and scroll keys.
+
+Pending guidance is `Esc/r back` in the navigation row and `q quit` in the action row. Add the shared helper below and use it in both `responseFooter` and the response branch of `workbenchView`; the latter currently hard-codes `responseNavigation`, so a footer-only change is insufficient. In `responseFooter`, check pending before search/not-found branches and return those two pending rows. Completed views retain their existing navigation and search hints.
+
+```go
+func (m *Model) responseNavigationHint() string {
+    if m.response.pending { return "Esc/r back" }
+    return responseNavigation
+}
+```
 
 - [ ] **Step 3: Adapt tests to execute actual commands and verify responsiveness.**
 
@@ -374,3 +400,10 @@ Commit explicit paths with signed subject `Navigate quality findings and check r
 Task 1 covers explicit whole-capture inspection, zero-message outcomes, detached diagnostic access and publication. Task 2 covers ordinary `r`, pending presentation, shared work, closure, quit, capture/request guards and formatting outside Update. Task 3 covers selectable actions, paging, first-example and primary diagnostic navigation, owned panel history, content-free diagnostics, documentation and combined terminal verification. All tasks consume the same named interfaces; no JSON, scrub acceptance, CLI mode or display-window changes are proposed.
 
 The prose-only paging rule is made explicit above so implementations cannot solve visible-selection reconciliation by skipping non-actionable guide sections. No unresolved implementation dependencies remain; review this plan before starting code.
+
+## Plan review corrections
+
+- A check can publish its cache before its completion message reaches Update. Opening a response in that interval queues presentation from the ready cache; the delayed completion must not queue it again. Task 2 now records the resolving phase before command dispatch and routes both triggers through one gate, with a deterministic real-command ordering test.
+- Pending responses intentionally ignore search and scrolling, but the existing response footer and workbench advertise those keys independently. Task 2 now specifies shared pending-aware navigation, close/quit-only actions, full-view assertions and a separate preparing status once inspection has completed.
+
+These corrections change the plan only. Re-tracing first inspection, joining, cached response opening, delayed completion, closed/replaced requests and final result delivery leaves one presentation command per request and no inactive controls advertised in a pending view.
