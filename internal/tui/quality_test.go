@@ -154,6 +154,58 @@ func TestQualityPagingKeepsTallOverlappingActionSelected(t *testing.T) {
 	}
 }
 
+func TestQualityArrowUpRevealsTallActionFirstRow(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	tall := qualityItemID{kind: "diagnostic", index: 1}
+	next := qualityItemID{kind: "diagnostic", index: 2}
+	actions := []qualityActionRow{{id: tall, start: 0, end: 7}, {id: next, start: 7, end: 8}}
+	m.quality.viewport = viewport.New(20, 3)
+	m.quality.viewport.SetContent(strings.Repeat("row\n", 8))
+	m.quality.viewport.SetYOffset(5)
+	m.quality.selected = next
+	m.moveQualitySelection(actions, false)
+	if m.quality.selected != tall || m.quality.viewport.YOffset != 0 {
+		t.Fatalf("Up selected/offset = %+v/%d, want tall/0", m.quality.selected, m.quality.viewport.YOffset)
+	}
+}
+
+func TestQualityProseOnlyPageClearsSelectionAndRecoversByDirection(t *testing.T) {
+	records := []qualityRecord{
+		{id: qualityItemID{kind: "check"}, text: "before"},
+		{text: strings.Repeat("prose ", 24)},
+		{id: qualityItemID{kind: "diagnostic", index: 1}, text: "after", sourceLine: 9},
+	}
+	lines, actions := wrapQualityRecords(records, 12)
+	if len(actions) != 2 || actions[1].start-actions[0].end < 3 {
+		t.Fatal("fixture has no prose-only page")
+	}
+	m := qualityModel(t, "capture.log")
+	m.quality.open = true
+	m.quality.viewport = viewport.New(12, 3)
+	m.quality.viewport.SetContent(strings.Join(lines, "\n"))
+	proseOffset := actions[0].end
+	m.quality.viewport.SetYOffset(proseOffset)
+	m.selectVisibleQualityAction(actions, true)
+	if m.quality.selected != (qualityItemID{}) {
+		t.Fatalf("prose page selection = %+v", m.quality.selected)
+	}
+	view, depth := m.view, len(m.history)
+	m.handleQualityKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != view || len(m.history) != depth {
+		t.Fatal("Enter acted on prose-only page")
+	}
+	m.moveQualitySelection(actions, true)
+	if m.quality.selected != actions[1].id {
+		t.Fatalf("Down recovered %+v, want next", m.quality.selected)
+	}
+	m.quality.selected = qualityItemID{}
+	m.quality.viewport.SetYOffset(proseOffset)
+	m.moveQualitySelection(actions, false)
+	if m.quality.selected != actions[0].id {
+		t.Fatalf("Up recovered %+v, want previous", m.quality.selected)
+	}
+}
+
 func TestQualityPublicationPrecedesInspectionMessage(t *testing.T) {
 	m := responseModel(t, `{"message":"available"}`)
 	m.openQuality()
