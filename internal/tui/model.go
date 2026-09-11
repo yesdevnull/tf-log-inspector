@@ -325,13 +325,8 @@ type facetCursor struct {
 // first; Pane's own zero value is PaneFacets, so this is set explicitly
 // rather than left to the zero value.
 //
-// The opening view is ViewCalls: the individual calls, with the facet pane
-// beside them. That is the shape a reader expects of a list and a sidebar --
-// the rows are the calls, the sidebar filters them -- whereas opening on a
-// rollup put a providers table next to a PROVIDERS facet list and left the
-// sidebar's filtering role to be guessed. View's own zero value is
-// ViewProviders, so this is set explicitly rather than left to the zero
-// value.
+// Captures with RPC timings open on Calls; UI-only captures open on
+// Resources so the first screen shows the evidence available in the log.
 func New(l *model.Log, path string) Model {
 	// The level dimension goes last, after the span dimensions
 	// FacetsForSpans builds: it is the one dimension drawn from entries
@@ -348,6 +343,9 @@ func New(l *model.Log, path string) Model {
 		pane:          PaneList,
 		facets:        facets,
 		resourceIndex: resourceIndex,
+	}
+	if len(l.RPCSpans) == 0 && len(l.UISpans) > 0 {
+		m.view = ViewResources
 	}
 	// Every table view starts on the column its own builder already ranks
 	// by, so the table is served in that builder's own order -- tie-break

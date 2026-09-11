@@ -6,8 +6,8 @@
 [36m│[0m google/1 [34m       ░██████████░                            [0m [36m│[0m
 [36m│[0m rpc      0s                                         9.0s [36m│[0m
 [36m│[0m busy 7.5s of 9.0s (83%)                                  [36m│[0m
-[36m│[0m waiting on aws/1, 4.0s–9.0s — concurrency 1 of 2         [36m│[0m
-[36m│[0m nothing running, 0s–1.0s — before any call               [36m│[0m
+[36m│[0m active in aws/1, 4.0s–9.0s — concurrency 1 of 2          [36m│[0m
+[36m│[0m no observed work, 0s–1.0s — before first                 [36m│[0m
 [36m│[0m                                                          [36m│[0m
 [36m│[0m                                                          [36m│[0m
 [36m│[0m                                                          [36m│[0m

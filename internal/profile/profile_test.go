@@ -164,6 +164,29 @@ func TestReportShowsResourceTypeJoin(t *testing.T) {
 	}
 }
 
+func TestTypeReportDistinguishesMissingRPCFromMeasuredZero(t *testing.T) {
+	l := &model.Log{
+		UISpans:  []span.Span{{ResourceType: "aws_instance", DurationMs: 1000, Fidelity: span.FidelityUIReported}},
+		RPCSpans: []span.Span{{ResourceType: "aws_subnet", DurationMs: 0}},
+	}
+	var out strings.Builder
+	if err := Render(&out, l, TextOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range tableRows(t, out.String(), "BY RESOURCE TYPE") {
+		cells := strings.Fields(line)
+		if len(cells) != 6 {
+			continue
+		}
+		if cells[0] == "aws_instance" && (cells[4] != "n/a" || cells[5] != "n/a") {
+			t.Errorf("absent RPC timings presented as measurements: %s", line)
+		}
+		if cells[0] == "aws_subnet" && (cells[4] != "0ms" || cells[5] != "0ms") {
+			t.Errorf("measured zero RPC lost: %s", line)
+		}
+	}
+}
+
 // UI-hook figures are whole seconds carrying up to a second of error each, so
 // a report that ranks them must say so.
 func TestReportStatesUIHookResolution(t *testing.T) {

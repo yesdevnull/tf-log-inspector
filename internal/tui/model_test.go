@@ -135,6 +135,18 @@ func TestNewOpensOnTheCallsView(t *testing.T) {
 	}
 }
 
+func TestUIOnlyCaptureOpensWithResourceTimings(t *testing.T) {
+	m := New(testLog(t, "structured-ui.log"), "ui.log")
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if m.ActiveView() != ViewResources || m.RowCount() == 0 {
+		t.Fatalf("UI capture opened on %v with %d rows", m.ActiveView(), m.RowCount())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.resourceOperations || m.RowCount() == 0 {
+		t.Fatal("opening resource did not expose its observed operations")
+	}
+}
+
 // Every View must have a binding: the centre pane takes its title from that
 // table and the footer takes its key hint from it, so a view added to the
 // enum and not to the table renders a nameless pane and is reachable by no

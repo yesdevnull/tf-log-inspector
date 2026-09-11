@@ -127,6 +127,16 @@ right, and the raw log with `/` search. `q` quits. Read
 [What each mode discloses](#what-each-mode-discloses) before you share a
 session — the interface shows more of your log than either report does.
 
+Captures with only structured UI timings open on Resources. RPC durations
+without observations display as `n/a` in the resource-type tables; measured
+zero durations remain zero. Timeline activity and gaps describe the selected
+observations and do not establish waiting or Terraform idleness.
+
+Plain-text CLI completion durations are not currently parsed. Structured
+`refresh_start`/`refresh_complete` pairs provide context but are not ranked as
+durations: they do not carry `elapsed_seconds`. Resource rankings therefore
+cover admitted completion hooks, not every refresh operation in a capture.
+
 The top tab bar highlights the active view; its number keys switch views.
 `Tab` moves the arrow and accented panel border to the pane receiving keyboard
 input. The filter title counts hidden values. Raw Log uses the available width
