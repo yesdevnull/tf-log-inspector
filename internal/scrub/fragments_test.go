@@ -3,6 +3,7 @@ package scrub
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -137,6 +138,61 @@ func TestScrubRejectsInvalidProviderFragments(t *testing.T) {
 		if strings.Contains(err.Error(), "private-credential") {
 			t.Fatal("error disclosed source")
 		}
+	}
+}
+
+func TestScrubRejectsPartialProviderJSONRecovery(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] "
+	provider := func(component, body string) string { return header + "provider." + component + ": " + body }
+	cases := []struct {
+		name, input string
+		wantBodies  []string
+		wantCodes   []string
+		forbidden   []string
+	}{
+		{"good A malformed B good A", provider("a", `{"id":"private-sentinel"}`) + "\n" + provider("b", `{"token":]}`) + "\n" + provider("a", `{"ok":true}`) + "\n", []string{`{"id":"private-sentinel"}`, `{"ok":true}`}, []string{"delimiter_mismatch"}, []string{"private-sentinel", "provider.b", "token"}},
+		{"pending A malformed B completed A", provider("a", `{"id":"private-`) + "\n" + provider("b", `{"token":]}`) + "\n" + provider("a", `sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"delimiter_mismatch"}, []string{"private-sentinel", "provider.b", "token"}},
+		{"complete A incomplete A at EOF", provider("a", `{"id":"private-sentinel"}`) + "\n" + provider("a", `{"unfinished":"private-body`), []string{`{"id":"private-sentinel"}`}, []string{"incomplete"}, []string{"private-sentinel", "provider.a", "private-body"}},
+		{"invalid UTF-8", provider("damaged", "{\"token\":\"\xff\"}") + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"invalid_utf8"}, []string{"private-sentinel", "provider.damaged", "token"}},
+		{"invalid JSON syntax", provider("damaged", `{"token":invalid}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"json_syntax"}, []string{"private-sentinel", "provider.damaged", "token"}},
+		{"invalid suffix grammar", provider("damaged", `{"token":"private-body"} trailing-private`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"suffix_grammar"}, []string{"private-sentinel", "provider.damaged", "trailing-private"}},
+		{"malformed inline UI", provider("damaged", `{"token":"private-body{"@module":false}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"invalid_inline_ui"}, []string{"private-sentinel", "provider.damaged", "private-body"}},
+		{"quarantined same-component restart", provider("damaged", `{"token":]}`) + "\n" + provider("damaged", `{"restart":"private-body"}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"delimiter_mismatch"}, []string{"private-sentinel", "provider.damaged", "private-body"}},
+		{"global ownership failure", provider("good", `{"id":"private-sentinel"}`) + "\n" + header + `provider.: {"token":"private-body"}` + "\n" + provider("later", `{"unavailable":true}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"ambiguous_ownership"}, []string{"private-sentinel", "provider.", "private-body"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := logfmt.InspectProviderJSON(tc.input)
+			if len(outcome.Messages) != len(tc.wantBodies) || len(outcome.Diagnostics) == 0 {
+				t.Fatalf("fixture does not exercise partial recovery: %#v", outcome)
+			}
+			for i, message := range outcome.Messages {
+				if message.Text != tc.wantBodies[i] {
+					t.Fatalf("recovered body %d = %q, want %q", i, message.Text, tc.wantBodies[i])
+				}
+			}
+			codes := make([]string, len(outcome.Diagnostics))
+			for i, diagnostic := range outcome.Diagnostics {
+				codes[i] = diagnostic.Code
+				for _, private := range tc.forbidden {
+					if strings.Contains(diagnostic.Error(), private) {
+						t.Fatalf("inspection diagnostic disclosed source content %q: %v", private, diagnostic.Error())
+					}
+				}
+			}
+			if !reflect.DeepEqual(codes, tc.wantCodes) {
+				t.Fatalf("diagnostic codes = %q, want %q", codes, tc.wantCodes)
+			}
+			result, err := Scrub([]byte(tc.input), nil)
+			if err == nil || !reflect.DeepEqual(result, Result{}) {
+				t.Fatalf("partial reconstruction produced scrub output: %#v, %v", result, err)
+			}
+			for _, private := range tc.forbidden {
+				if strings.Contains(err.Error(), private) {
+					t.Fatalf("diagnostic disclosed source content %q: %v", private, err)
+				}
+			}
+		})
 	}
 }
 

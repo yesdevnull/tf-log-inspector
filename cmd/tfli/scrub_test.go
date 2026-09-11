@@ -347,6 +347,71 @@ func TestRunScrubRejectsFragmentedHTTPRequestBeforeCreatingOutput(t *testing.T) 
 	}
 }
 
+func TestRunScrubRejectsPartialProviderJSONRecoveryBeforePublication(t *testing.T) {
+	const header = "2026-09-08T00:00:00.000Z [DEBUG] "
+	provider := func(component, body string) string { return header + "provider." + component + ": " + body }
+	cases := []struct {
+		name, input string
+		forbidden   []string
+	}{
+		{"good A malformed B good A", provider("a", `{"id":"private-sentinel"}`) + "\n" + provider("b", `{"token":]}`) + "\n" + provider("a", `{"ok":true}`) + "\n", []string{"private-sentinel", "provider.b", "token"}},
+		{"pending A malformed B completed A", provider("a", `{"id":"private-`) + "\n" + provider("b", `{"token":]}`) + "\n" + provider("a", `sentinel"}`) + "\n", []string{"private-sentinel", "provider.b", "token"}},
+		{"complete A incomplete A at EOF", provider("a", `{"id":"private-sentinel"}`) + "\n" + provider("a", `{"unfinished":"private-body`), []string{"private-sentinel", "provider.a", "private-body"}},
+		{"invalid UTF-8", provider("damaged", "{\"token\":\"\xff\"}") + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{"private-sentinel", "provider.damaged", "token"}},
+		{"invalid JSON syntax", provider("damaged", `{"token":invalid}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{"private-sentinel", "provider.damaged", "token"}},
+		{"invalid suffix grammar", provider("damaged", `{"token":"private-body"} trailing-private`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{"private-sentinel", "provider.damaged", "trailing-private"}},
+		{"malformed inline UI", provider("damaged", `{"token":"private-body{"@module":false}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{"private-sentinel", "provider.damaged", "private-body"}},
+		{"quarantined same-component restart", provider("damaged", `{"token":]}`) + "\n" + provider("damaged", `{"restart":"private-body"}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{"private-sentinel", "provider.damaged", "private-body"}},
+		{"global ownership failure", provider("good", `{"id":"private-sentinel"}`) + "\n" + header + `provider.: {"token":"private-body"}` + "\n" + provider("later", `{"unavailable":true}`) + "\n", []string{"private-sentinel", "provider.", "private-body"}},
+	}
+	for _, tc := range cases {
+		for _, existing := range []bool{false, true} {
+			outputState := "absent output"
+			if existing {
+				outputState = "existing output"
+			}
+			t.Run(tc.name+"/"+outputState, func(t *testing.T) {
+				dir := t.TempDir()
+				inputPath := filepath.Join(dir, "source.log")
+				outputPath := filepath.Join(dir, "sanitised.log")
+				if err := os.WriteFile(inputPath, []byte(tc.input), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				const previous = "existing-output-sentinel\n"
+				if existing {
+					if err := os.WriteFile(outputPath, []byte(previous), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var stderr strings.Builder
+				err := runScrub(inputPath, outputPath, "", &stderr)
+				if err == nil {
+					t.Fatal("partial reconstruction succeeded")
+				}
+				if stderr.Len() != 0 {
+					t.Fatalf("failure wrote stderr: %q", stderr.String())
+				}
+				for _, private := range tc.forbidden {
+					if strings.Contains(err.Error(), private) {
+						t.Fatalf("error disclosed source content %q: %v", private, err)
+					}
+				}
+				if existing {
+					output, readErr := os.ReadFile(outputPath)
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					if string(output) != previous {
+						t.Fatalf("existing output changed: %q", output)
+					}
+				} else if _, statErr := os.Lstat(outputPath); !os.IsNotExist(statErr) {
+					t.Fatalf("output exists after strict rejection: %v", statErr)
+				}
+			})
+		}
+	}
+}
+
 func TestRunScrubRejectsParserWindowChangesBeforeCreatingOutput(t *testing.T) {
 	prefix := "Received downstream response: name=a padding="
 	for name, message := range map[string]string{
