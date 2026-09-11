@@ -40,13 +40,14 @@ const (
 // timelineSpans reports which tier the timeline draws under the active
 // filter, and the filtered spans of that tier.
 //
-// The tier is decided from the log's WHOLE RPC span set, before filtering:
-// a facet selection that happens to hide every RPC span must still draw an
-// empty RPC timeline rather than silently swapping in the UI tier, which
-// would redraw the whole pane under the user and change what its numbers
-// mean without saying so. The project owner's chosen fallback -- RPC where
-// the log has one, otherwise UI -- is therefore a property of the LOG, not
-// of the current selection.
+// Default preference and availability are decided from the log's WHOLE span
+// sets, before filtering. A facet selection that happens to hide every RPC
+// span must still draw an empty RPC timeline rather than silently swapping in
+// the UI tier, which would redraw the whole pane under the user and change
+// what its numbers mean without saying so. The project owner's chosen fallback
+// -- RPC where the log has one, otherwise UI -- is therefore a property of the
+// LOG, while an explicit TUI tier choice is retained separately in timeline
+// state. Neither is derived from the current selection.
 //
 // tierNone is reported only when the log carries neither tier at all: a
 // filter narrowing a tier that DOES exist down to nothing is reported as
