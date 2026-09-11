@@ -24,7 +24,7 @@
 
 **Interfaces:** Implement the DurationSource constants and Span fields from the spec exactly. Consumers continue reading `Log.UISpans`, `UIEvidence`, `UIOrigin`. Expose a model helper for observation source ranges if needed, and document its exact signature in the task report. Do not change JSON or TUI in this task.
 
-- [ ] Add failing builder and model/diagnose tests for matched refresh pairs and CLI completions. Tests must assert literal source, duration, admission and position results, e.g. a pair from `2026-09-11T00:00:01Z` to `2026-09-11T00:00:03.250Z` yields `2250` ms and `SourceRefreshWindow`; `aws_instance.example: Creation complete after 2m16s` yields `136000` ms and no position.
+- [x] Add failing builder and model/diagnose tests for matched refresh pairs and CLI completions. Tests must assert literal source, duration, admission and position results, e.g. a pair from `2026-09-11T00:00:01Z` to `2026-09-11T00:00:03.250Z` yields `2250` ms and `SourceRefreshWindow`; `aws_instance.example: Creation complete after 2m16s` yields `136000` ms and no position.
 
 ```go
 if got.DurationMs != 2250 || got.DurationSource != span.SourceRefreshWindow || !got.HasPosition() {
@@ -32,10 +32,10 @@ if got.DurationMs != 2250 || got.DurationSource != span.SourceRefreshWindow || !
 }
 ```
 
-- [ ] Run focused tests and record expected RED failures.
-- [ ] Implement pairing, CLI fallback admission, exact entry identity/source ranges, source evidence and shared diagnose/model admission. Avoid interpreting provider payloads as lifecycle messages. Count malformed/unmatched/backwards/suppressed evidence explicitly.
-- [ ] Add and run boundary regressions from the spec; keep existing suites passing where output contracts have not intentionally changed. Record any downstream presentation expectations needing Task 2/3 updates.
-- [ ] Validate the three real captures using the counts in the spec; run `go test ./internal/span ./internal/logfmt ./internal/model ./internal/diagnose ./cmd/tfli`, `go build ./...`, and signed commit.
+- [x] Run focused tests and record expected RED failures.
+- [x] Implement pairing, CLI fallback admission, exact entry identity/source ranges, source evidence and shared diagnose/model admission. Avoid interpreting provider payloads as lifecycle messages. Count malformed/unmatched/backwards/suppressed evidence explicitly.
+- [x] Add and run boundary regressions from the spec; keep existing suites passing where output contracts have not intentionally changed. Record any downstream presentation expectations needing Task 2/3 updates.
+- [x] Validate the three real captures using the counts in the spec; run `go test ./internal/span ./internal/logfmt ./internal/model ./internal/diagnose ./cmd/tfli`, `go build ./...`, and signed commit.
 
 ### Task 2: Present all sources in terminal and text reports
 
@@ -43,7 +43,7 @@ if got.DurationMs != 2250 || got.DurationSource != span.SourceRefreshWindow || !
 
 **Interfaces:** Consume `Span.DurationSource`, `StartEntry`/`HasStartEntry`, and Task 1 source-location helper. Use existing resource selection/projection and timing exclusion flows. JSON/comparison formatting belongs to Task 3.
 
-- [ ] Add failing rendered-output and navigation tests covering each source. A CLI operation must show its source and duration, open its physical line, and produce no timeline lanes. A refresh detail must show both source endpoints and timestamp-derived qualification; a mixed resource table must not label every duration rounded.
+- [x] Add failing rendered-output and navigation tests covering each source. A CLI operation must show its source and duration, open its physical line, and produce no timeline lanes. A refresh detail must show both source endpoints and timestamp-derived qualification; a mixed resource table must not label every duration rounded.
 
 ```go
 if strings.Contains(text, "all durations are rounded") || !strings.Contains(text, "refresh") {
@@ -51,9 +51,9 @@ if strings.Contains(text, "all durations are rounded") || !strings.Contains(text
 }
 ```
 
-- [ ] Run focused tests to observe RED; implement source-aware labels and totals/quality breakdowns. Retain empty RPC handling and neutral activity wording. Replace the temporary unsupported-CLI guidance.
-- [ ] Run TUI/profile/diagnose tests, regenerate affected goldens intentionally, inspect them with `scripts/read-golden.sh` and inspect raw diffs.
-- [ ] Open the three captures and check Resources, operation/source drill-down, Types and Timeline. Run `go test ./...`, build and signed commit.
+- [x] Run focused tests to observe RED; implement source-aware labels and totals/quality breakdowns. Retain empty RPC handling and neutral activity wording. Replace the temporary unsupported-CLI guidance.
+- [x] Run TUI/profile/diagnose tests, regenerate affected goldens intentionally, inspect them with `scripts/read-golden.sh` and inspect raw diffs.
+- [x] Open the three captures and check Resources, operation/source drill-down, Types and Timeline. Run `go test ./...`, build and signed commit.
 
 ### Task 3: Preserve provenance in JSON and comparisons
 
@@ -61,7 +61,7 @@ if strings.Contains(text, "all durations are rounded") || !strings.Contains(text
 
 **Interfaces:** Consume Task 1 provenance and source range helpers. Schema version is `1` for profile and comparison. Retain RPC/UI top-level tier keys. Resource observation `duration_source` is one of the three values in the spec. Source-aware totals expose source counts and durations. Resource comparison keys include duration source. Update existing schema documentation to version 1 and repair links; do not retain compatibility export modes or introduce a v3 contract.
 
-- [ ] Add failing contract tests requiring version 1, source provenance, refresh source range and null CLI positions. Add comparison tests proving identical addresses/actions with different duration sources stay separate.
+- [x] Add failing contract tests requiring version 1, source provenance, refresh source range and null CLI positions. Add comparison tests proving identical addresses/actions with different duration sources stay separate.
 
 ```go
 if doc["schema_version"] != float64(1) {
@@ -69,6 +69,6 @@ if doc["schema_version"] != float64(1) {
 }
 ```
 
-- [ ] Implement serializers and comparison grouping/order/qualification changes; update exact JSON contracts and document every new field. Do not silently match unlike duration sources.
-- [ ] Run focused JSON/comparison tests followed by `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, formatting/diff checks and signed commit.
-- [ ] Reconcile all three captures independently, run task/final reviews and independent test cleanup, resolve findings, and record final validation.
+- [x] Implement serializers and comparison grouping/order/qualification changes; update exact JSON contracts and document every new field. Do not silently match unlike duration sources.
+- [x] Run focused JSON/comparison tests followed by `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run --timeout=5m`, formatting/diff checks and signed commit.
+- [x] Reconcile all three captures independently, run task/final reviews and independent test cleanup, resolve findings, and record final validation.
