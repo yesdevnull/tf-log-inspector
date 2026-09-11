@@ -131,3 +131,13 @@ func totalProviderJSONBytes(fragments []JSONFragment) int {
 	}
 	return total
 }
+
+func providerJSONDiagnosticStart(d ProviderJSONDiagnostic) int {
+	if len(d.Ranges) != 0 {
+		return d.Ranges[0].Start
+	}
+	if len(d.Unavailable) != 0 {
+		return d.Unavailable[0].Start
+	}
+	return 0
+}

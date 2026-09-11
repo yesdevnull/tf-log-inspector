@@ -2,6 +2,7 @@ package logfmt
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -29,13 +30,16 @@ type providerJSONPending struct {
 }
 
 // InspectProviderJSON joins timestamped fragments by exact provider component.
-// Physical line endings are transport bytes, not JSON payload. Inspection stops
-// at the first failure and retains messages completed before it.
+// Physical line endings are transport bytes, not JSON payload. A failed exact
+// component is quarantined while independent components remain recoverable.
 func InspectProviderJSON(text string) ProviderJSONResult {
 	var messages []ProviderJSON
+	var diagnostics []ProviderJSONDiagnostic
 	pending := make(map[string]*providerJSONPending)
+	quarantined := make(map[string]int)
 	active := ""
 	lastLine := 0
+	globalDiagnostic := -1
 	for start, line := 0, 1; start < len(text); line++ {
 		lastLine = line
 		end := strings.IndexByte(text[start:], '\n')
@@ -50,12 +54,39 @@ func InspectProviderJSON(text string) ProviderJSONResult {
 			end--
 		}
 		raw := text[start:end]
+		if globalDiagnostic >= 0 {
+			diagnostics[globalDiagnostic].Unavailable = append(diagnostics[globalDiagnostic].Unavailable, JSONFragment{Start: start, End: end, Line: line})
+			start = next
+			continue
+		}
+		if providerJSONOwnershipUnknown(raw) {
+			for _, p := range pending {
+				message := messages[p.index]
+				diagnostics = append(diagnostics, ProviderJSONDiagnostic{
+					Code: "ambiguous_ownership", Line: line, StartLine: message.Fragments[0].Line,
+					FragmentCount: len(message.Fragments), JoinedBytes: p.body.Len(),
+					FirstFragmentBytes: message.Fragments[0].End - message.Fragments[0].Start,
+					LastFragmentBytes:  p.lastConsumed, Ranges: append([]JSONFragment(nil), message.Fragments...),
+				})
+				messages[p.index] = ProviderJSON{}
+			}
+			clear(pending)
+			diagnostics = append(diagnostics, ProviderJSONDiagnostic{Code: "ambiguous_ownership", Line: line, StartLine: line, Unavailable: []JSONFragment{{Start: start, End: end, Line: line}}})
+			globalDiagnostic = len(diagnostics) - 1
+			start = next
+			continue
+		}
 		comp, offset, header := providerJSONOuter(raw)
 		var p *providerJSONPending
+		quarantineIndex := -1
 		if header {
 			active = comp
+			quarantineIndex = quarantined[comp]
+			if _, ok := quarantined[comp]; !ok {
+				quarantineIndex = -1
+			}
 			p = pending[comp]
-			if p == nil {
+			if p == nil && quarantineIndex < 0 {
 				offset = providerJSONInitial(raw)
 				if offset >= 0 {
 					p = &providerJSONPending{index: len(messages)}
@@ -68,6 +99,18 @@ func InspectProviderJSON(text string) ProviderJSONResult {
 			// when only a different component has unfinished JSON.
 			comp = active
 			p = pending[comp]
+		} else {
+			comp = active
+		}
+		if !header {
+			if index, ok := quarantined[comp]; ok {
+				quarantineIndex = index
+			}
+		}
+		if quarantineIndex >= 0 {
+			diagnostics[quarantineIndex].Unavailable = append(diagnostics[quarantineIndex].Unavailable, JSONFragment{Start: start + offset, End: end, Line: line})
+			start = next
+			continue
 		}
 		if p != nil {
 			message := &messages[p.index]
@@ -85,7 +128,12 @@ func InspectProviderJSON(text string) ProviderJSONResult {
 				ranges := append([]JSONFragment(nil), message.Fragments...)
 				ranges = append(ranges, JSONFragment{Start: start + offset, End: start + len(raw), Line: line})
 				diagnostic := newProviderJSONDiagnostic(reason, line, startLine, len(message.Fragments)+1, p.body.Len(), firstBytes, consumed, providerJSONSyntaxOffset(p.body.String()), ranges)
-				return ProviderJSONResult{Messages: completedProviderJSON(messages), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
+				diagnostics = append(diagnostics, diagnostic)
+				quarantined[comp] = len(diagnostics) - 1
+				messages[p.index] = ProviderJSON{}
+				delete(pending, comp)
+				start = next
+				continue
 			}
 			for _, fragment := range p.ranges {
 				message.Fragments = append(message.Fragments, JSONFragment{Start: start + offset + fragment.Start, End: start + offset + fragment.End, Line: line})
@@ -94,26 +142,30 @@ func InspectProviderJSON(text string) ProviderJSONResult {
 				message.Text = p.body.String()
 				if !utf8.ValidString(message.Text) {
 					diagnostic := newProviderJSONDiagnostic("UTF-8", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, 0, message.Fragments)
-					return ProviderJSONResult{Messages: completedProviderJSONExcept(messages, p.index), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
+					diagnostics = append(diagnostics, diagnostic)
+					quarantined[comp] = len(diagnostics) - 1
+					messages[p.index] = ProviderJSON{}
+					delete(pending, comp)
+					start = next
+					continue
 				}
 				if !json.Valid([]byte(message.Text)) {
 					syntaxOffset := providerJSONSyntaxOffset(message.Text)
 					diagnostic := newProviderJSONDiagnostic("JSON syntax", line, startLine, len(message.Fragments), len(message.Text), firstBytes, consumed, syntaxOffset, message.Fragments)
-					return ProviderJSONResult{Messages: completedProviderJSONExcept(messages, p.index), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
+					diagnostics = append(diagnostics, diagnostic)
+					quarantined[comp] = len(diagnostics) - 1
+					messages[p.index] = ProviderJSON{}
+					delete(pending, comp)
+					start = next
+					continue
 				}
 				delete(pending, comp)
 			}
 		}
 		start = next
 	}
-	if len(pending) != 0 {
-		var earliest *providerJSONPending
-		for _, p := range pending {
-			if earliest == nil || p.index < earliest.index {
-				earliest = p
-			}
-		}
-		message := messages[earliest.index]
+	for _, p := range pending {
+		message := messages[p.index]
 		startLine := message.Fragments[0].Line
 		firstBytes := message.Fragments[0].End - message.Fragments[0].Start
 		diagnostic := ProviderJSONDiagnostic{
@@ -123,12 +175,39 @@ func InspectProviderJSON(text string) ProviderJSONResult {
 			FragmentCount:      len(message.Fragments),
 			JoinedBytes:        totalProviderJSONBytes(message.Fragments),
 			FirstFragmentBytes: firstBytes,
-			LastFragmentBytes:  earliest.lastConsumed,
+			LastFragmentBytes:  p.lastConsumed,
 			Ranges:             append([]JSONFragment(nil), message.Fragments...),
 		}
-		return ProviderJSONResult{Messages: completedProviderJSON(messages), Diagnostics: []ProviderJSONDiagnostic{diagnostic}}
+		diagnostics = append(diagnostics, diagnostic)
+		messages[p.index] = ProviderJSON{}
 	}
-	return ProviderJSONResult{Messages: messages}
+	sort.Slice(diagnostics, func(i, j int) bool {
+		a, b := diagnostics[i], diagnostics[j]
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		if a.StartLine != b.StartLine {
+			return a.StartLine < b.StartLine
+		}
+		if providerJSONDiagnosticStart(a) != providerJSONDiagnosticStart(b) {
+			return providerJSONDiagnosticStart(a) < providerJSONDiagnosticStart(b)
+		}
+		return a.Code < b.Code
+	})
+	return ProviderJSONResult{Messages: completedProviderJSON(messages), Diagnostics: diagnostics}
+}
+
+func providerJSONOwnershipUnknown(line string) bool {
+	_, rest, ok := splitTimestamp(line)
+	if !ok {
+		return false
+	}
+	_, rest = splitLevel(rest)
+	if !strings.HasPrefix(strings.TrimLeft(rest, " \t"), "provider.") {
+		return false
+	}
+	comp, _, header := providerJSONOuter(line)
+	return !header || !strings.HasPrefix(comp, "provider.") || len(comp) == len("provider.")
 }
 
 func providerJSONSyntaxOffset(text string) int64 {
