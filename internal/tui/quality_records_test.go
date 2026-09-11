@@ -57,8 +57,14 @@ func TestQualityRecordsKeepDiagnosticIdentityOrderAndContentPrivate(t *testing.T
 			t.Fatalf("record %d original index = %d, want %d", i, records[i].id.index, want)
 		}
 	}
-	if strings.Contains(records[0].text, "line 2") || strings.Contains(records[0].text, "line 1") {
-		t.Fatalf("syntax diagnostic exposed competing coordinate: %q", records[0].text)
+	if strings.Contains(records[0].text, "line 2") {
+		t.Fatalf("syntax diagnostic exposed trigger coordinate: %q", records[0].text)
+	}
+	if !strings.Contains(records[0].text, "response starts at line 1") {
+		t.Fatalf("syntax diagnostic omitted response start: %q", records[0].text)
+	}
+	if records[0].sourceLine != 4 {
+		t.Fatalf("syntax diagnostic action line = %d, want 4", records[0].sourceLine)
 	}
 	if !strings.Contains(records[1].text, "source line 8") || !strings.Contains(records[1].text, "response starts at line 3") {
 		t.Fatalf("distinct start coordinate missing: %q", records[1].text)
