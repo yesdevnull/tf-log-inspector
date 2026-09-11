@@ -57,7 +57,7 @@ type viewBinding struct {
 var views = []viewBinding{
 	{key: "1", view: ViewProviders, title: "BY PROVIDER", name: "providers"},
 	{key: "2", view: ViewTypes, title: "BY RESOURCE TYPE", name: "types"},
-	{key: "3", view: ViewResources, title: "RESOURCES (observed UI)", name: "resources"},
+	{key: "3", view: ViewResources, title: "RESOURCES (observed)", name: "resources"},
 	{key: "4", view: ViewCalls, title: "CALLS", name: "calls"},
 	// TIMELINE here is a placeholder title: the timeline renders from its
 	// own state, not from rows(), so centreTitle overrides it at render

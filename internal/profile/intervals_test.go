@@ -54,7 +54,7 @@ func TestUIIntervalRetainsObservedResourceEvidence(t *testing.T) {
 	}
 	got := renderTemporal(t, report)
 	for _, want := range []string{
-		"CONCURRENCY (UI tier)", "longest observed active observation: apply aws_instance", "resource: aws_instance.example (observed UI)", "source: line 24",
+		"CONCURRENCY (resource tier)", "longest observed active observation: apply aws_instance", "resource: aws_instance.example (observed resource)", "source: line 24",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
@@ -116,7 +116,7 @@ func TestTemporalAnalysisStatesAndZeroWorkUseExactEvidenceWording(t *testing.T) 
 		{name: "unavailable", tier: span.FidelityReported, analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 2}}, want: []string{"clock origin: unavailable", "analysis: unavailable", "temporal metrics: unavailable"}, forbidden: []string{"analysis: partial", "analysis: complete", "no qualifying intervals"}},
 		{name: "partial", tier: span.FidelityReported, analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 2, ExcludedCount: 1, Exclusions: map[string]uint64{"timestamp_missing": 1}}, Metrics: &model.TimingMetrics{}}, want: []string{"analysis: partial", "positioned observations 1 of 2 admitted", "busy / window unavailable", "summed / window unavailable"}, forbidden: []string{"analysis: complete", "analysis: unavailable"}},
 		{name: "complete and no RPC work", tier: span.FidelityReported, analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 1}, Metrics: &model.TimingMetrics{}, Intervals: []model.Stall{{StartMs: 0, EndMs: 1000, Blocking: -1}}}, want: []string{"analysis: complete", "busy / window unavailable", "summed / window unavailable", "no observed RPC work"}, forbidden: []string{"analysis: partial", "analysis: unavailable", "blocking"}},
-		{name: "complete and no UI work", tier: span.FidelityUIReported, analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 1}, Metrics: &model.TimingMetrics{}, Intervals: []model.Stall{{StartMs: 0, EndMs: 1000, Blocking: -1}}}, want: []string{"CONCURRENCY (UI tier)", "no observed UI work"}, forbidden: []string{"no observed RPC work", "blocking"}},
+		{name: "complete and no UI work", tier: span.FidelityUIReported, analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 1}, Metrics: &model.TimingMetrics{}, Intervals: []model.Stall{{StartMs: 0, EndMs: 1000, Blocking: -1}}}, want: []string{"CONCURRENCY (resource tier)", "no observed resource work"}, forbidden: []string{"no observed RPC work", "blocking"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

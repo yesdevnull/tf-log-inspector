@@ -136,7 +136,7 @@ func TestRunReportsStructuredOutputLog(t *testing.T) {
 	if !strings.Contains(out, "structured lines     8") {
 		t.Errorf("report missing structured line count:\n%s", out)
 	}
-	if !strings.Contains(out, "selected tier             ui-reported") {
+	if !strings.Contains(out, "selected tier             resource") {
 		t.Errorf("report did not select the ui-reported tier:\n%s", out)
 	}
 	for _, leak := range []string{`module.module_name["key"].data.local_file.thing`, "aws_instance.example"} {
@@ -474,10 +474,10 @@ func TestProfileLimitControlsIntervalsAndResourcesWithoutChangingMetrics(t *test
 			if name == "limited" {
 				wantRows = 1
 			}
-			if got := strings.Count(resources, " (observed UI)\n"); got != wantRows {
+			if got := strings.Count(resources, " (observed resource)\n"); got != wantRows {
 				t.Errorf("%s resource row count = %d, want %d:\n%s", name, got, wantRows, resources)
 			}
-			for _, want := range []string{"UI timing records     2: admitted 2, rejected 0; duration 2.5s", "UI positioning        2 observations, 2.5s; excluded 0 observations, 0ms", "positioned reported-duration sum 2.5s"} {
+			for _, want := range []string{"resource timing records     2: admitted 2, rejected 0; duration 2.5s", "resource positioning        2 observations, 2.5s; excluded 0 observations, 0ms", "positioned reported-duration sum 2.5s"} {
 				if !strings.Contains(report, want) {
 					t.Errorf("%s report changed metric %q:\n%s", name, want, report)
 				}

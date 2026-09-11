@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func (m *Model) operationRows() []row {
@@ -37,13 +39,16 @@ func (m *Model) operationRows() []row {
 			action = "unavailable"
 		}
 		source, sourceLine := "unavailable", uint64(0)
-		if location, ok := m.log.SourceLocation(s.Entry); ok {
+		if location, ok := m.log.ObservationSource(s); ok {
 			sourceLine = location.StartLine
 			source = fmt.Sprintf("%d", sourceLine)
+			if location.EndLine != location.StartLine {
+				source = fmt.Sprintf("%d-%d", location.StartLine, location.EndLine)
+			}
 		}
 		rows = append(rows, row{
 			identity: selectionIdentity{kind: "ui", index: index},
-			cells:    []string{logfmt.DisplayText(s.Address), action, durationTotalText(duration), source},
+			cells:    []string{logfmt.DisplayText(s.Address), action, resourceOperationDuration(s), source},
 			numeric:  []uint64{0, 0, duration.TotalMs, sourceLine},
 			spanIdx:  noSpanIdx,
 		})
@@ -53,6 +58,17 @@ func (m *Model) operationRows() []row {
 
 func operationDuration(ms uint32, lowerBound bool) model.DurationTotal {
 	return model.DurationTotal{Count: 1, TotalMs: uint64(ms), MaxMs: ms, LowerBound: lowerBound}
+}
+
+func resourceOperationDuration(s span.Span) string {
+	if s.DurationSource == span.SourceUIElapsed {
+		return durationTotalText(operationDuration(s.DurationMs, s.DurationSaturated))
+	}
+	text := qualitytext.ExactDuration(uint64(s.DurationMs))
+	if s.DurationSaturated {
+		return "≥" + text
+	}
+	return text
 }
 
 func (m *Model) selectedUIOperation() (int, bool) {
@@ -109,7 +125,7 @@ func (m *Model) operationDetailSections(index, w int) []paneSection {
 		action = "unavailable"
 	}
 	source := "unavailable"
-	if location, ok := m.log.SourceLocation(s.Entry); ok {
+	if location, ok := m.log.ObservationSource(s); ok {
 		source = fmt.Sprintf("line %d", location.StartLine)
 		if location.EndLine != location.StartLine {
 			source = fmt.Sprintf("lines %d-%d", location.StartLine, location.EndLine)
@@ -119,11 +135,11 @@ func (m *Model) operationDetailSections(index, w int) []paneSection {
 		"address: " + logfmt.DisplayText(s.Address),
 		"action: " + action,
 		"source: " + source,
-		"observed UI duration: " + durationTotalText(operationDuration(s.DurationMs, s.DurationSaturated)),
-		"UI timing is rounded to whole seconds, +/- 1s.",
+		"observed resource duration: " + resourceOperationDuration(s),
+		qualitytext.DurationSourceQualification(s.DurationSource),
 	}
 	if s.DurationSaturated {
-		fields = append(fields, "Observed UI duration is a lower bound (≥).")
+		fields = append(fields, "Observed resource duration is a lower bound (≥).")
 	}
 	if s.StartClamped {
 		fields = append(fields, "Operation start was clamped to the capture origin.")

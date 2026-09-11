@@ -636,7 +636,7 @@ func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	}
 
 	// Named selection obeys the same whole-log tier decision. This address
-	// has observed UI timing but no selected RPC, so falling back after
+	// has observed resource timing but no selected RPC, so falling back after
 	// selection would visibly replace an empty RPC timeline with UI timing.
 	l := testLog(t, "two-tier.log")
 	m = New(l, "two-tier.log")

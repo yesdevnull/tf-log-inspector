@@ -12,7 +12,10 @@ import (
 func WriteCaptureQuality(b *strings.Builder, q model.CaptureQuality) {
 	fmt.Fprintln(b, "CAPTURE QUALITY (whole log)")
 	writeTierQuality(b, "RPC", q.RPC)
-	writeTierQuality(b, "UI", q.UI)
+	writeTierQuality(b, "resource", q.UI)
+	for _, line := range DurationSourceLines(q.DurationSources) {
+		fmt.Fprintf(b, "    %s\n", line)
+	}
 	switch {
 	case !q.HasContext:
 		fmt.Fprintf(b, "  %-22s unavailable / %s (no address context)\n", "nameable duration", formatMs(q.RPCDurationMs))

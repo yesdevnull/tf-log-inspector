@@ -102,6 +102,14 @@ func (m *Model) timelineTitle() string {
 	case tierRPC:
 		return "TIMELINE (rpc)"
 	case tierUI:
+		for _, s := range m.selectedUISpans() {
+			if s.DurationSource == span.SourceRefreshWindow {
+				return "TIMELINE (ui, refresh windows)"
+			}
+			if s.DurationSource == span.SourceCLIElapsed {
+				return "TIMELINE (CLI positions unavailable)"
+			}
+		}
 		return "TIMELINE (ui, whole seconds)"
 	default:
 		return "TIMELINE"

@@ -162,7 +162,7 @@ func renderHelp(w, h int) string {
 	resources := paneSection{"", styles.title.Render(clipWidth("RESOURCES", w))}
 	for _, line := range []string{
 		"Resources ranks exact addresses by summed",
-		"observed UI duration.",
+		"observed resource duration.",
 		"Associated RPC time is inferred and partial.",
 		"It cannot recover every call.",
 		"UI scope: type/resource/module.",

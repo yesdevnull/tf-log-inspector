@@ -948,7 +948,7 @@ func (m *Model) centreTitle() string {
 		return "PARTIAL INFERRED CALLS · SELECTION, NOT ONE OPERATION"
 	}
 	if m.view == ViewResources && m.resourceOperations {
-		return "OBSERVED UI OPERATIONS"
+		return "OBSERVED RESOURCE OPERATIONS"
 	}
 	return viewTitle(m.view)
 }
@@ -1368,6 +1368,9 @@ func spanDetailLines(s span.Span, a attrib.Attribution, hasContext bool, w int) 
 		fields = append(fields, detailField{label: "position", value: "unavailable: " + strings.Join(s.PositionReasons(), ", "), kind: headIdentifierColumn})
 	}
 	if s.Fidelity == span.FidelityUIReported {
+		fields[0].label = "action"
+		fields[3].value = resourceOperationDuration(s)
+		fields = append(fields, detailField{label: "duration source", value: s.DurationSource.String(), kind: headIdentifierColumn})
 		// An observed address, stated by the log rather than inferred from
 		// it, so it carries no confidence marker.
 		fields = append(fields, detailField{label: "address", value: s.Address, kind: tailIdentifierColumn})

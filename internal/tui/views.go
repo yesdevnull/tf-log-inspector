@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -191,8 +192,8 @@ var providerColumns = []column{
 
 var typeColumns = []column{
 	{header: "resource type", kind: tailIdentifierColumn},
-	{header: "UI res.", kind: numericColumn},
-	{header: "UI total", kind: numericColumn},
+	{header: "res ops", kind: numericColumn},
+	{header: "res total", kind: numericColumn},
 	{header: "RPC calls", kind: numericColumn},
 	{header: "RPC total", kind: numericColumn},
 	{header: "RPC max", kind: numericColumn},
@@ -208,8 +209,8 @@ var callColumns = []column{
 var resourceColumns = []column{
 	{header: "address", kind: tailIdentifierColumn},
 	{header: "operations", kind: numericColumn},
-	{header: "UI total", kind: numericColumn},
-	{header: "UI max", kind: numericColumn},
+	{header: "res total", kind: numericColumn},
+	{header: "res max", kind: numericColumn},
 	{header: "inferred RPCs", kind: numericColumn},
 	{header: "inferred total", kind: numericColumn},
 	{header: "overlap RPCs", kind: numericColumn},
@@ -509,8 +510,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "resource type", value: r.ResourceType, kind: tailIdentifierColumn},
-					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
-					{label: "UI total", value: formatMs(r.UITotalMs), kind: numericColumn},
+					{label: "res ops", value: strconv.Itoa(r.UIResources), kind: numericColumn},
+					{label: "res total", value: formatMs(r.UITotalMs), kind: numericColumn},
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
 					{label: "RPC total", value: rpcTotal, kind: numericColumn},
 					{label: "RPC max", value: rpcMax, kind: numericColumn},
@@ -895,9 +896,9 @@ func (m *Model) fitCaptureGuidance(w, h int) string {
 // and explains which evidence can be profiled. Lines fit a 40-column pane.
 var captureGuidance = []string{
 	"No supported timing observations.",
-	"Plain-text CLI timings are not parsed.",
-	"Use terraform.ui JSON completion hooks",
-	"for resource timings, or provider TRACE",
+	"Use CLI completion durations or",
+	"terraform.ui completion/refresh hooks",
+	"for resources, or provider TRACE",
 	"for RPC timings. Raw Log: press 6.",
 	"",
 	"Provider RPC entries are emitted only at",
@@ -932,7 +933,7 @@ var captureGuidance = []string{
 // one height too short even for the mark -- a pane of one line -- still
 // leaves a finished sentence naming what this log is missing, with only the
 // remedy cut.
-const shortCaptureGuidance = "No supported timing observations. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE for RPC timings. Plain-text CLI timings are not parsed. Use terraform.ui JSON completion hooks for resource timings. Raw Log: press 6."
+const shortCaptureGuidance = "No supported timing observations. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE for RPC timings. Use CLI completion durations or terraform.ui completion/refresh hooks for resources. Raw Log: press 6."
 
 // fitCaptureGuidance is the capture guidance for a pane w columns wide and h
 // lines tall: the full text where it fits, one sentence where it does not,
@@ -1019,18 +1020,18 @@ func wrapToWidth(s string, w int) []string {
 	return lines
 }
 
-// typesPreamble states the UI-hook resolution caveat above the types table,
-// but only when UI-hook figures are actually present to rank -- a log with
-// RPC spans only has nothing to caveat. Terraform rounds a resource's start
-// and end to the nearest second before subtracting them, so these figures
-// carry up to a second of error each; see the identical caveat in
-// internal/profile.Render's BY RESOURCE TYPE section, whose wording this
-// matches.
+// typesPreamble qualifies only the duration sources present in the selected
+// resource operations. Reported completions and refresh windows share a clock
+// but have different resolution and meaning.
 func typesPreamble(uiSpans []span.Span) []string {
 	if len(uiSpans) == 0 {
 		return nil
 	}
-	return []string{"UI-hook figures are sums of measurements rounded to whole seconds, +/- 1s each."}
+	var lines []string
+	for _, summary := range model.SummariseDurationSources(uiSpans) {
+		lines = append(lines, qualitytext.DurationSourceQualification(summary.Source))
+	}
+	return lines
 }
 
 // renderTable formats preamble lines followed by a header and data rows as a
