@@ -127,7 +127,7 @@ func TestInspectProviderJSONGlobalDiagnosticShape(t *testing.T) {
 	}
 }
 
-func TestInspectProviderJSONQuarantinesOnlyFailedComponent(t *testing.T) {
+func TestInspectProviderJSONRangesAndOrdering(t *testing.T) {
 	input := providerRecord("a", `{"a":`) + "\n" +
 		providerRecord("b", `{"b":1}`) + "\n" +
 		providerRecord("c", `{"c":]}`) + "\n" +
@@ -142,6 +142,22 @@ func TestInspectProviderJSONQuarantinesOnlyFailedComponent(t *testing.T) {
 	if len(want.Diagnostics) != 1 || want.Diagnostics[0].Code != "delimiter_mismatch" || len(want.Diagnostics[0].Unavailable) != 3 {
 		t.Fatalf("diagnostic: %#v", want.Diagnostics)
 	}
+	if got := []string{input[want.Messages[0].Fragments[0].Start:want.Messages[0].Fragments[0].End], input[want.Messages[0].Fragments[1].Start:want.Messages[0].Fragments[1].End], input[want.Messages[1].Fragments[0].Start:want.Messages[1].Fragments[0].End]}; !reflect.DeepEqual(got, []string{`{"a":`, `1}`, `{"b":1}`}) {
+		t.Fatalf("complete payload slices: %q", got)
+	}
+	wantUnavailable := []string{"ordinary", "c continuation", `{"restart":1}`}
+	for i, r := range want.Diagnostics[0].Unavailable {
+		if input[r.Start:r.End] != wantUnavailable[i] {
+			t.Fatalf("unavailable %d = %q", i, input[r.Start:r.End])
+		}
+		for _, message := range want.Messages {
+			for _, fragment := range message.Fragments {
+				if r.Start < fragment.End && fragment.Start < r.End {
+					t.Fatalf("unavailable range overlaps complete fragment: %#v and %#v", r, fragment)
+				}
+			}
+		}
+	}
 	for _, r := range want.Diagnostics[0].Unavailable {
 		if r.Line < 5 || r.Line > 7 {
 			t.Fatalf("unavailable range escaped quarantined entry: %#v", r)
@@ -149,6 +165,135 @@ func TestInspectProviderJSONQuarantinesOnlyFailedComponent(t *testing.T) {
 	}
 	if got := InspectProviderJSON(input); !reflect.DeepEqual(got, want) {
 		t.Fatalf("inspection is nondeterministic: %#v", got)
+	}
+}
+
+func TestInspectProviderJSONGlobalStopMalformedOwners(t *testing.T) {
+	const head = "2026-09-08T00:00:00.000Z [DEBUG] "
+	for _, malformed := range []string{`provider.: {}`, `provider.a missing-colon`, `provider.a bad: {}`} {
+		t.Run(malformed, func(t *testing.T) {
+			lines := []string{head + `provider.done: {"done":1}`, head + `provider.a: {"a":`, head + `provider.b: {"b":`, head + malformed, head + `provider.c: {"later":1}`, head + `terraform: ordinary`}
+			input := strings.Join(lines, "\n")
+			got := InspectProviderJSON(input)
+			if len(got.Messages) != 1 || got.Messages[0].Text != `{"done":1}` || len(got.Diagnostics) != 3 {
+				t.Fatalf("outcome: %#v", got)
+			}
+			verified := got.Messages[0].Fragments[0]
+			if input[verified.Start:verified.End] != `{"done":1}` {
+				t.Fatalf("verified source fragment: %#v", verified)
+			}
+			if got.Diagnostics[0].StartLine != 2 || got.Diagnostics[1].StartLine != 3 || got.Diagnostics[2].StartLine != 4 {
+				t.Fatalf("diagnostic order: %#v", got.Diagnostics)
+			}
+			for i := 0; i < 2; i++ {
+				if got.Diagnostics[i].Code != "ambiguous_ownership" || len(got.Diagnostics[i].Ranges) != 1 || len(got.Diagnostics[i].Unavailable) != 0 {
+					t.Fatalf("aborted diagnostic %d: %#v", i, got.Diagnostics[i])
+				}
+				if input[got.Diagnostics[i].Ranges[0].Start:got.Diagnostics[i].Ranges[0].End] != []string{`{"a":`, `{"b":`}[i] {
+					t.Fatalf("aborted range %d: %#v", i, got.Diagnostics[i].Ranges[0])
+				}
+			}
+			trigger := got.Diagnostics[2]
+			if trigger.Code != "ambiguous_ownership" || len(trigger.Ranges) != 0 || len(trigger.Unavailable) != 3 {
+				t.Fatalf("trigger diagnostic: %#v", trigger)
+			}
+			for i, r := range trigger.Unavailable {
+				if input[r.Start:r.End] != lines[i+3] {
+					t.Fatalf("global tail %d = %q", i, input[r.Start:r.End])
+				}
+			}
+		})
+	}
+}
+
+func TestInspectProviderJSONEOFPendingOrderingAndRanges(t *testing.T) {
+	lines := []string{providerRecord("damaged", `{"bad":]}`), providerRecord("a", `{"a":"`), providerRecord("b", `{"b":`), providerRecord("a", "tail"), providerRecord("b", "")}
+	for _, tc := range []struct{ name, separator, suffix string }{{"trailing LF", "\n", "\n"}, {"blank final continuation", "\n", "\n\n"}, {"CRLF", "\r\n", "\r\n"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := strings.Join(lines, tc.separator) + tc.suffix
+			got := InspectProviderJSON(input)
+			if len(got.Messages) != 0 || len(got.Diagnostics) != 3 {
+				t.Fatalf("outcome: %#v", got)
+			}
+			if got.Diagnostics[0].Code != "delimiter_mismatch" || got.Diagnostics[0].Line != 1 || got.Diagnostics[1].Code != "incomplete" || got.Diagnostics[1].StartLine != 2 || got.Diagnostics[2].Code != "incomplete" || got.Diagnostics[2].StartLine != 3 {
+				t.Fatalf("diagnostic order: %#v", got.Diagnostics)
+			}
+			wantLines := [][]int{{1}, {2, 4}, {3, 5}}
+			lastLine := 5
+			if tc.name == "blank final continuation" {
+				wantLines[2] = []int{3, 5, 6}
+				lastLine = 6
+			}
+			wantCounts := []struct{ fragments, joined, first, last int }{{1, 8, 8, 8}, {2, 10, 6, 4}, {2, 5, 5, 0}}
+			if tc.name == "blank final continuation" {
+				wantCounts[2].fragments = 3
+			}
+			for i, d := range got.Diagnostics {
+				if i > 0 && d.Line != lastLine {
+					t.Fatalf("diagnostic %d EOF line = %d, want %d", i, d.Line, lastLine)
+				}
+				counts := wantCounts[i]
+				if d.FragmentCount != counts.fragments || d.JoinedBytes != counts.joined || d.FirstFragmentBytes != counts.first || d.LastFragmentBytes != counts.last {
+					t.Fatalf("diagnostic %d counts: %#v", i, d)
+				}
+				if len(d.Ranges) != len(wantLines[i]) {
+					t.Fatalf("diagnostic %d ranges: %#v", i, d.Ranges)
+				}
+				for j, r := range d.Ranges {
+					if r.Line != wantLines[i][j] || r.Start < 0 || r.End < r.Start || r.End > len(input) || strings.ContainsAny(input[r.Start:r.End], "\r\n") {
+						t.Fatalf("diagnostic %d range %d: %#v", i, j, r)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInspectProviderJSONRecoveryPreservesInlineUIAndSplitUTF8(t *testing.T) {
+	const ui = `{"@level":"info","@module":"terraform.ui","@message":"event","@timestamp":"2026-09-08T00:00:00Z","type":"apply_complete"}`
+	for _, tc := range []struct{ name, first, last, want string }{{"inline UI", `{"a":"x` + ui, `y"}`, `{"a":"xy"}`}, {"split UTF-8", "{\"a\":\"\xc3", "\xa9\"}", `{"a":"é"}`}} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := providerRecord("a", tc.first) + "\n" + providerRecord("b", `{"bad":]}`) + "\n" + providerRecord("a", tc.last)
+			got := InspectProviderJSON(input)
+			if len(got.Messages) != 1 || got.Messages[0].Text != tc.want || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "delimiter_mismatch" {
+				t.Fatalf("outcome: %#v", got)
+			}
+			var joined strings.Builder
+			for _, r := range got.Messages[0].Fragments {
+				joined.WriteString(input[r.Start:r.End])
+				if strings.Contains(input[r.Start:r.End], ui) {
+					t.Fatal("inline UI retained in source fragments")
+				}
+			}
+			if joined.String() != tc.want {
+				t.Fatalf("source fragments = %q", joined.String())
+			}
+		})
+	}
+}
+
+func TestInspectProviderJSONInvalidInlineUIQuarantinesItsOwner(t *testing.T) {
+	input := providerRecord("bad", `{"x":"a{"@module":false}`) + "\n" + providerRecord("bad", "ordinary") + "\ncontinuation\n" + providerRecord("good", `{"ok":1}`)
+	got := InspectProviderJSON(input)
+	if len(got.Messages) != 1 || got.Messages[0].Text != `{"ok":1}` || len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "invalid_inline_ui" {
+		t.Fatalf("outcome: %#v", got)
+	}
+	d := got.Diagnostics[0]
+	if len(d.Ranges) != 1 || input[d.Ranges[0].Start:d.Ranges[0].End] != `{"x":"a{"@module":false}` || len(d.Unavailable) != 2 || input[d.Unavailable[0].Start:d.Unavailable[0].End] != "ordinary" || input[d.Unavailable[1].Start:d.Unavailable[1].End] != "continuation" {
+		t.Fatalf("positions: %#v", d)
+	}
+}
+
+func TestInspectProviderJSONRecoversRepeatedComponentMessages(t *testing.T) {
+	input := providerRecord("a", `{"n":1}`) + "\n" + providerRecord("bad", `{"x":]}`) + "\n" + providerRecord("a", `{"n":2}`)
+	got := InspectProviderJSON(input)
+	if len(got.Messages) != 2 || got.Messages[0].Text != `{"n":1}` || got.Messages[1].Text != `{"n":2}` || len(got.Diagnostics) != 1 {
+		t.Fatalf("outcome: %#v", got)
+	}
+	for _, m := range got.Messages {
+		if len(m.Fragments) != 1 || input[m.Fragments[0].Start:m.Fragments[0].End] != m.Text {
+			t.Fatalf("message range: %#v", m)
+		}
 	}
 }
 
