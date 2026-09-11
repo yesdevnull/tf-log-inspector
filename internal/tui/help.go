@@ -85,7 +85,7 @@ var helpGroups = func() []helpGroup {
 		}},
 		{title: "EVERYWHERE", entries: []helpEntry{
 			{keys: "⇥ Tab", what: "move focus between panes"},
-			{keys: "i", what: "open capture quality; i or Esc returns"},
+			{keys: "i", what: "open quality; select, Enter checks/jumps; i or Esc closes"},
 			{keys: "e", what: "open resource evidence; e or Esc returns"},
 			{keys: "?", what: "open or close this help (Esc closes it too)"},
 			{keys: "↑ ↓ j k", what: "scroll help; PgUp/PgDn move a page"},

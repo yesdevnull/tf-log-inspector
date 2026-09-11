@@ -170,6 +170,24 @@ func TestResponsePendingGuidanceAndKeys(t *testing.T) {
 }
 
 func TestResponseCheckKeepsTerminalResponsiveWhileInspectionRuns(t *testing.T) {
+	t.Run("close and reopen retains the real deferred request", func(t *testing.T) {
+		m := responseModel(t, `{"message":"available"}`)
+		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		_, duplicate := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		if duplicate != nil || !m.response.open || !m.response.pending {
+			t.Fatal("reopen did not join the in-flight inspection")
+		}
+		_, present := m.Update(inspect())
+		if present == nil {
+			t.Fatal("real inspection did not resolve reopened request")
+		}
+		m.Update(present())
+		if frame := unstyled(m.View()); !strings.Contains(frame, "available") {
+			t.Fatalf("reopened response was not presented:\n%s", frame)
+		}
+	})
+
 	t.Run("mixed recovery renders quality and closes before completion delivery", func(t *testing.T) {
 		source := responseRecoveryHead + `a: {"message":"recovered"}` + "\n" +
 			responseRecoveryHead + `b: {"broken":]}` + "\n"

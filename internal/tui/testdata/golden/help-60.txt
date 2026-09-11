@@ -34,7 +34,7 @@
 [2m│[0m                                                          [2m│[0m
 [2m│[0m [1;36mEVERYWHERE[0m                                               [2m│[0m
 [2m│[0m   [36m⇥ Tab[0m      move focus between panes                    [2m│[0m
-[2m│[0m   [36mi[0m          open capture quality; i or Esc returns      [2m│[0m
+[2m│[0m   [36mi[0m          open quality; select, Enter checks/jumps; … [2m│[0m
 [2m╰──────────────────────────────────────────────────────────╯[0m
 [2m↑↓ scroll  PgUp/PgDn page  ?/Esc close help[0m
 [36mq[0m quit

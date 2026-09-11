@@ -94,6 +94,44 @@ func TestQualityPanelPreservesTheRawInvestigationAndShowsWholeLogFacts(t *testin
 	}
 }
 
+func TestQualityLocatedAnomalyJumpsAndReturnsToExactSelection(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	m.raw.lastQuery = "provider"
+	if !m.searchFrom(1, true, true) {
+		t.Fatal("fixture has no raw match")
+	}
+	wantRaw := cloneRawState(m.raw)
+	m.openQuality()
+	m.renderQuality(40, 5)
+	qualityKey(m, "down")
+	wantQuality := m.captureQualityNavigation()
+	if wantQuality.selected.kind != "anomaly" {
+		t.Fatalf("selected = %+v", wantQuality.selected)
+	}
+	qualityKey(m, "enter")
+	if m.view != ViewRawLog || m.quality.open || len(m.history) != 1 {
+		t.Fatalf("jump state = view %v quality %v history %d", m.view, m.quality.open, len(m.history))
+	}
+	rows := m.rawLogRows(1)
+	if len(rows) != 1 || rows[0].sourceLine != 3 {
+		t.Fatalf("jump source = %+v, want line 3", rows)
+	}
+	m.raw.query = "child"
+	m.raw.lastQuery = "changed"
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 8})
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.quality.open || m.quality.selected != wantQuality.selected {
+		t.Fatalf("quality navigation = %+v, want %+v", m.captureQualityNavigation(), wantQuality)
+	}
+	if m.raw.query != wantRaw.query || m.raw.lastQuery != wantRaw.lastQuery || m.raw.match == nil || *m.raw.match != *wantRaw.match {
+		t.Fatal("raw parent search was not restored")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.quality.open || len(m.history) != 0 {
+		t.Fatal("closing restored quality spent or retained history")
+	}
+}
+
 func TestQualityModalPrecedenceAndQuitKeys(t *testing.T) {
 	m := qualityModel(t, "capture.log")
 	m.raw.searching = true

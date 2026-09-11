@@ -6,139 +6,191 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
-	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
 const (
 	qualityTitle      = "CAPTURE QUALITY (whole log)"
-	qualityNavigation = "Esc/i close  ↑↓ scroll  PgUp/PgDn page"
+	qualityNavigation = "Esc/i close  ↑↓ select  PgUp/PgDn page"
 )
 
 type qualityState struct {
 	open     bool
 	viewport viewport.Model
+	selected qualityItemID
+	notice   string
 }
 
 func (m *Model) openQuality() {
-	m.quality = qualityState{open: true, viewport: viewport.New(1, 1)}
+	m.quality = qualityState{open: true, viewport: viewport.New(1, 1), selected: qualityItemID{kind: "check"}}
 	m.quality.viewport.MouseWheelEnabled = false
 }
 
 func (m *Model) handleQualityKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.quality.notice = ""
 	switch msg.String() {
 	case "esc", "i":
 		m.quality.open = false
 	case "q", "ctrl+c":
 		m.quitting = true
 		return m, tea.Quit
-	case "up", "down", "j", "k", "pgup", "pgdown":
+	case "enter":
+		_, actions := m.buildQualityContent(m.quality.viewport.Width)
+		for _, action := range actions {
+			if action.id != m.quality.selected {
+				continue
+			}
+			if action.id.kind == "check" {
+				return m, m.requestResponseCheck()
+			}
+			if action.sourceLine != 0 && m.jumpToSourceLine(action.sourceLine) {
+				m.quality.open = false
+				return m, nil
+			}
+			if action.sourceLine != 0 {
+				m.quality.notice = "Source location unavailable."
+			}
+			return m, nil
+		}
+	case "up", "k", "down", "j":
 		m.View()
-		m.quality.viewport, _ = m.quality.viewport.Update(msg)
+		_, actions := m.buildQualityContent(m.quality.viewport.Width)
+		m.moveQualitySelection(actions, msg.String() == "down" || msg.String() == "j")
+	case "pgup", "pgdown":
+		m.View()
+		v := &m.quality.viewport
+		if msg.String() == "pgdown" {
+			v.PageDown()
+		} else {
+			v.PageUp()
+		}
+		_, actions := m.buildQualityContent(v.Width)
+		m.selectVisibleQualityAction(actions, msg.String() == "pgdown")
 	}
 	return m, nil
+}
+
+func (m *Model) buildQualityContent(w int) ([]string, []qualityActionRow) {
+	reconstruction := m.log.ReconstructionQuality()
+	records := m.qualityRecords(m.log.CaptureQuality(), reconstruction)
+	return wrapQualityRecords(records, w)
+}
+
+func (m *Model) revealQualityAction(action qualityActionRow) {
+	v := &m.quality.viewport
+	if v.Height <= 0 {
+		return
+	}
+	if action.start < v.YOffset {
+		v.SetYOffset(action.start)
+	}
+	if action.start >= v.YOffset+v.Height {
+		v.SetYOffset(action.start - v.Height + 1)
+	}
+}
+
+func (m *Model) moveQualitySelection(actions []qualityActionRow, down bool) {
+	if len(actions) == 0 {
+		m.quality.selected = qualityItemID{}
+		return
+	}
+	i := -1
+	for n := range actions {
+		if actions[n].id == m.quality.selected {
+			i = n
+			break
+		}
+	}
+	if i < 0 {
+		if down {
+			for n := range actions {
+				if actions[n].start >= m.quality.viewport.YOffset {
+					i = n
+					break
+				}
+			}
+		} else {
+			for n := len(actions) - 1; n >= 0; n-- {
+				if actions[n].end <= m.quality.viewport.YOffset+m.quality.viewport.Height {
+					i = n
+					break
+				}
+			}
+		}
+	} else if down && i < len(actions)-1 {
+		i++
+	} else if !down && i > 0 {
+		i--
+	}
+	if i >= 0 {
+		m.quality.selected = actions[i].id
+		m.revealQualityAction(actions[i])
+	}
+}
+
+func (m *Model) selectVisibleQualityAction(actions []qualityActionRow, down bool) {
+	start, end := m.quality.viewport.YOffset, m.quality.viewport.YOffset+m.quality.viewport.Height
+	m.quality.selected = qualityItemID{}
+	if down {
+		for _, a := range actions {
+			if a.start >= start && a.start < end {
+				m.quality.selected = a.id
+				return
+			}
+		}
+	} else {
+		for i := len(actions) - 1; i >= 0; i-- {
+			a := actions[i]
+			if a.start >= start && a.start < end {
+				m.quality.selected = a.id
+				return
+			}
+		}
+	}
 }
 
 func (m *Model) renderQuality(w, h int) string {
 	if w <= 0 || h <= 0 {
 		return ""
 	}
-	q := m.log.CaptureQuality()
-	text := m.qualityText(q, m.log.ReconstructionQuality())
-	lines := make([]string, 0)
-	for _, line := range strings.Split(text, "\n") {
-		lines = append(lines, strings.Split(ansi.Wrap(line, max(1, w), ""), "\n")...)
-	}
+	lines, actions := m.buildQualityContent(w)
 	v := &m.quality.viewport
 	if v.Width == 0 {
 		*v = viewport.New(w, h)
 		v.MouseWheelEnabled = false
 	}
 	v.Width, v.Height = w, h
+	for _, action := range actions {
+		if action.id == m.quality.selected {
+			for i := action.start; i < action.end; i++ {
+				prefix := "  "
+				if i == action.start {
+					prefix = "> "
+				}
+				lines[i] = styles.selected.Render(prefix + strings.TrimPrefix(lines[i], "  "))
+			}
+			break
+		}
+	}
 	v.SetContent(strings.Join(lines, "\n"))
 	v.SetYOffset(v.YOffset)
+	for _, action := range actions {
+		if action.id == m.quality.selected {
+			m.revealQualityAction(action)
+			break
+		}
+	}
 	return v.View()
 }
 
 func (m *Model) qualityText(q model.CaptureQuality, reconstruction model.ReconstructionQuality) string {
-	var b strings.Builder
-	b.WriteString("TIMING AVAILABILITY\n")
-	writeQualityTier(&b, "RPC", q.RPC)
-	writeQualityTier(&b, "UI", q.UI)
-
-	b.WriteString("\nANOMALIES\n")
-	b.WriteString("  Counts can overlap across stages and must not be totalled as bad lines.\n")
-	b.WriteString("  First samples use original one-based physical source lines; they are not exhaustive.\n")
-	if len(q.Issues) == 0 {
-		b.WriteString("  none recorded\n")
+	records := m.qualityRecords(q, reconstruction)
+	texts := make([]string, len(records))
+	for i := range records {
+		texts[i] = records[i].text
 	}
-	stage := ""
-	for _, issue := range q.Issues {
-		if issue.Count == 0 {
-			continue
-		}
-		if issue.Stage != stage {
-			stage = issue.Stage
-			fmt.Fprintf(&b, "  %s — %s\n", logfmt.DisplayText(stage), qualityStageUnits(stage))
-		}
-		fmt.Fprintf(&b, "    %s: %d", logfmt.DisplayText(issue.Code), issue.Count)
-		if issue.FirstEntry != nil {
-			if location, ok := m.log.SourceLocation(*issue.FirstEntry); ok {
-				fmt.Fprintf(&b, " (first at %s, line %d", logfmt.DisplayText(m.name), location.StartLine)
-				if location.EndLine != location.StartLine {
-					fmt.Fprintf(&b, "-%d", location.EndLine)
-				}
-				b.WriteByte(')')
-			} else {
-				b.WriteString(" (location unavailable)")
-			}
-		}
-		b.WriteByte('\n')
-	}
-
-	b.WriteString("\nATTRIBUTION\n")
-	if !q.HasContext {
-		b.WriteString("  unavailable: no address context was recognised\n")
-		fmt.Fprintf(&b, "  nameable duration: unavailable / %dms (no address context)\n", q.RPCDurationMs)
-	} else {
-		if q.NameableShare == nil {
-			b.WriteString("  nameable duration: unavailable (total RPC duration is 0ms)\n")
-		} else {
-			fmt.Fprintf(&b, "  nameable duration: %dms / %dms (%.1f%%)\n", q.NameableMs, q.RPCDurationMs, *q.NameableShare*100)
-		}
-		fmt.Fprintf(&b, "  attributed spans: %d / %d\n", q.Attribution.ByConfidence[attrib.Contained]+q.Attribution.ByConfidence[attrib.Likely], q.Attribution.Spans)
-	}
-	for _, confidence := range []attrib.Confidence{attrib.Contained, attrib.Likely, attrib.Overlapping, attrib.Ambiguous, attrib.Unattributed} {
-		fmt.Fprintf(&b, "  %-12s %d spans, %dms\n", confidence.String(), q.Attribution.ByConfidence[confidence], q.Attribution.MsByConfidence[confidence])
-	}
-
-	b.WriteString("\nCONTEXT LIMITATIONS\n")
-	if hasQualityIssue(q.Issues, "context", "context_incomplete") {
-		b.WriteString("  Context evidence is incomplete; this limits attribution and does not establish that an operation failed.\n")
-	} else if q.HasContext {
-		b.WriteString("  no incomplete contexts recorded\n")
-	} else {
-		b.WriteString("  no address context was recognised\n")
-	}
-	b.WriteString("  Recognition requires structured records to carry literal @level and @timestamp keys.\n")
-	b.WriteString("  Malformed hclog headers are not recovered as independent RPC records.\n")
-
-	b.WriteString("\nRECONSTRUCTION\n")
-	switch reconstruction.State {
-	case "complete":
-		fmt.Fprintf(&b, "  complete: %d responses available\n", reconstruction.Responses)
-	case "partial":
-		fmt.Fprintf(&b, "  partial: %d responses available; %d reconstruction diagnostics\n", reconstruction.Responses, reconstruction.Diagnostics)
-		b.WriteString("  Diagnostic counts can include ownership triggers and aborted messages.\n")
-	case "failed":
-		fmt.Fprintf(&b, "  failed: 0 responses available; %d reconstruction diagnostics\n", reconstruction.Diagnostics)
-		b.WriteString("  Diagnostic counts can include ownership triggers and aborted messages.\n")
-	default:
-		b.WriteString("  not checked (response reconstruction is lazy)\n")
-	}
-	return strings.TrimSuffix(b.String(), "\n")
+	return strings.Join(texts, "\n")
 }
 
 func writeQualityTier(b *strings.Builder, name string, q model.TierQuality) {

@@ -76,6 +76,9 @@ func (m *Model) workbenchView() string {
 			status = m.responseTitle()
 		case m.quality.open:
 			status = qualityTitle
+			if m.quality.notice != "" {
+				status = m.quality.notice
+			}
 		case m.showHelp:
 			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.showResourceEvidence:
