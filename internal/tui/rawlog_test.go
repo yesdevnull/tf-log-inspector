@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +14,157 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+func sourceLineLog(t *testing.T, newline string) *model.Log {
+	t.Helper()
+	data := strings.Join([]string{
+		`2026-09-11T00:00:00.000Z [INFO] first`,
+		``,
+		`continuation`,
+		`2026-09-11T00:00:01.000Z [WARN] last`,
+	}, newline)
+	path := filepath.Join(t.TempDir(), "source-lines.log")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := model.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func submitSourceLine(t *testing.T, m Model, value string) Model {
+	t.Helper()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	return update(t, typeQuery(t, m, value), tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestSourceLinePromptRejectsInvalidInputWithoutMoving(t *testing.T) {
+	tests := []struct{ name, value, want string }{
+		{"empty", "", "enter a source line"},
+		{"zero", "0", "source line must be positive"},
+		{"sign", "+1", "use decimal digits only"},
+		{"space", "1 2", "use decimal digits only"},
+		{"overflow", "18446744073709551616", "source line is too large"},
+		{"past end", "999", "source line is outside this log"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := rawLogView(t, "provider-rpc.log")
+			m.raw.top, m.raw.column, m.raw.query, m.raw.lastQuery = 1, 3, "kept", "kept"
+			before, history := m.captureNavigation(), len(m.history)
+			m = submitSourceLine(t, m, tc.value)
+			if !m.sourceLine.editing || !strings.Contains(unstyled(m.footer(100)), "Go to source line") || !strings.Contains(unstyled(m.footer(100)), logfmt.DisplayText(tc.want)) {
+				t.Fatalf("invalid submission did not retain prompt and safe error: %q", unstyled(m.footer(100)))
+			}
+			if len(m.history) != history || !reflect.DeepEqual(m.captureNavigation(), before) {
+				t.Fatal("invalid submission mutated navigation state")
+			}
+		})
+	}
+}
+
+func TestSourceLinePromptIsModalAndTerminalSafe(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	before := m.captureNavigation()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	for _, key := range []rune{'q', 'j', '/', 'g'} {
+		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x1b', '1'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.sourceLine.editing || m.sourceLine.err != "use decimal digits only" || m.Quitting() {
+		t.Fatalf("modal keys escaped to commands or unsafe input was accepted: %+v", m.sourceLine)
+	}
+	if !reflect.DeepEqual(m.captureNavigation(), before) {
+		t.Fatal("typing in prompt mutated navigation")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.Quitting() {
+		t.Fatal("Ctrl+C did not quit from source-line prompt")
+	}
+}
+
+func TestSourceLinePromptKeepsInputAndErrorVisibleAtNarrowWidths(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = typeQuery(t, m, "999")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	for _, width := range []int{24, 40, 60} {
+		got := unstyled(m.sourceLinePrompt(width))
+		if !strings.Contains(got, "9") || (width > 24 && !strings.Contains(got, "source line")) || (width == 24 && !strings.Contains(got, "…")) {
+			t.Errorf("width %d prompt hid input or error: %q", width, got)
+		}
+	}
+}
+
+func TestSourceLineBindingRequiresFocusedRawLogList(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		view View
+		pane Pane
+	}{
+		{"other view", ViewCalls, PaneList},
+		{"facet pane", ViewRawLog, PaneFacets},
+		{"detail pane", ViewRawLog, PaneDetail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(testLog(t, "provider-rpc.log"), "x.log")
+			m.view, m.pane = tc.view, tc.pane
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+			if m.sourceLine.editing {
+				t.Fatal("g opened source-line input outside the focused Raw Log list")
+			}
+		})
+	}
+}
+
+func TestSourceLinePromptCancellationIsInert(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m.raw.top, m.raw.topLine, m.raw.column = 1, 0, 2
+	m.raw.query, m.raw.lastQuery = "query", "last"
+	match := literalPosition{byteOffset: 1, column: 1}
+	m.raw.match = &rawMatch{entry: 1, line: 0, text: match}
+	before := m.captureNavigation()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = typeQuery(t, m, "1")
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.sourceLine.editing || !reflect.DeepEqual(m.captureNavigation(), before) {
+		t.Fatal("Esc changed the investigation while cancelling")
+	}
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.raw.top == before.raw.top && m.raw.topLine == before.raw.topLine {
+		t.Fatal("commands did not resume after cancellation")
+	}
+}
+
+func TestGoToSourceLineTargetsEveryPhysicalLine(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		for line := uint64(1); line <= 4; line++ {
+			t.Run(fmt.Sprintf("%q/%d", newline, line), func(t *testing.T) {
+				m := New(sourceLineLog(t, newline), "source.log")
+				m.width, m.height = 120, 30
+				m.setView(ViewRawLog)
+				m.raw.lastQuery, m.raw.column, m.raw.notFound = "kept", 7, true
+				position, ok := m.log.SourcePosition(line)
+				if !ok {
+					t.Fatal("fixture source position missing")
+				}
+				m = submitSourceLine(t, m, fmt.Sprint(line))
+				if m.raw.top != int(position.Entry) || m.raw.topLine != int(position.EntryLine) {
+					t.Fatalf("raw position = %d+%d, want %d+%d", m.raw.top, m.raw.topLine, position.Entry, position.EntryLine)
+				}
+				if len(m.history) != 1 || m.raw.scope != nil || m.raw.column != 0 || m.raw.match != nil || m.raw.notFound || m.raw.lastQuery != "kept" {
+					t.Fatalf("jump state wrong: history=%d raw=%+v", len(m.history), m.raw)
+				}
+				if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != line {
+					t.Fatalf("first rendered source line = %+v, want %d", rows, line)
+				}
+			})
+		}
+	}
+}
 
 // The whole point: from a slow call, land on the log lines that produced it.
 func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {

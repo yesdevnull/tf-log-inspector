@@ -81,17 +81,26 @@ func (m *Model) workbenchView() string {
 		case m.showResourceEvidence:
 			status = resourceEvidenceTitle
 		case m.view == ViewRawLog:
-			scope := "all entries"
+			scope := "whole log"
 			if m.raw.scope != nil {
 				scope = "call scope"
 			}
-			if len(m.log.Entries) == 0 {
-				status = "Entry 0/0 · " + scope
-				break
+			rows := m.rawLogRows(paneBodyHeight(workbenchPaneHeight(h)))
+			visible := make([]string, len(rows))
+			for i, row := range rows {
+				visible[i] = row.text
 			}
-			visible := m.rawLogLines(paneBodyHeight(workbenchPaneHeight(h)))
 			column := min(m.raw.column, rawLogMaxColumn(visible, m.rawLogViewportWidth()))
-			status = fmt.Sprintf("Entry %d/%d · line %d · column %d · %s", m.raw.top+1, len(m.log.Entries), m.raw.topLine+1, column+1, scope)
+			switch {
+			case len(rows) == 0:
+				status = "No visible source line · " + scope
+			case rows[0].sourceLine == 0:
+				status = fmt.Sprintf("Source line unavailable · entry %d/%d · %s", rows[0].entry+1, len(m.log.Entries), scope)
+			default:
+				first := rows[0]
+				status = fmt.Sprintf("Line %d · entry %d/%d · column %d · %s", first.sourceLine, first.entry+1, len(m.log.Entries), column+1, scope)
+			}
+			status = clipValueEnd(status, w)
 		}
 		lines = append(lines, styles.note.Render(clipWidth(status, w)))
 	}

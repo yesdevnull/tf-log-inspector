@@ -292,6 +292,9 @@ func (m *Model) footer(w int) string {
 	if m.showResourceEvidence {
 		return clipWidth(resourceEvidenceNavigation, w) + "\n" + clipWidth(quitHint, w)
 	}
+	if m.sourceLine.editing {
+		return m.sourceLinePrompt(w)
+	}
 	if m.facetSearch.editing {
 		return m.facetSearchPrompt(w)
 	}
@@ -539,9 +542,10 @@ func (m *Model) actionKeys(w int) string {
 	if m.view == ViewRawLog && m.pane == PaneList && !m.facetOverlayShowing(w) {
 		keys = []string{"⇥ pane", "r response", "↔ scroll"}
 		if m.raw.scope != nil {
+			keys = keys[1:]
 			keys = append(keys, scopeHint)
 		}
-		keys = append(keys, "/ search", esc, quitHint)
+		keys = append(keys, "g line", "/ search", esc, quitHint)
 		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
 			removed := false
 			for _, secondary := range []string{"⇥ pane", "↔ scroll", "r response"} {

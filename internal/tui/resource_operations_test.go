@@ -49,7 +49,7 @@ func TestResourceOperationSourceTargetIsVisibleAtSixtyByNine(t *testing.T) {
 	pressRune(t, &m, '3')
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
-	if got := unstyled(m.View()); !strings.Contains(got, "Entry 5/6") || !strings.Contains(unstyled(strings.Join(m.rawLogLines(2), "\n")), "complete repeated nested resource") {
+	if got := unstyled(m.View()); !strings.Contains(got, "Line 5 · entry 5/6") || !strings.Contains(unstyled(strings.Join(m.rawLogLines(2), "\n")), "complete repeated nested resource") {
 		t.Fatalf("narrow source frame hid the selected UI entry:\n%s", got)
 	}
 }
