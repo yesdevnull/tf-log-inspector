@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
@@ -20,6 +21,20 @@ func TestQualityDiagnosticPrimarySource(t *testing.T) {
 	} {
 		if got := diagnosticSourceLine(tc.d); got != tc.want {
 			t.Fatalf("primary coordinate = %d, want %d", got, tc.want)
+		}
+	}
+}
+
+func TestWrapQualityRecordsClampsPrefixAtTinyWidths(t *testing.T) {
+	for _, width := range []int{0, 1, 2} {
+		lines, actions := wrapQualityRecords([]qualityRecord{{id: qualityItemID{kind: "check"}, text: "check"}}, width)
+		if len(lines) == 0 || len(actions) != 1 {
+			t.Fatalf("width %d lost record/action", width)
+		}
+		for _, line := range lines {
+			if got := lipgloss.Width(line); got > width {
+				t.Fatalf("width %d produced %d-column row %q", width, got, line)
+			}
 		}
 	}
 }

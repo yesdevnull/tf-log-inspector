@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
@@ -129,6 +130,70 @@ func TestQualityLocatedAnomalyJumpsAndReturnsToExactSelection(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.quality.open || len(m.history) != 0 {
 		t.Fatal("closing restored quality spent or retained history")
+	}
+}
+
+func TestQualityPagingKeepsTallOverlappingActionSelected(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	m.openQuality()
+	records := []qualityRecord{{id: qualityItemID{kind: "check"}, text: strings.Repeat("wrapped ", 30)}, {text: "prose"}}
+	lines, actions := wrapQualityRecords(records, 12)
+	m.quality.viewport = viewport.New(12, 3)
+	m.quality.viewport.MouseWheelEnabled = false
+	m.quality.viewport.SetContent(strings.Join(lines, "\n"))
+	m.quality.selected = actions[0].id
+	m.quality.viewport.PageDown()
+	offset := m.quality.viewport.YOffset
+	m.selectVisibleQualityAction(actions, true)
+	if m.quality.selected != actions[0].id {
+		t.Fatalf("overlapping action selection = %+v", m.quality.selected)
+	}
+	m.revealQualityAction(actions[0])
+	if m.quality.viewport.YOffset != offset {
+		t.Fatalf("tall action snapped from offset %d to %d", offset, m.quality.viewport.YOffset)
+	}
+}
+
+func TestQualityPublicationPrecedesInspectionMessage(t *testing.T) {
+	m := responseModel(t, `{"message":"available"}`)
+	m.openQuality()
+	_, cmd := m.handleQualityKey(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd()
+	if m.log.ReconstructionQuality().State != "complete" {
+		t.Fatal("real command did not publish")
+	}
+	text := m.qualityText(m.log.CaptureQuality(), m.log.ReconstructionQuality())
+	if strings.Contains(text, "checking responses") || !strings.Contains(text, "complete: 1 responses available") {
+		t.Fatalf("published rendering remained transient:\n%s", text)
+	}
+	m.Update(msg)
+}
+
+func TestQualityUnlocatedActionDoesNotChangeInvestigationOrHistory(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	m.openQuality()
+	view, pane, depth := m.view, m.pane, len(m.history)
+	m.activateQualityAction(qualityActionRow{id: qualityItemID{kind: "anomaly", stage: "scan", code: "unlocated"}})
+	if m.view != view || m.pane != pane || len(m.history) != depth || !m.quality.open {
+		t.Fatal("unlocated Enter changed investigation")
+	}
+}
+
+func TestQualityComposedWorkbenchAtSupportedWidthsAndShortHeight(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 8}, {Width: 100, Height: 12}, {Width: 160, Height: 24}, {Width: 60, Height: 4}} {
+		m := qualityModel(t, "capture.log")
+		m.Update(size)
+		m.openQuality()
+		frame := unstyled(m.workbenchView())
+		wants := []string{"Esc/i close", "↑↓ select", "Enter open/check", "q quit"}
+		if size.Height > 4 {
+			wants = append(wants, "Check responses")
+		}
+		for _, want := range wants {
+			if !strings.Contains(frame, want) {
+				t.Errorf("%dx%d frame missing %q:\n%s", size.Width, size.Height, want, frame)
+			}
+		}
 	}
 }
 
