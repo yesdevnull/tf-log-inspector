@@ -60,7 +60,7 @@ func BenchmarkProviderResponseAtFailureTail(b *testing.B) {
 			source := head + "a: {\"broken\":]}\n" + strings.Repeat(head+"a: {\"apparent_restart\":1}\n", tailLines)
 			loaded := loadResponseBenchmarkLog(b, source)
 			positions := responseBenchmarkPositions(b, loaded, 1, uint64(tailLines+1))
-			loaded.inspectProviderResponses()
+			loaded.InspectProviderResponses()
 			if len(loaded.responseDiagnostics) != 1 || len(loaded.responseDiagnostics[0].Unavailable) != tailLines {
 				b.Fatalf("local fixture diagnostics = %#v", loaded.responseDiagnostics)
 			}
@@ -79,7 +79,7 @@ func BenchmarkProviderResponseAtFailureTail(b *testing.B) {
 			source := head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\n" + strings.Repeat("ordinary tail\n", tailLines)
 			loaded := loadResponseBenchmarkLog(b, source)
 			positions := responseBenchmarkPositions(b, loaded, 1, 2, uint64(tailLines+2))
-			loaded.inspectProviderResponses()
+			loaded.InspectProviderResponses()
 			if len(loaded.responseDiagnostics) != 2 || len(loaded.responseDiagnostics[1].Unavailable) != tailLines+1 {
 				b.Fatalf("global fixture diagnostics = %#v", loaded.responseDiagnostics)
 			}

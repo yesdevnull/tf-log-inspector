@@ -29,7 +29,7 @@ func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseS
 		return selection
 	}
 
-	l.inspectProviderResponses()
+	l.InspectProviderResponses()
 	selection.SourceLine = line
 	selection.HasDiagnostics = len(l.responseDiagnostics) != 0
 	if i, ok := responseRangeMatch(l.responseMessageRanges, start, end); ok {
@@ -57,7 +57,8 @@ func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseS
 	return selection
 }
 
-func (l *Log) inspectProviderResponses() {
+// InspectProviderResponses reconstructs and indexes provider responses.
+func (l *Log) InspectProviderResponses() {
 	l.responseOnce.Do(func() {
 		result := logfmt.InspectProviderJSON(string(l.Data))
 		l.responses = result.Messages
@@ -67,6 +68,19 @@ func (l *Log) inspectProviderResponses() {
 		l.responseUnavailableRanges = providerDiagnosticRanges(l.responseDiagnostics, true)
 		l.responseChecked.Store(true)
 	})
+}
+
+// ReconstructionDiagnostics returns published content-free diagnostic metadata.
+func (l *Log) ReconstructionDiagnostics() []logfmt.ProviderJSONDiagnostic {
+	if !l.responseChecked.Load() {
+		return nil
+	}
+	out := append([]logfmt.ProviderJSONDiagnostic(nil), l.responseDiagnostics...)
+	for i := range out {
+		out[i].Ranges = nil
+		out[i].Unavailable = nil
+	}
+	return out
 }
 
 func providerResponseRanges(responses []logfmt.ProviderJSON) []responseRange {
