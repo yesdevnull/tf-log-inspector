@@ -184,6 +184,7 @@ func TestComparisonJSONIsOneDocumentAndOutputOnly(t *testing.T) {
 
 func TestComparisonOutputFailuresAreReturned(t *testing.T) {
 	input := filepath.Join("..", "..", "testdata", "provider-rpc.log")
+	writeFailure := errors.New("comparison output failed")
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -194,18 +195,28 @@ func TestComparisonOutputFailuresAreReturned(t *testing.T) {
 		{"JSON directory", []string{"--compare", "--format=json", "-o", t.TempDir(), input, input}, io.Discard, nil},
 		{"text short stdout", []string{"--compare", input, input}, profileJSONShortWriter{}, io.ErrShortWrite},
 		{"JSON short stdout", []string{"--compare", "--format=json", input, input}, profileJSONShortWriter{}, io.ErrShortWrite},
+		{"text stdout error", []string{"--compare", input, input}, comparisonErrorWriter{err: writeFailure}, writeFailure},
+		{"JSON stdout error", []string{"--compare", "--format=json", input, input}, comparisonErrorWriter{err: writeFailure}, writeFailure},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := run(tc.args, tc.stdout, io.Discard)
+			var stderr bytes.Buffer
+			err := run(tc.args, tc.stdout, &stderr)
 			if tc.want != nil && !errors.Is(err, tc.want) {
 				t.Fatalf("error=%v, want %v", err, tc.want)
 			}
 			if tc.want == nil && (err == nil || !strings.Contains(err.Error(), "creating ")) {
 				t.Fatalf("directory error=%v", err)
 			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr=%q, want empty", stderr.String())
+			}
 		})
 	}
 }
+
+type comparisonErrorWriter struct{ err error }
+
+func (w comparisonErrorWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestCompareLimitParseDiagnosticsAndShortCircuits(t *testing.T) {
 	for _, value := range []string{"many", "999999999999999999999999999999999999999999999999999999"} {
