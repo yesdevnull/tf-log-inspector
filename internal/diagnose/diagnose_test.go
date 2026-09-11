@@ -1412,8 +1412,8 @@ func TestReportRendersBaselineOffsetAsAConstantNotACheck(t *testing.T) {
 	}
 }
 
-// The disclosure guarantee: --diagnose is the one output Dan shares, and no
-// resource address may appear in it.
+// The structural disclosure invariant is that --diagnose never reports a
+// resource address.
 func TestReportNeverPrintsAnAddress(t *testing.T) {
 	out := renderFixture(t, fixture(t, "two-tier.log"))
 	l, err := model.Load(fixture(t, "two-tier.log"))

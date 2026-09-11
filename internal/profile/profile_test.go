@@ -137,13 +137,20 @@ func render(t *testing.T, path string) string {
 	return sb.String()
 }
 
-// Unlike --diagnose, this report shows real addresses. A reader who assumes
-// otherwise could paste a confidential resource address somewhere it does not
-// belong, so the warning is part of the contract, not decoration.
+// This report shows real addresses, so the review instruction is part of the
+// output contract, not decoration.
 func TestReportWarnsThatOutputIsUnmasked(t *testing.T) {
 	out := render(t, "../../testdata/structured-ui.log")
 	if !strings.Contains(out, "not masked") {
 		t.Errorf("report does not warn that it is unmasked:\n%s", out)
+	}
+	if !strings.Contains(out, "Review the report before sharing it.") {
+		t.Errorf("report does not require review before sharing:\n%s", out)
+	}
+	for _, forbidden := range []string{"Unlike --diagnose", "diagnose report is safe", "diagnose report is shareable"} {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(forbidden)) {
+			t.Errorf("report implies diagnose is safe to share via %q:\n%s", forbidden, out)
+		}
 	}
 }
 
@@ -158,7 +165,7 @@ func TestReportShowsResourceTypeJoin(t *testing.T) {
 }
 
 // UI-hook figures are whole seconds carrying up to a second of error each, so
-// a report that ranks them must say so -- the same caveat --diagnose carries.
+// a report that ranks them must say so.
 func TestReportStatesUIHookResolution(t *testing.T) {
 	out := render(t, "../../testdata/structured-ui.log")
 	if !strings.Contains(out, "whole seconds") {

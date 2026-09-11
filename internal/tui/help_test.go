@@ -161,6 +161,17 @@ func TestHelpListsEveryBoundViewKeyByItsOwnName(t *testing.T) {
 	}
 }
 
+func TestHelpDescribesPhysicalSourceLineNavigation(t *testing.T) {
+	for _, g := range helpGroups {
+		for _, entry := range g.entries {
+			if entry.keys == "g" && entry.what == "go to a physical source line" {
+				return
+			}
+		}
+	}
+	t.Fatal(`help is missing {keys: "g", what: "go to a physical source line"}`)
+}
+
 // Every key the footer can advertise must be documented here. The footer is
 // terse by necessity -- its action line is clipped from the end at 70
 // columns -- so help is where those abbreviations are spelled out, and a
