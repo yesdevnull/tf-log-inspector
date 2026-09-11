@@ -16,7 +16,7 @@
 [2m│[0m   [36m← → h l[0m    scroll horizontally in raw log or response                                          [2m│[0m
 [2m│[0m   [36mPgUp PgDn[0m  page through raw log or response                                                    [2m│[0m
 [2m│[0m   [36mr[0m          open reconstructed response; r or Esc returns                                       [2m│[0m
-[2m│[0m   [36mg[0m          go to a physical source line in the raw log                                         [2m│[0m
+[2m│[0m   [36mg[0m          go to a physical source line                                                        [2m│[0m
 [2m│[0m   [36mc[0m          open inferred calls from resource operations                                        [2m│[0m
 [2m│[0m   [36m↑ ↓ j k[0m    scroll the reconstructed response                                                   [2m│[0m
 [2m│[0m   [36m↵ ⏎ Enter[0m  open selected provider/type or call                                                 [2m│[0m

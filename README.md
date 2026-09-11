@@ -188,6 +188,11 @@ time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `
 to edit the query. Long queries scroll with the cursor. `Enter` searches,
 `Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
 
+Press `g` with the Raw Log list focused to enter a physical source line number.
+A successful jump widens a filtered call view to the whole log and resets the
+horizontal position; `Esc` returns to the exact view, filters, search and
+selection you left.
+
 With the Raw Log list focused, `r` inspects the physical line at the top of the
 pane. When that line contains a verified provider fragment, it opens the
 complete JSON response, joining timestamped fragments even when different
@@ -421,8 +426,7 @@ guarantee. Review a diagnose report before sharing it.
 
 `--profile`'s output contains **real, unmasked resource addresses** — that is
 the point of a profiler, which is useless if it cannot say which resource was
-slow. It is for your own eyes on your own machine, and unlike `--diagnose`,
-it is not safe to share.
+slow. Review a profile report before sharing it.
 
 JSON profiles also contain unmasked identifiers and full source references,
 but exclude raw log and response bodies. Review a JSON profile before sharing

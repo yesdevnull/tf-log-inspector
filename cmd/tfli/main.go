@@ -1,9 +1,8 @@
 // Command tfli inspects Terraform TF_LOG output.
 //
-// --diagnose reports a log's structure with its content masked, safe to
-// share back to this project. --profile reports real timing and resource
-// addresses for the user's own eyes; its output is NOT masked and must never
-// be treated as shareable the way a diagnose report is.
+// --diagnose reports a log's structure with its content masked; review the
+// output before sharing it. --profile reports real timing and resource
+// addresses and is also unmasked, so it requires review before sharing.
 // --scrub writes a separate log with consistent fake identifying values;
 // review that candidate before sharing because detection is heuristic.
 //
@@ -45,7 +44,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("tfli", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked, safe to share)")
+		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked; review before sharing)")
 		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
 		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
 		doCompare  = fs.Bool("compare", false, "compare two raw logs")

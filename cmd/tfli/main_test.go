@@ -841,3 +841,19 @@ func TestHelpIsNotAnError(t *testing.T) {
 		})
 	}
 }
+
+func TestHelpQualifiesDiagnoseOutputBeforeSharing(t *testing.T) {
+	var stderr strings.Builder
+	if err := run([]string{"--help"}, io.Discard, &stderr); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "output is masked; review before sharing") {
+		t.Fatalf("diagnose help lacks review qualification:\n%s", out)
+	}
+	for _, forbidden := range []string{"safe to share", "shareable"} {
+		if strings.Contains(strings.ToLower(out), forbidden) {
+			t.Fatalf("help implies diagnose is %q:\n%s", forbidden, out)
+		}
+	}
+}

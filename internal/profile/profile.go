@@ -1,6 +1,6 @@
 // Package profile renders a loaded model.Log as a plain-text performance
 // report for the user who captured it. It prints real, unmasked resource
-// addresses and must remain separate from the shareable diagnose report.
+// addresses and requires review before sharing.
 package profile
 
 import (
@@ -46,7 +46,7 @@ func renderReport(w io.Writer, report Report, options TextOptions) error {
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "tfli profile report\n====================\n\n")
 	fmt.Fprintf(b, "SIZE\n  bytes                %d\n  RPC spans            %d\n  UI-hook spans        %d\n\n", report.Bytes, len(report.RPC), len(report.UI))
-	fmt.Fprintf(b, "Resource addresses in this report are not masked. Unlike\n--diagnose, this report is not safe to share.\n\n")
+	fmt.Fprintf(b, "Resource addresses in this report are not masked. Review the report before sharing it.\n\n")
 	writeLoggingCaveat(b)
 	qualitytext.WriteCaptureQuality(b, report.Quality)
 	writeSaturationWarning(b, report.Quality)
