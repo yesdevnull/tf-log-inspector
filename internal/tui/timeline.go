@@ -1487,14 +1487,10 @@ func (m *Model) stallAnnotation(w int) string {
 // laneOrderFor assigns each provider a position in the lane palette, keyed
 // by the short name the lane labels use.
 //
-// It reads the spans of the tier the timeline DRAWS -- RPC when the log has
-// RPC spans, UI otherwise, the same choice timelineTierFor makes. Reading
-// the provider facet instead would have covered only the RPC tier: the
-// facets are built from RPCSpans (see New), and the timeline falls to the UI
-// tier exactly when there are none, so every UI-tier lane came out
-// uncoloured. That tier is not an edge case -- it is what a capture taken
-// without TF_LOG_PROVIDER=TRACE produces, which this package elsewhere calls
-// the most likely first-run result.
+// It reads the spans of the supplied tier, including UI spans when the
+// reader explicitly selects UI timing in a mixed capture. The provider
+// facet cannot supply this palette because it is built from RPCSpans
+// (see New) and does not include UI-only providers.
 //
 // The source is the log's own spans, never the filtered ones, so a hue is a
 // property of the log rather than of the current selection: toggle a facet

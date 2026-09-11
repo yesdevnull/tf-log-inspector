@@ -223,7 +223,7 @@ and `←`/`→` (or `h`/`l`) step along the selected one call by call — the
 detail pane follows the step, and `⏎` opens that call's own log lines,
 scoped to it by its `tf_req_id`; `\` returns to the whole log.
 
-With the timeline focused, `t` switches between available RPC and UI timing.
+With the timeline list focused, `t` switches between available RPC and UI timing.
 Each tier keeps its own selected observation. UI timing retains whole-second
 resolution; filtering does not switch clocks. A single available tier stays
 selected and reports the unavailable alternative.
