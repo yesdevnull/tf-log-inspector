@@ -170,7 +170,7 @@ func TestInspectProviderJSONRangesAndOrdering(t *testing.T) {
 
 func TestInspectProviderJSONGlobalStopMalformedOwners(t *testing.T) {
 	const head = "2026-09-08T00:00:00.000Z [DEBUG] "
-	for _, malformed := range []string{`provider.`, `provider.: {}`, `provider.a missing-colon`, `provider.a bad: {}`} {
+	for _, malformed := range []string{`provider.`, `provider.: {}`, `provider.a missing-colon`, `provider.a bad: {}`, `provider.a{}`, `provider.a[]`, `provider.a"message"`, `provider.a=value`} {
 		t.Run(malformed, func(t *testing.T) {
 			lines := []string{head + `provider.done: {"done":1}`, head + `provider.a: {"a":`, head + `provider.b: {"b":`, head + malformed, head + `provider.c: {"later":1}`, head + `terraform: ordinary`}
 			input := strings.Join(lines, "\n")
@@ -215,6 +215,7 @@ func TestInspectProviderJSONEmptyProviderRecords(t *testing.T) {
 		want  []string
 	}{
 		{"empty request records", []string{emptyA, emptyA}, nil},
+		{"long provider identifier", []string{"2026-09-08T00:00:00.000Z [DEBUG] provider.terraform-provider-" + strings.Repeat("a", 64) + "_v1.2.3_x5"}, nil},
 		{"split string", []string{providerRecord("a", `{"value":"first`), emptyA, emptyA, providerRecord("a", `last"}`)}, []string{`{"value":"firstlast"}`}},
 		{"interleaved pending owners", []string{providerRecord("a", `{"a":`), providerRecord("b", `{"b":`), emptyB, `2}`, providerRecord("a", `1}`)}, []string{`{"a":1}`, `{"b":2}`}},
 		{"unrelated continuation", []string{providerRecord("a", `{"a":`), emptyB, "ordinary continuation", providerRecord("a", `1}`)}, []string{`{"a":1}`}},
