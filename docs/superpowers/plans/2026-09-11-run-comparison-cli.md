@@ -201,11 +201,11 @@ for i, info := range inputInfos {
 
 **Interfaces:** Exercise user-facing `run`; no further production API planned.
 
-- [ ] **Step 1: Add real workflow regressions.** Use `provider-rpc.log`, `two-tier.log`, `structured-ui.log`, `core-only.log`, `resources-long-lower-bound.log` and temporary synthetic empty/admitted-unpositioned captures. Assert identical inputs, added/removed groups, changed count with equal total, zero baseline, repeated actions, disjoint tiers and saturated deltas through text and decoded JSON. Source counts and totals must come from independently inspected fixture values. Copy identical capture bytes into different directories under identical basenames and require byte-identical output; rename either side independently and require only that side's `input.basename` to change. No absolute temp directory may appear. Differently renamed UI addresses remain separate observed keys, with the scrub-alias qualification intact. Use valid control/Unicode identifiers through real parsing, then assert JSON round-trip and escaped text.
-- [ ] **Step 2: Run focused checks.** `go test ./cmd/tfli -run 'TestCompare|TestComparison' -count=1`. Passing regression additions are legitimate coverage, not a new feature's RED evidence. If they reveal a production bug, capture its behavioural failure before the smallest fix and review that fix.
-- [ ] **Step 3: Document actual commands and limits.** Add both CLI examples above to README and link `docs/comparison-json-v1.md`. Explain before/after direction, admitted counts versus mean changes, zero/missing baselines, unavailable tiers, separate clocks/work, lower-bound unranked rows, text's independent list limits, complete JSON, unmasked identifiers, no raw bodies, independent scrub aliases, unknown logging equivalence and observational success exit status. Do not advertise threshold exits, JSON import or fuzzy matching. Show `--limit 0` only for text.
-- [ ] **Step 4: Execute final checks.** Run the commands below once on the final application tree; inspect every result. Decode representative JSON with the standard decoder, inspect representative text, and compare pre-H versus post-H profile text/JSON on identical fixtures and version metadata. Run independent combined H review and separate cleanup; resolve actionable findings. Update both plans and **only Boundary H**'s completion status after this evidence exists.
-- [ ] **Step 5: Commit verified documentation.** Signed commit `Verify and document raw-log comparison workflows`. Record local versus remote verification honestly, preserve review findings/resolutions in durable plan evidence, verify all branch signatures and a clean worktree. Integration remains Dan's choice.
+- [x] **Step 1: Add real workflow regressions.** Use `provider-rpc.log`, `two-tier.log`, `structured-ui.log`, `core-only.log`, `resources-long-lower-bound.log` and temporary synthetic empty/admitted-unpositioned captures. Assert identical inputs, added/removed groups, changed count with equal total, zero baseline, repeated actions, disjoint tiers and saturated deltas through text and decoded JSON. Source counts and totals must come from independently inspected fixture values. Copy identical capture bytes into different directories under identical basenames and require byte-identical output; rename either side independently and require only that side's `input.basename` to change. No absolute temp directory may appear. Differently renamed UI addresses remain separate observed keys, with the scrub-alias qualification intact. Use valid control/Unicode identifiers through real parsing, then assert JSON round-trip and escaped text.
+- [x] **Step 2: Run focused checks.** `go test ./cmd/tfli -run 'TestCompare|TestComparison' -count=1`. Passing regression additions are legitimate coverage, not a new feature's RED evidence. If they reveal a production bug, capture its behavioural failure before the smallest fix and review that fix.
+- [x] **Step 3: Document actual commands and limits.** Add both CLI examples above to README and link `docs/comparison-json-v1.md`. Explain before/after direction, admitted counts versus mean changes, zero/missing baselines, unavailable tiers, separate clocks/work, lower-bound unranked rows, text's independent list limits, complete JSON, unmasked identifiers, no raw bodies, independent scrub aliases, unknown logging equivalence and observational success exit status. Do not advertise threshold exits, JSON import or fuzzy matching. Show `--limit 0` only for text.
+- [x] **Step 4: Execute final checks.** Run the commands below once on the final application tree; inspect every result. Decode representative JSON with the standard decoder, inspect representative text, and compare pre-H versus post-H profile text/JSON on identical fixtures and version metadata. Run independent combined H review and separate cleanup; resolve actionable findings. Update both plans and **only Boundary H**'s completion status after this evidence exists.
+- [x] **Step 5: Commit verified documentation.** Signed commit `Verify and document raw-log comparison workflows`. Record local versus remote verification honestly, preserve review findings/resolutions in durable plan evidence, verify all branch signatures and a clean worktree. Integration remains Dan's choice.
 
 ## Final validation
 
@@ -300,4 +300,18 @@ Controller race tests passed all eleven packages at `8e6fc0c`, with zero lint
 issues and clean formatting. Subsequent cleanup removed only redundant test
 predicates and passed its focused checks. Build, module consistency/checksums,
 local platform builds and manual output checks passed on unchanged production.
-Final combined review remains before Boundary H completion.
+Final combined review of `801a917..ac40ba0` found no production defects or
+Critical/Important findings. Its sole Minor was a shallow text-renderer test
+snapshot. Commit `64a1577` reuses the independent deep-copy helper; a temporary
+nested mutation failed the assertion before restoration, and the focused test
+passed. Scoped re-review approved the fix with no collateral findings. Separate
+cleanup retained the meaningful test without edits. All review findings are
+resolved.
+
+The controller ran `go test ./...` on `64a1577`: all eleven packages passed.
+Step 5's documentation commit is `8e7b9f4`; its signature and clean-worktree
+checks passed. All H commits through `64a1577` have verified signatures; this
+final bookkeeping commit is checked separately after creation.
+Boundary H implementation is complete on
+`wip/run-comparison-plans`; integration remains Dan’s decision. No merge, push
+or remote CI execution is claimed.

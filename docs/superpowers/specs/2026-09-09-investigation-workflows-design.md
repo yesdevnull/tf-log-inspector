@@ -81,6 +81,14 @@ and two-input output protection. Dan subsequently approved both plans and
 subagent implementation. This approval is limited to H; Boundary I retains
 its existing status.
 
+Boundary H completed on 11 September 2026. The CLI compares two raw logs using
+`--compare`, with qualified text reports and complete versioned JSON. Combined
+review of `801a917..ac40ba0` found no production defects or important findings;
+the sole minor test-snapshot issue was fixed in `64a1577` and approved by scoped
+re-review. Both plans record task reviews, separate cleanup and local
+verification. Integration into main remains Dan's decision. Boundary I remains
+unimplemented.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response

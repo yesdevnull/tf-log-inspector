@@ -301,6 +301,12 @@ proved missing comparison assembly after the interface compiled. Focused tests,
 the full suite and build passed. Review requested complete report-retention
 checks and all lower-bound timing-null assertions; the test-only fix passed
 scoped re-review. Separate cleanup retained all four tests and the fix additions,
-with profile package tests passing. H1 is ready for H2. One minor documentation
-clarification is carried to H2 task 4: explicitly state that each key object
-contains only its section's applicable fields in the documented order.
+with profile package tests passing. H2 task 4 resolved the minor documentation
+clarification: each key object contains only its section's applicable fields in
+the documented order.
+
+H1 and H2 implementation completed on 11 September 2026. Combined review of
+`801a917..ac40ba0` found no production defects or important findings. Its sole
+minor text-test snapshot issue was fixed in `64a1577` and approved by scoped
+re-review. H2 records the combined verification, cleanup and controller ruling.
+Integration into main remains Dan's decision.
