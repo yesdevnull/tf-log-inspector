@@ -102,9 +102,10 @@ local main at `04d28da`. Dan authorised drafting the
 [I2 viewer and quality implementation plan](../plans/2026-09-11-response-recovery-viewer.md).
 Dan approved JSON v2 with explicit recovery states for both profile and
 comparison output on 11 September 2026. Physical-line selection and the
-remaining plan contracts are still proposals for review; the two peer-review
-findings and final plan approval remain outstanding. I2 implementation has not
-started.
+remaining plan contracts are still proposals for review. Dan authorised fixing
+both peer-review findings; the plan now specifies atomic temporary-error
+publication and scalar diagnostic selection with failure-tail benchmarks.
+Final plan approval remains outstanding. I2 implementation has not started.
 
 ## Evidence and relationship to existing designs
 

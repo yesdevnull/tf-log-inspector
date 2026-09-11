@@ -31,13 +31,13 @@
 
 Dan authorised this I2 plan after I1 merged into local main at `04d28da` on 11 September 2026. Planning is on `wip/response-recovery-viewer-plan`. This document proposes the precise contracts below; application implementation has not started.
 
-Dan approved JSON v2 with explicit recovery states for both profile and comparison output on 11 September 2026. Version 1 only defines `not_checked`, `checked` and `failed`; silently adding recovery states would change its documented contract. Version 2 exposes the actual outcome without maintaining a second writer or a version-selection flag. The existing v1 documents remain historical references, clearly labelled as such. This approval settles the JSON version direction; the two peer-review findings and final plan approval remain outstanding before implementation.
+Dan approved JSON v2 with explicit recovery states for both profile and comparison output on 11 September 2026. Version 1 only defines `not_checked`, `checked` and `failed`; silently adding recovery states would change its documented contract. Version 2 exposes the actual outcome without maintaining a second writer or a version-selection flag. The existing v1 documents remain historical references, clearly labelled as such. Dan subsequently authorised fixing both peer-review findings; the plan now specifies atomic temporary-error publication and scalar diagnostic selection with failure-tail benchmarks. Final plan approval remains outstanding before implementation.
 
 Raw Log has a viewport position, not a character cursor. For `r`, “selected physical position” means the first physical line the pane actually draws, identified by entry ordinal and zero-based line offset. Horizontal scrolling and a search occurrence do not become byte offsets. A physical line containing provider payload opens that message even when its logger header is at the left edge; an inline UI-only line or an empty fragment does not select a response. The model will intersect the original nonempty line byte range with original fragment ranges. It never searches a later physical line or another response in the same entry.
 
 ### Alternatives considered
 
-1. **Cached ranges and explicit JSON v2 — recommended.** One parser result, logarithmic repeated lookup, one canonical quality state and no lossy report projection.
+1. **Cached ranges and explicit JSON v2 — recommended.** One parser result, logarithmic repeated range lookup, one canonical quality state and no lossy report projection. Status selection copies only fixed-size diagnostic presentation facts; complete selection additionally copies the selected message's fragments.
 2. **Scan every message for each opening.** Less indexing code, but repeated opening in a large capture revisits every response and diagnostic. The existing spec explicitly asks for lazy indexes where repeated lookup needs them.
 3. **Keep JSON v1 with conservative strict-quality projection.** This preserves old wire states but cannot expose recovered counts and partial quality directly; it introduces a separate consumer projection. Do not implement this alternative without Dan choosing it and revising this plan's exact mapping.
 
@@ -77,7 +77,7 @@ type ProviderResponseSelection struct {
     State          string // "complete", "invalid", "unavailable", "none"
     SourceLine     uint64 // one-based physical line; zero for an invalid request
     Response       logfmt.ProviderJSON
-    Diagnostic     *logfmt.ProviderJSONDiagnostic
+    Diagnostic     *logfmt.ProviderJSONDiagnostic // presentation facts only; both range slices nil
     HasDiagnostics bool // any diagnostic in the whole-capture outcome
 }
 
@@ -97,7 +97,7 @@ Keep three sorted private slices on `Log`: `responseMessageRanges`, `responseFai
 
 `inspectProviderResponses` invokes `logfmt.InspectProviderJSON(string(l.Data))` exactly once, stores both result slices and builds the indexes. Flatten complete `Fragments`, diagnostic `Ranges`, and diagnostic `Unavailable` separately. Skip `Start == End`; preserve indexes into the original message/diagnostic slices; sort each flattened slice by start, end, then original index. The I1 ownership contract makes nonempty ranges within each class disjoint, so ends are monotonic after sorting. Binary-search the first `end > selectedStart`, then require `start < selectedEnd`. No interval tree or all-capture scan per lookup.
 
-Set `responseChecked.Store(true)` only after the messages, diagnostics and all indexes are complete. Quality reads must load that flag before accessing those fields. Concurrent `ProviderResponseAt` calls synchronise through the same `sync.Once`; callers never mutate cached results. Do not expose a cache-reset API.
+Set `responseChecked.Store(true)` only after the messages, diagnostics and all indexes are complete. During Tasks 1–2, the same `responseOnce.Do` closure must also assign the temporary `responseErr` from the first diagnostic before that final store; neither public response method may assign it afterwards. Quality reads must load the flag before accessing any published field, including `responseErr`. Concurrent `ProviderResponseAt` calls synchronise through the same `sync.Once`; callers never mutate cached results. Task 3 removes the temporary error assignment together with its field and consumer. Do not expose a cache-reset API.
 
 `responseSourceLine` calls the existing `SourceLocation(entry)` to validate the entry and initialise `sourceLineStarts`. Reject negative offsets and offsets exceeding `EndLine-StartLine` before addition. Use the indexed global line start and next start (or `len(Data)`), clipped to the entry's validated byte interval. Exclude one final LF and then one immediately preceding CR; also exclude a final CR without LF, matching I1. Do not sum `Entry.Lines`, split the entire capture again, or reinterpret display text. Return the real global physical line even for an empty byte range.
 
@@ -106,9 +106,11 @@ Selection order is exact:
 1. An invalid entry/line request returns `State:"none"`, zero source line and empty details without triggering inspection.
 2. A valid physical line triggers the one inspection, including a blank line. Set `SourceLine` and `HasDiagnostics` from that result.
 3. A nonempty intersection with complete-message fragments returns `complete`, a copy of that message and a detached fragment slice; `Diagnostic` is nil.
-4. Otherwise an intersection with unsuccessful-message `Ranges` returns `invalid`, an empty response and a detached diagnostic (both range slices copied). This includes a pending response aborted by a global ownership failure; its reason remains `ambiguous_ownership`.
-5. Otherwise an intersection with `Unavailable` returns `unavailable` and the detached owning diagnostic. A global trigger owns its whole trigger line and tail, as defined by I1.
+4. Otherwise an intersection with unsuccessful-message `Ranges` returns `invalid`, an empty response and a scalar copy of the owning diagnostic with `Ranges` and `Unavailable` both nil. This includes a pending response aborted by a global ownership failure; its reason remains `ambiguous_ownership`.
+5. Otherwise an intersection with `Unavailable` returns `unavailable` and the same scalar diagnostic projection with both range slices nil. A global trigger owns its whole trigger line and tail, as defined by I1.
 6. Otherwise return `none`. Do not substitute the first response in the entry, first diagnostic in the capture, or a response on a later line. An empty range never matches.
+
+Diagnostic ranges remain private in the cache and indexes; never copy or return them during status selection. Preserve every scalar field, including code, source locations, counts and syntax offset, so `Diagnostic.Error()` retains exactly the cached diagnostic's safe text. The returned pointer owns an independent value. Status selection must not allocate or copy in proportion to the failed message's ranges or unavailable tail.
 
 The source-line selector is intentionally independent of active TUI filters; the TUI admits the opening position first. Once a verified fragment is selected, its complete message can contain other physical fragments hidden by a current raw scope/filter. This is the existing complete-body modal behaviour, not a change to the raw selection or filter.
 
@@ -212,10 +214,27 @@ func TestProviderResponseAtSelectsPhysicalLineWithinEntry(t *testing.T) {
 
 Add table cases for good A/bad B/good A; pending A/bad B/finish A; complete A/incomplete A at EOF; bad A/apparent A/good B; invalid UTF-8; inline UI-only line between A fragments; global trigger with earlier complete and pending streams; ordinary content within a multi-line entry; blank and CRLF/final-CR lines; invalid ordinals/negative and excessive line offsets; and an entry with more than 65,535 physical lines. Assert exact selected body/state/line/diagnostic code, no unrelated fallback and original-slice equality. On global failure, previous pending ranges select invalid and trigger/tail lines select unavailable. Include a quarantined payload followed by a different ordinary entry's continuation to prove its ordinary line is none.
 
-After selecting a complete response, mutate the returned fragment slice and repeat the selection; after selecting invalid/unavailable, mutate both returned diagnostic range slices and repeat. Internal results, source bytes and entries must remain equal to their baseline. Concurrent first lookups must return consistent independent copies; existing quality accessors must not see partially published fields.
+After selecting a complete response, mutate the returned fragment slice and repeat the selection. For every invalid/unavailable selection, require a non-nil diagnostic with both range slices nil, and compare all scalar fields and `Error()` with the owning I1 diagnostic. Mutate the returned diagnostic's code/count/location fields and assign fresh slices to its range fields, then repeat selection; it must again return the original scalar facts and nil ranges. Check invalid-start, local unavailable-tail, global-trigger and global unavailable-tail positions. Cached diagnostics must retain their full original ranges, and later lookups must still select correctly. Internal results, source bytes and entries must remain equal to their baseline. Concurrent first lookups must return consistent independent values; existing quality accessors must not see partially published fields.
+
+Add this interim regression before migrating quality in Task 3. It inspects through the new API first, without invoking the old entry API:
+
+```go
+func TestProviderResponseAtPublishesInterimFailedQuality(t *testing.T) {
+    const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
+    source := head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n"
+    l := &Log{Data: []byte(source), Entries: []logfmt.Entry{{Len: uint32(len(source)), Lines: 2}}}
+    if got := l.ProviderResponseAt(0, 0); got.State != "complete" || !got.HasDiagnostics {
+        t.Fatalf("selection = %+v", got)
+    }
+    want := ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}
+    if got := l.ReconstructionQuality(); got != want { t.Fatalf("quality = %+v", got) }
+}
+```
+
+Run this case with malformed-only input as well (selection `invalid`, same interim quality). On fresh logs of both fixtures, release quality readers and first `ProviderResponseAt` calls from one start channel. Before publication, readers may see only the exact `not_checked` zero snapshot; afterwards, only the exact interim `failed` snapshot above. Join all workers and assert final `failed`. Then exercise the old entry API concurrently with quality readers on that inspected log to catch any post-publication assignment. Use finite iterations and a wait group, without sleeps; check worker errors in the test goroutine. In Task 3 migrate these tests to final `partial` with one response/one diagnostic for the mixed fixture and `failed` with zero responses/one diagnostic for malformed-only input; remove the old-API phase while retaining concurrent first-selection coverage.
 
 - [ ] **Step 2: Observe behavioural RED.** Add compiling declarations only if needed, then run `go test ./internal/model -run 'TestProviderResponseAt' -count=1`. Record wrong/empty selected response assertions, not only undefined symbols.
-- [ ] **Step 3: Implement the shared cache and range selection.** Follow the exact contracts above. Use the following dispatch shape and copy the selected slices before return:
+- [ ] **Step 3: Implement the shared cache and range selection.** Follow the exact contracts above. Copy fragments only for a selected complete message; project failure diagnostics to scalar facts:
 
 ```go
 func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseSelection {
@@ -235,8 +254,8 @@ func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseS
     } {
         if i, ok := responseRangeMatch(candidate.ranges, start, end); ok {
             d := l.responseDiagnostics[i]
-            d.Ranges = append([]logfmt.JSONFragment(nil), d.Ranges...)
-            d.Unavailable = append([]logfmt.JSONFragment(nil), d.Unavailable...)
+            d.Ranges = nil
+            d.Unavailable = nil
             selection.State, selection.Diagnostic = candidate.state, &d
             return selection
         }
@@ -245,9 +264,32 @@ func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseS
 }
 ```
 
-Until Task 3, route the current `ProviderResponse(e)` through `inspectProviderResponses` and set its existing `responseErr` from the first diagnostic, so current TUI and quality tests still pass while using one cache. Replace the old method's `responseOnce.Do` block with a call to the new helper; never nest a call to that same `sync.Once` inside itself. Do not add a second strict reconstruction pass. This temporary call-site migration is removed in Task 3; it is not an additional supported API or compatibility feature.
+Until Task 3, route the current `ProviderResponse(e)` through `inspectProviderResponses`; the old method only calls the helper and reads the published error/messages. Replace its old `responseOnce.Do` block with that helper call; never nest a call to the same `sync.Once` inside itself. Inside the helper's `responseOnce.Do` closure, after storing the outcome and building all three indexes, finish publication with exactly this ordering:
 
-- [ ] **Step 4: Verify and measure.** Run `go test ./internal/model ./internal/tui ./internal/profile -count=1`. Add `BenchmarkProviderResponseAtFirst` and `BenchmarkProviderResponseAtRepeated`, with 1,000 and 10,000 synthetic groups of good A / bad unique B / apparent B restart; alternate lookups of a complete, invalid and unavailable last-group line. Build input and entries outside measurement. First-access iterations construct a fresh `Log` with immutable fixture Data/Entries and no copied sync primitives; repeated access uses one inspected log. Validate expected selection before timing, `ReportAllocs`, and assign the returned selection to a package benchmark sink. Run `go test ./internal/model -run '^$' -bench BenchmarkProviderResponseAt -benchmem -count=1`; record actual results without a timing threshold.
+```go
+if len(l.responseDiagnostics) != 0 {
+    d := l.responseDiagnostics[0]
+    d.Ranges, d.Unavailable = nil, nil
+    l.responseErr = d
+}
+l.responseChecked.Store(true)
+```
+
+The zero-value error remains nil for diagnostic-free input. Clear the temporary error's slice fields so returning that error from the old method cannot expose cached range storage; its safe error text remains identical. Extend Task 1's old-API phase to assert the returned diagnostic error has nil ranges. Neither response method writes the error outside this closure, including on repeated calls. This keeps current TUI/quality consumers correct even when `ProviderResponseAt` performs the first inspection. Do not add a second strict reconstruction pass. Task 3 removes this temporary assignment, its field and the old method together; it is not an additional supported API or compatibility feature.
+
+- [ ] **Step 4: Verify and measure.** Run `go test ./internal/model ./internal/tui ./internal/profile -count=1` and `go test -race ./internal/model -run 'TestProviderResponseAt' -count=1`. Add `BenchmarkProviderResponseAtFirst` and `BenchmarkProviderResponseAtRepeated`, with 1,000 and 10,000 synthetic groups of good A / bad unique B / apparent B restart; alternate lookups of a complete, invalid and unavailable last-group line. Build input and entries outside measurement. First-access iterations construct a fresh `Log` with immutable fixture Data/Entries and no copied sync primitives; repeated access uses one inspected log. Validate expected selection before timing, `ReportAllocs`, and assign the returned selection to a package benchmark sink.
+
+Also add `BenchmarkProviderResponseAtFailureTail` with separate local/global sub-benchmarks and tail lengths 1,000, 10,000 and 100,000. Construct these real-parser sources outside measurement (`tailLines` is the sub-benchmark's length):
+
+```go
+const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
+localSource := head + "a: {\"broken\":]}\n" +
+    strings.Repeat(head + "a: {\"apparent_restart\":1}\n", tailLines)
+globalSource := head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\n" +
+    strings.Repeat("ordinary tail\n", tailLines)
+```
+
+Use the real loaded entry index to resolve the requested physical lines before timing, including a continuation offset when the final global-tail line shares an entry. Pre-inspect each log. For local input, measure the invalid first line and unavailable final tail line separately; the owning diagnostic must have `tailLines` unavailable ranges. For global input, measure the aborted invalid first line, unavailable trigger line and unavailable final tail line separately; the trigger diagnostic must have `tailLines+1` unavailable ranges. Assert these fixture sizes and expected selection states before timing so the benchmark cannot silently measure an ordinary/no-match path. Each status result must have a diagnostic with nil range slices. Keep validation, fixture construction and first inspection outside repeated-lookup timing; use `ReportAllocs` and the same package sink. Run `go test ./internal/model -run '^$' -bench BenchmarkProviderResponseAt -benchmem -count=1`. Record ns/op, B/op and allocs/op for each case: repeated status-selection B/op and allocs/op must remain bounded independently of tail length; investigate any growth rather than accepting an aggregate number. Do not impose a wall-clock threshold. First inspection and selected complete-message fragment copying have separate costs.
 - [ ] **Step 5: Review, cleanup and signed commit.** Independent task review and separate test cleanup; resolve findings. Commit `Resolve recovered responses by physical source line`.
 
 ### Task 2: Integrate recovered responses into the existing modal
@@ -324,7 +366,7 @@ func (l *Log) ReconstructionQuality() ReconstructionQuality {
 }
 ```
 
-Update TUI copy and indicator per contract. Remove the temporary entry-wide method/error field and migrate retained regression tests to the intended physical line; keep their source-preservation, failure-safety and concurrency assertions.
+Update TUI copy and indicator per contract. Remove the temporary entry-wide method/error field and the error assignment inside `inspectProviderResponses` together; retain the final atomic store after all remaining cache fields are ready. Migrate retained regression tests to the intended physical line and the final quality table, including Task 1's mixed and malformed-only publication cases; keep their source-preservation, failure-safety and concurrency assertions.
 
 - [ ] **Step 4: Implement coordinated JSON v2.** Add `Diagnostics *int` between Responses and Code in private `jsonReconstruction`, change both root constructors to version 2, and validate/map the state table in the shared helper before marshalling. Check not-checked zeros/empty code; complete nonnegative responses with zero diagnostics/empty code; partial positive counts/exact partial code; failed zero responses/positive diagnostics/exact failed code. Invalid state and invalid snapshot use the fixed distinct errors above. Update exact root, nested key, integer/null and CLI assertions together.
 
@@ -413,3 +455,10 @@ Tasks are sequential: 1 supplies lookup; 2 switches the viewer; 3 coordinates ca
 Baseline at `04d28da`: `go test ./...` passes all eleven packages (cached), and `go build ./...` passes. These checks validate the existing application, not the proposed I2 implementation. The draft inspected I1's outcome contract, model response/cache/location code, raw rendering/search/visibility, modal navigation, quality publication, shared JSON projection and both published v1 documents.
 
 Self-review checked exact existing/new paths, type/field agreement, interim consumer expectations, the physical-line interpretation, empty-range handling, both JSON kinds and all spec-coverage rows. It made the temporary cache migration explicit to prevent recursive `sync.Once` use and supplied the precise TUI fixture setup. The document validator checked relative links, fences and unfinished-value markers; all ten Go examples parse with `gofmt`. Those checks do not type-check proposed APIs or validate future behaviour. Independent plan review and approval remain separate gates. No application code, new fixture, JSON v2 document or implementation test has been created by drafting this plan.
+
+### Peer-review corrections, 11 September 2026
+
+- `I2-PAR-1`: the cache contract and Task 1 publication example place temporary `responseErr` assignment inside the shared once closure before its atomic store. Task 1 requires mixed/malformed first-access and concurrent quality regressions; Task 3 removes the temporary assignment and migrates those assertions together with the consumer.
+- `I2-PAR-2`: the selection contract, dispatch example and detachment tests return only scalar diagnostic facts with nil ranges. Full cached ranges remain available to the indexes. Separate local/global failure-tail benchmarks measure invalid and unavailable selections at 1,000, 10,000 and 100,000 tail lines, checking that repeated status allocation does not scale with the tail.
+
+The corrected document passes link, fence and unfinished-value checks; all thirteen Go examples parse with `gofmt`. These are plan checks only. Runtime race, allocation and behaviour evidence belongs to the implementation tasks above.
