@@ -49,7 +49,7 @@ func TestResponseNavigationAndSearchPreservesRawPosition(t *testing.T) {
 	beforeTop, beforeTopLine, beforeColumn := m.raw.top, m.raw.topLine, m.raw.column
 	beforeMatch := *m.raw.match
 	before := m.renderRawLog(100, 8)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	if !strings.Contains(m.centreTitle(), "RECONSTRUCTED RESPONSE") || !strings.Contains(m.centreTitle(), "2 fragments") {
 		t.Fatalf("title = %q", m.centreTitle())
 	}
@@ -88,7 +88,7 @@ func TestResponseNavigationAndSearchPreservesRawPosition(t *testing.T) {
 	if m.raw.match == nil || m.raw.match.entry <= beforeMatch.entry {
 		t.Fatal("raw repeat did not continue from its prior occurrence")
 	}
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	if !strings.Contains(m.footer(60), "q quit") {
 		t.Fatal("narrow response footer hides quit")
 	}
@@ -101,7 +101,7 @@ func TestResponseNavigationAndSearchPreservesRawPosition(t *testing.T) {
 func TestResponseDecodedControlsAndUnavailableBody(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"@message": "HTTP\nunsafe\x1b[2J\r\t\a\u009b text"})
 	m := responseModel(t, string(body))
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	out := m.renderCentre(200, 20)
 	if !strings.Contains(out, "Decoded @message") || !strings.Contains(out, `unsafe\x1b[2J\r\t\a\u009b text`) {
 		t.Fatalf("unsafe or unreadable decoded display: %q", out)
@@ -119,12 +119,12 @@ func TestResponseDecodedControlsAndUnavailableBody(t *testing.T) {
 	}
 	for _, body := range []string{"ordinary message", `{"secret":`} {
 		m = responseModel(t, body)
-		responseKey(m, "r")
+		responseKeyAndDrain(t, m, "r")
 		out = m.renderCentre(100, 10)
 		if !strings.Contains(out, "response") || strings.Contains(out, "secret") {
 			t.Fatalf("unavailable message = %q", out)
 		}
-		responseKey(m, "r")
+		responseKeyAndDrain(t, m, "r")
 		if m.centreTitle() != "RAW LOG" {
 			t.Fatal("r did not close")
 		}
@@ -133,7 +133,7 @@ func TestResponseDecodedControlsAndUnavailableBody(t *testing.T) {
 
 func TestResponseSearchRevealsWideMatchAndAdvancesNearBottom(t *testing.T) {
 	m := responseModel(t, `{"a":"`+strings.Repeat("x", 150)+`needle","b":"needle"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(50, 10)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -150,7 +150,7 @@ func TestResponseSearchRevealsWideMatchAndAdvancesNearBottom(t *testing.T) {
 
 func TestResponseSearchVisitsOccurrencesOnOneLine(t *testing.T) {
 	m := responseModel(t, `{"message":"`+strings.Repeat("x", 100)+`needle first needle second`+strings.Repeat("z", 100)+`"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(12, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -170,7 +170,7 @@ func TestResponseSearchVisitsOccurrencesOnOneLine(t *testing.T) {
 
 func TestResponseSearchMissAndEmptyInputPreserveOccurrence(t *testing.T) {
 	m := responseModel(t, `{"message":"`+strings.Repeat("x", 100)+`needle first needle second`+strings.Repeat("z", 100)+`"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(12, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -202,7 +202,7 @@ func TestResponseSearchMissAndEmptyInputPreserveOccurrence(t *testing.T) {
 
 func TestResponseSearchHighlightTracksSubmittedOccurrenceWithoutMutatingState(t *testing.T) {
 	m := responseModel(t, `{"message":"needle first needle second"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderResponse(80, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -251,7 +251,7 @@ func TestResponseSearchHighlightHandlesDisplayedUnicodeControlsAndClipping(t *te
 	message := "top\nCafe\u0301 👩‍💻 界界 needle-wide tail \x1b[2J\nbottom"
 	body, _ := json.Marshal(map[string]string{"@message": message})
 	m := responseModel(t, string(body))
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderResponse(80, 4)
 
 	for _, tc := range []struct {
@@ -291,7 +291,7 @@ func TestResponseSearchHighlightHandlesDisplayedUnicodeControlsAndClipping(t *te
 
 func TestResponseSearchHighlightPreservesFullHorizontalRangeAndManualNavigationClearsIt(t *testing.T) {
 	m := responseModel(t, `{"short":"needle","long":"`+strings.Repeat("x", 300)+`"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderResponse(20, 1)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -326,7 +326,7 @@ func TestResponseSearchHighlightPreservesFullHorizontalRangeAndManualNavigationC
 func TestResponseManualScrollingStartsRepeatFromVisiblePosition(t *testing.T) {
 	body := `{"a":"` + strings.Repeat("x", 10) + `needle first needle second` + strings.Repeat("z", 300) + `"` + strings.Repeat(`,"tail":"padding"`, 30) + `}`
 	m := responseModel(t, body)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(12, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -338,7 +338,7 @@ func TestResponseManualScrollingStartsRepeatFromVisiblePosition(t *testing.T) {
 	}
 
 	m = responseModel(t, `{"a":"needle first","b":"needle second","wide":"`+strings.Repeat("z", 300)+`"`+strings.Repeat(`,"tail":"padding"`, 30)+`}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(20, 1)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -352,7 +352,7 @@ func TestResponseManualScrollingStartsRepeatFromVisiblePosition(t *testing.T) {
 
 func TestResponseResizeClampsViewWithoutDiscardingOccurrence(t *testing.T) {
 	m := responseModel(t, `{"message":"`+strings.Repeat("x", 40)+`needle first `+strings.Repeat("y", 40)+`needle second"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(12, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -369,7 +369,7 @@ func TestResponseResizeClampsViewWithoutDiscardingOccurrence(t *testing.T) {
 
 func TestResponseSearchUsesDisplayColumnsAfterWideUnicode(t *testing.T) {
 	m := responseModel(t, `{"message":"`+strings.Repeat("界", 30)+`needle first needle second"}`)
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	m.renderCentre(14, 4)
 	responseKey(m, "/")
 	responseKey(m, "needle")
@@ -386,7 +386,7 @@ func TestResponseSearchUsesDisplayColumnsAfterWideUnicode(t *testing.T) {
 func TestResponseWorkbenchShowsModalGuidance(t *testing.T) {
 	m := responseModel(t, `{"message":"synthetic"}`)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	responseKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	out := unstyled(m.View())
 	for _, hint := range []string{"Esc/r back", "scroll", "PgUp/PgDn", "q quit"} {
 		if !strings.Contains(out, hint) {
@@ -411,7 +411,7 @@ func TestResponseDoesNotOpenEntriesOutsideRawFilterOrScope(t *testing.T) {
 			if out := m.renderRawLog(80, 10); strings.Contains(out, "hidden-response") {
 				t.Fatalf("raw view did not hide entry: %q", out)
 			}
-			responseKey(m, "r")
+			responseKeyAndDrain(t, m, "r")
 			out := m.renderCentre(80, 10)
 			if strings.Contains(out, "hidden-response") || !strings.Contains(out, "No reconstructed response") {
 				t.Fatalf("empty raw pane opened response: %q", out)

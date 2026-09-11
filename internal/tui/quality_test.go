@@ -180,11 +180,11 @@ func TestQualityReportsLazyReconstructionWithoutTriggeringIt(t *testing.T) {
 		t.Fatal("quality did not report untouched reconstruction state")
 	}
 	qualityKey(m, "i")
-	qualityKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	if got := m.log.ReconstructionQuality().State; got != "complete" {
 		t.Fatalf("viewing response left reconstruction state %q", got)
 	}
-	qualityKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	qualityKey(m, "i")
 	if got := m.renderQuality(100, 200); !strings.Contains(got, "complete: 1 responses available") {
 		t.Fatalf("quality did not report completed reconstruction:\n%s", got)
@@ -193,11 +193,11 @@ func TestQualityReportsLazyReconstructionWithoutTriggeringIt(t *testing.T) {
 
 func TestQualityReportsFailedReconstruction(t *testing.T) {
 	m := responseModel(t, `{"secret":`)
-	qualityKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	if got := m.log.ReconstructionQuality().State; got != "failed" {
 		t.Fatalf("malformed response left reconstruction state %q", got)
 	}
-	qualityKey(m, "r")
+	responseKeyAndDrain(t, m, "r")
 	qualityKey(m, "i")
 	if got := m.renderQuality(100, 200); !strings.Contains(got, "failed: 0 responses available; 1 reconstruction diagnostics") || !strings.Contains(got, "Diagnostic counts can include ownership triggers and aborted messages.") {
 		t.Fatalf("quality did not report reconstruction failure:\n%s", got)

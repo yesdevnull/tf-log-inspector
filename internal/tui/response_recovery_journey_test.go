@@ -53,7 +53,7 @@ func TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing(t *t
 		t.Fatalf("raw occurrence is not highlighted before opening response: %q", beforeRaw)
 	}
 
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "Partial reconstruction") || !strings.Contains(got, "Decoded @message:") || !strings.Contains(got, "recovered response") {
 		t.Fatalf("recovered response view:\n%s", got)
 	}
@@ -77,40 +77,40 @@ func TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing(t *t
 	}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "This response is incomplete or invalid.") || !strings.Contains(got, "Source line 2.") || strings.Contains(got, `"broken"`) {
 		t.Fatalf("invalid response status:\n%s", got)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "This stream is unavailable after an earlier failure.") || !strings.Contains(got, "Source line 4.") || strings.Contains(got, "apparent_restart") {
 		t.Fatalf("unavailable response status:\n%s", got)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "No reconstructed response at this physical line.") || !strings.Contains(got, "Source line 5.") || strings.Contains(got, "ordinary entry") {
 		t.Fatalf("ordinary entry response status:\n%s", got)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "No reconstructed response at this physical line.") || !strings.Contains(got, "Source line 6.") || strings.Contains(got, "ordinary continuation") {
 		t.Fatalf("ordinary continuation response status:\n%s", got)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "This response is incomplete or invalid.") || !strings.Contains(got, "Source line 7.") || strings.Contains(got, "unfinished") {
 		t.Fatalf("incomplete response status:\n%s", got)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	responseKey(&m, "i")
 	wantQuality := model.ReconstructionQuality{State: "partial", Responses: 2, Diagnostics: 2, Code: "reconstruction_partial"}

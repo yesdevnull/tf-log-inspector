@@ -46,7 +46,7 @@ func TestResponsePhysicalPositionSelectsLineWithinBroadEntry(t *testing.T) {
 	m.raw.column = 37
 	m.raw.match = &rawMatch{entry: 0, line: 1, text: literalPosition{byteOffset: 7, column: 7}}
 
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	out := m.renderResponse(80, 8)
 	if !strings.Contains(out, `"selected": "second"`) || strings.Contains(out, `"selected": "first"`) {
 		t.Fatalf("response at the second physical line = %q", out)
@@ -72,7 +72,7 @@ func TestResponseRecoveryOpensCompleteAndInvalidPositions(t *testing.T) {
 	beforeFilter := cloneExclusions(m.excludedFacets)
 	beforeHistory := slices.Clone(m.history)
 
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if !strings.Contains(m.response.notice, "Partial reconstruction") {
 		t.Fatal("recovered body lacks the capture qualification")
 	}
@@ -93,15 +93,15 @@ func TestResponseRecoveryOpensCompleteAndInvalidPositions(t *testing.T) {
 	}
 
 	m.raw.top = 0
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	out = m.renderResponse(80, 8)
 	if !strings.Contains(out, `"selected": "first"`) || strings.Contains(out, `"selected": "second"`) {
 		t.Fatalf("first recovered body = %q", out)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 
 	m.raw.top = 1
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	out = m.renderResponse(100, 8)
 	for _, want := range []string{
 		"This response is incomplete or invalid.",
@@ -124,7 +124,7 @@ func TestResponseUnavailableAndGlobalOwnershipStatuses(t *testing.T) {
 			responseRecoveryHead + "a: ordinary continuation\n"
 		m := loadedResponseModel(t, source)
 		m.raw.top = 1
-		responseKey(&m, "r")
+		responseKeyAndDrain(t, &m, "r")
 		out := m.renderResponse(100, 8)
 		for _, want := range []string{
 			"This stream is unavailable after an earlier failure.",
@@ -147,7 +147,7 @@ func TestResponseUnavailableAndGlobalOwnershipStatuses(t *testing.T) {
 			responseRecoveryHead + `b: {"later-sentinel":1}` + "\n"
 		m := loadedResponseModel(t, source)
 		m.raw.top = 1
-		responseKey(&m, "r")
+		responseKeyAndDrain(t, &m, "r")
 		out := m.renderResponse(100, 8)
 		for _, want := range []string{
 			"Response ownership is unavailable at this position.",
@@ -170,7 +170,7 @@ func TestResponsePositionUsesFirstDisplayedPhysicalLine(t *testing.T) {
 			responseRecoveryHead + `a: {"selected":"visible"}` + "\n"
 		m := loadedResponseModel(t, source)
 		m.excludedFacets = map[string]map[string]bool{dimLevel: {"INFO": true}}
-		responseKey(&m, "r")
+		responseKeyAndDrain(t, &m, "r")
 		if out := m.renderResponse(80, 8); !strings.Contains(out, `"selected": "visible"`) {
 			t.Fatalf("response did not follow the first displayed entry: %q", out)
 		}
@@ -190,13 +190,13 @@ func TestResponsePositionUsesFirstDisplayedPhysicalLine(t *testing.T) {
 			if tc.filter {
 				m.excludedFacets = map[string]map[string]bool{dimLevel: {"DEBUG": true}}
 			}
-			responseKey(&m, "r")
+			responseKeyAndDrain(t, &m, "r")
 			out := m.renderResponse(80, 8)
 			if !strings.Contains(out, "No reconstructed response at this position.") || strings.Contains(out, "hidden") {
 				t.Fatalf("empty raw pane response = %q", out)
 			}
-			if got := m.log.ReconstructionQuality(); got.State != "not_checked" {
-				t.Fatalf("empty raw pane initiated reconstruction: %+v", got)
+			if got := m.log.ReconstructionQuality(); got.State != "complete" {
+				t.Fatalf("empty raw pane did not complete the explicit whole-capture check: %+v", got)
 			}
 		})
 	}
@@ -206,7 +206,7 @@ func TestResponsePositionUsesFirstDisplayedPhysicalLine(t *testing.T) {
 			responseRecoveryHead + `b: {"selected":"next"}` + "\n"
 		m := loadedResponseModel(t, source)
 		m.raw.topLine = 99
-		responseKey(&m, "r")
+		responseKeyAndDrain(t, &m, "r")
 		out := m.renderResponse(80, 8)
 		if !strings.Contains(out, `"selected": "next"`) || strings.Contains(out, `"selected": "skipped"`) {
 			t.Fatalf("invalid top line response = %q", out)
@@ -247,7 +247,7 @@ func TestResponsePhysicalLinesDoNotSelectNeighbouringResponses(t *testing.T) {
 				}
 			}
 			m.raw.top, m.raw.topLine = entry, line
-			responseKey(&m, "r")
+			responseKeyAndDrain(t, &m, "r")
 			out := m.renderResponse(80, 8)
 			if !strings.Contains(out, "No reconstructed response at this physical line.") || strings.Contains(out, "verified") {
 				t.Fatalf("non-provider physical line selected a neighbour: %q", out)
@@ -263,12 +263,12 @@ func TestResponseRecoveryIncludesFragmentsOutsideRawScope(t *testing.T) {
 	m := loadedResponseModel(t, source)
 	m.raw.scope = []int{0}
 	before := slices.Clone(m.raw.scope)
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	out := m.renderResponse(100, 8)
 	if !strings.Contains(out, `"selected": "inside-outside"`) {
 		t.Fatalf("scoped response omitted verified fragments: %q", out)
 	}
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	if !slices.Equal(m.raw.scope, before) {
 		t.Fatalf("response changed scope: %v", m.raw.scope)
 	}
@@ -278,7 +278,7 @@ func TestResponseNoticeLayoutPreservesBodyAndSearchState(t *testing.T) {
 	source := responseRecoveryHead + `a: {"@message":"first needle\n界界界 needle second \u001b[2J needle third"}` + "\n" +
 		responseRecoveryHead + `b: {"damaged":]}` + "\n"
 	m := loadedResponseModel(t, source)
-	responseKey(&m, "r")
+	responseKeyAndDrain(t, &m, "r")
 	responseKey(&m, "/")
 	responseKey(&m, "needle")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})

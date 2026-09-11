@@ -48,7 +48,7 @@ func (m *Model) workbenchView() string {
 		if m.showHelp {
 			navigation = styleHintKeys(helpCloseHint) + "  " + styles.note.Render("Esc closes help")
 		} else if m.response.open {
-			navigation = responseNavigation
+			navigation = m.responseNavigationHint()
 		} else if m.quality.open {
 			navigation = qualityNavigation
 		} else if m.showResourceEvidence {
