@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -41,6 +42,9 @@ func TestTimelineTierRemembersEachOriginalObservation(t *testing.T) {
 	if rpc.kind != "rpc" || rpc.index != 2 || ui.kind != "ui" || ui.index != 1 {
 		t.Fatalf("chosen identities: RPC=%#v UI=%#v", rpc, ui)
 	}
+	if l.RPCSpans[rpc.index].Entry == l.UISpans[ui.index].Entry {
+		t.Fatalf("chosen identities share source entry %d", l.RPCSpans[rpc.index].Entry)
+	}
 	m.switchTimelineTier()
 	if got := m.selectedTimelineIdentity(); got != rpc {
 		t.Fatalf("restored RPC identity = %#v, want %#v", got, rpc)
@@ -48,6 +52,127 @@ func TestTimelineTierRemembersEachOriginalObservation(t *testing.T) {
 	m.switchTimelineTier()
 	if got := m.selectedTimelineIdentity(); got != ui {
 		t.Fatalf("restored UI identity = %#v, want %#v", got, ui)
+	}
+}
+
+func TestTimelineTierSwitchRefreshesWarmedPresentationAndSource(t *testing.T) {
+	l := testLog(t, "timing-tiers.log")
+	m := update(t, New(l, "timing-tiers.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+
+	rpc := captureTimelineTierEvidence(t, &m)
+	if rpc.tier != tierRPC || rpc.entry != l.RPCSpans[1].Entry || !strings.Contains(rpc.detail, "ReadResource") {
+		t.Fatalf("warmed RPC evidence = %+v", rpc)
+	}
+
+	m.switchTimelineTier()
+	ui := captureTimelineTierEvidence(t, &m)
+	if ui.tier != tierUI || ui.entry != l.UISpans[1].Entry || !strings.Contains(ui.detail, "module.long_module_path_for_timing_details.aws_instance.second") {
+		t.Fatalf("refreshed UI evidence = %+v", ui)
+	}
+	if reflect.DeepEqual(ui.labels, rpc.labels) || ui.hue == "" || ui.notes == rpc.notes || ui.width <= rpc.width {
+		t.Fatalf("tier presentation did not change: RPC=%+v UI=%+v", rpc, ui)
+	}
+
+	m.switchTimelineTier()
+	rpcAgain := captureTimelineTierEvidence(t, &m)
+	if rpcAgain.entry != rpc.entry || !reflect.DeepEqual(rpcAgain.labels, rpc.labels) || rpcAgain.hue != rpc.hue || rpcAgain.notes != rpc.notes || rpcAgain.detail != rpc.detail || rpcAgain.width != rpc.width {
+		t.Fatalf("RPC evidence after round trip = %+v, want %+v", rpcAgain, rpc)
+	}
+}
+
+type timelineTierEvidence struct {
+	tier   timelineTier
+	labels []string
+	hue    string
+	notes  string
+	detail string
+	width  int
+	entry  uint32
+}
+
+func captureTimelineTierEvidence(t *testing.T, m *Model) timelineTierEvidence {
+	t.Helper()
+	tier, tierSpans := m.timelineSpans()
+	_, _ = m.timelineTiming()
+	lanes := m.timelineLanes()
+	labels, _ := m.timelineLaneLabels()
+	_ = m.timelineWallClock()
+	rows := timelineLaneRows(t, *m, lanes)
+	gotHue := barHueOf(t, rows[0])
+	wantHue := barHueOf(t, hueOf(t, *m, tierSpans, lanes, 0).Render("x"))
+	if gotHue != wantHue {
+		t.Fatalf("tier %v first lane hue = %q, want %q for %q", tier, gotHue, wantHue, laneProvider(tierSpans, lanes[0]))
+	}
+	_, detailSections := m.selectedDetail(hugeWidth)
+	spans, idx, ok := m.jumpTarget()
+	if !ok || len(lanes) == 0 || len(rows) == 0 {
+		t.Fatalf("tier %v has no selected jump target or lane", tier)
+	}
+	return timelineTierEvidence{
+		tier: tier, labels: append([]string(nil), labels...), hue: gotHue,
+		notes: strings.Join(m.timelineNotes(100), "\n"), detail: fmt.Sprint(detailSections),
+		width: m.detailPaneNatural, entry: spans[idx].Entry,
+	}
+}
+
+func TestTimelineTierReconcilesLazilyAfterFilteringAnotherView(t *testing.T) {
+	l := testLog(t, "timing-tiers.log")
+	m := update(t, New(l, "timing-tiers.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m.moveTimelineSpan(1)
+	m.changeView(ViewCalls)
+	m.excludedFacets = map[string]map[string]bool{dimRPC: {"PlanResourceChange": true}}
+	m.invalidateRows()
+	if m.timelineLanesCached {
+		t.Fatal("filtering the calls view packed timeline lanes")
+	}
+
+	m.changeView(ViewTimeline)
+	if got := m.selectedTimelineIdentity(); got.kind != "rpc" || got.index != 1 {
+		t.Fatalf("identity reconciled on activation = %#v, want RPC index 1", got)
+	}
+	spans, idx, ok := m.jumpTarget()
+	if !ok || spans[idx].Entry != l.RPCSpans[1].Entry {
+		t.Fatalf("reconciled source = ok %v entry %d, want %d", ok, spans[idx].Entry, l.RPCSpans[1].Entry)
+	}
+	m.switchTimelineTier()
+	if got := m.selectedTimelineIdentity(); got.kind != "ui" || got.index != 1 {
+		t.Fatalf("UI identity after lazy RPC reconciliation = %#v", got)
+	}
+}
+
+func TestTimelineTierHistoryRestoresBothSelectionsAndSourceAfterChildChanges(t *testing.T) {
+	l := testLog(t, "timing-tiers.log")
+	m := update(t, New(l, "timing-tiers.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m.moveTimelineSpan(1)
+	rpc := m.selectedTimelineIdentity()
+	m.switchTimelineTier()
+	ui := m.selectedTimelineIdentity()
+	wantSelections := m.timeline.selections
+	wantEntry := l.UISpans[ui.index].Entry
+
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog || len(m.history) != 1 {
+		t.Fatalf("UI Enter child = view %v history %d", m.view, len(m.history))
+	}
+	m.excludedFacets = map[string]map[string]bool{dimRPC: {"ReadResource": true}}
+	m.invalidateRows()
+	m = update(t, m, tea.WindowSizeMsg{Width: 72, Height: 18})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.view != ViewTimeline || m.activeTimelineTier() != tierUI || m.timeline.selections != wantSelections || m.selectedTimelineIdentity() != ui {
+		t.Fatalf("restored timeline = view %v tier %v selections %#v identity %#v", m.view, m.activeTimelineTier(), m.timeline.selections, m.selectedTimelineIdentity())
+	}
+	spans, idx, ok := m.jumpTarget()
+	if !ok || spans[idx].Entry != wantEntry {
+		t.Fatalf("restored UI source = ok %v entry %d, want %d", ok, spans[idx].Entry, wantEntry)
+	}
+	m.switchTimelineTier()
+	if got := m.selectedTimelineIdentity(); got != rpc || m.timeline.selections[tierUI] != ui {
+		t.Fatalf("RPC switch restored %#v and UI memory %#v, want %#v/%#v", got, m.timeline.selections[tierUI], rpc, ui)
+	}
+	spans, idx, ok = m.jumpTarget()
+	if !ok || spans[idx].Entry != l.RPCSpans[rpc.index].Entry {
+		t.Fatalf("restored RPC source = ok %v entry %d, want %d", ok, spans[idx].Entry, l.RPCSpans[rpc.index].Entry)
 	}
 }
 

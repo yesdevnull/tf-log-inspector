@@ -85,16 +85,14 @@ func facetNaturalWidth(facets []model.Facet) int {
 // nothing else: in a log carrying both tiers, the span loop below measures
 // the RPC spans, and no RPC span carries that type.
 //
-// The span tier it measures is the tier a selection can actually reach,
-// which timelineTierFor decides -- the same rule timelineSpans draws by, so
-// the two cannot disagree about which spans this pane will ever be asked to
-// describe. A UI-hook span's detail carries an address field (see
-// spanDetailLines) that no RPC span has, and it is the widest line this
-// pane draws for a log whose only tier is that one: the timeline's cursor
-// selects such spans directly (selectedTimelineSpanValue), so measured off
-// its rollups alone that pane would front-clip every address it drew,
-// collapsing distinct module paths to identical text with terminal width to
-// spare.
+// The additional span tier it measures is the explicit active timeline tier,
+// the same tier timelineSpans draws, so the two cannot disagree about which
+// spans this pane can be asked to describe. A UI-hook span's detail carries
+// an address field (see spanDetailLines) that no RPC span has, and it can be
+// the widest line this pane draws: the timeline's cursor selects such spans
+// directly (selectedTimelineSpanValue), so measured off its rollups alone
+// that pane would front-clip every address it drew, collapsing distinct
+// module paths to identical text with terminal width to spare.
 //
 // RPC details and rollups remain reachable from the calls views whichever
 // timeline tier is active. When UI timing is active its resource addresses
@@ -102,8 +100,8 @@ func facetNaturalWidth(facets []model.Facet) int {
 //
 // It formats every span in the log and rolls the log up twice, so like
 // facetNaturalWidth it is measured once per active tier, not per frame. It
-// measures the UNFILTERED rollups, which is
-// what makes it a load-time measurement at all: a filter can only remove
+// measures the UNFILTERED rollups, which is what makes it a stable cached
+// measurement: a filter can only remove
 // spans, so it can offer no group key these rows do not already carry, and
 // the identifier lines -- the wide ones -- are covered exactly. A filtered
 // sub-total can render at most one column wider than the total it came from
