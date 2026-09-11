@@ -572,9 +572,9 @@ Boundary A is implemented on `feature/source-line-navigation`. Tasks 1–3
 passed independent review. Final whole-branch review found and the final fix
 wave corrected two rendering inconsistencies: trailing blank physical lines are
 retained as source targets, and a narrow Filters overlay no longer reports a
-position from the hidden Raw Log pane. Final review of that fix remains with the
-controller. Separate test-cleanup passes retained the earlier behavioural and
-boundary tests without removals.
+position from the hidden Raw Log pane. Scoped re-review approved both fixes with
+no new findings. Separate test-cleanup passes retained all behavioural and
+boundary tests, including both final regressions, without removals.
 
 Final checks passed: `go test ./...`, `go test -race -count=1 ./...`,
 `golangci-lint run` (zero issues), `go build ./...`, formatting and whitespace
@@ -591,5 +591,5 @@ pane actually drawn. Focused regression tests, `go test ./...`,
 after that fix. A sanitised real-PTY rerun passed at 100×30 and 60×12 for blank
 targets before a header and at EOF, retained-query reverse search, narrow
 Filters overlay status, exact Esc restoration and resize during prompt editing.
-Final review of the fix remains pending. All implementation commits are signed.
+Final review is complete with no outstanding findings. All implementation commits are signed.
 Boundaries B–H remain separate future implementation plans.
