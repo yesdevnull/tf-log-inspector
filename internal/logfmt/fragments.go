@@ -229,7 +229,7 @@ func providerJSONOuter(line string) (comp string, offset int, header bool) {
 	colon := strings.IndexByte(rest, ':')
 	// Empty provider records omit both the colon and message, but still
 	// identify the owner of any following physical continuations.
-	if colon < 0 && strings.HasPrefix(rest, "provider.") && !strings.ContainsAny(rest, " \t") {
+	if colon < 0 && providerJSONEmptyOwner(rest) {
 		return rest, len(line), true
 	}
 	if colon <= 0 || strings.ContainsAny(rest[:colon], " \t") {
@@ -241,6 +241,21 @@ func providerJSONOuter(line string) (comp string, offset int, header bool) {
 		offset++
 	}
 	return comp, offset, true
+}
+
+func providerJSONEmptyOwner(component string) bool {
+	if !strings.HasPrefix(component, "provider.") || len(component) == len("provider.") {
+		return false
+	}
+	// Provider names use identifier characters without the field-key length
+	// limit. Attached JSON or logger fields are not part of an empty record.
+	for i := range len(component) {
+		c := component[i]
+		if !isAlpha(c) && !isDigit(c) && c != '_' && c != '.' && c != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func providerJSONInitial(line string) int {

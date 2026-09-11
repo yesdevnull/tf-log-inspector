@@ -193,6 +193,7 @@ func TestScrubRejectsPartialProviderJSONRecovery(t *testing.T) {
 		{"malformed inline UI", provider("damaged", `{"token":"private-body{"@module":false}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"invalid_inline_ui"}, []string{"private-sentinel", "provider.damaged", "private-body"}},
 		{"quarantined same-component restart", provider("damaged", `{"token":]}`) + "\n" + provider("damaged", `{"restart":"private-body"}`) + "\n" + provider("good", `{"id":"private-sentinel"}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"delimiter_mismatch"}, []string{"private-sentinel", "provider.damaged", "private-body"}},
 		{"global ownership failure", provider("good", `{"id":"private-sentinel"}`) + "\n" + header + `provider.: {"token":"private-body"}` + "\n" + provider("later", `{"unavailable":true}`) + "\n", []string{`{"id":"private-sentinel"}`}, []string{"ambiguous_ownership"}, []string{"private-sentinel", "provider.", "private-body"}},
+		{"attached message without separator", provider("good", `{"id":"private-sentinel"}`) + "\n" + header + `provider.a["private-body"]` + "\n" + provider("later", `{"unavailable":true}`), []string{`{"id":"private-sentinel"}`}, []string{"ambiguous_ownership"}, []string{"private-sentinel", "provider.a", "private-body"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
