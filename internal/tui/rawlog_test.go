@@ -140,6 +140,12 @@ func TestSourceLinePromptCancellationIsInert(t *testing.T) {
 }
 
 func TestGoToSourceLineTargetsEveryPhysicalLine(t *testing.T) {
+	wantText := []string{
+		`2026-09-11T00:00:00.000Z [INFO] first`,
+		``,
+		`continuation`,
+		`2026-09-11T00:00:01.000Z [WARN] last`,
+	}
 	for _, newline := range []string{"\n", "\r\n"} {
 		for line := uint64(1); line <= 4; line++ {
 			t.Run(fmt.Sprintf("%q/%d", newline, line), func(t *testing.T) {
@@ -158,8 +164,12 @@ func TestGoToSourceLineTargetsEveryPhysicalLine(t *testing.T) {
 				if len(m.history) != 1 || m.raw.scope != nil || m.raw.column != 0 || m.raw.match != nil || m.raw.notFound || m.raw.lastQuery != "kept" {
 					t.Fatalf("jump state wrong: history=%d raw=%+v", len(m.history), m.raw)
 				}
-				if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != line {
-					t.Fatalf("first rendered source line = %+v, want %d", rows, line)
+				want := wantText[line-1]
+				if newline == "\r\n" && line < 4 {
+					want += `\r`
+				}
+				if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != line || unstyled(rows[0].text) != want {
+					t.Fatalf("first rendered source line = %+v text %q, want %d text %q", rows, unstyled(rows[0].text), line, want)
 				}
 			})
 		}
