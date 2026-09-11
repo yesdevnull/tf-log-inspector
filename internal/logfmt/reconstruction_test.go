@@ -170,7 +170,7 @@ func TestInspectProviderJSONRangesAndOrdering(t *testing.T) {
 
 func TestInspectProviderJSONGlobalStopMalformedOwners(t *testing.T) {
 	const head = "2026-09-08T00:00:00.000Z [DEBUG] "
-	for _, malformed := range []string{`provider.: {}`, `provider.a missing-colon`, `provider.a bad: {}`} {
+	for _, malformed := range []string{`provider.`, `provider.: {}`, `provider.a missing-colon`, `provider.a bad: {}`} {
 		t.Run(malformed, func(t *testing.T) {
 			lines := []string{head + `provider.done: {"done":1}`, head + `provider.a: {"a":`, head + `provider.b: {"b":`, head + malformed, head + `provider.c: {"later":1}`, head + `terraform: ordinary`}
 			input := strings.Join(lines, "\n")
@@ -203,6 +203,53 @@ func TestInspectProviderJSONGlobalStopMalformedOwners(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInspectProviderJSONEmptyProviderRecords(t *testing.T) {
+	emptyA := strings.TrimSuffix(providerRecord("a", ""), ": ")
+	emptyB := strings.TrimSuffix(providerRecord("b", ""), ": ")
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  []string
+	}{
+		{"empty request records", []string{emptyA, emptyA}, nil},
+		{"split string", []string{providerRecord("a", `{"value":"first`), emptyA, emptyA, providerRecord("a", `last"}`)}, []string{`{"value":"firstlast"}`}},
+		{"interleaved pending owners", []string{providerRecord("a", `{"a":`), providerRecord("b", `{"b":`), emptyB, `2}`, providerRecord("a", `1}`)}, []string{`{"a":1}`, `{"b":2}`}},
+		{"unrelated continuation", []string{providerRecord("a", `{"a":`), emptyB, "ordinary continuation", providerRecord("a", `1}`)}, []string{`{"a":1}`}},
+	} {
+		for _, ending := range []string{"\n", "\r\n"} {
+			t.Run(tc.name+fmt.Sprintf("/%q", ending), func(t *testing.T) {
+				input := strings.Join(tc.lines, ending)
+				got, err := ReconstructProviderJSON(input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got) != len(tc.want) {
+					t.Fatalf("messages = %d, want %d", len(got), len(tc.want))
+				}
+				for i, message := range got {
+					var joined strings.Builder
+					for _, fragment := range message.Fragments {
+						joined.WriteString(input[fragment.Start:fragment.End])
+						lineStart := len(strings.Join(tc.lines[:fragment.Line-1], ending))
+						if fragment.Line > 1 {
+							lineStart += len(ending)
+						}
+						if fragment.Start < lineStart || fragment.End > lineStart+len(tc.lines[fragment.Line-1]) {
+							t.Fatalf("fragment escaped physical line: %#v", fragment)
+						}
+						if fragment.Start == fragment.End && fragment.Start != lineStart+len(tc.lines[fragment.Line-1]) {
+							t.Fatalf("empty fragment must follow its provider header: %#v", fragment)
+						}
+					}
+					if message.Text != tc.want[i] || joined.String() != tc.want[i] {
+						t.Fatalf("message %d = %q, source bytes = %q, want %q", i, message.Text, joined.String(), tc.want[i])
+					}
+				}
+			})
+		}
 	}
 }
 

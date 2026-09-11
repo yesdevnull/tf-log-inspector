@@ -60,6 +60,40 @@ func TestScrubProviderHTTPBanner(t *testing.T) {
 	}
 }
 
+func TestScrubAzureRMRequestEmptyProviderRecords(t *testing.T) {
+	const owner = "2026-09-07T09:19:10.117+1000 [DEBUG] provider.terraform-provider-azurerm_v4.81.0_x5"
+	const subscription = "11111111-2222-4333-8444-555555555555"
+	input := strings.Join([]string{
+		owner + ": [DEBUG] AzureRM Request:",
+		owner + ": GET /subscriptions/" + subscription + "/providers?api-version=2022-09-01 HTTP/1.1",
+		owner + ": Host: management.azure.com",
+		owner + ": Authorization: Bearer private-credential",
+		owner,
+		owner,
+		owner + `: {"password":"body-credential"}`,
+	}, "\n")
+	got, err := Scrub([]byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(got.Data)
+	for _, secret := range []string{subscription, "private-credential", "body-credential"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("scrubbed request retained %q", secret)
+		}
+	}
+	lines := strings.Split(output, "\n")
+	if len(lines) != 7 || lines[4] != owner || lines[5] != owner {
+		t.Fatal("empty provider records or physical line count changed")
+	}
+	if !strings.Contains(lines[1], ": GET /subscriptions/") || !strings.HasSuffix(lines[1], " HTTP/1.1") {
+		t.Fatal("HTTP request structure changed")
+	}
+	if messages, err := logfmt.ReconstructProviderJSON(output); err != nil || len(messages) != 1 {
+		t.Fatalf("scrubbed JSON reconstruction: messages=%d, error=%v", len(messages), err)
+	}
+}
+
 func TestScrubProviderMetadataIgnoresBodyDecoys(t *testing.T) {
 	const header = "2026-09-04T12:56:10.000Z [DEBUG] provider.aws: "
 	// A continuation starts with a field lookalike inside a JSON string. The
