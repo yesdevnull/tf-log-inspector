@@ -80,7 +80,8 @@ func TestSourcePositionRejectsMalformedEntryRanges(t *testing.T) {
 		{name: "past data", log: Log{Data: []byte("one\n"), Entries: []logfmt.Entry{{Off: 0, Len: 5}}}, line: 1, wantLen: 1},
 	}
 
-	for _, tc := range tests {
+	for i := range tests {
+		tc := &tests[i]
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.log.PhysicalLineCount(); got != tc.wantLen {
 				t.Fatalf("PhysicalLineCount() = %d, want %d", got, tc.wantLen)
