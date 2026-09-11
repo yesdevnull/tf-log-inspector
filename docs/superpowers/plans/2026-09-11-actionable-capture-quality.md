@@ -8,7 +8,7 @@
 
 **Tech Stack:** Existing Go 1.25 toolchain, Bubble Tea, Bubbles viewport, Lip Gloss, ANSI helpers and standard-library tests. No new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-09-11-investigation-usability-design.md`, shared invariants and boundary D. Baseline `66fff81`; topic branch `feature/actionable-capture-quality`. A–C are on main. This plan proposes implementation only; no runtime changes accompany it.
+**Spec:** `docs/superpowers/specs/2026-09-11-investigation-usability-design.md`, shared invariants and boundary D. Baseline `66fff81`; topic branch `feature/actionable-capture-quality`. A–C are on main. Boundary D is implemented on this branch; the delivery record below describes validation and review.
 
 ## Global Constraints
 
@@ -68,7 +68,7 @@ Quality selection uses stable IDs: check action, anomaly `(Stage, Code)`, or ori
 - Produce `func (l *Log) ReconstructionDiagnostics() []logfmt.ProviderJSONDiagnostic`, a detached content-free snapshot that does not start or wait for inspection.
 - Preserve `ProviderResponseAt` and `ReconstructionQuality` signatures and outcomes.
 
-- [ ] **Step 1: Add failing behavioural tests.**
+- [x] **Step 1: Add failing behavioural tests.**
 
 Use the existing `loadResponseLog(t testing.TB, source string) *Log` helper in `provider_response_test.go`, which writes and loads a real temporary capture. Do not manufacture a checked flag or inject a fake reconstruction result.
 
@@ -91,11 +91,11 @@ func TestExplicitInspectionWithoutSourceSelection(t *testing.T) {
 
 Extend the existing real malformed/recovered/ambiguous cases to check complete, partial and failed counts. After inspecting, mutate a returned diagnostic's code/coordinates and append elements; another snapshot must retain the original values. Every returned `Ranges` and `Unavailable` must be nil. Preserve original diagnostic ordering for downstream identity.
 
-- [ ] **Step 2: Record RED.**
+- [x] **Step 2: Record RED.**
 
 Run `go test ./internal/model -run 'TestExplicitInspection|TestReconstructionDiagnostics' -count=1`; missing exported methods must fail before implementation. Name the new metadata cases with the second prefix.
 
-- [ ] **Step 3: Expose the existing operation and add the getter.**
+- [x] **Step 3: Expose the existing operation and add the getter.**
 
 Rename the private method and all its actual callers, including benchmarks. Keep `responseChecked.Store(true)` after all five result/index assignments. The getter is:
 
@@ -115,7 +115,7 @@ func (l *Log) ReconstructionDiagnostics() []logfmt.ProviderJSONDiagnostic {
 
 The getter exposes structural metadata only; do not add bodies, snippets, fragment enumeration or output operations. No new persistent state is needed in `Log`.
 
-- [ ] **Step 4: Verify concurrency and commit.**
+- [x] **Step 4: Verify concurrency and commit.**
 
 Extend the existing atomic-publication test with concurrent real `InspectProviderResponses`, `ReconstructionDiagnostics` and `ReconstructionQuality` calls. Before publication, readers see `not_checked` and no diagnostics; after publication every diagnostic/range lookup is complete. Avoid comparing two independently timed getter calls as though they were one atomic snapshot. Keep concurrent first-selection tests and invalid-position laziness tests.
 
@@ -133,7 +133,7 @@ Run focused model tests, `go test -race ./internal/model`, `go test ./...`, form
 - Produce `func (m *Model) completeResponseInspection(msg responseInspectionDoneMsg) tea.Cmd` and `func (m *Model) completeResponseSelection(msg responseReadyMsg)`.
 - Produce `func (m *Model) queueResponseSelection() tea.Cmd` as the single scheduling gate and `func (m *Model) responseNavigationHint() string` for pending-aware guidance in both the response footer and workbench navigation.
 
-- [ ] **Step 1: Add failing deferred-command journeys.**
+- [x] **Step 1: Add failing deferred-command journeys.**
 
 Use the real `responseModel` helper and preserve commands rather than discarding them:
 
@@ -166,7 +166,7 @@ Cover publication before message delivery: start a check, execute its real comma
 
 Run `go test ./internal/tui -run 'TestResponseFirstRequest|TestResponseCheck|TestResponseCompletion' -count=1` and record RED.
 
-- [ ] **Step 2: Implement the command/message protocol.**
+- [x] **Step 2: Implement the command/message protocol.**
 
 Add these value types and state fields; never reset the counters on modal close:
 
@@ -254,7 +254,7 @@ func (m *Model) responseNavigationHint() string {
 }
 ```
 
-- [ ] **Step 3: Adapt tests to execute actual commands and verify responsiveness.**
+- [x] **Step 3: Adapt tests to execute actual commands and verify responsiveness.**
 
 Existing `responseKey` and `qualityKey` helpers currently throw away commands. Use the following helper explicitly after response-opening/check commands in existing completed-response journeys; pending/race tests control delivery themselves. Leave key-only helpers unchanged where they handle quit, search or scrolling. Do not silently change the generic `update` helper to execute every command, since callers use it to inspect transient states and quit messages.
 
@@ -272,7 +272,7 @@ For race coverage, execute a real inspection command in a goroutine, send its me
 
 Keep tests for verified JSON only, escaped controls, physical continuation lines, ambiguous tails and raw search restoration. Run focused tests, full TUI tests and `go test -race ./internal/tui ./internal/model`.
 
-- [ ] **Step 4: Verify and commit.**
+- [x] **Step 4: Verify and commit.**
 
 Run `go test ./...`, `go build ./...`, `golangci-lint run`, formatting and diff checks. Commit explicit paths with signed subject `Keep response inspection outside terminal updates`. Request task review and separate test cleanup before Task 3.
 
@@ -286,7 +286,7 @@ Run `go test ./...`, `go build ./...`, `golangci-lint run`, formatting and diff 
 - Produce `func (m *Model) qualityRecords(q model.CaptureQuality, reconstruction model.ReconstructionQuality) []qualityRecord`, `func wrapQualityRecords(records []qualityRecord, width int) ([]string, []qualityActionRow)` and `func diagnosticSourceLine(d logfmt.ProviderJSONDiagnostic) uint64`.
 - Produce `func (m *Model) captureQualityNavigation() qualityNavigationState` and `func (m *Model) restoreQualityNavigation(state qualityNavigationState)`; add one value field of that type to `navigationFrame`.
 
-- [ ] **Step 1: Add failing record and source-return tests.**
+- [x] **Step 1: Add failing record and source-return tests.**
 
 Use these exact primary-coordinate expectations:
 
@@ -314,7 +314,7 @@ Also test nil/invalid `FirstEntry`, zero issues, empty captures and nonzero coun
 
 Run `go test ./internal/tui -run 'TestQuality' -count=1` and record RED.
 
-- [ ] **Step 2: Build records without duplicating the explanatory guide.**
+- [x] **Step 2: Build records without duplicating the explanatory guide.**
 
 ```go
 type qualityItemID struct {
@@ -356,7 +356,7 @@ In `renderQuality`, first read `ReconstructionQuality` and pass that same snapsh
 
 `wrapQualityRecords` wraps escaped text using the existing ANSI-aware helper and maps each actionable record to its full wrapped interval. Reserve two columns for a prefix on every wrapped row, clamping gracefully below two columns. The renderer replaces that blank prefix with `> ` on the selected record's first row and applies the existing selected style; it does not wrap again. Selection therefore remains visible with `NO_COLOR` and does not change action coordinates.
 
-- [ ] **Step 3: Implement movement, paging and history ownership.**
+- [x] **Step 3: Implement movement, paging and history ownership.**
 
 Add `selected qualityItemID` and `notice string` to `qualityState`; the viewport remains an owned live object, not a history field. Initialise selection to `qualityItemID{kind: "check"}`. Build action intervals at the current viewport width before key movement. Up/down selects adjacent actions, with endpoint clamping, and minimally adjusts the offset so the record's first row is visible. A wrapped record taller than the viewport remains one action.
 
@@ -379,7 +379,7 @@ No selected action means a no-op. Never close the panel before the navigation pr
 
 `captureQualityNavigation` returns only open/selected/offset values. `restoreQualityNavigation` constructs a new viewport, disables mouse-wheel navigation, restores values, then rebuilds content at the current size before clamping the offset. Restore after the parent view, filters, raw and timeline state have been restored. Do not call `openQuality` on history return because that selects Check responses again. Do not snapshot, rewind or cancel the shared inspection or counters in history: new published results remain available when returning to a saved panel.
 
-- [ ] **Step 4: Cover combined asynchronous and privacy journeys.**
+- [x] **Step 4: Cover combined asynchronous and privacy journeys.**
 
 Exercise Check responses with a command held pending, repeated Enter, panel close, opening `r`, resizing, command completion, response close and reopening quality. Verify one inspection command, completion counts, active-request identity, no unexpected modal reopening and responsive quit. Execute the real commands; do not substitute fake results for the reconstruction integration cases. Deliver saved real messages out of order to test request guards.
 
@@ -387,7 +387,7 @@ Use `testdata/response-recovery.log` and existing ambiguous/malformed synthetic 
 
 Update help and README to describe selecting quality actions/records, first-example jumps, pending response checks, cached results and Esc closing without cancellation. Make the quality navigation line `Esc/i close  ↑↓ select  PgUp/PgDn page`; put `Enter open/check  q quit` in the action row. Check the full composed workbench at 60/100/160 columns and short heights, not only `footer()` in isolation. Preserve current parent raw/timeline hints on return.
 
-- [ ] **Step 5: Verify, review terminal output and commit.**
+- [x] **Step 5: Verify, review terminal output and commit.**
 
 Run focused tests, full `go test ./...`, `go test -race -count=1 ./...`, `go build ./...`, `golangci-lint run`, formatting and diff checks. Regenerate affected goldens only intentionally with `go test ./internal/tui -update`; inspect raw ANSI diffs and `scripts/read-golden.sh` output before accepting them.
 
@@ -407,3 +407,20 @@ The prose-only paging rule is made explicit above so implementations cannot solv
 - Pending responses intentionally ignore search and scrolling, but the existing response footer and workbench advertise those keys independently. Task 2 now specifies shared pending-aware navigation, close/quit-only actions, full-view assertions and a separate preparing status once inspection has completed.
 
 These corrections change the plan only. Re-tracing first inspection, joining, cached response opening, delayed completion, closed/replaced requests and final result delivery leaves one presentation command per request and no inactive controls advertised in a pending view.
+
+## Delivery record — 11 September 2026
+
+Boundary D is complete on `feature/actionable-capture-quality`, based on `66fff81`. All implementation commits are signed. The branch remains local pending integration.
+
+- Model inspection and detached diagnostics: `1242a66`, with coverage refinement in `13da360`.
+- Deferred response inspection and presentation: `e04eb48`, with request and concurrent-rendering regressions in `568f515`.
+- Selectable quality records and source-return history: `12a12dd`, with exact offset restoration, publication wording, narrow layout and navigation corrections in `814599d`, `6a4c14d` and `09174e9`.
+- Syntax diagnostics retain labelled response-start context while targeting only the primary syntax coordinate: `27ed743`.
+
+Task reviews and independent test-cleanup passes completed for all three tasks and their fixes. The final whole-branch review identified one diagnostic-context mismatch; its fix passed scoped re-review. No outstanding, deferred or parked findings remain, and no design rulings were required.
+
+Final verification at `27ed743`: `go test ./...`, `go test -race -count=1 ./...`, `go build ./...` and `golangci-lint run` all passed across the eleven packages; lint reported zero issues. Formatting and diff checks were clean. Existing strict-scrub and lazy reporting tests remain passing.
+
+Real terminal journeys passed at 100 and 60 columns with colour and `NO_COLOR`: anomaly and diagnostic source jumps, exact panel return including a nonzero saved offset, invalid-body withholding, verified recovered bodies, resizing, unlocated and prose-only Enter behaviour, cached checks and an empty capture with zero responses. A large synthetic capture verified pending close/quit responsiveness; raw and response search regressions also passed. Unit tests additionally cover 160-column and short layouts, controlled command ordering, concurrent publication, explicit UI timeline history and arrow movement through tall records. Only sanitised fixtures were used.
+
+Terminal evidence is retained locally under `/private/tmp/tfli-quality-terminal`, `/private/tmp/tfli-response-check-terminal` and `/private/tmp/tfli-quality-search-terminal`; the reproduced offset failure is archived under `/private/tmp/tfli-quality-offset-red`. Per-task scratch reports are removed after this delivery record is committed; signed Git history retains the implementation and review fixes.
