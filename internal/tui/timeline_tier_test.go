@@ -145,11 +145,18 @@ func TestTimelineTierFooterAdvertisesSwitchOnlyWhereItWorks(t *testing.T) {
 			t.Fatalf("pane %v footer advertises inert t: %q", pane, got)
 		}
 	}
-	m.pane = PaneList
-	m.width = 60
-	m.showFacetOverlay = true
+	m = update(t, m, tea.WindowSizeMsg{Width: 60, Height: 40})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if !m.facetOverlayShowing(60) || m.pane != PaneFacets {
+		t.Fatalf("f at narrow width = overlay %v pane %v, want visible facet overlay with facet focus", m.facetOverlayShowing(60), m.pane)
+	}
 	if got := m.actionKeys(60); strings.Contains(got, "t tier") {
 		t.Fatalf("covered timeline footer advertises inert t: %q", got)
+	}
+	before := m.activeTimelineTier()
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if got := m.activeTimelineTier(); got != before {
+		t.Fatalf("t switched covered timeline from %v to %v", before, got)
 	}
 }
 
