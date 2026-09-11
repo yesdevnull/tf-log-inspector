@@ -148,7 +148,7 @@ func TestQualityPagingKeepsTallOverlappingActionSelected(t *testing.T) {
 	if m.quality.selected != actions[0].id {
 		t.Fatalf("overlapping action selection = %+v", m.quality.selected)
 	}
-	m.revealQualityAction(actions[0])
+	m.revealQualityAction(actions[0], true)
 	if m.quality.viewport.YOffset != offset {
 		t.Fatalf("tall action snapped from offset %d to %d", offset, m.quality.viewport.YOffset)
 	}

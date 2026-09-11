@@ -82,25 +82,12 @@ func (m *Model) buildQualityContent(w int) ([]string, []qualityActionRow) {
 	return wrapQualityRecords(records, w)
 }
 
-func (m *Model) revealQualityAction(action qualityActionRow) {
+func (m *Model) revealQualityAction(action qualityActionRow, preserveOverlap bool) {
 	v := &m.quality.viewport
 	if v.Height <= 0 {
 		return
 	}
-	if action.end > v.YOffset && action.start < v.YOffset+v.Height {
-		return
-	}
-	if action.start < v.YOffset {
-		v.SetYOffset(action.start)
-	}
-	if action.start >= v.YOffset+v.Height {
-		v.SetYOffset(action.start - v.Height + 1)
-	}
-}
-
-func (m *Model) revealQualityActionFirstRow(action qualityActionRow) {
-	v := &m.quality.viewport
-	if v.Height <= 0 {
+	if preserveOverlap && action.end > v.YOffset && action.start < v.YOffset+v.Height {
 		return
 	}
 	if action.start < v.YOffset {
@@ -146,7 +133,7 @@ func (m *Model) moveQualitySelection(actions []qualityActionRow, down bool) {
 	}
 	if i >= 0 {
 		m.quality.selected = actions[i].id
-		m.revealQualityActionFirstRow(actions[i])
+		m.revealQualityAction(actions[i], false)
 	}
 }
 
@@ -198,7 +185,7 @@ func (m *Model) renderQuality(w, h int) string {
 	v.SetYOffset(v.YOffset)
 	for _, action := range actions {
 		if action.id == m.quality.selected {
-			m.revealQualityAction(action)
+			m.revealQualityAction(action, true)
 			break
 		}
 	}
