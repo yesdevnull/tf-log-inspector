@@ -12,6 +12,7 @@
 [2m│[0m                                                                                                  [2m│[0m
 [2m│[0m [1;36mTHE LIST[0m                                                                                         [2m│[0m
 [2m│[0m   [36m↑ ↓ j k[0m    move the cursor in the focused pane                                                 [2m│[0m
+[2m│[0m   [36mt[0m          switch RPC/UI timing with the timeline list focused                                 [2m│[0m
 [2m│[0m   [36m← → h l[0m    step within a timeline lane -- the footer's ↔                                       [2m│[0m
 [2m│[0m   [36m← → h l[0m    scroll horizontally in raw log or response                                          [2m│[0m
 [2m│[0m   [36mPgUp PgDn[0m  page through raw log or response                                                    [2m│[0m
@@ -34,7 +35,6 @@
 [2m│[0m [1;36mEVERYWHERE[0m                                                                                       [2m│[0m
 [2m│[0m   [36m⇥ Tab[0m      move focus between panes                                                            [2m│[0m
 [2m│[0m   [36mi[0m          open capture quality; i or Esc returns                                              [2m│[0m
-[2m│[0m   [36me[0m          open resource evidence; e or Esc returns                                            [2m│[0m
 [2m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯[0m
 [2m↑↓ scroll  PgUp/PgDn page  ?/Esc close help[0m
 [36mq[0m quit

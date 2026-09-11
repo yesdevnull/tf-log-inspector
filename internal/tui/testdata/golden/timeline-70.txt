@@ -4,7 +4,7 @@
 [36m╭▶[0m[1;36m Timeline (rpc) [0m[36m───────────────────────────╮[0m [2m╭─[0m[1;36m Span detail [0m[2m───────╮[0m
 [36m│[0m [7maws/1    [0m[32m   ░███████   ░██████████████████[0m [36m│[0m[2m [0m[2m│[0m [2;36mRPC[0m                 [2m│[0m
 [36m│[0m google/1 [34m     ▒██████▓                    [0m [36m│[0m[2m [0m[2m│[0m   ApplyResourceCha… [2m│[0m
-[36m│[0m          0s                           9.0s [36m│[0m[2m [0m[2m│[0m [2;36mresource type[0m       [2m│[0m
+[36m│[0m rpc      0s                           9.0s [36m│[0m[2m [0m[2m│[0m [2;36mresource type[0m       [2m│[0m
 [36m│[0m busy 7.5s of 9.0s (83%)                    [36m│[0m[2m [0m[2m│[0m   aws_instance      [2m│[0m
 [36m│[0m waiting on aws/1, 4.0s–9.0s — concurrency… [36m│[0m[2m [0m[2m│[0m [2;36mprovider[0m            [2m│[0m
 [36m│[0m nothing running, 0s–1.0s — before any call [36m│[0m[2m [0m[2m│[0m   …io/hashicorp/aws [2m│[0m
@@ -37,4 +37,4 @@
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m╰────────────────────────────────────────────╯[0m [2m╰─────────────────────╯[0m
 [2mDurations measured under logging; rankings approximate.[0m
-[36m⇥[0m pane  [36me[0m evidence  [36m⏎[0m open  [36m↔[0m span  [36mf[0m facets  [36mEsc[0m clear  [36mq[0m quit
+[36m⇥[0m pane  [36mt[0m tier  [36me[0m evidence  [36m⏎[0m open  [36m↔[0m span  [36mEsc[0m clear  [36mq[0m quit

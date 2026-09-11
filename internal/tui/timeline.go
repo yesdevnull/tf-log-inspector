@@ -671,11 +671,26 @@ func (m *Model) renderTimeline(w, h int) string {
 		lines = append(lines, clipWidth(label+bar, w))
 	}
 	if axisH > 0 {
-		gutter := padRight(clipValueEnd(laneCutMark(len(lanes)-visible), labelW), labelW) + " "
+		gutter := timelineAxisGutter(tier, len(lanes)-visible, labelW) + " "
 		lines = append(lines, clipWidth(gutter+timeAxis(wallClock, barW), w))
 	}
 	lines = append(lines, notes...)
 	return strings.Join(lines, "\n")
+}
+
+func timelineAxisGutter(tier timelineTier, hidden, width int) string {
+	label := "rpc"
+	if tier == tierUI {
+		label = "ui"
+	}
+	if mark := laneCutMark(hidden); mark != "" {
+		combined := label + " " + mark
+		if lipgloss.Width(combined) <= width {
+			return padRight(combined, width)
+		}
+		return padRight(clipValueEnd(mark, width), width)
+	}
+	return padRight(clipWidth(label, width), width)
 }
 
 // laneCutMark is what the axis row's label gutter says when the pane had

@@ -438,6 +438,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// lasts exactly until the next key: any other key moves the
 		// selection, the filter or the view out from under it.
 		m.blockedJump = false
+		m.timeline.notice = ""
 		// While a search query is being typed, every key is text for the
 		// query rather than a command -- including keys bound elsewhere,
 		// such as "j" or "q" -- so this is handled before anything else.
@@ -559,6 +560,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			if m.pane == PaneList {
 				m.openAssociatedCalls()
+			}
+		case "t":
+			if m.view == ViewTimeline && m.pane == PaneList {
+				m.switchTimelineTier()
 			}
 		case "left", "h":
 			// Arrows act on the focused timeline or raw log. Search input
