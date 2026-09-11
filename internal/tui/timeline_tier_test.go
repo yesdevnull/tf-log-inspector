@@ -98,6 +98,9 @@ func captureTimelineTierEvidence(t *testing.T, m *Model) timelineTierEvidence {
 	labels, _ := m.timelineLaneLabels()
 	_ = m.timelineWallClock()
 	rows := timelineLaneRows(t, *m, lanes)
+	if len(lanes) == 0 || len(rows) == 0 {
+		t.Fatalf("tier %v has no lane", tier)
+	}
 	gotHue := barHueOf(t, rows[0])
 	wantHue := barHueOf(t, hueOf(t, *m, tierSpans, lanes, 0).Render("x"))
 	if gotHue != wantHue {
@@ -105,8 +108,8 @@ func captureTimelineTierEvidence(t *testing.T, m *Model) timelineTierEvidence {
 	}
 	_, detailSections := m.selectedDetail(hugeWidth)
 	spans, idx, ok := m.jumpTarget()
-	if !ok || len(lanes) == 0 || len(rows) == 0 {
-		t.Fatalf("tier %v has no selected jump target or lane", tier)
+	if !ok {
+		t.Fatalf("tier %v has no selected jump target", tier)
 	}
 	return timelineTierEvidence{
 		tier: tier, labels: append([]string(nil), labels...), hue: gotHue,
