@@ -315,3 +315,25 @@ final bookkeeping commit is checked separately after creation.
 Boundary H implementation is complete on
 `wip/run-comparison-plans`; integration remains Dan’s decision. No merge, push
 or remote CI execution is claimed.
+
+## Peer-review follow-up: loaded input identity
+
+Dan authorised fixing PAR-H-1 after peer review identified a pathname race
+inherited from the shared writer. A loaded input could be renamed to the output
+path and replaced before the writer's pathname checks, allowing truncation of
+the original input. Signed commit `1f8e5a1` resolves this for comparison, profile
+and diagnose. This follow-up supersedes task 3's pathname-only writer interface:
+`writeReport` now accepts the retained `[]*os.File` inputs, and `model.LoadFile`
+reads a caller-owned descriptor. The actual output descriptor is checked against
+both loaded input identities and current pathname identities before truncation.
+
+A deterministic real-filesystem regression failed before correction for one
+input and each side of a two-input comparison, showing overwritten input bytes.
+All three cases now preserve the original and replacement files. Additional
+tests cover reading the opened file after renaming and retaining caller
+ownership on success and read failure. Independent review approved the fix with
+no findings; separate cleanup retained all three tests. Verification against
+PAR-H-1 found it resolved with no collateral issues. Full tests, build and lint
+passed; the controller's fresh race suite passed all eleven packages at
+`1f8e5a1`. Concurrent writes to file contents are outside this identity check.
+Integration remains Dan's decision.
