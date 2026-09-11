@@ -120,6 +120,7 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 			st.Bytes += uint64(raw)
 
 			h := ParseHeader(text)
+			_, _, _, cliCompletion := CLICompletionParts(text)
 			switch {
 			case IsStructuredLine(text):
 				// A structured-output line is its own logical entry, closed
@@ -197,12 +198,36 @@ func Scan(r io.Reader, comps, reqIDs *Interner, sinks ...Sink) (Stats, error) {
 				}
 				open = true
 
+			case cliCompletion && (!open || !cur.Timestamped || cur.Level == LevelUnknown):
+				flush()
+				st.UntimestampedLines++
+				entryOrd := ord
+				cur = Entry{Off: off, Len: raw, Lines: 1}
+				curClock = ClockPosition{Status: TimestampMissing}
+				curMsg = ""
+				open = true
+				flush()
+				for _, s := range sinks {
+					if cs, ok := s.(CLICompletionSink); ok {
+						cs.CLICompletion(entryOrd, cur, text)
+					}
+				}
+
 			case open:
 				// Continuation: counted and covered by Off/Len, but its text
 				// never reaches a sink.
 				st.ContinuationLines++
 				st.ContinuationBytes += uint64(raw)
 				st.UntimestampedLines++
+				// Keep provider continuations intact. Candidates seen inside
+				// them are counted for suppression, never independently indexed.
+				if cliCompletion && cur.Timestamped {
+					for _, s := range sinks {
+						if cs, ok := s.(CLICompletionSink); ok {
+							cs.CLICompletion(ord, cur, text)
+						}
+					}
+				}
 				// A substring test first, and the parser only on the lines
 				// that pass it. The parser is what decides -- the key
 				// spelled inside a JSON body is not a field, and counting

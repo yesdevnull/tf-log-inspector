@@ -1,6 +1,10 @@
 package model
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
+)
 
 // SourceLocation identifies an entry's exact half-open byte range and its
 // inclusive one-based physical line range in the original log.
@@ -83,4 +87,20 @@ func (l *Log) SourceLocation(entry uint32) (SourceLocation, bool) {
 		StartLine: uint64(startLine),
 		EndLine:   uint64(endLine),
 	}, true
+}
+
+// ObservationSource returns the physical range covered by an observation's
+// source hooks. Entry remains its completion identity for raw navigation.
+func (l *Log) ObservationSource(s span.Span) (SourceLocation, bool) {
+	completion, ok := l.SourceLocation(s.Entry)
+	if !ok || !s.HasStartEntry {
+		return completion, ok
+	}
+	start, ok := l.SourceLocation(s.StartEntry)
+	if !ok || start.StartByte > completion.StartByte {
+		return SourceLocation{}, false
+	}
+	completion.StartByte = start.StartByte
+	completion.StartLine = start.StartLine
+	return completion, true
 }

@@ -10,12 +10,9 @@ type Fidelity uint8
 const (
 	// FidelityReported means the provider logged its own duration.
 	FidelityReported Fidelity = iota
-	// FidelityUIReported means Terraform's structured-output UI hook stream
-	// logged its own per-resource duration. It ranks below FidelityReported:
-	// an RPC-level measurement is finer-grained than a per-resource one. In
-	// practice the two never coexist in one log, because HCP's structured
-	// output is info level only -- enabling debug logging to get RPC-level
-	// evidence replaces the JSON stream with hclog text.
+	// FidelityUIReported identifies the resource-operation tier, including
+	// reported UI durations, structured refresh windows and CLI durations.
+	// DurationSource describes provenance independently of this clock boundary.
 	//
 	// A FidelityUIReported span's StartMs/EndMs are on a different timeline
 	// from a FidelityReported span's: structured-output lines carry no
@@ -60,7 +57,9 @@ func (f Fidelity) String() string {
 // shrink it -- which would hit the early GetProviderSchema and Configure calls
 // that are most often the slow ones.
 type Span struct {
-	Entry uint32 // ordinal of the entry that closed this span
+	Entry         uint32 // ordinal of the entry that closed this span
+	StartEntry    uint32 // ordinal of an observed opening hook
+	HasStartEntry bool
 
 	// ReqID is the interned tf_req_id of this call, 0 when the log carried
 	// none for it. It is COPIED from the closing entry's Entry.ReqID and
@@ -99,6 +98,7 @@ type Span struct {
 	EndMs   uint32
 
 	DurationMs        uint32 // as reported by the provider
+	DurationSource    DurationSource
 	StartClamped      bool
 	TimestampStatus   logfmt.TimestampStatus
 	DurationSaturated bool
@@ -114,6 +114,28 @@ type Span struct {
 	ModuleKnown   bool
 	ModuleInvalid bool
 	Fidelity      Fidelity
+}
+
+// DurationSource identifies how a resource-operation duration was obtained.
+type DurationSource uint8
+
+const (
+	SourceUIElapsed DurationSource = iota
+	SourceRefreshWindow
+	SourceCLIElapsed
+)
+
+func (s DurationSource) String() string {
+	switch s {
+	case SourceUIElapsed:
+		return "ui_elapsed"
+	case SourceRefreshWindow:
+		return "refresh_window"
+	case SourceCLIElapsed:
+		return "cli_elapsed"
+	default:
+		return "unknown"
+	}
 }
 
 func (s Span) HasPosition() bool {

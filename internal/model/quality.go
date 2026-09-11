@@ -31,6 +31,7 @@ type CaptureQuality struct {
 	RPC, UI                          TierQuality
 	ProviderEntries, StructuredLines uint64
 	Issues                           []QualityIssue
+	DurationSources                  []DurationSourceSummary
 	HasContext                       bool
 	Attribution                      attrib.Coverage
 	NameableMs, RPCDurationMs        uint64
@@ -60,6 +61,7 @@ func BuildCaptureQuality(in CaptureQualityInput) CaptureQuality {
 	q := CaptureQuality{
 		RPC:             tierQuality(in.RPCEvidence, rpcTiming, in.Stats.FirstTS),
 		UI:              tierQuality(in.UIEvidence, uiTiming, in.UIOrigin),
+		DurationSources: SummariseDurationSources(in.UISpans),
 		ProviderEntries: in.Caps.ProviderEntries,
 		StructuredLines: in.Stats.StructuredLines,
 		HasContext:      hasContext,
@@ -188,6 +190,7 @@ func (l *Log) CaptureQuality() CaptureQuality { return detachedCaptureQuality(l.
 func detachedCaptureQuality(q CaptureQuality) CaptureQuality {
 	q.RPC = detachedTierQuality(q.RPC)
 	q.UI = detachedTierQuality(q.UI)
+	q.DurationSources = append([]DurationSourceSummary(nil), q.DurationSources...)
 	q.Issues = append([]QualityIssue(nil), q.Issues...)
 	for i := range q.Issues {
 		if q.Issues[i].FirstEntry != nil {

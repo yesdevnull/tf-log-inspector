@@ -1,0 +1,4 @@
+{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-11T00:00:00Z","type":"version"}
+{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-11T00:00:01Z","type":"refresh_start","hook":{"resource":{"addr":"aws_instance.example","resource_type":"aws_instance","implied_provider":"aws"}}}
+{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-11T00:00:03.250Z","type":"refresh_complete","hook":{"resource":{"addr":"aws_instance.example","resource_type":"aws_instance","implied_provider":"aws"}}}
+{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-11T00:00:04Z","type":"apply_complete","hook":{"resource":{"addr":"aws_instance.example","resource_type":"aws_instance","implied_provider":"aws"},"action":"update","elapsed_seconds":1}}

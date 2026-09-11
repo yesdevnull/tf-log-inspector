@@ -41,18 +41,9 @@ type uiHook struct {
 // carries elapsed_seconds, but as a partial "still working" figure -- taking
 // it as a completion would double-count and inflate durations.
 //
-// provision_complete/provision_errored and refresh_complete are also
-// deliberately excluded, even though they close a context in package attrib:
-// verified against hashicorp/terraform tag v1.14.9's
-// internal/command/views/json/hook.go, their backing structs --
-// provisionComplete/provisionErrored ({Resource, Provisioner}) and
-// refreshComplete ({Resource, IDKey, IDValue}) -- carry no elapsed_seconds
-// field at all, unlike operationComplete/operationErrored (used by
-// apply_complete/apply_errored and ephemeral_op_complete/ephemeral_op_errored),
-// which do. attrib's opensContext/closesContext admit provision_*/refresh_*
-// anyway because that package takes its context windows from the lines' own
-// timestamps rather than from elapsed_seconds -- a different admission
-// criterion answering a different question, not an inconsistency to reconcile.
+// Refresh hooks carry no elapsed_seconds: their durations are extracted from
+// matched timestamp windows separately. Provision hooks carry no reported
+// duration and are excluded.
 func isCompletionType(t string) bool {
 	switch t {
 	case "apply_complete", "apply_errored",
@@ -62,26 +53,33 @@ func isCompletionType(t string) bool {
 	return false
 }
 
-// UIHookBuilder builds spans from Terraform's structured-output UI hook
-// stream, one span per completion-bearing hook line. It satisfies
-// logfmt.StructuredSink, and Entry (a no-op) so it also satisfies
-// logfmt.Sink and can be passed to logfmt.Scan directly.
+// UIHookBuilder extracts resource operations from structured hooks and CLI
+// completion lines. Structured operations share one clock; CLI durations are
+// admitted only when the capture has no structured lifecycle or hclog evidence.
 type UIHookBuilder struct {
 	spans     []Span
 	kept      dedupCache // dedup cache for retained ResourceType/Provider/RPC strings, shared with ReportedBuilder
 	malformed uint64
 
-	base      time.Time // first parseable @timestamp seen, any line
-	haveBase  bool
-	backwards uint64 // timestamps earlier than base and unavailable for positioning
-	saturated uint64 // durations that hit math.MaxUint32 rather than overflowing
-	evidence  TimingEvidence
+	base                time.Time // first parseable @timestamp seen, any line
+	haveBase            bool
+	backwards           uint64 // timestamps earlier than base and unavailable for positioning
+	saturated           uint64 // durations that hit math.MaxUint32 rather than overflowing
+	evidence            TimingEvidence
+	refreshOpen         map[string]refreshStart
+	refreshOverflow     bool
+	cliSpans            []Span
+	cliEvidence         TimingEvidence
+	structuredLifecycle bool
+	timestampedLog      bool
 }
 
-// Entry implements logfmt.Sink as a no-op: UIHookBuilder only cares about
-// structured lines, delivered via Structured, but every sink passed to
-// logfmt.Scan must satisfy Sink.
-func (b *UIHookBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {}
+// Entry recognises timestamped hclog evidence for capture-wide CLI suppression.
+func (b *UIHookBuilder) Entry(ord uint32, e logfmt.Entry, msg string, f logfmt.Fields) {
+	if e.Timestamped && e.Level != logfmt.LevelUnknown {
+		b.timestampedLog = true
+	}
+}
 
 // relativePosition places a parsed UI timestamp on this builder's clock.
 // Duration admission is independent of the returned position status.
@@ -107,12 +105,16 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		Timestamp json.RawMessage `json:"@timestamp"`
 		Type      json.RawMessage `json:"type"`
 		Hook      json.RawMessage `json:"hook"`
+		Module    string          `json:"@module"`
 	}
 	if err := json.Unmarshal([]byte(line), &ul); err != nil {
 		addStage(&b.evidence.SchemaErrors, ord)
 		return
 	}
 	position, timestampSchema := b.timestampPosition(ul.Timestamp)
+	if ul.Module != "" && ul.Module != "terraform.ui" && position.Status != logfmt.TimestampMissing && position.Status != logfmt.TimestampInvalid {
+		b.timestampedLog = true
+	}
 	if reason := timestampReason(position.Status); reason != "" {
 		if b.evidence.TimestampIssues == nil {
 			b.evidence.TimestampIssues = make(map[string]IssueCount)
@@ -126,6 +128,13 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 	}
 	if timestampSchema || typeSchema {
 		addStage(&b.evidence.SchemaErrors, ord)
+	}
+	if !typeSchema && isLifecycleType(typ) {
+		b.structuredLifecycle = true
+	}
+	if !typeSchema && (typ == "refresh_start" || typ == "refresh_complete") {
+		b.refresh(ord, typ, ul.Timestamp, ul.Hook, position)
+		return
 	}
 	if typeSchema || !isCompletionType(typ) {
 		return
@@ -307,12 +316,34 @@ func (b *UIHookBuilder) reject(reason string, ord uint32) {
 	addIssue(b.evidence.Rejected, reason, ord)
 }
 
-func (b *UIHookBuilder) Evidence() TimingEvidence { return detachedEvidence(b.evidence) }
+func (b *UIHookBuilder) Evidence() TimingEvidence {
+	e := detachedEvidence(b.evidence)
+	for _, start := range b.refreshOpen {
+		e.Records++
+		mergeIssue(e.Rejected, "refresh_incomplete", IssueCount{Count: 1, FirstEntry: start.entry})
+	}
+	cli := b.cliEvidence
+	e.Records += cli.Records
+	for code, issue := range cli.Rejected {
+		mergeIssue(e.Rejected, code, issue)
+	}
+	if b.suppressCLI() {
+		for _, s := range b.cliSpans {
+			addIssue(e.Rejected, "cli_suppressed", s.Entry)
+		}
+	}
+	return e
+}
 
 func (b *UIHookBuilder) Origin() (time.Time, bool) { return b.base, b.haveBase }
 
 // Spans returns the spans built so far, in the order their lines appeared.
-func (b *UIHookBuilder) Spans() []Span { return b.spans }
+func (b *UIHookBuilder) Spans() []Span {
+	if b.suppressCLI() || len(b.cliSpans) == 0 {
+		return b.spans
+	}
+	return b.cliSpans
+}
 
 // Malformed reports how many structured lines failed to decode as JSON. Such
 // a line is skipped, never fatal to the scan.
