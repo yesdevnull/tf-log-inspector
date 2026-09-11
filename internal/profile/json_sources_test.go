@@ -112,3 +112,28 @@ func TestComparisonExportsUnavailableSourceChanges(t *testing.T) {
 		t.Fatal("incompatible sources ranked as deltas")
 	}
 }
+
+func TestJSONMissingResourceTypeRetainsDurationSources(t *testing.T) {
+	l := &model.Log{UISpans: []span.Span{{Address: "aws_instance.a", RPC: "read", DurationMs: 1000, Fidelity: span.FidelityUIReported}}}
+	r, err := Build(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := RenderJSON(&out, r, JSONMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	doc := decodeJSONObject(t, out.Bytes())
+	aggregates := decodeJSONObject(t, doc["aggregates"])
+	types := decodeJSONArray(t, aggregates["resource_types"])
+	if len(types) != 1 {
+		t.Fatalf("resource types = %s", aggregates["resource_types"])
+	}
+	sources := decodeJSONArray(t, types[0]["duration_sources"])
+	if len(sources) != 1 {
+		t.Fatalf("unknown-type sources = %s", types[0]["duration_sources"])
+	}
+	assertJSONLiteral(t, sources[0], "duration_source", `"ui_elapsed"`)
+	assertJSONLiteral(t, sources[0], "count", "1")
+	assertJSONLiteral(t, sources[0], "duration_ms", "1000")
+}

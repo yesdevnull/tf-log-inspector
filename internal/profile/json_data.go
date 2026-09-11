@@ -433,7 +433,8 @@ func aggregatesJSON(r Report) (jsonAggregates, error) {
 	o.DurationSources = durationSourcesJSON(observations)
 	byType, byAddress := make(map[string][]span.Span), make(map[string][]span.Span)
 	for _, observation := range observations {
-		byType[observation.ResourceType] = append(byType[observation.ResourceType], observation)
+		resourceType := model.FacetKey(observation.ResourceType)
+		byType[resourceType] = append(byType[resourceType], observation)
 		byAddress[observation.Address] = append(byAddress[observation.Address], observation)
 	}
 	for _, p := range r.Providers {
