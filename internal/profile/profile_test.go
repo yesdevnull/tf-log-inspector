@@ -173,17 +173,25 @@ func TestTypeReportDistinguishesMissingRPCFromMeasuredZero(t *testing.T) {
 	if err := Render(&out, l, TextOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	seen := make(map[string]bool)
 	for _, line := range tableRows(t, out.String(), "BY RESOURCE TYPE") {
 		cells := strings.Fields(line)
-		if len(cells) != 6 {
+		if len(cells) == 0 || (cells[0] != "aws_instance" && cells[0] != "aws_subnet") {
 			continue
 		}
+		if len(cells) != 6 {
+			t.Fatalf("malformed type row: %s", line)
+		}
+		seen[cells[0]] = true
 		if cells[0] == "aws_instance" && (cells[4] != "n/a" || cells[5] != "n/a") {
 			t.Errorf("absent RPC timings presented as measurements: %s", line)
 		}
 		if cells[0] == "aws_subnet" && (cells[4] != "0ms" || cells[5] != "0ms") {
 			t.Errorf("measured zero RPC lost: %s", line)
 		}
+	}
+	if !seen["aws_instance"] || !seen["aws_subnet"] {
+		t.Fatalf("missing expected type rows: %s", out.String())
 	}
 }
 

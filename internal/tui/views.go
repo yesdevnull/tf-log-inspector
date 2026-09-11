@@ -932,7 +932,7 @@ var captureGuidance = []string{
 // one height too short even for the mark -- a pane of one line -- still
 // leaves a finished sentence naming what this log is missing, with only the
 // remedy cut.
-const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE, then re-run."
+const shortCaptureGuidance = "No supported timing observations. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE for RPC timings. Plain-text CLI timings are not parsed. Use terraform.ui JSON completion hooks for resource timings. Raw Log: press 6."
 
 // fitCaptureGuidance is the capture guidance for a pane w columns wide and h
 // lines tall: the full text where it fits, one sentence where it does not,
@@ -945,6 +945,9 @@ const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_
 func fitCaptureGuidance(w, h int) string {
 	if h <= 0 {
 		return ""
+	}
+	if h == 1 {
+		return clipWidth(captureGuidance[0], w)
 	}
 	lines := captureGuidance
 	if h < len(lines) {
