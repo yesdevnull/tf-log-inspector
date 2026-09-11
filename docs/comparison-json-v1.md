@@ -59,6 +59,10 @@ unavailable, the row is `unavailable`, the unavailable side is `null`, and all
 changes are `null`. When both tiers are available, absent groups have a zero
 count and total, with null mean and maximum.
 
+Each row's `key` object contains only the fields applicable to that section.
+Those fields appear in the order documented in the five-item section list
+above.
+
 The side summary fields are `count`, `total_ms`, `mean_ms`, `max_ms`, and
 `lower_bound`. A summary is null for an unavailable tier. A present summary
 counts admitted observations, sums their durations, uses

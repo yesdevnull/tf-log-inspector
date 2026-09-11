@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -254,4 +255,292 @@ func TestComparisonMissingInputNamesRoleAndPreservesOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComparisonWorkflowsUseCompleteParsedEvidence(t *testing.T) {
+	tests := []struct {
+		name        string
+		before      string
+		after       string
+		section     string
+		keyField    string
+		keyValue    string
+		state       string
+		beforeCount string
+		beforeTotal string
+		afterCount  string
+		afterTotal  string
+		totalChange any
+		countChange any
+	}{
+		{"identical RPC", "provider-rpc.log", "provider-rpc.log", "rpc_providers", "provider", "registry.terraform.io/hashicorp/aws", "matched", "2", "6", "2", "6", "0", "0"},
+		{"added RPC group", "provider-rpc.log", "two-tier.log", "rpc_resource_types", "resource_type", "aws_instance", "added", "0", "0", "2", "370", "370", "2"},
+		{"changed UI group", "structured-ui.log", "two-tier.log", "ui_resource_types", "resource_type", "aws_instance", "matched", "1", "2500", "2", "5000", "2500", "1"},
+		{"disjoint RPC tier", "structured-ui.log", "provider-rpc.log", "rpc_providers", "provider", "registry.terraform.io/hashicorp/aws", "unavailable", "", "", "2", "6", nil, nil},
+		{"unavailable RPC tier", "structured-ui.log", "core-only.log", "rpc_resource_types", "resource_type", "", "", "", "", "", "", nil, nil},
+		{"lower-bound UI", "resources-long-lower-bound.log", "resources-long-lower-bound.log", "ui_operations", "address", "module.with_a_very_long_instance_key[\"display-safe\"].aws_instance.resource_with_a_long_name", "matched", "1", "4294967295", "1", "4294967295", nil, "0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before := filepath.Join("..", "..", "testdata", tc.before)
+			after := filepath.Join("..", "..", "testdata", tc.after)
+			root, raw := runComparisonJSONDocument(t, before, after)
+			section := comparisonCLISection(t, root, tc.section)
+			if tc.state == "" {
+				if section["before_available"] != false || section["after_available"] != false || len(section["rows"].([]any)) != 0 {
+					t.Fatalf("unexpected unavailable section: %#v", section)
+				}
+				return
+			}
+			row := comparisonCLIRow(t, section, tc.keyField, tc.keyValue)
+			if row["state"] != tc.state {
+				t.Fatalf("state=%v, want %q", row["state"], tc.state)
+			}
+			assertCLIComparisonSummary(t, row["before"], tc.beforeCount, tc.beforeTotal)
+			assertCLIComparisonSummary(t, row["after"], tc.afterCount, tc.afterTotal)
+			changes := row["changes"].(map[string]any)
+			if changes["total_ms"] != tc.totalChange || changes["count"] != tc.countChange {
+				t.Fatalf("changes=%#v, want total=%v count=%v", changes, tc.totalChange, tc.countChange)
+			}
+			var text bytes.Buffer
+			if err := run([]string{"--compare", "--limit=0", before, after}, &text, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(text.String(), tc.keyValue) || len(raw) == 0 {
+				t.Fatalf("text omitted parsed key %q", tc.keyValue)
+			}
+			if tc.name == "lower-bound UI" && !strings.Contains(text.String(), "timing deltas unavailable: lower bound") {
+				t.Fatal("text omitted lower-bound delta qualification")
+			}
+		})
+	}
+}
+
+func TestComparisonSyntheticParsingCoversCountVolumeAndIdentifiers(t *testing.T) {
+	dir := t.TempDir()
+	before := filepath.Join(dir, "before.log")
+	after := filepath.Join(dir, "after.log")
+	beforeLines := strings.Join([]string{
+		rpcCompletion("p", 10),
+		rpcCompletion("p", 30),
+		rpcCompletion("removed", 5),
+		rpcCompletion("zero", 0),
+		uiCompletion("old.address", "create", 1),
+		uiCompletion("old.address", "create", 2),
+		uiCompletion("module.東京[\\u001b]", "créate\\n", 1),
+	}, "\n") + "\n"
+	afterLines := strings.Join([]string{
+		rpcCompletion("p", 40),
+		rpcCompletion("added", 7),
+		rpcCompletion("zero", 5),
+		uiCompletion("new.address", "create", 3),
+		uiCompletion("module.東京[\\u001b]", "créate\\n", 2),
+	}, "\n") + "\n"
+	if err := os.WriteFile(before, []byte(beforeLines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(after, []byte(afterLines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := runComparisonJSONDocument(t, before, after)
+	rpc := comparisonCLISection(t, root, "rpc_providers")
+	matched := comparisonCLIRow(t, rpc, "provider", "p")
+	assertCLIComparisonSummary(t, matched["before"], "2", "40")
+	assertCLIComparisonSummary(t, matched["after"], "1", "40")
+	changes := matched["changes"].(map[string]any)
+	if changes["count"] != "-1" || changes["total_ms"] != "0" || changes["mean_ms"] != "20" {
+		t.Fatalf("equal-volume count change=%#v", changes)
+	}
+	zero := comparisonCLIRow(t, rpc, "provider", "zero")["changes"].(map[string]any)
+	if zero["total_ms"] != "5" || zero["total_percent"] != nil {
+		t.Fatalf("zero baseline changes=%#v", zero)
+	}
+	if comparisonCLIRow(t, rpc, "provider", "added")["state"] != "added" || comparisonCLIRow(t, rpc, "provider", "removed")["state"] != "removed" {
+		t.Fatal("added or removed RPC evidence lost")
+	}
+	ui := comparisonCLISection(t, root, "ui_operations")
+	old := comparisonCLIRow(t, ui, "address", "old.address")
+	assertCLIComparisonSummary(t, old["before"], "2", "3000")
+	if old["state"] != "removed" || comparisonCLIRow(t, ui, "address", "new.address")["state"] != "added" {
+		t.Fatal("renamed UI addresses were matched")
+	}
+	controlled := comparisonCLIRow(t, ui, "address", "module.東京[\x1b]")
+	if controlled["key"].(map[string]any)["action"] != "créate\n" {
+		t.Fatalf("control/Unicode key changed: %#v", controlled["key"])
+	}
+	qualifications := root["qualifications"].([]any)
+	if !containsCLIString(qualifications, "independent_scrub_aliases_may_differ") {
+		t.Fatalf("scrub qualification missing: %#v", qualifications)
+	}
+	var text bytes.Buffer
+	if err := run([]string{"--compare", "--limit=0", before, after}, &text, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text.String(), `module.東京[\x1b]`) || !strings.Contains(text.String(), `créate\n`) {
+		t.Fatalf("text did not visibly escape identifiers:\n%s", text.String())
+	}
+}
+
+func TestComparisonJSONDependsOnlyOnBytesAndBasenames(t *testing.T) {
+	source := filepath.Join("..", "..", "testdata", "provider-rpc.log")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	leftDir, rightDir := filepath.Join(dir, "left"), filepath.Join(dir, "right")
+	if err := os.Mkdir(leftDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(rightDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	left := filepath.Join(leftDir, "capture.log")
+	right := filepath.Join(rightDir, "capture.log")
+	if err := os.WriteFile(left, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(right, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, first := runComparisonJSONDocument(t, left, right)
+	_, second := runComparisonJSONDocument(t, right, left)
+	if !bytes.Equal(first, second) || bytes.Contains(first, []byte(dir)) {
+		t.Fatalf("directory affected output or leaked: equal=%v", bytes.Equal(first, second))
+	}
+	renamedBefore := filepath.Join(leftDir, "renamed-before.log")
+	renamedAfter := filepath.Join(rightDir, "renamed-after.log")
+	if err := os.WriteFile(renamedBefore, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(renamedAfter, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	beforeRoot, _ := runComparisonJSONDocument(t, renamedBefore, right)
+	afterRoot, _ := runComparisonJSONDocument(t, left, renamedAfter)
+	if comparisonCLIInput(beforeRoot, "before") != "renamed-before.log" || comparisonCLIInput(beforeRoot, "after") != "capture.log" {
+		t.Fatalf("before rename metadata=%#v", beforeRoot)
+	}
+	if comparisonCLIInput(afterRoot, "before") != "capture.log" || comparisonCLIInput(afterRoot, "after") != "renamed-after.log" {
+		t.Fatalf("after rename metadata=%#v", afterRoot)
+	}
+}
+
+func TestComparisonEmptyAndAdmittedUnpositionedCaptures(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.log")
+	unpositioned := filepath.Join(dir, "unpositioned.log")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"@level":"info","@module":"terraform.ui","@timestamp":"invalid","type":"apply_complete","hook":{"resource":{"addr":"thing.example","resource_type":"thing"},"action":"read","elapsed_seconds":9}}` + "\n"
+	if err := os.WriteFile(unpositioned, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := runComparisonJSONDocument(t, empty, unpositioned)
+	section := comparisonCLISection(t, root, "ui_operations")
+	if section["before_available"] != false || section["after_available"] != true {
+		t.Fatalf("availability=%#v", section)
+	}
+	row := comparisonCLIRow(t, section, "address", "thing.example")
+	if row["state"] != "unavailable" || row["before"] != nil {
+		t.Fatalf("unpositioned row=%#v", row)
+	}
+	assertCLIComparisonSummary(t, row["after"], "1", "9000")
+}
+
+func rpcCompletion(provider string, duration int) string {
+	return `2026-09-11T00:00:00.000Z [TRACE] provider.test: Received downstream response: tf_provider_addr=` + provider + ` tf_resource_type=thing tf_rpc=Read tf_req_duration_ms=` + strconv.Itoa(duration)
+}
+
+func uiCompletion(address, action string, elapsed int) string {
+	return `{"@level":"info","@module":"terraform.ui","@timestamp":"2026-09-11T00:00:00Z","type":"apply_complete","hook":{"resource":{"addr":"` + address + `","resource_type":"thing"},"action":"` + action + `","elapsed_seconds":` + strconv.Itoa(elapsed) + `}}`
+}
+
+func runComparisonJSONDocument(t *testing.T, before, after string) (map[string]any, []byte) {
+	t.Helper()
+	var out bytes.Buffer
+	if err := run([]string{"--compare", "--format=json", before, after}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	decoder.UseNumber()
+	var root map[string]any
+	if err := decoder.Decode(&root); err != nil {
+		t.Fatal(err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("extra JSON: %v", err)
+	}
+	normaliseJSONNumbers(root)
+	return root, out.Bytes()
+}
+
+func normaliseJSONNumbers(value any) {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, item := range value {
+			if number, ok := item.(json.Number); ok {
+				value[key] = number.String()
+			} else {
+				normaliseJSONNumbers(item)
+			}
+		}
+	case []any:
+		for _, item := range value {
+			normaliseJSONNumbers(item)
+		}
+	}
+}
+
+func comparisonCLISection(t *testing.T, root map[string]any, kind string) map[string]any {
+	t.Helper()
+	for _, value := range root["sections"].([]any) {
+		section := value.(map[string]any)
+		if section["kind"] == kind {
+			return section
+		}
+	}
+	t.Fatalf("section %q not found", kind)
+	return nil
+}
+
+func comparisonCLIRow(t *testing.T, section map[string]any, field, value string) map[string]any {
+	t.Helper()
+	for _, item := range section["rows"].([]any) {
+		row := item.(map[string]any)
+		if row["key"].(map[string]any)[field] == value {
+			return row
+		}
+	}
+	t.Fatalf("row %s=%q not found", field, value)
+	return nil
+}
+
+func assertCLIComparisonSummary(t *testing.T, value any, count, total string) {
+	t.Helper()
+	if count == "" {
+		if value != nil {
+			t.Fatalf("summary=%#v, want null", value)
+		}
+		return
+	}
+	summary := value.(map[string]any)
+	if summary["count"] != count || summary["total_ms"] != total {
+		t.Fatalf("summary=%#v, want count=%s total=%s", summary, count, total)
+	}
+}
+
+func containsCLIString(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func comparisonCLIInput(root map[string]any, side string) string {
+	return root[side].(map[string]any)["input"].(map[string]any)["basename"].(string)
 }

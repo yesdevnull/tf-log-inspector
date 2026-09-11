@@ -113,6 +113,8 @@ These are development builds; version-tag publishing is not configured.
     tfli --profile -o profile.txt plan.log
     tfli --profile --format json run.log
     tfli --profile --format json -o profile.json run.log
+    tfli --compare [--format text] [--limit N] [-o comparison.txt] before.log after.log
+    tfli --compare --format json [-o comparison.json] before.log after.log
     tfli --scrub -o sanitised.log plan.log
     tfli --scrub --scrub-values private-values.txt -o sanitised.log plan.log
 
@@ -207,8 +209,36 @@ and `←`/`→` (or `h`/`l`) step along the selected one call by call — the
 detail pane follows the step, and `⏎` opens that call's own log lines,
 scoped to it by its `tf_req_id`; `\` returns to the whole log.
 
-`-o` writes a report for `--diagnose` and `--profile`, and is required for
-`--scrub`. Passing it without a mode flag is an error. Select only one mode.
+`-o` writes a report for `--diagnose`, `--profile`, and `--compare`, and is
+required for `--scrub`. Passing it without a mode flag is an error. Select only
+one mode.
+
+### Comparing two runs
+
+`--compare` reads two raw logs and reports observed changes from the first
+(`before`) capture to the second (`after`) capture. Changes are after minus
+before. Counts describe admitted timing observations; a changed count can also
+change a mean even when total duration is unchanged. A percentage is
+unavailable when its baseline is zero or missing, and a whole tier is
+unavailable when that capture has no admitted observations for it.
+
+RPC durations measure provider calls while UI-hook durations measure resource
+operations. Their clocks and work are separate and may overlap, so do not add
+or subtract the tiers. Rows containing a lower-bound UI duration retain their
+observed values but are unranked because they do not define an exact timing
+delta.
+
+Text output defaults to 20 exact rows and 20 unranked or unavailable rows in
+each section; `--limit` applies independently to every list. Use `--limit 0`
+to show all text rows. JSON always contains every row and does not accept
+`--limit`; see the [Comparison JSON v1 schema](docs/comparison-json-v1.md).
+
+Comparison output contains unmasked identifiers and capture metadata, but no
+raw log bodies or absolute input paths. Separately scrubbed captures can assign
+different aliases to the same source value and therefore cannot be matched
+reliably. The report cannot establish equivalent logging configuration or the
+cause of a change. A successful exit means the observations were compared and
+rendered; it is not a performance threshold verdict.
 
 `--diagnose` reports the log's structure: size, levels, which extraction tier
 applies, which fields are present, and the most common message shapes.

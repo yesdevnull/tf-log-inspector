@@ -21,7 +21,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := report
+	original := deepCopyComparisonReport(report)
 	metadata := ComparisonMetadata{ToolVersion: "test", BeforeBasename: "before.log", AfterBasename: "after.log"}
 	var out bytes.Buffer
 	if err := RenderComparisonJSON(&out, report, metadata); err != nil {
@@ -95,6 +95,10 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	if !reflect.DeepEqual(report, original) {
 		t.Fatal("renderer mutated report")
 	}
+}
+
+func deepCopyComparisonReport(report ComparisonReport) ComparisonReport {
+	return cloneReflect(reflect.ValueOf(report)).Interface().(ComparisonReport)
 }
 
 func TestComparisonJSONRetainsCompleteSectionsAndNullSemantics(t *testing.T) {
