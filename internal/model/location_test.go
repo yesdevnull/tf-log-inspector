@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,87 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 )
+
+func TestPhysicalLineCountAndSourcePositionUseLoadedBytes(t *testing.T) {
+	const crlfSource = "2026-09-10T00:00:00.000Z [INFO] first\r\n\r\ncontinuation\r\n2026-09-10T00:00:01.000Z [INFO] last"
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "CRLF", source: crlfSource},
+		{name: "LF", source: strings.ReplaceAll(crlfSource, "\r\n", "\n")},
+	}
+	wants := []struct {
+		line      uint64
+		wantEntry uint32
+		wantLine  uint64
+	}{
+		{line: 1, wantEntry: 0, wantLine: 0},
+		{line: 2, wantEntry: 0, wantLine: 1},
+		{line: 3, wantEntry: 0, wantLine: 2},
+		{line: 4, wantEntry: 1, wantLine: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "source.log")
+			if err := os.WriteFile(path, []byte(tc.source), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			l, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+
+			if got := l.PhysicalLineCount(); got != 4 {
+				t.Fatalf("PhysicalLineCount() = %d, want 4", got)
+			}
+			for _, want := range wants {
+				got, ok := l.SourcePosition(want.line)
+				wantPosition := SourcePosition{Entry: want.wantEntry, EntryLine: want.wantLine}
+				if !ok || got != wantPosition {
+					t.Errorf("SourcePosition(%d) = %+v, %v; want %+v, true", want.line, got, ok, wantPosition)
+					continue
+				}
+				location, ok := l.SourceLocation(got.Entry)
+				if !ok || location.StartLine+got.EntryLine != want.line {
+					t.Errorf("SourceLocation(%d) = %+v, %v; position resolves to line %d", got.Entry, location, ok, want.line)
+				}
+			}
+			for _, line := range []uint64{0, 5, math.MaxUint64} {
+				if got, ok := l.SourcePosition(line); ok || got != (SourcePosition{}) {
+					t.Errorf("SourcePosition(%d) = %+v, %v; want zero, false", line, got, ok)
+				}
+			}
+		})
+	}
+}
+
+func TestSourcePositionRejectsMalformedEntryRanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		log     Log
+		line    uint64
+		wantLen uint64
+	}{
+		{name: "empty log", log: Log{}, line: 1, wantLen: 0},
+		{name: "gap", log: Log{Data: []byte("one\ntwo\n"), Entries: []logfmt.Entry{{Off: 0, Len: 4}, {Off: 5, Len: 3}}}, line: 2, wantLen: 2},
+		{name: "zero length", log: Log{Data: []byte("one\n"), Entries: []logfmt.Entry{{Off: 0, Len: 0}}}, line: 1, wantLen: 1},
+		{name: "overflow", log: Log{Data: []byte("one\n"), Entries: []logfmt.Entry{{Off: math.MaxUint64, Len: 2}}}, line: 1, wantLen: 1},
+		{name: "past data", log: Log{Data: []byte("one\n"), Entries: []logfmt.Entry{{Off: 0, Len: 5}}}, line: 1, wantLen: 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.log.PhysicalLineCount(); got != tc.wantLen {
+				t.Fatalf("PhysicalLineCount() = %d, want %d", got, tc.wantLen)
+			}
+			if got, ok := tc.log.SourcePosition(tc.line); ok || got != (SourcePosition{}) {
+				t.Errorf("SourcePosition(%d) = %+v, %v; want zero, false", tc.line, got, ok)
+			}
+		})
+	}
+}
 
 func TestSourceLocationUsesOriginalByteOffsetsBeyondEntryLineSaturation(t *testing.T) {
 	var source strings.Builder
@@ -37,6 +119,18 @@ func TestSourceLocationUsesOriginalByteOffsetsBeyondEntryLineSaturation(t *testi
 	second, ok := l.SourceLocation(1)
 	if !ok || second.StartLine != 65_538 || second.EndLine != 65_538 {
 		t.Fatalf("second location=%+v, ok=%v", second, ok)
+	}
+
+	for _, tc := range []struct {
+		line uint64
+		want SourcePosition
+	}{
+		{line: 65_537, want: SourcePosition{Entry: 0, EntryLine: 65_536}},
+		{line: 65_538, want: SourcePosition{Entry: 1, EntryLine: 0}},
+	} {
+		if got, ok := l.SourcePosition(tc.line); !ok || got != tc.want {
+			t.Errorf("SourcePosition(%d) = %+v, %v; want %+v, true", tc.line, got, ok, tc.want)
+		}
 	}
 }
 
