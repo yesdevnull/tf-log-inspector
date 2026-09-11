@@ -5,6 +5,7 @@ package model
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -72,7 +73,19 @@ func (x *entryIndex) Entry(_ uint32, e logfmt.Entry, _ string, _ logfmt.Fields) 
 // Load reads a log file whole and extracts everything phase 2 needs in a
 // single pass.
 func Load(path string) (*Log, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	return LoadFile(f)
+}
+
+// LoadFile reads from the current position of f without closing it. Callers
+// retain the descriptor to protect the loaded file when writing a report.
+func LoadFile(f *os.File) (*Log, error) {
+	path := f.Name()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}

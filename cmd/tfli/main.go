@@ -170,18 +170,25 @@ func run(args []string, stdout, stderr io.Writer) error {
 // writeReport sends render's output to outPath if set, otherwise to stdout.
 // Diagnose, profile and comparison funnel their reports through this so no
 // mode can regress the -o handling on its own.
-func writeReport(stdout io.Writer, inputPaths []string, outPath string, render func(io.Writer) error) error {
+func writeReport(stdout io.Writer, inputs []*os.File, outPath string, render func(io.Writer) error) error {
 	w := stdout
 	var out *os.File
 	if outPath != "" {
 		var err error
-		inputInfos := make([]os.FileInfo, len(inputPaths))
-		for i, inputPath := range inputPaths {
-			inputInfo, err := os.Stat(inputPath)
+		// Each pair protects the loaded file even after a rename, then the
+		// file currently at its pathname if a replacement has appeared.
+		inputInfos := make([]os.FileInfo, 0, 2*len(inputs))
+		for _, input := range inputs {
+			inputInfo, err := input.Stat()
 			if err != nil {
-				return fmt.Errorf("checking %s: %w", inputPath, err)
+				return fmt.Errorf("checking %s: %w", input.Name(), err)
 			}
-			inputInfos[i] = inputInfo
+			inputInfos = append(inputInfos, inputInfo)
+			inputInfo, err = os.Stat(input.Name())
+			if err != nil {
+				return fmt.Errorf("checking %s: %w", input.Name(), err)
+			}
+			inputInfos = append(inputInfos, inputInfo)
 		}
 		// Open without truncation so the identity check applies to the
 		// descriptor we actually write, including symbolic and hard links.
@@ -197,7 +204,7 @@ func writeReport(stdout io.Writer, inputPaths []string, outPath string, render f
 		for i, inputInfo := range inputInfos {
 			if os.SameFile(inputInfo, outputInfo) {
 				_ = out.Close() // No output has been written to the input file.
-				return fmt.Errorf("input %s and output %s are the same file", inputPaths[i], outPath)
+				return fmt.Errorf("input %s and output %s are the same file", inputs[i/2].Name(), outPath)
 			}
 		}
 		if outputInfo.Mode().IsRegular() {
@@ -274,7 +281,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 		uiBuilder.Malformed(), uiBuilder.BackwardsTimestamps(), uiBuilder.Saturated(), &cc,
 		collector, &comps, elapsed)
 
-	return writeReport(stdout, []string{path}, outPath, report.Render)
+	return writeReport(stdout, []*os.File{f}, outPath, report.Render)
 }
 
 type profileOptions struct {
@@ -284,23 +291,39 @@ type profileOptions struct {
 
 // runProfile loads path and writes the unmasked performance report.
 func runProfile(path, outPath string, stdout io.Writer, options profileOptions) error {
-	l, err := model.Load(path)
+	f, l, err := loadReportInput(path)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = f.Close() }() // Retain the loaded identity through output validation.
 	if options.Format == "json" {
 		report, err := profile.Build(l)
 		if err != nil {
 			return err
 		}
 		metadata := profile.JSONMetadata{ToolVersion: version, InputBasename: filepath.Base(path)}
-		return writeReport(stdout, []string{path}, outPath, func(w io.Writer) error {
+		return writeReport(stdout, []*os.File{f}, outPath, func(w io.Writer) error {
 			return profile.RenderJSON(w, report, metadata)
 		})
 	}
-	return writeReport(stdout, []string{path}, outPath, func(w io.Writer) error {
+	return writeReport(stdout, []*os.File{f}, outPath, func(w io.Writer) error {
 		return profile.Render(w, l, options.Text)
 	})
+}
+
+// loadReportInput keeps the descriptor used by the parser open so pathname
+// replacement cannot hide the loaded file from output alias checks.
+func loadReportInput(path string) (*os.File, *model.Log, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	l, err := model.LoadFile(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	return f, l, nil
 }
 
 // runTUIFunc is the seam a test substitutes to confirm the TUI path was

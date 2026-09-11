@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
-	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/profile"
 )
 
@@ -15,14 +15,16 @@ type comparisonOptions struct {
 }
 
 func runComparison(beforePath, afterPath, outPath string, stdout io.Writer, options comparisonOptions) error {
-	beforeLog, err := model.Load(beforePath)
+	beforeFile, beforeLog, err := loadReportInput(beforePath)
 	if err != nil {
 		return fmt.Errorf("loading before: %w", err)
 	}
-	afterLog, err := model.Load(afterPath)
+	defer func() { _ = beforeFile.Close() }()
+	afterFile, afterLog, err := loadReportInput(afterPath)
 	if err != nil {
 		return fmt.Errorf("loading after: %w", err)
 	}
+	defer func() { _ = afterFile.Close() }()
 	before, err := profile.Build(beforeLog)
 	if err != nil {
 		return fmt.Errorf("profiling before: %w", err)
@@ -42,5 +44,5 @@ func runComparison(beforePath, afterPath, outPath string, stdout io.Writer, opti
 		}
 		return profile.RenderComparisonText(w, report, metadata, options.Text)
 	}
-	return writeReport(stdout, []string{beforePath, afterPath}, outPath, render)
+	return writeReport(stdout, []*os.File{beforeFile, afterFile}, outPath, render)
 }
