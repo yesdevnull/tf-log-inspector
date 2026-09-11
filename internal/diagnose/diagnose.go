@@ -176,6 +176,7 @@ func template(msg string, f logfmt.Fields) string {
 type ResourceRow struct {
 	DurationMs     uint32
 	DurationSource span.DurationSource
+	LowerBound     bool
 	Action         string
 	ResourceType   string
 	MaskedAddr     string
@@ -187,6 +188,7 @@ type ResourceTypeTotal struct {
 	ResourceType string
 	TotalMs      uint64
 	Count        uint64
+	LowerBound   bool
 }
 
 // Report is the finished diagnostic summary.
@@ -408,6 +410,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		rows = append(rows, ResourceRow{
 			DurationMs:     s.DurationMs,
 			DurationSource: s.DurationSource,
+			LowerBound:     s.DurationSaturated,
 			Action:         action,
 			ResourceType:   resourceType,
 			MaskedAddr:     MaskAddress(s.Address),
@@ -420,6 +423,7 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		}
 		rt.TotalMs += uint64(s.DurationMs)
 		rt.Count++
+		rt.LowerBound = rt.LowerBound || s.DurationSaturated
 
 		actionCounts[action]++
 	}
@@ -781,7 +785,11 @@ func (r Report) Render(w io.Writer) error {
 	// UI-hook spans sit on a different timeline from the RPC spans above
 	// (see span.Span's StartMs/EndMs doc comment) and are reported
 	// separately rather than folded into the figures above.
-	fmt.Fprintf(b, "  resource slowest span %d ms\n", r.UISlowestMs)
+	lowerBound := ""
+	if r.Quality.UI.DurationLowerBound {
+		lowerBound = "≥"
+	}
+	fmt.Fprintf(b, "  resource slowest span %s%d ms\n", lowerBound, r.UISlowestMs)
 	if len(r.UIActionCounts) > 0 {
 		fmt.Fprintf(b, "  resource actions    ")
 		for _, a := range r.UIActionCounts {
@@ -812,6 +820,9 @@ func (r Report) Render(w io.Writer) error {
 			if row.DurationSource != span.SourceUIElapsed {
 				duration = qualitytext.ExactDuration(uint64(row.DurationMs))
 			}
+			if row.LowerBound {
+				duration = "≥" + duration
+			}
 			fmt.Fprintf(b, "  %8s  %-8s %-24s %s  [%s]\n",
 				duration, row.Action, row.ResourceType, row.MaskedAddr, row.DurationSource)
 		}
@@ -823,7 +834,11 @@ func (r Report) Render(w io.Writer) error {
 			fmt.Fprintf(b, "BY RESOURCE TYPE\n")
 		}
 		for _, t := range r.ByResourceType {
-			fmt.Fprintf(b, "  %8s  %6d  %s\n", formatMs(t.TotalMs), t.Count, t.ResourceType)
+			duration := formatMs(t.TotalMs)
+			if t.LowerBound {
+				duration = "≥" + duration
+			}
+			fmt.Fprintf(b, "  %8s  %6d  %s\n", duration, t.Count, t.ResourceType)
 		}
 		fmt.Fprintf(b, "\n")
 	}
