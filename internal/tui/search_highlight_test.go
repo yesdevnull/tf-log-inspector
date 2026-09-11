@@ -252,6 +252,44 @@ func TestRawSearchHighlightInheritsSeverityWithAndWithoutColour(t *testing.T) {
 	}
 }
 
+func TestRawSearchHighlightResetsBeforeTheNextSeverityRow(t *testing.T) {
+	oldStyles, oldSemantic := styles, semantic
+	styles, semantic = newTheme(true), newSemantics(true)
+	t.Cleanup(func() { styles, semantic = oldStyles, oldSemantic })
+
+	m := horizontalLog(t, strings.Join([]string{
+		"2026-09-11T00:00:00.000Z [ERROR] before needle after",
+		"2026-09-11T00:00:01.000Z [WARN] warning row",
+	}, "\n"))
+	m.raw.lastQuery = "needle"
+	if !m.searchFrom(0, true, true) {
+		t.Fatal("ERROR-line match missing")
+	}
+	rendered := m.renderRawLog(100, 2)
+	glyphs := renderedGlyphs(rendered)
+	newline := -1
+	for i, glyph := range glyphs {
+		if glyph.text == "\n" {
+			newline = i
+			break
+		}
+	}
+	if newline < 0 || newline == len(glyphs)-1 {
+		t.Fatalf("two-row render missing its second row: %q", rendered)
+	}
+	if got := reversedText(rendered); got != "needle" {
+		t.Fatalf("joined two-row reverse span = %q, want only needle", got)
+	}
+	for _, glyph := range glyphs[newline+1:] {
+		if glyph.reversed {
+			t.Fatalf("reverse video leaked into the WARN row at %q: %q", glyph.text, rendered)
+		}
+		if glyph.bold || !glyph.hasForeground {
+			t.Fatalf("WARN row lost its own severity style at %q: bold=%v foreground=%v", glyph.text, glyph.bold, glyph.hasForeground)
+		}
+	}
+}
+
 func TestRawSearchHighlightClearsWhenNavigationChangesItsDomain(t *testing.T) {
 	m := horizontalLog(t, "needle\nsecond")
 	find := func() {
