@@ -204,6 +204,20 @@ func TestHistoryRestoresRawSearchAndRequestState(t *testing.T) {
 	if m.raw.top != want.top || m.raw.topLine != want.topLine || m.raw.column != want.column || m.raw.query != want.query || m.raw.lastQuery != want.lastQuery || m.raw.notFound != want.notFound || !slices.Equal(m.raw.scope, want.scope) || m.raw.match == nil || *m.raw.match != *want.match {
 		t.Fatalf("raw parent state = %+v, want %+v", m.raw, want)
 	}
+
+	m.setView(ViewRawLog)
+	m.raw.scope = nil
+	m.raw.top, m.raw.topLine, m.raw.column = 2, 0, 0
+	m.raw.lastQuery, m.raw.notFound, m.raw.match = "apply_start", false, nil
+	if !m.searchFrom(2, true, true) || reversedText(m.renderRawLog(200, 1)) != "apply_start" {
+		t.Fatal("valid parent occurrence was not highlighted")
+	}
+	m.history = append(m.history, m.captureNavigation())
+	m.raw.match = nil
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if got := reversedText(m.renderRawLog(200, 1)); got != "apply_start" {
+		t.Fatalf("Esc restored raw match state without its styling: %q", got)
+	}
 }
 
 func TestHistoryModalEscPrecedesReturn(t *testing.T) {

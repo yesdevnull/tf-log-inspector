@@ -3,12 +3,36 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
 type literalPosition struct {
 	byteOffset int
 	column     int
+}
+
+func renderLiteralMatch(line, query string, position literalPosition, base lipgloss.Style) string {
+	start := position.byteOffset
+	if query == "" || start < 0 || start > len(line) || len(query) > len(line)-start || line[start:start+len(query)] != query {
+		return base.Render(line)
+	}
+	end := start + len(query)
+	first, last := start, end
+	remaining, offset, state := line, 0, -1
+	for remaining != "" {
+		cluster, rest, _, nextState := ansi.FirstGraphemeCluster(remaining, state)
+		clusterEnd := offset + len(cluster)
+		if offset <= start && start < clusterEnd {
+			first = offset
+		}
+		if offset < end && end <= clusterEnd {
+			last = clusterEnd
+			break
+		}
+		remaining, offset, state = rest, clusterEnd, nextState
+	}
+	return base.Render(line[:first]) + styles.selected.Inherit(base).Render(line[first:last]) + base.Render(line[last:])
 }
 
 // findLiteral selects from the same non-overlapping occurrences in either
