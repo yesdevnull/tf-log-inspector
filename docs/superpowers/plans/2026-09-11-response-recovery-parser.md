@@ -87,9 +87,36 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error)
 
 `Ranges` contains the known source payload portions of the unsuccessful message, including its failing physical payload through that line's end. For completed-but-invalid JSON/UTF-8, reuse its payload fragments. For a structural failure, preserve prior fragments and record the failing payload span; this diagnostic span may include unclassified trailing bytes and is not a reconstructed body. Never attribute another component's physical line to it. Empty fragments may retain line locations but must not match a byte position.
 
-`Unavailable` contains subsequent physical payload ranges assigned to the quarantined component, including ordinary same-component messages and their continuations; these are unavailable stream positions, not attempted new messages. It must not include known transport headers or another component's lines. A global ownership failure instead marks the remaining physical lines unavailable, including headers, because no response ownership can be asserted. Keep each range within one physical line, without line terminators. I2 must prioritise complete-message fragments and respect these different range meanings; do not treat a diagnostic range as verified JSON.
+`Unavailable` contains subsequent physical payload ranges assigned to the quarantined component, including ordinary same-component messages and their continuations; these are unavailable stream positions, not attempted new messages. It must not include known transport headers or another component's lines. A global ownership failure instead marks the triggering physical line and every later physical line unavailable, including headers, because no response ownership can be asserted. Keep each range within one physical line, without line terminators: exclude LF and the CR immediately preceding LF; also exclude a final CR at EOF, matching the existing physical-line loop. I2 must prioritise complete-message fragments and respect these different range meanings; do not treat a diagnostic range as verified JSON.
 
-`Line` is the physical line where failure is detected; at EOF use the final physical line processed, without inventing a line after a trailing newline. `StartLine` is the first attempted payload line. Counts and syntax coordinates retain the existing diagnostic meanings. `SyntaxOffset` is one-based joined-payload bytes, zero when unknown; `SyntaxLine` is its mapped source line or zero. Outcome diagnostics sort by `Line`, then `StartLine`, then first range's `Start`, then `Code`. This retains detection order across ordinary failures and makes EOF ties deterministic. Within either range list, preserve source order. Empty outcomes have no messages or diagnostics; nil versus empty slices is not a public wire contract. The strict caller returns the first diagnostic in this declared order, not an arbitrary pending-map entry.
+`Line` is the physical line where failure is detected; at EOF use the final physical line processed, without inventing a line after a trailing newline. `StartLine` is the first attempted payload line, except for the trigger-only shape below. Counts and syntax coordinates retain the existing diagnostic meanings. `SyntaxOffset` is one-based joined-payload bytes, zero when unknown; `SyntaxLine` is its mapped source line or zero. Outcome diagnostics sort by `Line`, then `StartLine`, then the safe source-position key below, then `Code`. This retains detection order across ordinary failures and makes EOF ties deterministic. Within either range list, preserve source order. Empty outcomes have no messages or diagnostics; nil versus empty slices is not a public wire contract. The strict caller returns the first diagnostic in this declared order, not an arbitrary pending-map entry.
+
+```go
+func providerJSONDiagnosticStart(d ProviderJSONDiagnostic) int {
+    if len(d.Ranges) != 0 { return d.Ranges[0].Start }
+    if len(d.Unavailable) != 0 { return d.Unavailable[0].Start }
+    return 0
+}
+```
+
+The final fallback makes an empty hand-built diagnostic safe to sort; parser-produced trigger diagnostics always contain at least the triggering line in `Unavailable`. A blank unavailable line uses an empty half-open range with its real line-start offset, which never matches a byte. Do not index a range list without checking its length.
+
+Global-stop diagnostics have two precise shapes:
+
+| Field | Trigger-only diagnostic | Aborted pending-message diagnostic |
+| --- | --- | --- |
+| `Code` | `ambiguous_ownership` | `ambiguous_ownership` |
+| `Line` | Trigger's physical line | Trigger's physical line |
+| `StartLine` | Trigger's physical line | First attempted payload line |
+| `FragmentCount` | `0` | Number of previously collected payload fragments, including empty fragments |
+| `JoinedBytes` | `0` | Pending builder's byte length before the trigger, excluding stripped UI events |
+| `FirstFragmentBytes` | `0` | First collected payload fragment's byte length |
+| `LastFragmentBytes` | `0` | Saved consumed-byte count from the pending body's most recent contributing physical line, using the existing diagnostic convention |
+| `SyntaxOffset`, `SyntaxLine` | Both `0` | Both `0`; do not infer syntax failure from ownership loss |
+| `Ranges` | Empty | All previously collected payload ranges, unchanged; no trigger bytes |
+| `Unavailable` | Complete trigger line, followed by every remaining physical line, with headers and without terminators | Empty; the trigger diagnostic owns the global unavailable tail |
+
+`Error()` for both shapes uses `Line` in `provider JSON at line N: ambiguous ownership`. All fields are numeric facts, fixed codes or positions; the triggering header text and component strings never enter the diagnostic. Nil and empty range lists are equivalent; tests compare lengths or normalise empty lists before whole-struct comparisons.
 
 | Code | Safe error reason / policy |
 | --- | --- |
@@ -120,7 +147,7 @@ func ReconstructProviderJSON(text string) ([]ProviderJSON, error) {
 1. Preserve `providerJSONOuter`, `providerJSONInitial`, nested-prefix recognition, suffix grammar and `terraformUIBytes` rules for valid input. A header's exact component identifies its stream. Headerless continuations belong only to the most recent physical entry, as today; a pending stream elsewhere does not acquire them.
 2. On a component-local failure, retain earlier complete messages, discard only that pending body, store one diagnostic for that failure, and permanently quarantine its exact component key. Other known components can finish pending messages or begin new ones. Never call `providerJSONInitial` for a quarantined component, even if a later payload is valid-looking `{...}`.
 3. A timestamped provider-looking header whose exact owner cannot be extracted triggers global failure. Precisely: after `splitTimestamp` and `splitLevel`, trim leading spaces/tabs from the remaining text; if it begins `provider.` but `providerJSONOuter` cannot supply a component with a nonempty suffix after `provider.` and a valid colon separator, ownership is ambiguous. This includes `provider.:`, `provider.a missing-colon`, and component text containing whitespace before the colon. Ordinary timestamped non-provider entries, standalone UI events and headerless payload bytes do not trigger this rule. This is a conservative proposed refinement of item 8, to review explicitly before implementation.
-4. At global failure, retain only messages already complete. Emit one `ambiguous_ownership` diagnostic for the triggering physical line and one for each still-pending body using its known prior ranges. Stop body reconstruction for the remainder; retain unavailable physical ranges on the triggering diagnostic only, avoiding duplication across pending diagnostics. No later apparent provider start, even from a different component, is recovered. Already quarantined local diagnostics keep their ranges accumulated before the stop.
+4. At global failure, retain only messages already complete. Emit the trigger-only `ambiguous_ownership` shape and one aborted-pending shape for each still-pending body, exactly as defined above. Stop body reconstruction at the trigger; the trigger diagnostic alone owns whole-line unavailable ranges beginning with the trigger itself. Never add trigger bytes to an aborted body's `Ranges`. No later apparent provider start, even from a different component, is recovered. Already quarantined local diagnostics keep their ranges accumulated before the stop.
 5. At ordinary EOF, emit `incomplete` for each pending body, retain complete messages from all streams, and do not append duplicate incompleteness for already-quarantined streams. A split UTF-8 sequence may be completed across fragments; do not validate each physical fragment as UTF-8 independently.
 6. Keep active-entry tracking even for ordinary and quarantined headers. A continuation after an ordinary entry remains ordinary; after a quarantined entry it is unavailable. An empty/headerless capture remains diagnostic-free unless it contains an attempted provider message under the existing grammar. Do not claim to detect same-component text inserted inside an unfinished JSON string when it is indistinguishable from payload.
 
@@ -212,6 +239,110 @@ for _, tc := range cases {
 Add `TestInspectProviderJSONRangesAndOrdering` with a pending A starting on line 1, complete B on line 2, local C failure on line 3, and A completing on line 4: require messages A then B, C diagnostic only, and exact original payload slices. Follow with C ordinary header plus continuation and a valid-looking C restart: all three payloads must appear in C's `Unavailable`, and none in complete-message fragments. Append a new ordinary non-provider entry and continuation; neither may enter C's unavailable ranges. Repeat inspection and require deep equality.
 
 Add explicit EOF tests for two pending components with interleaved starts/continuations and an earlier local failure, a trailing newline, a blank final continuation and CRLF. Assert the declared diagnostic sort tuple and valid line-local ranges without map-order dependence. Add global-stop tests with pending A and B plus each malformed-header form in transition 3: one trigger diagnostic plus two aborted-pending diagnostics, no later completions, earlier verified messages preserved, only the trigger owns the remaining unavailable ranges.
+
+Pin the special source boundaries with these two tests in `reconstruction_test.go`. They use the existing `providerRecord` timestamp, so its header plus `provider.a: ` is exactly 45 bytes. The literal offsets below are expectations from fixture bytes, not values calculated by the production range helpers.
+
+```go
+func TestInspectProviderJSONStructuralFailureRanges(t *testing.T) {
+    cases := []struct {
+        name, payload, code string
+        end, consumed int
+    }{
+        {"delimiter", `{"a":]tail`, "delimiter_mismatch", 55, 6},
+        {"suffix", `{"a":1}tail`, "suffix_grammar", 56, 7},
+        {"inline UI", `{"a":"x{"@module":false}tail`, "invalid_inline_ui", 73, 8},
+    }
+    for _, tc := range cases {
+        for _, ending := range []string{"\n", "\r\n"} {
+            t.Run(tc.name+"/"+fmt.Sprintf("%q", ending), func(t *testing.T) {
+                input := providerRecord("a", tc.payload) + ending
+                result := InspectProviderJSON(input)
+                if len(result.Messages) != 0 || len(result.Diagnostics) != 1 {
+                    t.Fatalf("outcome: %#v", result)
+                }
+                d := result.Diagnostics[0]
+                wantRanges := []JSONFragment{{Start: 45, End: tc.end, Line: 1}}
+                if d.Code != tc.code || d.Line != 1 || d.StartLine != 1 ||
+                    !reflect.DeepEqual(d.Ranges, wantRanges) || len(d.Unavailable) != 0 {
+                    t.Fatalf("diagnostic boundaries: %#v", d)
+                }
+                if d.FragmentCount != 1 || d.JoinedBytes != tc.consumed ||
+                    d.FirstFragmentBytes != tc.consumed || d.LastFragmentBytes != tc.consumed {
+                    t.Fatalf("consumed counts: %#v", d)
+                }
+                if tc.end-45 <= d.LastFragmentBytes {
+                    t.Fatal("fixture must include unconsumed trailing bytes")
+                }
+                if input[45:tc.end] != tc.payload {
+                    t.Fatal("literal fixture boundary changed")
+                }
+            })
+        }
+    }
+}
+```
+
+The malformed inline candidate is detected at its opening `{` after `{"a":"x`; the diagnostic span covers its full physical payload, while counts stop after that opening brace. This intentionally tests a broader diagnostic range than verified payload or consumed bytes. Add `fmt` to this test file's imports.
+
+```go
+func TestInspectProviderJSONGlobalDiagnosticShape(t *testing.T) {
+    const head = "2026-09-08T00:00:00.000Z [DEBUG] "
+    lines := []string{
+        head + `provider.a: {"a":`,
+        head + `provider.b: {"b":`,
+        head + `provider.: {}`,
+        head + `provider.c: {"ok":1}`,
+        head + `terraform: ordinary`,
+    }
+    cases := []struct {
+        name, input string
+        want []ProviderJSONDiagnostic
+    }{
+        {"lone trigger EOF", lines[2], []ProviderJSONDiagnostic{
+            {Code: "ambiguous_ownership", Line: 1, StartLine: 1,
+                Unavailable: []JSONFragment{{Start: 0, End: 46, Line: 1}}},
+        }},
+        {"LF pending streams", strings.Join(lines, "\n") + "\n", []ProviderJSONDiagnostic{
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 1,
+                FragmentCount: 1, JoinedBytes: 5, FirstFragmentBytes: 5, LastFragmentBytes: 5,
+                Ranges: []JSONFragment{{Start: 45, End: 50, Line: 1}}},
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 2,
+                FragmentCount: 1, JoinedBytes: 5, FirstFragmentBytes: 5, LastFragmentBytes: 5,
+                Ranges: []JSONFragment{{Start: 96, End: 101, Line: 2}}},
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 3,
+                Unavailable: []JSONFragment{{Start: 102, End: 148, Line: 3}, {Start: 149, End: 202, Line: 4}, {Start: 203, End: 255, Line: 5}}},
+        }},
+        {"CRLF pending streams", strings.Join(lines, "\r\n") + "\r\n", []ProviderJSONDiagnostic{
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 1,
+                FragmentCount: 1, JoinedBytes: 5, FirstFragmentBytes: 5, LastFragmentBytes: 5,
+                Ranges: []JSONFragment{{Start: 45, End: 50, Line: 1}}},
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 2,
+                FragmentCount: 1, JoinedBytes: 5, FirstFragmentBytes: 5, LastFragmentBytes: 5,
+                Ranges: []JSONFragment{{Start: 97, End: 102, Line: 2}}},
+            {Code: "ambiguous_ownership", Line: 3, StartLine: 3,
+                Unavailable: []JSONFragment{{Start: 104, End: 150, Line: 3}, {Start: 152, End: 205, Line: 4}, {Start: 207, End: 259, Line: 5}}},
+        }},
+    }
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            result := InspectProviderJSON(tc.input)
+            if len(result.Messages) != 0 || len(result.Diagnostics) != len(tc.want) {
+                t.Fatalf("outcome: %#v", result)
+            }
+            for i, d := range result.Diagnostics {
+                // Empty-list representation is not part of this contract.
+                if len(d.Ranges) == 0 { d.Ranges = nil }
+                if len(d.Unavailable) == 0 { d.Unavailable = nil }
+                if !reflect.DeepEqual(d, tc.want[i]) {
+                    t.Fatalf("diagnostic %d: got %#v, want %#v", i, d, tc.want[i])
+                }
+            }
+        })
+    }
+}
+```
+
+These full-struct expectations also pin all zero body/syntax fields on the trigger and both zero syntax fields on aborted bodies. They require aborted bodies before the trigger under the declared ordering, retain only their prior payload ranges, include the malformed header and later provider/non-provider headers in the trigger's unavailable list, and exclude both CR and LF. Extend the existing empty/blank-line cases to check the safe source-position helper with `ProviderJSONDiagnostic{}` and with an empty `Ranges` but nonempty `Unavailable`; neither may panic or read a nonexistent element.
 
 Exercise every local failure code from the table followed by an independent good component. Reuse the valid inline-UI literal in `TestProviderJSONInlineUI`: place an event in a retained A body around a malformed B; assert A's original fragments exclude it. A malformed inline event quarantines only its known owner. Include split UTF-8 across A fragments with a B failure between them, multiple completed responses from one component, and the existing ordinary-continuation isolation cases. These additions must assert both retained bodies and diagnostic/unavailable positions, not just success.
 
@@ -377,3 +508,17 @@ rejection throughout intermediate commits, deterministic EOF ordering, all
 diagnostic families in the publication matrix, and source-range ownership.
 Relative links and code fences pass; no unfinished-value markers remain.
 Implementation, independent code review and test cleanup remain future work.
+
+## Plan review follow-up
+
+Dan authorised both peer-review corrections on 11 September 2026. PAR-I1-1 is
+resolved by explicit trigger-only and aborted-pending diagnostic shapes,
+trigger-line inclusion and safe sorting for empty range lists. PAR-I1-2 is
+resolved by literal structural-tail and global LF/CRLF boundary examples,
+including the distinction between consumed-byte counts and diagnostic spans.
+
+Scoped verification checked both findings against the revised contract and the
+existing parser helpers, finding no collateral contradictions. Markdown links,
+code fences, syntax of the three new Go examples and literal fixture offsets
+were checked successfully. These are plan checks; no recovery implementation or
+application test changes have been made. Implementation approval remains open.
