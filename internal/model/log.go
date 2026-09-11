@@ -25,17 +25,21 @@ import (
 // accessor, so swapping in ReadAt or mmap later is contained to this file if a
 // log ever turns up large enough to need it.
 type Log struct {
-	responseOnce     sync.Once
-	responseChecked  atomic.Bool
-	responses        []logfmt.ProviderJSON
-	responseErr      error
-	sourceLinesOnce  sync.Once
-	sourceLineStarts []uint64
-	Data             []byte
-	Entries          []logfmt.Entry
-	Comps            *logfmt.Interner
-	Stats            logfmt.Stats
-	quality          CaptureQuality
+	responseOnce              sync.Once
+	responseChecked           atomic.Bool
+	responses                 []logfmt.ProviderJSON
+	responseDiagnostics       []logfmt.ProviderJSONDiagnostic
+	responseMessageRanges     []responseRange
+	responseFailedRanges      []responseRange
+	responseUnavailableRanges []responseRange
+	responseErr               error
+	sourceLinesOnce           sync.Once
+	sourceLineStarts          []uint64
+	Data                      []byte
+	Entries                   []logfmt.Entry
+	Comps                     *logfmt.Interner
+	Stats                     logfmt.Stats
+	quality                   CaptureQuality
 
 	// RPCSpans and UISpans are kept apart rather than concatenated. Their
 	// StartMs/EndMs sit on different zero points -- see the doc comment on
@@ -175,10 +179,7 @@ func (l *Log) Bytes(e logfmt.Entry) []byte {
 // entries. Errors contain structural diagnostics only; raw inspection remains
 // available even when reconstruction fails. Empty Text means no matching body.
 func (l *Log) ProviderResponse(e logfmt.Entry) (logfmt.ProviderJSON, error) {
-	l.responseOnce.Do(func() {
-		l.responses, l.responseErr = logfmt.ReconstructProviderJSON(string(l.Data))
-		l.responseChecked.Store(true)
-	})
+	l.inspectProviderResponses()
 	if l.responseErr != nil {
 		return logfmt.ProviderJSON{}, l.responseErr
 	}
