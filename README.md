@@ -2,9 +2,12 @@
 
 Find where a slow Terraform plan spent its time.
 
+See the [investigation workflow release notes](docs/release-notes.md) for the
+completed features and JSON v2 migration details.
+
 ## Install
 
-Requires Go 1.25 or later. No third-party dependencies.
+Requires Go 1.25 or later.
 
     go install github.com/yesdevnull/tf-log-inspector/cmd/tfli@latest
 

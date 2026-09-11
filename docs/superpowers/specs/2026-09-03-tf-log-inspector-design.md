@@ -1550,10 +1550,9 @@ anything is built on top of it.
    type join is the first deliverable: both builders populate
    `Span.ResourceType`, so it needs no address attribution and it is what
    answers "which resource type cost the most, and what did its RPCs cost".
-3. **TUI: layout C with views 1, 2, 4 and 6** — planned in
-   `docs/superpowers/plans/2026-09-04-phase-3-tui.md`. `s` (cycle sort) and
-   `?` (help) from the key table are deliberately not in that plan: neither is
-   named in this phase's scope line and both are cheap once the panes exist.
+3. **TUI: layout C with views 1, 2, 4 and 6.** The retired phase-3 plan
+   remains in Git history at `c51588e`. `s` (cycle sort) and `?` (help) from
+   the key table were deliberately outside that phase's scope.
    **Shipped 2026-09-07**, after phase 5 rather than with this phase, closing
    the last gap between the key table below and what the interface binds. Two
    things about them were decided in building them and are recorded here

@@ -2,116 +2,26 @@
 
 ## Status and purpose
 
-Draft for Dan's review, 9 September 2026. This document covers all eight
-improvements identified in the application assessment. It proposes behaviour
-and boundaries for later implementation plans; it does not authorise application
-changes or represent an implemented feature set.
+Approved and implemented. All eight improvements and delivery boundaries A–I
+are merged into local main through `c51588e` on 11 September 2026. This document
+records the delivered behaviour, acceptance criteria and scope decisions.
 
-The goal is to make an investigation flow naturally from a slow provider or
-resource type to a resource, its calls and the supporting log text, while making
-the limits of the captured evidence visible. Reports and comparisons should
-support the same reasoning without requiring the terminal interface.
+The investigation flow connects provider/resource-type summaries to resources,
+operations, associated calls and original log text. Capture-quality facts and
+timing qualifications remain visible through that flow. Text profiles, JSON
+exports and raw-log comparisons use the same model calculations.
 
-Dan approved the raw-log CLI comparison scope on 9 September 2026: compare two
-raw logs and produce text or JSON output. JSON-profile imports and interactive
-TUI comparison remain outside scope. The remaining design decisions are still
-proposed for review.
+Dan approved comparison of two raw logs with text or JSON output. JSON-profile
+imports and interactive comparison remain outside scope. Both JSON report kinds
+now use version 2 with explicit reconstruction states; the published
+[profile](../../profile-json-v2.md) and [comparison](../../comparison-json-v2.md)
+contracts define their exact fields and nullability.
 
-On 10 September 2026 Dan approved planning boundary D as two sequential plans:
-[resource evidence and selection](../plans/2026-09-10-resource-evidence-selection.md)
-followed by [Resources TUI and filters](../plans/2026-09-10-resources-tui-filters.md).
-He explicitly approved provider and RPC-method filters affecting RPC evidence
-only, including replacing the existing UI provider-filter translation. This is
-scoped approval; it does not mark unrelated draft decisions approved. Dan
-subsequently authorised subagent implementation of both plans on 10 September
-2026, with D1 completed and reviewed before D2.
-
-Boundary D implementation completed on 10 September 2026. Independent review
-of the combined D1/D2 range approved its specification and quality after the
-aggregate UI evidence qualification fix in `69d1fb9`; no finding remains. This
-completion applies only to Boundary D. The other draft boundaries and review
-decisions retain their existing status.
-
-On 10 September 2026 Dan approved planning Boundary E as two sequential plans:
-[navigation history and aggregate drill-down](../plans/2026-09-10-investigation-navigation.md),
-then [resource operation drill-down](../plans/2026-09-10-resource-operation-navigation.md).
-This approves item 4's navigation behaviour, including singleton drill-down,
-parent-state restoration with Esc and numbered views ending the history chain.
-Dan subsequently approved both plans and authorised subagent implementation.
-Boundary E completed on 10 September 2026. Independent combined review verified
-the final focus-restoration and filtered-empty guidance fixes in `c64c0f0`;
-no finding remains. Both plans record tests, terminal checks and separate test
-cleanup. Other draft boundaries retain their existing status.
-
-On 10 September 2026, after Boundary E and its peer-review fixes merged into
-local main at `e21f366`, Dan authorised starting Boundary F with two sequential
-plans: [profile data and interval analysis](../plans/2026-09-10-profile-data-analysis.md),
-then [actionable text profiles](../plans/2026-09-10-actionable-text-profiles.md).
-The plans specify shared calculations and complete report data first, followed
-by physical source references, confidence-qualified identities, observed
-intervals and text-only list limits. Dan approved both plans and subagent
-implementation. This approval is limited to Boundary F and does not approve
-unrelated G/H/I decisions.
-
-Boundary F completed on 10 September 2026. Combined review of
-`e21f366..112fb6b` approved the shared calculations, complete report data,
-actionable text profiles and independent list limits with no remaining findings.
-Both plans record behavioural tests, separate cleanup, race/lint/build checks
-and sanitised output inspection. This completion applies only to Boundary F;
-JSON export, comparison and response recovery retain their existing status.
-
-On 11 September 2026, after Boundary F merged locally at `529a6fd`, Dan
-authorised drafting Boundary G as two sequential plans:
-[JSON profile schema and encoder](../plans/2026-09-11-json-profile-schema.md),
-then [JSON profile CLI integration](../plans/2026-09-11-json-profile-cli.md).
-Dan approved both plans and subagent implementation. Boundary G completed on
-11 September 2026: complete versioned JSON profiles are available through
-`--profile --format json`, with explicit nullability, source references,
-deterministic encoding and protected file output. Combined review of
-`529a6fd..1b78fc9` found no actionable issues. Both plans record task reviews,
-separate test cleanup, race/lint/build checks and decoded output inspection.
-This completion applies only to G; Boundaries H and I remain unimplemented.
-
-On 11 September 2026, after G merged locally at `801a917`, Dan authorised
-drafting Boundary H as two sequential plans:
-[comparison model and schema](../plans/2026-09-11-run-comparison-model.md), then
-[comparison renderers and CLI](../plans/2026-09-11-run-comparison-cli.md).
-The plans define exact grouping, availability, deltas, ordering, wire fields
-and two-input output protection. Dan subsequently approved both plans and
-subagent implementation. This approval is limited to H; Boundary I retains
-its existing status.
-
-Boundary H completed on 11 September 2026. The CLI compares two raw logs using
-`--compare`, with qualified text reports and complete versioned JSON. Combined
-review of `801a917..ac40ba0` found no production defects or important findings;
-the sole minor test-snapshot issue was fixed in `64a1577` and approved by scoped
-re-review. Both plans record task reviews, separate cleanup and local
-verification. Integration into main remains Dan's decision. Boundary I remains
-unimplemented.
-
-After Boundary H and its input-identity review fix merged into local main at
-`f614493`, Dan authorised drafting the first Boundary I plan on 11 September
-2026: [response recovery parser and strict scrubbing](../plans/2026-09-11-response-recovery-parser.md).
-Viewer and quality integration will be a separate second plan. Dan subsequently
-approved I1 subagent implementation after both plan-review findings were fixed
-and verified. I1 completed with parser and strict-policy tests through `d563e59`,
-task reviews, separate cleanup and all local validation checks. Independent
-whole-branch review of `f614493..2fd6200` found no actionable issues. I2 was still
-unimplemented at that point. I1 subsequently merged into
-local main at `04d28da`. Dan authorised drafting the
-[I2 viewer and quality implementation plan](../plans/2026-09-11-response-recovery-viewer.md).
-Dan approved JSON v2 with explicit recovery states for both profile and
-comparison output on 11 September 2026. After both peer-review findings were
-fixed and verified in `433c460`, Dan approved the revised I2 plan, including
-physical-line selection, and subagent implementation. I2 completed through
-`7ae5fca`, including physical-line recovery selection, safe status views, lazy
-quality states and coordinated profile/comparison JSON v2. All four task reviews,
-separate test-cleanup passes and scoped fixes are complete. Independent
-whole-branch review of `04d28da..7ae5fca` found no actionable issues. The full race
-suite, lint, build/module/format checks, Linux/macOS amd64/arm64 cross-builds,
-actual terminal journeys and decoded CLI JSON checks passed. The I2 plan records
-the requirement-by-requirement evidence. Boundary I is complete; integration into
-local main remains Dan's decision.
+The implementation plans are retired after delivery. Their task history,
+approvals, review fixes and detailed validation records remain in Git at
+`c51588e` under `docs/superpowers/plans/`. The acceptance evidence below identifies
+the maintained tests, and the [release notes](../../release-notes.md) summarise
+the user-visible changes. No remote publication is implied by local completion.
 
 ## Evidence and relationship to existing designs
 
@@ -120,35 +30,33 @@ reconstruction and TUI code, exercised the application, and ran the full Go test
 suite and build successfully at commit `524e757`. Those checks establish the
 starting point, not validation of the proposed behaviour.
 
-Two defects were observed:
+Two defects identified by that assessment are now resolved:
 
-- Raw-log search finds a query inside a logical entry but returns to the entry's
-  first line. A synthetic entry with 50 continuation lines before two matching
-  lines left both matches off-screen; pressing `n` then reported no match.
-- The profile report promises that rankings hold because spans incur the same
-  logging cost. The README repeats that claim. The TUI already states that
-  rankings are approximate because logging overhead varies between calls.
+- Raw-log search now lands on the matching physical line and occurrence,
+  including repeated matches inside one logical entry.
+- The profile, README and TUI now consistently qualify rankings as
+  approximate because logging overhead varies between calls.
 
 The original [application design](2026-09-03-tf-log-inspector-design.md) records
 an important constraint: an inferred address-ranking view was withheld after
 only 15.9% of RPC time in the measured capture resolved to Contained or Likely,
-against its 50% gate. This draft does not silently remove that gate. The new
+against its 50% gate. This delivery preserves that gate. The new
 Resources view is grounded in observed Terraform UI resource timings; inferred
 RPC associations are supplementary evidence, visibly separated from those
-timings. Ranking resources by inferred RPC totals remains outside this proposal.
+timings. Ranking resources by inferred RPC totals remains outside the delivered scope.
 
 The [provider reconstruction design](2026-09-09-provider-fragments-design.md)
 requires complete reconstruction before scrubbing can publish output. That
-requirement remains. This draft changes the viewer's ability to retain verified
-messages around failures, without relaxing the scrubber's acceptance rules.
+requirement remains. The viewer retains verified messages around failures
+without relaxing the scrubber's acceptance rules.
 
-Approval of this design would explicitly expand the original design's scope to
-include JSON profile export and CLI run comparison. Historical design documents
-remain historical; this document records the proposed changes in policy.
+Dan approved the expansion to JSON profile export and CLI run comparison.
+The original application design remains a historical record; this document and
+the published v2 schemas describe the current investigation behaviour.
 
 ## Approaches considered
 
-1. **Shared investigation data with separate consumers — recommended.** Add
+1. **Shared investigation data with separate consumers — implemented.** Add
    focused model functions for resource summaries, capture quality and report
    data. The TUI, text reports and JSON use the same calculations. Navigation,
    search positions and response recovery remain local to their domains. This
@@ -503,7 +411,7 @@ Such a gap does not prove Terraform was idle, nor does a long active span prove
 it caused all other work to wait. Distinguish longest observed active work from
 a dependency-critical path, which these logs have not established.
 
-Proposed `--limit N` controls text ranking and interval lists: default 20,
+`--limit N` controls text ranking and interval lists: default 20,
 `0` means all, negative values are errors. Summary totals always cover all
 eligible observations; headings show truncation. This flag applies to text
 profile and comparison output only.
@@ -585,9 +493,9 @@ timeline position. Rejection counters must not replace per-observation validity.
 
 ## 7. JSON profiles and CLI run comparison
 
-### CLI contract — profile options and proposed comparison mode
+### CLI contract — profile and comparison modes
 
-The profile forms are implemented by F/G; the comparison forms are proposed:
+Both profile and comparison forms are implemented:
 
 ```text
 tfli --profile --format json -o profile.json run.log
@@ -614,11 +522,11 @@ and JSON renderers consume that structure; neither parses the other's output.
 Keep presentation width, formatted duration strings and row truncation outside
 the calculation model.
 
-The first JSON schema includes:
+The current profile JSON v2 schema includes:
 
 | Field group | Required meaning |
 | --- | --- |
-| Identity | `schema_version: 1`, `kind: "profile"`, tool version, input basename and byte size |
+| Identity | `schema_version: 2`, `kind: "profile"`, tool version, input basename and byte size |
 | Tiers | Duration availability, admitted/positioned/rejected counts, duration unit `ms`, clock origins when known |
 | Quality | Measured counters, attribution distribution, reconstruction status and qualifications |
 | RPC observations | Local source entry identity, physical line/byte reference, method, provider, type, admitted duration, nullable offsets, position-validity reason, clamping and attribution |
@@ -631,9 +539,9 @@ interned request-ID numbers as portable identities or invent a request-ID string
 the model has not retained. Exact source byte offsets remain available even if
 displayed physical line counters exceed existing compact index fields.
 
-Unavailable values are explicit nulls or absent tier objects according to the
-schema; unavailable per-observation offsets and timeline metrics are null, never
-zero placeholders. Observation arrays contain admitted durations; rejected timing
+All schema fields are mandatory. Unavailable values use explicit nulls; tier
+objects remain present. Unavailable per-observation offsets and timeline metrics
+are null, never zero placeholders. Observation arrays contain admitted durations; rejected timing
 records contribute to quality counters only. Present numerical observations,
 including zero, are numbers. Array ordering is deterministic. Do not include
 current generation timestamps or
@@ -642,8 +550,10 @@ same tool version are reproducible.
 
 Schema versioning identifies the format; it does not authorise compatibility
 adapters or promises to preserve old schemas indefinitely. No JSON import or
-backward-compatibility layer is included. A later plan defines exact field names
-within these groups before implementation and keeps the schema in tests/docs.
+backward-compatibility layer is included. The published
+[profile JSON v2](../../profile-json-v2.md) and
+[comparison JSON v2](../../comparison-json-v2.md) documents define the exact
+fields, ordering and validation, with matching encoder tests.
 
 ### Comparison behaviour
 
@@ -728,9 +638,10 @@ Recovery does not claim to detect that unobservable mixing.
 
 ### Viewer behaviour
 
-Resolve the selected raw physical position to its fragment range, rather than
-returning an unrelated first response that merely overlaps the same logical
-entry. Opening a fragment of a recovered response shows its full verified body
+Resolve the first raw physical line actually drawn to its original fragment
+range, using its entry ordinal and line offset. Horizontal scrolling and the
+character position of a search match do not select a different byte range. Do
+not search later lines or return another response from the same logical entry. Opening a fragment of a recovered response shows its full verified body
 and a notice that other responses could not be reconstructed.
 
 Distinguish “no response at this position”, “this response is incomplete or
@@ -768,7 +679,7 @@ only when needed; avoid rescanning all source bytes for every exported row or
 TUI keypress. Benchmark new projections on sanitised large fixtures before
 introducing parallel loading or a new storage strategy.
 
-The following are implementation-plan boundaries, not implementation plans:
+All of the following delivery boundaries are complete:
 
 | Boundary | Includes | Depends on |
 | --- | --- | --- |
@@ -782,9 +693,8 @@ The following are implementation-plan boundaries, not implementation plans:
 | H. Run comparison | Item 7 comparison model, CLI and encoders | G; shares F's data |
 | I. Response recovery | Item 8 parser outcomes and strict scrub policy | C only for quality-panel integration |
 
-Items A, B and the reconstruction core of I can proceed independently. Do not
-make small correctness fixes wait for Resources or comparison. Each boundary
-must leave a runnable application and have its own acceptance evidence.
+The dependency column records the dependencies between delivered areas. Every boundary left
+a runnable application with its own task reviews and acceptance evidence.
 
 ## Validation and review requirements
 
@@ -804,9 +714,8 @@ whole-log quality, that text and JSON calculations agree, that history restores
 selection scope, that repeated operation identities survive drill-down/export,
 and that partial response recovery cannot weaken scrubbing.
 
-For this document, review all eight sections against their original requests,
-check the existing attribution gate and reconstruction requirements explicitly,
-and resolve conflicting semantics before marking the design approved.
+The close-out check covers all eight sections against their original requests,
+including the unchanged attribution gate and strict reconstruction policy.
 
 ## Scope reserved for later proposals
 
@@ -816,22 +725,54 @@ performance thresholds, inferred critical path, new attribution mechanism or
 inferred resource-time ranking is included. These are possible extensions, not
 dependencies concealed inside the eight agreed areas for exploration.
 
-## Review decisions
+## Approved decisions
 
-The following decisions are proposed for review unless marked approved:
+1. Resources ranks observed UI operations. Inferred RPC associations remain
+   separate and confidence-qualified; they do not become resource-time rankings.
+2. Provider and RPC-method filters apply only to RPC evidence. Resource, type
+   and module filters use the metadata available in each measurement tier.
+3. Explicit drill-down saves the parent selection and position for Esc.
+   Numbered view changes end the history chain.
+4. JSON exports complete structured results; text alone has explicit list
+   limits. Both JSON report kinds use v2, without a v1 writer or version flag.
+5. Comparison accepts two raw logs and emits text or JSON. It does not produce
+   a performance pass/fail verdict or assume equal logging configurations.
+6. Response recovery quarantines damaged streams without guessing a restart.
+   Scrubbing rejects every reconstruction diagnostic, including after viewing.
 
-1. Resources ranks observed UI operations and shows inferred RPC evidence
-   separately, retaining the existing restriction on inferred rankings.
-2. **Boundary E approved and implemented, 10 September 2026:** explicit
-   drill-down restores parent filters and positions through Esc; manual numbered
-   view changes end the history chain. Both implementation plans are complete.
-3. JSON exports complete structured results; text alone has an explicit limit.
-4. **Comparison scope approved by Dan, 9 September 2026:** accept two raw logs
-   and emit text/JSON. The comparison design proposes no automatic pass/fail
-   verdict or claim that logging configurations match.
-5. Response recovery quarantines a damaged component instead of guessing a
-   same-stream restart; scrubbing remains strict for every reconstruction error.
+## Delivery acceptance evidence
 
-Once these behaviours are agreed, revise this document to approved status and
-split it into the smaller implementation plans Dan requests. No implementation
-plans or application changes are part of this drafting task.
+The maintained tests below exercise real parsing, model, rendering and CLI
+boundaries. They carry the cross-feature acceptance criteria after the task
+plans are retired.
+
+| Contract | Maintained evidence |
+| --- | --- |
+| Search lands on physical occurrences and preserves return state | `internal/tui/rawlog_test.go`, `response_test.go` and `response_recovery_test.go` cover repeated matches, safe display columns, filtering, scope and modal return. |
+| Timing qualifications agree across outputs | `internal/profile/profile_test.go`, `internal/tui/help_test.go` and CLI tests retain logging, rounding, clamping and saturation qualifications. |
+| Resource filtering preserves whole-log quality | `TestResourcesInvestigationWorkflowPreservesEvidenceQualityAndRawState` checks the 35ms baseline partition and quality through resource selection, evidence/quality modals and scoped raw search. |
+| History composes across types, resources, operations, calls and responses | `TestResourceOperationAssociatedCallResponseHistoryComposition` follows the entire drill-down and Esc chain; `history_test.go` covers parent filters, sorts, focus and resized restoration. |
+| Repeated operations retain source identities through selection and export | `TestRepeatedResourceOperationsKeepOriginalIdentitiesThroughSelection`, `TestBuildRetainsAllObservedOperations` and JSON source-contract tests retain distinct original operations. |
+| Text and JSON share complete qualified calculations | `internal/profile/data_test.go`, `text_test.go`, `json_contract_test.go`, `comparison_data_test.go` and both comparison renderer tests exercise the shared reports, limits, nulls and lower bounds. |
+| CLI profile/comparison agree with parsed evidence and protect inputs | `cmd/tfli/profile_json_test.go`, `comparison_test.go` and `report_identity_test.go` cover complete output, determinism, loaded-file identity, both input aliases and failure paths. |
+| Viewing recovered bodies cannot weaken scrubbing | `TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing` checks the same capture after inspection; `TestRunScrubRejectsPartialProviderJSONRecoveryBeforePublication` verifies no publication. |
+
+The final I2 whole-branch and peer reviews through `c51588e` found no outstanding
+issues. Earlier boundary reviews and local build/race/lint/platform/PTY evidence
+are recorded in the retired plans at that commit. Cross-builds are local checks,
+not evidence of remote CI execution.
+
+Close-out validation on 11 September 2026 passed `go test -race -count=1 ./...`
+across all eleven packages and `go build ./...`. No application code or tests
+changed during documentation consolidation. The tests above therefore exercise
+the application delivered at `c51588e`.
+
+Actual CLI checks used `resources-accounting.log` and `resources-modules.log`:
+text and JSON retained the 35ms RPC baseline and respective 1000ms/3000ms UI
+totals; comparison capture objects matched independently generated profiles.
+Repeated UI operations retained distinct source entries and physical lines.
+The missing after-side RPC tier stayed unavailable, while the UI type total
+change was 2000ms. Both report kinds emitted one JSON v2 document with lazy
+reconstruction snapshots. Scrubbing `response-recovery.log` failed with only a
+structural diagnostic and left no output file. Complete CLI streams are retained
+locally under `/tmp/tfli-closeout-validation`.

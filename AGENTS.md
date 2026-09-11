@@ -11,7 +11,9 @@ independent of rendering and CLI flags.
 
 Tests live beside source files as `*_test.go`. Shared log fixtures are in
 `testdata/`; package fixtures and terminal snapshots live under package
-`testdata/` directories. Design documents and plans are in `docs/superpowers/`.
+`testdata/` directories. Design references are in `docs/superpowers/specs/`;
+JSON contracts and release notes are in `docs/`. Completed implementation plans
+are retained in Git history.
 
 ## Build, Test, and Development Commands
 
