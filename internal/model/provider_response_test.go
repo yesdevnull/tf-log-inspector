@@ -50,6 +50,86 @@ func TestProviderResponseAtRejectsInvalidPhysicalPositionWithoutInspection(t *te
 	}
 }
 
+func TestExplicitInspectionWithoutSourceSelection(t *testing.T) {
+	l := loadResponseLog(t, "ordinary log line\n")
+	if got := l.ReconstructionDiagnostics(); len(got) != 0 {
+		t.Fatalf("unchecked diagnostics = %#v", got)
+	}
+	if l.ReconstructionQuality().State != "not_checked" {
+		t.Fatal("diagnostic access triggered inspection")
+	}
+	l.InspectProviderResponses()
+	q := l.ReconstructionQuality()
+	if q.State != "complete" || q.Responses != 0 || q.Diagnostics != 0 {
+		t.Fatalf("zero-response inspection = %+v", q)
+	}
+}
+
+func TestReconstructionDiagnosticsReturnsDetachedMetadata(t *testing.T) {
+	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
+	tests := []struct {
+		name        string
+		source      string
+		wantQuality ReconstructionQuality
+		wantCodes   []string
+		wantStarts  []int
+	}{
+		{
+			name:        "complete",
+			source:      head + "a: {\"ok\":1}\n",
+			wantQuality: ReconstructionQuality{State: "complete", Responses: 1},
+		},
+		{
+			name:        "partial recovered",
+			source:      head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n",
+			wantQuality: ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"},
+			wantCodes:   []string{"delimiter_mismatch"},
+			wantStarts:  []int{2},
+		},
+		{
+			name:        "failed ambiguous",
+			source:      head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\nordinary tail\n",
+			wantQuality: ReconstructionQuality{State: "failed", Diagnostics: 2, Code: "reconstruction_failed"},
+			wantCodes:   []string{"ambiguous_ownership", "ambiguous_ownership"},
+			wantStarts:  []int{1, 2},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			l := loadResponseLog(t, tc.source)
+			l.InspectProviderResponses()
+			if got := l.ReconstructionQuality(); got != tc.wantQuality {
+				t.Fatalf("quality = %+v, want %+v", got, tc.wantQuality)
+			}
+			diagnostics := l.ReconstructionDiagnostics()
+			if len(diagnostics) != len(tc.wantCodes) {
+				t.Fatalf("diagnostics = %#v", diagnostics)
+			}
+			for i, diagnostic := range diagnostics {
+				if diagnostic.Code != tc.wantCodes[i] || diagnostic.StartLine != tc.wantStarts[i] || diagnostic.Ranges != nil || diagnostic.Unavailable != nil {
+					t.Errorf("diagnostic %d = %#v", i, diagnostic)
+				}
+			}
+			if len(diagnostics) == 0 {
+				return
+			}
+
+			diagnostics[0].Code = "changed"
+			diagnostics[0].Line = 999
+			diagnostics[0].StartLine = 999
+			diagnostics[0].Ranges = append(diagnostics[0].Ranges, logfmt.JSONFragment{Start: 1, End: 2})
+			diagnostics[0].Unavailable = append(diagnostics[0].Unavailable, logfmt.JSONFragment{Start: 2, End: 3})
+			diagnostics = append(diagnostics, logfmt.ProviderJSONDiagnostic{Code: "appended"})
+
+			repeated := l.ReconstructionDiagnostics()
+			if len(repeated) != len(tc.wantCodes) || repeated[0].Code != tc.wantCodes[0] || repeated[0].StartLine != tc.wantStarts[0] || repeated[0].Ranges != nil || repeated[0].Unavailable != nil {
+				t.Fatalf("stored diagnostics mutated: %#v", repeated)
+			}
+		})
+	}
+}
+
 func TestProviderResponseAtSelectsRecoveredOutcomeByPhysicalLine(t *testing.T) {
 	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
 	const ui = `{"@level":"info","@module":"terraform.ui","@message":"event","@timestamp":"2026-09-11T00:00:00Z","type":"apply_complete"}`
@@ -294,10 +374,20 @@ func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 		{head + "b: {\"broken\":]}\n", ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"}},
 	} {
 		l := &Log{Data: []byte(tc.source), Entries: []logfmt.Entry{{Len: uint32(len(tc.source)), Lines: uint16(strings.Count(tc.source, "\n"))}}}
+		if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "not_checked"}) {
+			t.Fatalf("initial quality = %+v", got)
+		}
+		if got := l.ReconstructionDiagnostics(); got != nil {
+			t.Fatalf("initial diagnostics = %#v", got)
+		}
 		start := make(chan struct{})
-		errs := make(chan error, 64)
+		errs := make(chan error, 96)
 		var wg sync.WaitGroup
 		for range 32 {
+			wg.Go(func() {
+				<-start
+				l.InspectProviderResponses()
+			})
 			wg.Go(func() {
 				<-start
 				for range 100 {
@@ -305,6 +395,25 @@ func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 					if got != (ReconstructionQuality{State: "not_checked"}) && got != tc.want {
 						errs <- fmt.Errorf("quality = %+v", got)
 						return
+					}
+				}
+			})
+			wg.Go(func() {
+				<-start
+				for range 100 {
+					diagnostics := l.ReconstructionDiagnostics()
+					if len(diagnostics) == 0 {
+						continue
+					}
+					if len(diagnostics) != tc.want.Diagnostics {
+						errs <- fmt.Errorf("diagnostics = %#v", diagnostics)
+						return
+					}
+					for _, diagnostic := range diagnostics {
+						if diagnostic.Code == "" || diagnostic.Ranges != nil || diagnostic.Unavailable != nil {
+							errs <- fmt.Errorf("partially published diagnostic = %#v", diagnostic)
+							return
+						}
 					}
 				}
 			})
@@ -327,6 +436,9 @@ func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 		}
 		if got := l.ReconstructionQuality(); got != tc.want {
 			t.Fatalf("final quality = %+v", got)
+		}
+		if got := l.ReconstructionDiagnostics(); len(got) != tc.want.Diagnostics {
+			t.Fatalf("final diagnostics = %#v", got)
 		}
 	}
 }
