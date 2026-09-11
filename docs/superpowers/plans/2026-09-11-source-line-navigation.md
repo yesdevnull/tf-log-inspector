@@ -588,5 +588,8 @@ removes a lock copy from a table loop. Final fix `6f9fcbe` preserves trailing
 blank source rows for LF and CRLF captures and makes overlay status reflect the
 pane actually drawn. Focused regression tests, `go test ./...`,
 `go test -race -count=1 ./...`, `golangci-lint run` and `go build ./...` passed
-after that fix. All implementation commits are signed. Boundaries B–H remain
-separate future implementation plans.
+after that fix. A sanitised real-PTY rerun passed at 100×30 and 60×12 for blank
+targets before a header and at EOF, retained-query reverse search, narrow
+Filters overlay status, exact Esc restoration and resize during prompt editing.
+Final review of the fix remains pending. All implementation commits are signed.
+Boundaries B–H remain separate future implementation plans.
