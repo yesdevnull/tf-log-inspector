@@ -51,7 +51,7 @@ func diagnosticQualityRecords(diagnostics []logfmt.ProviderJSONDiagnostic) []qua
 		location := "location unavailable"
 		if line != 0 {
 			location = fmt.Sprintf("source line %d", line)
-			if d.SyntaxLine == 0 && d.StartLine > 0 && uint64(d.StartLine) != line {
+			if d.StartLine > 0 && uint64(d.StartLine) != line {
 				location += fmt.Sprintf(", response starts at line %d", d.StartLine)
 			}
 		}
