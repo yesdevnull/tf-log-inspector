@@ -89,6 +89,13 @@ re-review. Both plans record task reviews, separate cleanup and local
 verification. Integration into main remains Dan's decision. Boundary I remains
 unimplemented.
 
+After Boundary H and its input-identity review fix merged into local main at
+`f614493`, Dan authorised drafting the first Boundary I plan on 11 September
+2026: [response recovery parser and strict scrubbing](../plans/2026-09-11-response-recovery-parser.md).
+Viewer and quality integration will be a separate second plan. This authorises
+planning; Boundary I's implementation and the new plan's precise contracts
+remain subject to review and approval.
+
 ## Evidence and relationship to existing designs
 
 The assessment inspected the CLI, model, profiling, attribution, response
