@@ -106,13 +106,16 @@ func (b *UIHookBuilder) Structured(ord uint32, e logfmt.Entry, line string) {
 		Type      json.RawMessage `json:"type"`
 		Hook      json.RawMessage `json:"hook"`
 		Module    string          `json:"@module"`
+		Level     json.RawMessage `json:"@level"`
 	}
 	if err := json.Unmarshal([]byte(line), &ul); err != nil {
 		addStage(&b.evidence.SchemaErrors, ord)
 		return
 	}
 	position, timestampSchema := b.timestampPosition(ul.Timestamp)
-	if ul.Module != "" && ul.Module != "terraform.ui" && position.Status != logfmt.TimestampMissing && position.Status != logfmt.TimestampInvalid {
+	var level string
+	haveLevel := decodeJSONString(ul.Level, &level) && logfmt.ParseLevel(strings.ToUpper(level)) != logfmt.LevelUnknown
+	if ul.Module != "terraform.ui" && (ul.Module != "" || haveLevel) && position.Status != logfmt.TimestampMissing && position.Status != logfmt.TimestampInvalid {
 		b.timestampedLog = true
 	}
 	if reason := timestampReason(position.Status); reason != "" {

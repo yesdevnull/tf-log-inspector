@@ -129,6 +129,7 @@ func TestMixedStreamsSuppressCLIRegardlessOfOrder(t *testing.T) {
 		refreshLine("refresh_start", "aws_instance.example", "2026-09-11T00:00:01Z"),
 		"2026-09-11T00:00:01.000Z [DEBUG] provider.aws: response:\n",
 		`{"@level":"debug","@timestamp":"2026-09-11T00:00:01Z","@module":"provider.aws","@message":"response"}` + "\n",
+		`{"@level":"debug","@timestamp":"2026-09-11T00:00:01Z","@message":"Terraform version: 1.14.0"}` + "\n",
 	} {
 		for _, input := range []string{cli + structured, structured + cli} {
 			var b UIHookBuilder
@@ -208,5 +209,41 @@ func TestTimestampedProseDoesNotSuppressCLI(t *testing.T) {
 	scanUIInto(t, "2026-09-11T00:00:01.000Z runner started\naws_instance.example: Read complete after 1s\n", &b)
 	if got := b.Spans(); len(got) != 1 || got[0].Entry != 1 {
 		t.Fatalf("CLI observations = %+v", got)
+	}
+}
+
+func TestMalformedRefreshHooksPreservePairingBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		types                []string
+		malformed            int
+		wantSpans            int
+		ambiguous, unmatched uint64
+	}{
+		{"repeated malformed start", []string{"refresh_start", "refresh_start", "refresh_complete", "refresh_complete"}, 1, 0, 2, 0},
+		{"malformed completion", []string{"refresh_start", "refresh_complete", "refresh_complete"}, 1, 0, 0, 1},
+		{"malformed start followed by independent pair", []string{"refresh_start", "refresh_complete", "refresh_start", "refresh_complete"}, 0, 1, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var b UIHookBuilder
+			for i, typ := range tc.types {
+				line := refreshLine(typ, "aws_instance.a", fmt.Sprintf("2026-09-11T00:00:0%dZ", i+1))
+				if i == tc.malformed {
+					line = strings.Replace(line, `"hook":{`, `"hook":{"action":42,`, 1)
+				}
+				b.Structured(uint32(i), logfmt.Entry{}, line)
+			}
+			got := b.Spans()
+			if len(got) != tc.wantSpans {
+				t.Fatalf("observations = %+v", got)
+			}
+			if len(got) == 1 && (got[0].StartEntry != 2 || got[0].Entry != 3 || got[0].DurationMs != 1000) {
+				t.Fatalf("independent window = %+v", got[0])
+			}
+			e := b.Evidence()
+			if e.Rejected["refresh_schema_invalid"].Count != 1 || e.Rejected["refresh_address_invalid"].Count != 0 || e.Rejected["refresh_ambiguous"].Count != tc.ambiguous || e.Rejected["refresh_unmatched"].Count != tc.unmatched || e.Rejected["refresh_incomplete"].Count != 0 {
+				t.Fatalf("pairing evidence = %+v", e)
+			}
+		})
 	}
 }

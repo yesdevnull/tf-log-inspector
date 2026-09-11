@@ -46,11 +46,15 @@ func (b *UIHookBuilder) refresh(ord uint32, typ string, timestamp, rawHook json.
 		return
 	}
 	hook, schema := parseUIHook(fields)
-	if schema || hook.Resource == nil || hook.Resource.Addr == "" {
+	if hook.Resource == nil || hook.Resource.Addr == "" {
 		if !complete {
 			b.evidence.Records++
 		}
-		b.reject("refresh_address_invalid", ord)
+		if hook.Resource == nil && schema {
+			b.reject("refresh_schema_invalid", ord)
+		} else {
+			b.reject("refresh_address_invalid", ord)
+		}
 		return
 	}
 	address := hook.Resource.Addr
@@ -72,7 +76,11 @@ func (b *UIHookBuilder) refresh(ord uint32, typ string, timestamp, rawHook json.
 			}
 			b.refreshOpen[address] = existing
 			b.evidence.Records++
-			b.reject("refresh_repeated_open", ord)
+			if schema {
+				b.reject("refresh_schema_invalid", ord)
+			} else {
+				b.reject("refresh_repeated_open", ord)
+			}
 			return
 		}
 		if b.refreshOverflow || len(b.refreshOpen) >= maxOpenRefresh {
@@ -87,15 +95,26 @@ func (b *UIHookBuilder) refresh(ord uint32, typ string, timestamp, rawHook json.
 		if b.refreshOpen == nil {
 			b.refreshOpen = make(map[string]refreshStart)
 		}
-		b.refreshOpen[strings.Clone(address)] = refreshStart{entry: ord, timestamp: t, position: position, pending: 1}
+		// A recognisable address still establishes a pairing boundary when
+		// other hook fields are malformed. Retain it as an invalid open so
+		// a later completion cannot cross or silently replace that boundary.
+		b.refreshOpen[strings.Clone(address)] = refreshStart{entry: ord, timestamp: t, position: position, pending: 1, ambiguous: schema}
+		if schema {
+			b.evidence.Records++
+			b.reject("refresh_schema_invalid", ord)
+		}
 		return
 	}
 	start, ok := b.refreshOpen[address]
 	if !ok {
-		b.reject("refresh_unmatched", ord)
+		if schema {
+			b.reject("refresh_schema_invalid", ord)
+		} else {
+			b.reject("refresh_unmatched", ord)
+		}
 		return
 	}
-	if start.ambiguous {
+	if start.ambiguous || schema {
 		if start.pending < math.MaxUint32 {
 			start.pending--
 		}
@@ -104,7 +123,11 @@ func (b *UIHookBuilder) refresh(ord uint32, typ string, timestamp, rawHook json.
 		} else {
 			b.refreshOpen[address] = start
 		}
-		b.reject("refresh_ambiguous", ord)
+		if schema {
+			b.reject("refresh_schema_invalid", ord)
+		} else {
+			b.reject("refresh_ambiguous", ord)
+		}
 		return
 	}
 	delete(b.refreshOpen, address)
