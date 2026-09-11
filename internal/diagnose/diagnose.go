@@ -174,10 +174,11 @@ func template(msg string, f logfmt.Fields) string {
 // provider schema names such as "aws_instance" or "create", never customer
 // data -- left visible, once passed through maskIdentifier's guard.
 type ResourceRow struct {
-	DurationMs   uint32
-	Action       string
-	ResourceType string
-	MaskedAddr   string
+	DurationMs     uint32
+	DurationSource span.DurationSource
+	Action         string
+	ResourceType   string
+	MaskedAddr     string
 }
 
 // ResourceTypeTotal is one row of the BY RESOURCE TYPE rollup: total
@@ -405,10 +406,11 @@ func Build(st logfmt.Stats, caps span.Capabilities, spans []span.Span, uiSpans [
 		resourceType := maskIdentifier(s.ResourceType)
 
 		rows = append(rows, ResourceRow{
-			DurationMs:   s.DurationMs,
-			Action:       action,
-			ResourceType: resourceType,
-			MaskedAddr:   MaskAddress(s.Address),
+			DurationMs:     s.DurationMs,
+			DurationSource: s.DurationSource,
+			Action:         action,
+			ResourceType:   resourceType,
+			MaskedAddr:     MaskAddress(s.Address),
 		})
 
 		rt, ok := typeTotals[resourceType]
@@ -702,7 +704,11 @@ func (r Report) Render(w io.Writer) error {
 	// column aligned instead of hand-counting padding spaces per line.
 	fmt.Fprintf(b, "EXTRACTION\n")
 	if r.TierUsable {
-		fmt.Fprintf(b, "  %-25s %s\n", "selected tier", r.Tier)
+		tierName := r.Tier.String()
+		if r.Tier == span.FidelityUIReported {
+			tierName = "resource"
+		}
+		fmt.Fprintf(b, "  %-25s %s\n", "selected tier", tierName)
 	} else {
 		fmt.Fprintf(b, "  %-25s NONE USABLE\n", "selected tier")
 	}
@@ -775,9 +781,9 @@ func (r Report) Render(w io.Writer) error {
 	// UI-hook spans sit on a different timeline from the RPC spans above
 	// (see span.Span's StartMs/EndMs doc comment) and are reported
 	// separately rather than folded into the figures above.
-	fmt.Fprintf(b, "  UI-hook slowest span %d ms\n", r.UISlowestMs)
+	fmt.Fprintf(b, "  resource slowest span %d ms\n", r.UISlowestMs)
 	if len(r.UIActionCounts) > 0 {
-		fmt.Fprintf(b, "  UI-hook actions     ")
+		fmt.Fprintf(b, "  resource actions    ")
 		for _, a := range r.UIActionCounts {
 			fmt.Fprintf(b, "  %s %d", a.Text, a.Count)
 		}
@@ -797,17 +803,17 @@ func (r Report) Render(w io.Writer) error {
 		} else {
 			fmt.Fprintf(b, "SLOWEST RESOURCES (addresses masked)\n")
 		}
-		// Terraform rounds a resource's start and end to the nearest second
-		// before subtracting them, so these figures are whole seconds
-		// carrying up to a second of error each. Rollups over many
-		// resources survive that; ranking two rows a second apart does not,
-		// and a ranked table invites exactly that reading.
-		fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n")
-		fmt.Fprintf(b, "  neighbouring rows are not reliably ordered. Totals below\n")
-		fmt.Fprintf(b, "  are sounder than any single row.\n")
+		for _, summary := range r.Quality.DurationSources {
+			fmt.Fprintf(b, "  %s\n", qualitytext.DurationSourceQualification(summary.Source))
+		}
+		fmt.Fprintf(b, "  Operation totals can overlap; they are not run elapsed time.\n")
 		for _, row := range r.SlowestResources {
-			fmt.Fprintf(b, "  %8s  %-8s %-24s %s\n",
-				formatMs(uint64(row.DurationMs)), row.Action, row.ResourceType, row.MaskedAddr)
+			duration := formatMs(uint64(row.DurationMs))
+			if row.DurationSource != span.SourceUIElapsed {
+				duration = qualitytext.ExactDuration(uint64(row.DurationMs))
+			}
+			fmt.Fprintf(b, "  %8s  %-8s %-24s %s  [%s]\n",
+				duration, row.Action, row.ResourceType, row.MaskedAddr, row.DurationSource)
 		}
 		fmt.Fprintf(b, "\n")
 

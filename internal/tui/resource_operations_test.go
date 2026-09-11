@@ -181,7 +181,7 @@ func TestResourceOperationsNarrowEvidenceRetainsFullEscapedAddress(t *testing.T)
 	m.openResourceOperations()
 	m.Update(tea.WindowSizeMsg{Width: 60, Height: 9})
 	frame := unstyled(m.View())
-	if !strings.Contains(strings.ToUpper(frame), "OBSERVED UI OPERATIONS") || !strings.Contains(frame, "action") || !strings.Contains(frame, "duration") || !strings.Contains(frame, "source") {
+	if !strings.Contains(strings.ToUpper(frame), "OBSERVED RESOURCE OPERATIONS") || !strings.Contains(frame, "action") || !strings.Contains(frame, "duration") || !strings.Contains(frame, "source") {
 		t.Fatalf("narrow operation frame lost priority fields:\n%s", frame)
 	}
 	evidence := m.resourceEvidenceText()

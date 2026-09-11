@@ -17,7 +17,7 @@ func (m *Model) resourceRows() []row {
 		r := &projection.Rows[i]
 		rows[i] = row{
 			identity: selectionIdentity{kind: "resource", value: r.Address},
-			cells:    []string{logfmt.DisplayText(r.Address), strconv.FormatUint(r.UI.Count, 10), durationTotalText(r.UI), durationMaxText(r.UI), strconv.FormatUint(r.NamedRPC.Count, 10), durationTotalText(r.NamedRPC), strconv.FormatUint(r.OverlappingRPC.Count, 10), durationTotalText(r.OverlappingRPC)},
+			cells:    []string{logfmt.DisplayText(r.Address), strconv.FormatUint(r.UI.Count, 10), durationTotalText(r.UI), durationMaxText(r.UI), strconv.FormatUint(r.NamedRPC.Count, 10), rpcEvidenceDuration(r.NamedRPC), strconv.FormatUint(r.OverlappingRPC.Count, 10), rpcEvidenceDuration(r.OverlappingRPC)},
 			numeric:  []uint64{0, r.UI.Count, r.UI.TotalMs, uint64(r.UI.MaxMs), r.NamedRPC.Count, r.NamedRPC.TotalMs, r.OverlappingRPC.Count, r.OverlappingRPC.TotalMs},
 			spanIdx:  noSpanIdx,
 			resource: r,
@@ -32,6 +32,13 @@ func durationTotalText(d model.DurationTotal) string {
 		prefix = "≥"
 	}
 	return prefix + formatMs(d.TotalMs)
+}
+
+func rpcEvidenceDuration(d model.DurationTotal) string {
+	if d.Count == 0 {
+		return "n/a"
+	}
+	return durationTotalText(d)
 }
 
 func durationMaxText(d model.DurationTotal) string {
@@ -49,10 +56,10 @@ func (m *Model) renderResources(w, h int) string {
 	p := m.selectedResources()
 	preamble := []string{
 		"Scopes: UI type/resource/module; RPC provider/type/method/resource/module.",
-		"Inferred RPC evidence is partial; observed UI ranks rows.",
+		"Inferred RPC evidence is partial; resource duration ranks rows.",
 	}
 	if p.UI.Count > 0 {
-		preamble = append(preamble, "Observed UI operations; measurements rounded to whole seconds, +/- 1s each.")
+		preamble = append(preamble, typesPreamble(m.selectedUISpans())...)
 		if p.UI.LowerBound {
 			preamble = append(preamble, "Observed totals and maxima are lower bounds (≥).")
 		}
@@ -70,15 +77,15 @@ func (m *Model) renderResources(w, h int) string {
 	switch {
 	case len(p.Rows) > 0:
 	case p.UnnamedUI.Count > 0:
-		empty = "no exact address: observed UI operations are ungrouped."
+		empty = "no exact address: observed resource operations are ungrouped."
 	case len(m.log.UISpans) == 0 && m.log.UIEvidence.Records > 0:
-		empty = "observed UI timing unavailable: completion records were rejected."
+		empty = "observed resource timing unavailable: completion records were rejected."
 	case len(m.log.UISpans) == 0 && len(m.log.RPCSpans) > 0:
-		empty = "no observed UI resource operations.\nUse 4 calls, 2 types, i quality, or e evidence."
+		empty = "no observed resource operations.\nUse 4 calls, 2 types, i quality, or e evidence."
 	case m.filterActive():
 		empty = m.noMatchTail()
 	default:
-		empty = "no observed UI resource operations."
+		empty = "no observed resource operations."
 	}
 	rows := m.rows()
 	if len(rows) == 0 {
@@ -133,11 +140,11 @@ func resourceDetailSections(r *model.ResourceRow, w int) []paneSection {
 	fields := []string{
 		"address: " + logfmt.DisplayText(r.Address),
 		fmt.Sprintf("operations: %d", r.UI.Count),
-		"observed UI total: " + durationTotalText(r.UI),
-		"observed UI max: " + durationMaxText(r.UI),
-		fmt.Sprintf("inferred Contained/Likely RPCs: %d, %s", r.NamedRPC.Count, durationTotalText(r.NamedRPC)),
-		fmt.Sprintf("inferred Overlapping RPCs: %d, %s", r.OverlappingRPC.Count, durationTotalText(r.OverlappingRPC)),
-		"UI timings are rounded to whole seconds, +/- 1s each.",
+		"observed resource total: " + durationTotalText(r.UI),
+		"observed resource max: " + durationMaxText(r.UI),
+		fmt.Sprintf("inferred Contained/Likely RPCs: %d, %s", r.NamedRPC.Count, rpcEvidenceDuration(r.NamedRPC)),
+		fmt.Sprintf("inferred Overlapping RPCs: %d, %s", r.OverlappingRPC.Count, rpcEvidenceDuration(r.OverlappingRPC)),
+		"Duration sources and qualifications: e evidence.",
 	}
 	var lines paneSection
 	for _, field := range fields {

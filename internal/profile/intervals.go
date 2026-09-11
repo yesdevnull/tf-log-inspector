@@ -20,7 +20,7 @@ func writeTimeline(b *strings.Builder, report Report, limit int) error {
 	analysis := report.Timeline.Analysis
 	tierName, origin, observations := "RPC", report.Quality.RPC.Origin, report.RPC
 	if tier == span.FidelityUIReported {
-		tierName, origin, observations = "UI", report.Quality.UI.Origin, report.UI
+		tierName, origin, observations = "resource", report.Quality.UI.Origin, report.UI
 	}
 	fmt.Fprintf(b, "CONCURRENCY (%s tier)\n", tierName)
 	if origin == nil {
@@ -122,7 +122,7 @@ func writeIntervals(b *strings.Builder, report Report, tierName string, observat
 		if err != nil {
 			return err
 		}
-		writeActiveObservation(b, observation, report.HasContext, tierName == "UI")
+		writeActiveObservation(b, observation, report.HasContext, tierName == "resource")
 	}
 	return nil
 }
@@ -142,7 +142,8 @@ func writeActiveObservation(b *strings.Builder, observation Observation, hasCont
 	s := observation.Span
 	if ui {
 		fmt.Fprintf(b, "    longest observed active observation: %s %s\n", logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType))
-		fmt.Fprintf(b, "    resource: %s (observed UI)\n", logfmt.DisplayText(s.Address))
+		fmt.Fprintf(b, "    resource: %s (observed resource)\n", logfmt.DisplayText(s.Address))
+		fmt.Fprintf(b, "    duration source: %s\n", s.DurationSource)
 	} else {
 		fmt.Fprintf(b, "    longest observed active observation: %s %s %s\n", logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Provider))
 		writeAttribution(b, observation.Attribution, hasContext)

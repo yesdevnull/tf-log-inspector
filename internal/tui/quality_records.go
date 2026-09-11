@@ -9,6 +9,7 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
 )
 
 type qualityItemID struct {
@@ -86,7 +87,10 @@ func (m *Model) qualityRecords(q model.CaptureQuality, reconstruction model.Reco
 	add("TIMING AVAILABILITY")
 	var b strings.Builder
 	writeQualityTier(&b, "RPC", q.RPC)
-	writeQualityTier(&b, "UI", q.UI)
+	writeQualityTier(&b, "resource", q.UI)
+	for _, line := range qualitytext.DurationSourceLines(q.DurationSources) {
+		fmt.Fprintf(&b, "    %s\n", line)
+	}
 	for _, line := range strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n") {
 		add(line)
 	}

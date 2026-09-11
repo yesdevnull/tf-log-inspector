@@ -13,6 +13,7 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 // DefaultLimit is the default maximum number of rows in each ranked list.
@@ -45,7 +46,7 @@ func renderReport(w io.Writer, report Report, options TextOptions) error {
 	}
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "tfli profile report\n====================\n\n")
-	fmt.Fprintf(b, "SIZE\n  bytes                %d\n  RPC spans            %d\n  UI-hook spans        %d\n\n", report.Bytes, len(report.RPC), len(report.UI))
+	fmt.Fprintf(b, "SIZE\n  bytes                %d\n  RPC spans            %d\n  resource operations  %d\n\n", report.Bytes, len(report.RPC), len(report.UI))
 	fmt.Fprintf(b, "Resource addresses in this report are not masked. Review the report before sharing it.\n\n")
 	writeLoggingCaveat(b)
 	qualitytext.WriteCaptureQuality(b, report.Quality)
@@ -94,7 +95,7 @@ func writeSaturationWarning(b *strings.Builder, quality model.CaptureQuality) {
 			saturated += issue.Count
 		}
 	}
-	fmt.Fprintf(b, "WARNING: %d UI-hook duration(s) exceeded the storage limit.\n", saturated)
+	fmt.Fprintf(b, "WARNING: %d resource duration(s) exceeded the storage limit.\n", saturated)
 	fmt.Fprintf(b, "Affected timings and totals are lower bounds; their rankings\nand timeline positions may be inaccurate.\n\n")
 }
 
@@ -145,10 +146,10 @@ func writeResourceTypeJoin(b *strings.Builder, rows []TypeSummary, limit int) {
 		uiPresent = uiPresent || row.UIResources > 0
 	}
 	if uiPresent {
-		fmt.Fprintf(b, "  UI-hook figures are sums of measurements rounded to\n  whole seconds, +/- 1s each.\n")
+		fmt.Fprintf(b, "  Resource totals sum operations and can overlap; they are not run elapsed time.\n")
 	}
 	width := resourceTypeColWidth(types)
-	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n", width, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
+	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n", width, "resource type", "res ops", "res total", "RPC calls", "RPC total", "RPC max")
 	for _, row := range rows[:shown] {
 		name := truncate(row.ResourceType, width)
 		rpcTotal, rpcMax := "n/a", "n/a"
@@ -156,6 +157,9 @@ func writeResourceTypeJoin(b *strings.Builder, rows []TypeSummary, limit int) {
 			rpcTotal, rpcMax = formatMs(row.RPCTotalMs), formatMs(uint64(row.RPCMaxMs))
 		}
 		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n", width, name, row.UIResources, formatLowerBoundMs(row.UITotalMs, row.UILowerBound), row.RPCCalls, rpcTotal, rpcMax)
+		for _, line := range qualitytext.DurationSourceLines(row.DurationSources) {
+			fmt.Fprintf(b, "    %s\n", line)
+		}
 		if name != logfmt.DisplayText(row.ResourceType) {
 			fmt.Fprintf(b, "    resource type: %s\n", logfmt.DisplayText(row.ResourceType))
 		}
@@ -183,7 +187,13 @@ func writeObservations(b *strings.Builder, heading string, observations []Observ
 	shown := limitedLength(len(ranking), limit)
 	writeHeading(b, heading, shown, len(ranking))
 	if ui {
-		fmt.Fprintf(b, "  Terraform reports these in whole seconds, +/- 1s each, so\n  neighbouring rows are not reliably ordered.\n")
+		var spans []span.Span
+		for _, observation := range observations {
+			spans = append(spans, observation.Span)
+		}
+		for _, summary := range model.SummariseDurationSources(spans) {
+			fmt.Fprintf(b, "  %s\n", qualitytext.DurationSourceQualification(summary.Source))
+		}
 	}
 	for _, index := range ranking[:shown] {
 		if index < 0 || index >= len(observations) {
@@ -192,8 +202,15 @@ func writeObservations(b *strings.Builder, heading string, observations []Observ
 		observation := observations[index]
 		s := observation.Span
 		duration := formatLowerBoundMs(uint64(s.DurationMs), ui && s.DurationSaturated)
+		if ui && s.DurationSource != span.SourceUIElapsed {
+			duration = qualitytext.ExactDuration(uint64(s.DurationMs))
+			if s.DurationSaturated {
+				duration = "≥" + duration
+			}
+		}
 		if ui {
-			fmt.Fprintf(b, "  %8s  %s  %s\n    resource: %s (observed UI)\n", duration, logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Address))
+			fmt.Fprintf(b, "  %8s  %s  %s\n    resource: %s (observed resource)\n", duration, logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Address))
+			fmt.Fprintf(b, "    duration source: %s\n", s.DurationSource)
 		} else {
 			fmt.Fprintf(b, "  %8s  %s  %s  %s\n", duration, logfmt.DisplayText(s.RPC), logfmt.DisplayText(s.ResourceType), logfmt.DisplayText(s.Provider))
 			writeAttribution(b, observation.Attribution, hasContext)

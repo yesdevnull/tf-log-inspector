@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 const (
@@ -65,10 +67,10 @@ func (m *Model) resourceEvidenceText() string {
 		if action == "" {
 			action = "unavailable"
 		}
-		b.WriteString("SELECTED OBSERVED UI OPERATION\n")
+		b.WriteString("SELECTED OBSERVED RESOURCE OPERATION\n")
 		fmt.Fprintf(&b, "  address: %s\n", logfmt.DisplayText(s.Address))
 		fmt.Fprintf(&b, "  action: %s\n", action)
-		if location, ok := m.log.SourceLocation(s.Entry); ok {
+		if location, ok := m.log.ObservationSource(s); ok {
 			fmt.Fprintf(&b, "  source: %s, line %d", logfmt.DisplayText(m.name), location.StartLine)
 			if location.EndLine != location.StartLine {
 				fmt.Fprintf(&b, "-%d", location.EndLine)
@@ -77,8 +79,8 @@ func (m *Model) resourceEvidenceText() string {
 		} else {
 			b.WriteString("  source: unavailable\n")
 		}
-		fmt.Fprintf(&b, "  observed UI duration: %s\n", durationTotalText(operationDuration(s.DurationMs, s.DurationSaturated)))
-		m.writeUIQualifications(&b, operationDuration(s.DurationMs, s.DurationSaturated), []int{index}, "Selected UI operation timings", "Observed UI duration is a lower bound (≥).")
+		fmt.Fprintf(&b, "  observed resource duration: %s\n", resourceOperationDuration(s))
+		m.writeUIQualifications(&b, operationDuration(s.DurationMs, s.DurationSaturated), []int{index}, "Observed resource duration is a lower bound (≥).")
 		if s.StartClamped {
 			b.WriteString("  Operation start was clamped to the capture origin.\n")
 		}
@@ -88,17 +90,17 @@ func (m *Model) resourceEvidenceText() string {
 		b.WriteString("SELECTED RESOURCE ROW (separate from baseline scope)\n")
 		fmt.Fprintf(&b, "  address: %s\n", logfmt.DisplayText(r.Address))
 		fmt.Fprintf(&b, "  operations: %d\n", r.UI.Count)
-		fmt.Fprintf(&b, "  observed UI total: %s\n", durationTotalText(r.UI))
-		fmt.Fprintf(&b, "  observed UI max: %s\n", durationMaxText(r.UI))
-		fmt.Fprintf(&b, "  inferred Contained/Likely RPCs: %d, %s\n", r.NamedRPC.Count, durationTotalText(r.NamedRPC))
-		fmt.Fprintf(&b, "  inferred Overlapping RPCs: %d, %s\n", r.OverlappingRPC.Count, durationTotalText(r.OverlappingRPC))
+		fmt.Fprintf(&b, "  observed resource total: %s\n", durationTotalText(r.UI))
+		fmt.Fprintf(&b, "  observed resource max: %s\n", durationMaxText(r.UI))
+		fmt.Fprintf(&b, "  inferred Contained/Likely RPCs: %d, %s\n", r.NamedRPC.Count, rpcEvidenceDuration(r.NamedRPC))
+		fmt.Fprintf(&b, "  inferred Overlapping RPCs: %d, %s\n", r.OverlappingRPC.Count, rpcEvidenceDuration(r.OverlappingRPC))
 		b.WriteString("  RPC evidence is inferred and partial.\n")
 		b.WriteString("  It does not recover every RPC call.\n")
 		indices := make([]int, 0, len(r.Operations))
 		for _, op := range r.Operations {
 			indices = append(indices, op.UIIndex)
 		}
-		m.writeUIQualifications(&b, r.UI, indices, "UI timings", "Observed UI total and max are lower bounds (≥).")
+		m.writeUIQualifications(&b, r.UI, indices, "Observed resource total and max are lower bounds (≥).")
 		b.WriteByte('\n')
 	}
 	b.WriteString("BASELINE FILTERS\n")
@@ -116,10 +118,10 @@ func (m *Model) resourceEvidenceText() string {
 	writeEvidenceTotal(&b, "unresolved", p.Selection.Unresolved)
 	b.WriteString("  Selected and other are resolved named associations; unresolved is potentially relevant work. Together they divide the provider/type/method baseline.\n")
 
-	b.WriteString("\nOBSERVED UI OPERATIONS\n")
+	b.WriteString("\nOBSERVED RESOURCE OPERATIONS\n")
 	writeEvidenceTotalWithNoun(&b, "selected UI", p.UI, "operation", "operations")
 	writeEvidenceTotalWithNoun(&b, "unnamed UI", p.UnnamedUI, "operation", "operations")
-	m.writeUIQualifications(&b, p.UI, p.UIIndices, "Selected UI timings, including unnamed operations", "Selected UI total is a lower bound (≥).")
+	m.writeUIQualifications(&b, p.UI, p.UIIndices, "Selected resource total is a lower bound (≥).")
 	b.WriteString("  UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply.\n")
 
 	b.WriteString("\nPRESELECTION RESOURCE EVIDENCE\n")
@@ -138,11 +140,21 @@ func (m *Model) resourceEvidenceText() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func (m *Model) writeUIQualifications(b *strings.Builder, total model.DurationTotal, indices []int, timingSubject, lowerBoundLine string) {
+func (m *Model) writeUIQualifications(b *strings.Builder, total model.DurationTotal, indices []int, lowerBoundLine string) {
 	if total.Count == 0 {
 		return
 	}
-	fmt.Fprintf(b, "  %s are rounded to whole seconds, +/- 1s each.\n", timingSubject)
+	var observations []span.Span
+	for _, i := range indices {
+		observations = append(observations, m.log.UISpans[i])
+	}
+	for _, line := range qualitytext.DurationSourceLines(model.SummariseDurationSources(observations)) {
+		fmt.Fprintf(b, "  %s\n", line)
+	}
+	for _, line := range typesPreamble(observations) {
+		fmt.Fprintf(b, "  %s\n", line)
+	}
+	b.WriteString("  Operation totals can overlap; they are not run elapsed time.\n")
 	if total.LowerBound {
 		b.WriteString("  " + lowerBoundLine + "\n")
 	}
@@ -197,7 +209,7 @@ func selectedDisplayValues(values map[string]bool, display func(string) string) 
 }
 
 func writeEvidenceTotal(b *strings.Builder, label string, d model.DurationTotal) {
-	writeEvidenceTotalWithNoun(b, label, d, "call", "calls")
+	fmt.Fprintf(b, "  %s: %d %s, %s\n", label, d.Count, plural(int(d.Count), "call", "calls"), rpcEvidenceDuration(d))
 }
 
 func writeEvidenceTotalWithNoun(b *strings.Builder, label string, d model.DurationTotal, singular, pluralNoun string) {

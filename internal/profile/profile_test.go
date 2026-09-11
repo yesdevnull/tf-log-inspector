@@ -114,7 +114,7 @@ func TestReportQualifiesSaturatedDurations(t *testing.T) {
 			}
 			out := render(t, path)
 			if seconds == 5000000 {
-				if !strings.Contains(out, "1 UI-hook duration") || !strings.Contains(out, "lower bounds") {
+				if !strings.Contains(out, "1 resource duration") || !strings.Contains(out, "lower bounds") {
 					t.Errorf("report presents saturated timing as a measurement: %q", out)
 				}
 			} else if strings.Contains(out, "lower bounds") {

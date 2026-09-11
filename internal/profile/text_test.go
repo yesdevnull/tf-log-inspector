@@ -22,7 +22,7 @@ func TestTextProfileOpensExactObservationEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"aws_instance.a", "contained", "source: line 4", "source: line 5", "observed UI"} {
+	for _, want := range []string{"aws_instance.a", "contained", "source: line 4", "source: line 5", "observed resource"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in report:\n%s", want, got)
 		}
@@ -71,7 +71,7 @@ func TestTextProfileRendersUILowerBoundsAndObservedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"≥4294967.3s", "resource: aws_instance.example (observed UI)", "source: line 24"} {
+	for _, want := range []string{"≥4294967.3s", "resource: aws_instance.example (observed resource)", "source: line 24"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}
