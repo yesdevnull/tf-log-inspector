@@ -340,7 +340,7 @@ Handle nonpositive dimensions before this block, and keep existing offset clamps
 
 **Interfaces:** Consume the immutable response/diagnostic cache and `responseChecked`; produce `ReconstructionQuality{State, Responses, Diagnostics, Code}` and the exact JSON v2 table above. Keep `Log.ReconstructionQuality()`, `profile.Build`, comparison building and encoder signatures unchanged. Remove `Log.ProviderResponse(e)` and `responseErr` after migrating all remaining test callers to `ProviderResponseAt`; no entry-wide response API remains in the final tree.
 
-- [ ] **Step 1: Add state and lazy-snapshot tests.** Extend real model fixtures to cover not checked, complete with zero/positive messages, partial with independent recovery, and failed with no messages. Compare static `CaptureQuality`, Data and Entries before/after. Read quality concurrently with first inspection and require whole snapshots only. Mutating returned selections must not change later counts. Rendering/opening the quality panel and its indicator must leave fresh inspection not checked. Check partial/failed limitations using an otherwise complete synthetic quality summary so unrelated missing-context limitations cannot hide the branch under test.
+- [x] **Step 1: Add state and lazy-snapshot tests.** Extend real model fixtures to cover not checked, complete with zero/positive messages, partial with independent recovery, and failed with no messages. Compare static `CaptureQuality`, Data and Entries before/after. Read quality concurrently with first inspection and require whole snapshots only. Mutating returned selections must not change later counts. Rendering/opening the quality panel and its indicator must leave fresh inspection not checked. Check partial/failed limitations using an otherwise complete synthetic quality summary so unrelated missing-context limitations cannot hide the branch under test.
 
 ```go
 want := ReconstructionQuality{
@@ -351,8 +351,8 @@ if got := l.ReconstructionQuality(); got != want { t.Fatalf("quality = %+v", got
 
 For both profile and comparison, build a report before actual `ProviderResponseAt`, then a report after; require the first snapshot to remain not checked and the second to be partial. Decoding both JSON kinds must show root version 2 and every mandatory reconstruction key with exact values/nulls from all four rows. Test complete-zero distinctly from not checked, and failed-zero distinctly from unknown. Reject bad state, negative counts, partial-with-zero, complete-with-diagnostics and mismatched codes before writing. Retain actual CLI output-file protection and invalid-UTF-8 tests.
 
-- [ ] **Step 2: Observe RED.** Run `go test ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -run 'Test.*(Reconstruction|Recovery|JSON)' -count=1`. Add the new `Diagnostics` declaration if required before measuring behavioural failure. Record wrong quality/state/version/null assertions.
-- [ ] **Step 3: Implement model and quality text.** Use the same cache; no new inspection call:
+- [x] **Step 2: Observe RED.** Run `go test ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -run 'Test.*(Reconstruction|Recovery|JSON)' -count=1`. Add the new `Diagnostics` declaration if required before measuring behavioural failure. Record wrong quality/state/version/null assertions.
+- [x] **Step 3: Implement model and quality text.** Use the same cache; no new inspection call:
 
 ```go
 func (l *Log) ReconstructionQuality() ReconstructionQuality {
@@ -368,7 +368,7 @@ func (l *Log) ReconstructionQuality() ReconstructionQuality {
 
 Update TUI copy and indicator per contract. Remove the temporary entry-wide method/error field and the error assignment inside `inspectProviderResponses` together; retain the final atomic store after all remaining cache fields are ready. Migrate retained regression tests to the intended physical line and the final quality table, including Task 1's mixed and malformed-only publication cases; keep their source-preservation, failure-safety and concurrency assertions.
 
-- [ ] **Step 4: Implement coordinated JSON v2.** Add `Diagnostics *int` between Responses and Code in private `jsonReconstruction`, change both root constructors to version 2, and validate/map the state table in the shared helper before marshalling. Check not-checked zeros/empty code; complete nonnegative responses with zero diagnostics/empty code; partial positive counts/exact partial code; failed zero responses/positive diagnostics/exact failed code. Invalid state and invalid snapshot use the fixed distinct errors above. Update exact root, nested key, integer/null and CLI assertions together.
+- [x] **Step 4: Implement coordinated JSON v2.** Add `Diagnostics *int` between Responses and Code in private `jsonReconstruction`, change both root constructors to version 2, and validate/map the state table in the shared helper before marshalling. Check not-checked zeros/empty code; complete nonnegative responses with zero diagnostics/empty code; partial positive counts/exact partial code; failed zero responses/positive diagnostics/exact failed code. Invalid state and invalid snapshot use the fixed distinct errors above. Update exact root, nested key, integer/null and CLI assertions together.
 
 ```go
 type jsonReconstruction struct {
@@ -381,7 +381,7 @@ type jsonReconstruction struct {
 
 Write complete v2 documents from the current v1 contracts, changing only the version and reconstruction section specified here. Mark v1 documents historical and update README's current-format links to v2. Search source/tests/docs for active `checked`, `schema_version: 1` and v1 current-format claims; classify matches instead of blindly replacing historical plans or unrelated timeline `partial` states. In particular comparison capture quality must use exactly profile v2's fields/nulls.
 
-- [ ] **Step 5: Verify, review, cleanup and commit.** Run `go test ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -count=1`; independent task review and separate cleanup. Commit `Report partial reconstruction in quality and JSON v2`.
+- [x] **Step 5: Verify, review, cleanup and commit.** Run `go test ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -count=1`; independent task review and separate cleanup. Commit `Report partial reconstruction in quality and JSON v2`.
 
 ### Task 4: Verify Boundary I end to end and document delivery
 
@@ -468,3 +468,5 @@ The corrected document passes link, fence and unfinished-value checks; all thirt
 Task 1 completed in signed commit `2501d7c`. Independent task review approved specification and quality with no findings. Separate cleanup retained all twelve changed test functions and three benchmark functions; no cleanup changes were needed. Behavioural RED preceded implementation. Focused, full and race tests, lint, formatting, module checks and four cross-build targets passed. Every local/global failure-status selection used 128 B/op and one allocation at 1,000, 10,000 and 100,000 tail lines; measured lookup times were 35–49 ns/op on darwin/arm64 (Apple M4). These are local measurements, not timing thresholds.
 
 Task 2 completed in signed commit `25c39fe`. Independent task review approved specification and quality without findings. Separate cleanup retained all eight new test functions without changes. Behavioural RED demonstrated entry-wide wrong-body selection, missing recovery notices, generic failure status and invalid-top-line selection; focused and full Go suites then passed. No goldens changed. Real terminal validation remains in Task 4.
+
+Task 3 completed in signed commit `f76670d`. Independent review approved specification and quality without findings; separate cleanup retained all 57 classified units across 30 changed test functions. Focused behavioural RED/GREEN, the required four-package suite and the full Go suite passed. Both JSON roots now emit v2 with the shared state/count/null/code contract; existing UTF-8 and output-protection checks remain, with arbitrary reconstruction codes rejected by the stricter v2 validation. Both new schema documents passed local link/fence/example-syntax checks. Final platform validation remains in Task 4.
