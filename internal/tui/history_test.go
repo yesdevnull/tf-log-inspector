@@ -264,15 +264,17 @@ func TestHistorySourceLineJumpReturnsToExactFilteredScope(t *testing.T) {
 	}
 	m.setFacetExclusions(dimProvider, map[string]bool{"registry.terraform.io/hashicorp/aws": true})
 	m.setFacetExclusions(dimLevel, map[string]bool{"DEBUG": true})
-	m.setFacetExclusions(dimRPC, map[string]bool{"ReadResource": true})
+	m.setFacetExclusions(dimRPC, map[string]bool{"Other": true})
 	m.setFacetExclusions(dimType, map[string]bool{"aws_subnet": true})
-	m.resourceSelection = model.ResourceSelection{Addresses: map[string]bool{}, Modules: map[string]bool{}}
+	m.resourceSelection = model.ResourceSelection{Addresses: map[string]bool{"aws_instance.a": true}, Modules: map[string]bool{"": true}}
+	m.invalidateRows()
 	m.facetSearch.query = "aws"
 	m.raw.top, m.raw.topLine, m.raw.column = m.raw.scope[0], 0, 4
 	m.raw.query, m.raw.lastQuery, m.raw.notFound = "typed", "kept", true
 	m.raw.match = &rawMatch{entry: m.raw.top, line: 0, text: literalPosition{byteOffset: 1, column: 1}}
 	m.timeline = timelineState{lane: 1, span: 2}
 	parent := m.captureNavigation()
+	filtered := m.selectedResources()
 	depth := len(m.history)
 	m = submitSourceLine(t, m, fmt.Sprint(line))
 	if m.raw.scope != nil || len(m.excludedFacets[dimProvider]) != 0 || len(m.excludedFacets[dimLevel]) != 0 {
@@ -281,7 +283,16 @@ func TestHistorySourceLineJumpReturnsToExactFilteredScope(t *testing.T) {
 	if !maps.Equal(m.excludedFacets[dimRPC], parent.excludedFacets[dimRPC]) || !maps.Equal(m.excludedFacets[dimType], parent.excludedFacets[dimType]) || !reflect.DeepEqual(m.resourceSelection, parent.resourceSelection) {
 		t.Fatal("jump discarded timing/resource filters")
 	}
-	if m.raw.lastQuery != "kept" || m.raw.match != nil || m.raw.notFound || m.raw.column != 0 || len(m.history) != depth+1 {
+	widened := m.selectedResources()
+	if len(widened.RPCIndices)+len(widened.UIIndices) <= len(filtered.RPCIndices)+len(filtered.UIIndices) {
+		t.Fatalf("clearing the provider filter did not widen timing projection: before %+v after %+v", filtered, widened)
+	}
+	position, ok := m.log.SourcePosition(line)
+	rows := m.rawLogRows(1)
+	if !ok || len(rows) != 1 || rows[0].entry != int(position.Entry) || rows[0].entryLine != int(position.EntryLine) || rows[0].sourceLine != line {
+		t.Fatalf("first rendered row = %+v, want requested position %+v on line %d", rows, position, line)
+	}
+	if m.raw.query != "typed" || m.raw.lastQuery != "kept" || m.raw.match != nil || m.raw.notFound || m.raw.column != 0 || len(m.history) != depth+1 {
 		t.Fatalf("jump child state wrong: history=%d raw=%+v", len(m.history), m.raw)
 	}
 	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
