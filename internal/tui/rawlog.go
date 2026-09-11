@@ -477,10 +477,12 @@ func (m Model) rawLogRows(h int) []rawLogLine {
 			var plain string
 			plain, scratch = logfmt.StripANSI(ln, scratch)
 			line := logfmt.DisplayText(plain)
-			if marked {
+			entryLine := firstEntryLine + j
+			if match := m.raw.match; match != nil && !m.raw.notFound && match.entry == i && match.line == entryLine {
+				line = renderLiteralMatch(line, m.raw.lastQuery, match.text, style)
+			} else if marked {
 				line = style.Render(line)
 			}
-			entryLine := firstEntryLine + j
 			var sourceLine uint64
 			if hasLocation {
 				sourceLine = location.StartLine + uint64(entryLine)

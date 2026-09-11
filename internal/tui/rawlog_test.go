@@ -460,20 +460,20 @@ func TestRawSearchRevealsContinuationOccurrences(t *testing.T) {
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m = typeQuery(t, m, "needle")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.TopLine() != 301 || !strings.Contains(m.renderRawLog(13, 1), "needle first") {
+	if m.TopLine() != 301 || !strings.Contains(unstyled(m.renderRawLog(13, 1)), "needle first") {
 		t.Fatalf("search did not reveal the continuation: line=%d, body=%q", m.TopLine(), m.renderRawLog(13, 1))
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if m.TopLine() != 301 || !strings.Contains(m.renderRawLog(13, 1), "needle second") {
+	if m.TopLine() != 301 || !strings.Contains(unstyled(m.renderRawLog(13, 1)), "needle second") {
 		t.Fatalf("next occurrence was skipped: %q", m.renderRawLog(13, 1))
 	}
-	before := m.renderRawLog(13, 1)
+	before, beforeEntry, beforeLine, beforeColumn := unstyled(m.renderRawLog(13, 1)), m.raw.top, m.raw.topLine, m.raw.column
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if !m.raw.notFound || m.renderRawLog(13, 1) != before {
+	if !m.raw.notFound || unstyled(m.renderRawLog(13, 1)) != before || m.raw.top != beforeEntry || m.raw.topLine != beforeLine || m.raw.column != beforeColumn {
 		t.Fatal("end of search moved or wrapped the viewport")
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
-	if !strings.Contains(m.renderRawLog(13, 1), "needle first") {
+	if !strings.Contains(unstyled(m.renderRawLog(13, 1)), "needle first") {
 		t.Fatal("reverse search skipped the first occurrence")
 	}
 }
@@ -491,7 +491,7 @@ func TestRawSearchTraversesEveryVisibleOccurrence(t *testing.T) {
 	m = typeQuery(t, m, "hit")
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	for _, want := range []string{"hit one", "hit two", "hit three", "hit four"} {
-		if got := m.renderRawLog(12, 1); !strings.Contains(got, want) {
+		if got := m.renderRawLog(12, 1); !strings.Contains(unstyled(got), want) {
 			t.Fatalf("search rendered %q, want occurrence %q", got, want)
 		}
 		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -500,7 +500,7 @@ func TestRawSearchTraversesEveryVisibleOccurrence(t *testing.T) {
 		t.Fatal("search wrapped after the final occurrence")
 	}
 	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
-	if got := m.renderRawLog(12, 1); !strings.Contains(got, "hit three") {
+	if got := m.renderRawLog(12, 1); !strings.Contains(unstyled(got), "hit three") {
 		t.Fatalf("reverse search rendered %q, want the preceding occurrence", got)
 	}
 }
@@ -512,7 +512,7 @@ func TestRawSearchUsesRenderedCellsAndText(t *testing.T) {
 		m := New(l, "synthetic.log")
 		m.setView(ViewRawLog)
 		m.raw.lastQuery = "needle"
-		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(8, 1), "needle") {
+		if !m.searchFrom(0, true, true) || !strings.Contains(unstyled(m.renderRawLog(8, 1)), "needle") {
 			t.Fatalf("search did not reveal the rendered word: %q", m.renderRawLog(8, 1))
 		}
 		if got, want := m.raw.column, 32; got != want {
@@ -526,7 +526,7 @@ func TestRawSearchUsesRenderedCellsAndText(t *testing.T) {
 		m := New(l, "synthetic.log")
 		m.setView(ViewRawLog)
 		m.raw.lastQuery = `\t`
-		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(10, 1), `\tafter`) {
+		if !m.searchFrom(0, true, true) || !strings.Contains(unstyled(m.renderRawLog(10, 1)), `\tafter`) {
 			t.Fatalf("search did not find the visible tab escape: %q", m.renderRawLog(10, 1))
 		}
 		m.raw.lastQuery = "\t"
@@ -545,7 +545,7 @@ func TestRawSearchRevealsTheContainingGrapheme(t *testing.T) {
 		m := New(&model.Log{Data: data, Entries: []logfmt.Entry{{Len: uint32(len(data))}}}, "synthetic.log")
 		m.setView(ViewRawLog)
 		m.raw.lastQuery = tc.query
-		if !m.searchFrom(0, true, true) || !strings.Contains(m.renderRawLog(10, 1), tc.text) {
+		if !m.searchFrom(0, true, true) || !strings.Contains(unstyled(m.renderRawLog(10, 1)), tc.text) {
 			t.Errorf("query %q hid grapheme %q: %q", tc.query, tc.text, m.renderRawLog(10, 1))
 		}
 	}
@@ -583,7 +583,7 @@ func TestRawSearchRestartsFromTheViewportAfterScrolling(t *testing.T) {
 		}
 		m.scrollRawLog(1)
 		m.searchAgain(-1)
-		if got := m.renderRawLog(12, 1); !strings.Contains(got, "hit second") {
+		if got := m.renderRawLog(12, 1); !strings.Contains(unstyled(got), "hit second") {
 			t.Fatalf("reverse search resumed from the stale match: %q", got)
 		}
 	})
@@ -599,7 +599,7 @@ func TestRawSearchRestartsFromTheViewportAfterScrolling(t *testing.T) {
 		}
 		m.scrollRawLogHorizontally(10)
 		m.searchAgain(1)
-		if got := m.renderRawLog(10, 1); !strings.Contains(got, "hit later") {
+		if got := m.renderRawLog(10, 1); !strings.Contains(unstyled(got), "hit later") {
 			t.Fatalf("forward search resumed from the stale match: %q", got)
 		}
 	})
@@ -652,7 +652,7 @@ func TestRawSearchDiscardsAnchorsWhenItsDomainChanges(t *testing.T) {
 		m.setFacetExclusions(dimLevel, map[string]bool{"INFO": true})
 		m.invalidateRows()
 		m.searchAgain(-1)
-		if m.raw.notFound || !strings.Contains(m.renderRawLog(20, 1), "needle warning") {
+		if m.raw.notFound || !strings.Contains(unstyled(m.renderRawLog(20, 1)), "needle warning") {
 			t.Fatalf("search reused an anchor from before the facet change: %q", m.renderRawLog(20, 1))
 		}
 	})
@@ -672,7 +672,7 @@ func TestRawSearchDiscardsAnchorsWhenItsDomainChanges(t *testing.T) {
 		}
 		m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\\'}})
 		m.searchAgain(-1)
-		if m.raw.notFound || !strings.Contains(m.renderRawLog(20, 1), "needle scoped") {
+		if m.raw.notFound || !strings.Contains(unstyled(m.renderRawLog(20, 1)), "needle scoped") {
 			t.Fatalf("search reused an anchor from before scope removal: %q", m.renderRawLog(20, 1))
 		}
 	})
