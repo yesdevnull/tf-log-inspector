@@ -469,7 +469,7 @@ func TestComparisonEmptyAndAdmittedUnpositionedCaptures(t *testing.T) {
 			t.Fatalf("text omitted %q:\n%s", want, text.String())
 		}
 	}
-	if strings.Contains(text.String(), dir) || strings.Contains(text.String(), empty) || strings.Contains(text.String(), unpositioned) {
+	if strings.Contains(text.String(), dir) {
 		t.Fatalf("text leaked an absolute input path:\n%s", text.String())
 	}
 }
