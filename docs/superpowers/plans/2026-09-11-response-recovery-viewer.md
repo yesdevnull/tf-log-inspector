@@ -27,11 +27,11 @@
 
 ---
 
-## Status and decisions proposed for approval
+## Status and decisions
 
 Dan authorised this I2 plan after I1 merged into local main at `04d28da` on 11 September 2026. Planning is on `wip/response-recovery-viewer-plan`. This document proposes the precise contracts below; application implementation has not started.
 
-The recommended JSON decision is to emit version 2 for both profile and comparison. Version 1 only defines `not_checked`, `checked` and `failed`; silently adding recovery states would change its documented contract. Version 2 exposes the actual outcome without maintaining a second writer or a version-selection flag. The existing v1 documents remain historical references, clearly labelled as such. Dan's preference question about this decision is open while the draft is prepared; approval of the final plan must settle it before implementation.
+Dan approved JSON v2 with explicit recovery states for both profile and comparison output on 11 September 2026. Version 1 only defines `not_checked`, `checked` and `failed`; silently adding recovery states would change its documented contract. Version 2 exposes the actual outcome without maintaining a second writer or a version-selection flag. The existing v1 documents remain historical references, clearly labelled as such. This approval settles the JSON version direction; the two peer-review findings and final plan approval remain outstanding before implementation.
 
 Raw Log has a viewport position, not a character cursor. For `r`, “selected physical position” means the first physical line the pane actually draws, identified by entry ordinal and zero-based line offset. Horizontal scrolling and a search occurrence do not become byte offsets. A physical line containing provider payload opens that message even when its logger header is at the left edge; an inline UI-only line or an empty fragment does not select a response. The model will intersect the original nonempty line byte range with original fragment ranges. It never searches a later physical line or another response in the same entry.
 
