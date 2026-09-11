@@ -140,7 +140,7 @@ Projection prepares all fields, marshals with `json.MarshalIndent`, appends exac
 
 **Interfaces:** Consume H1 model values and metadata without recalculating aggregates or deltas. Produce `RenderComparisonText(io.Writer, ComparisonReport, ComparisonMetadata, TextOptions) error`. Reuse existing `writeText`, `limitedLength`, `qualitytext.WriteCaptureQuality` and safe display helpers where applicable.
 
-- [ ] **Step 1: Add failing text tests.** Construct comparison reports via H1 from synthetic Span inputs or real loaded reports; assert the two-call/one-call example above, labelled before/after quality, count/mean separation, nulls, lower bounds and all caveats. To test limits, create at least 21 exact rows and 21 lower-bound/unavailable rows within a section, then require independent shown/total labels and full quality totals at limit 1, default 20 and zero. For sections where lower bounds cannot occur (RPC), use unavailable-tier rows in a separate report. Use a small literal output expectation for one row plus targeted contract assertions; no giant golden copied blindly from the renderer.
+- [x] **Step 1: Add failing text tests.** Construct comparison reports via H1 from synthetic Span inputs or real loaded reports; assert the two-call/one-call example above, labelled before/after quality, count/mean separation, nulls, lower bounds and all caveats. To test limits, create at least 21 exact rows and 21 lower-bound/unavailable rows within a section, then require independent shown/total labels and full quality totals at limit 1, default 20 and zero. For sections where lower bounds cannot occur (RPC), use unavailable-tier rows in a separate report. Use a small literal output expectation for one row plus targeted contract assertions; no giant golden copied blindly from the renderer.
 
 ```go
 var output bytes.Buffer
@@ -150,10 +150,10 @@ if err == nil || err.Error() != "comparison limit must be non-negative" || outpu
 }
 ```
 
-- [ ] **Step 2: Run RED.** `go test ./internal/profile -run TestComparisonText -count=1`. Require behavioural evidence for missing content/limits after declarations compile.
-- [ ] **Step 3: Implement the text contract.** Build the complete report into a `strings.Builder`, label capture sides, write shared quality summaries, then split each already-ordered section on `row.Changes.TotalMs != nil` into exact and unranked views. Apply `limitedLength` independently, format stored metric/delta values and finish through `writeText`. Use `strconv.FormatUint` for signed magnitudes and `fmt.Sprintf("%+.2f", value)` for defined decimal changes, normalising rounded zero. Keep all raw identifiers escaped and untruncated; do not share JSON-escaped strings with text.
-- [ ] **Step 4: Run GREEN and inspect output.** Test safe controls in both basenames and every key position, unchanged model values, added/removed meaning, missing-tier text, count-only lower-bound changes, empty sections, independent limits, writer errors and short writes. Cross-check the same report's decoded JSON numbers against text values before text rounding. Run `go test ./internal/profile -count=1`. Inspect actual representative text for comprehensible labels/rows, including very long names.
-- [ ] **Step 5: Review, cleanup and commit.** Independent task review and separate cleanup. Signed commit: `Render qualified before and after comparisons`.
+- [x] **Step 2: Run RED.** `go test ./internal/profile -run TestComparisonText -count=1`. Require behavioural evidence for missing content/limits after declarations compile.
+- [x] **Step 3: Implement the text contract.** Build the complete report into a `strings.Builder`, label capture sides, write shared quality summaries, then split each already-ordered section on `row.Changes.TotalMs != nil` into exact and unranked views. Apply `limitedLength` independently, format stored metric/delta values and finish through `writeText`. Use `strconv.FormatUint` for signed magnitudes and `fmt.Sprintf("%+.2f", value)` for defined decimal changes, normalising rounded zero. Keep all raw identifiers escaped and untruncated; do not share JSON-escaped strings with text.
+- [x] **Step 4: Run GREEN and inspect output.** Test safe controls in both basenames and every key position, unchanged model values, added/removed meaning, missing-tier text, count-only lower-bound changes, empty sections, independent limits, writer errors and short writes. Cross-check the same report's decoded JSON numbers against text values before text rounding. Run `go test ./internal/profile -count=1`. Inspect actual representative text for comprehensible labels/rows, including very long names.
+- [x] **Step 5: Review, cleanup and commit.** Independent task review and separate cleanup. Signed commit: `Render qualified before and after comparisons`.
 
 ## Task 3: Add two-input dispatch and output protection
 
@@ -262,3 +262,12 @@ container, and the implemented prose-valued object introduced unspecified wire
 values. Schema, encoder and tests now agree on the smaller array representation.
 If this choice is wrong, the schema/doc/tests require rework before consumer
 adoption. The clarification is committed in `8810492`.
+
+Task 2 completed in signed commits `a8df7f6`, `61aa676` and `5fcca16`.
+Behavioural RED preceded implementation, then focused/profile/full tests passed.
+Review required model-generated test reports and genuine exact/lower-bound UI
+scale cases plus a separate unavailable RPC report. Corrected tests passed
+scoped review with all findings addressed, including retained count-line output.
+Separate cleanup removed one duplicated quality assertion block while preserving
+all required coverage; profile package tests pass at 96.1% statement coverage.
+No production correction was needed after review. CLI integration remains next.
