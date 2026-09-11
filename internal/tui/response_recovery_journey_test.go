@@ -3,7 +3,6 @@ package tui
 import (
 	"os"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -44,11 +43,11 @@ func TestResponseRecoveryJourneyPreservesRawInvestigationAndStrictScrubbing(t *t
 	if m.raw.match == nil || m.raw.top != 2 || m.raw.topLine != 0 {
 		t.Fatalf("raw search position = top %d, line %d, match %+v", m.raw.top, m.raw.topLine, m.raw.match)
 	}
+	beforeHistory := []navigationFrame{m.captureNavigation()}
 	m.history = append(m.history, m.captureNavigation())
 	beforeTop, beforeLine, beforeColumn := m.raw.top, m.raw.topLine, m.raw.column
 	beforeMatch := *m.raw.match
 	beforeQuery, beforeLastQuery := m.raw.query, m.raw.lastQuery
-	beforeHistory := slices.Clone(m.history)
 
 	responseKey(&m, "r")
 	if got := m.renderResponse(100, 10); !strings.Contains(got, "Partial reconstruction") || !strings.Contains(got, "Decoded @message:") || !strings.Contains(got, "recovered response") {
