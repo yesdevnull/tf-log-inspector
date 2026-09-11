@@ -874,6 +874,83 @@ func unstyled(s string) string {
 	return plain
 }
 
+func rawLogStatus(m *Model) string {
+	lines := strings.Split(unstyled(m.workbenchView()), "\n")
+	return lines[len(lines)-2]
+}
+
+func TestRawLogStatusAgreesWithFirstRenderedSourceLine(t *testing.T) {
+	m := New(sourceLineLog(t, "\n"), "source.log")
+	m.width, m.height = 100, 24
+	m.setView(ViewRawLog)
+	m = submitSourceLine(t, m, "3")
+	rows := m.rawLogRows(paneBodyHeight(workbenchPaneHeight(m.height)))
+	if len(rows) == 0 || rows[0].sourceLine != 3 || !strings.Contains(rows[0].text, "continuation") {
+		t.Fatalf("first row = %+v, want source line 3 continuation", rows)
+	}
+	if got := rawLogStatus(&m); !strings.Contains(got, "Line 3 · entry 1/2") {
+		t.Fatalf("status = %q, want physical line and original entry", got)
+	}
+}
+
+func TestRawLogStatusUsesFirstAdmittedRow(t *testing.T) {
+	m := rawLogView(t, "mixed-hcp.log")
+	m.raw.top = 0
+	m.setFacetExclusions(dimLevel, map[string]bool{m.log.Entries[0].Level.String(): true})
+	rows := m.rawLogRows(paneBodyHeight(workbenchPaneHeight(m.height)))
+	if len(rows) == 0 || rows[0].entry == 0 {
+		t.Fatal("fixture/filter did not skip the stored cursor")
+	}
+	want := fmt.Sprintf("Line %d · entry %d/%d", rows[0].sourceLine, rows[0].entry+1, len(m.log.Entries))
+	if got := rawLogStatus(&m); !strings.Contains(got, want) {
+		t.Fatalf("status = %q, want %q", got, want)
+	}
+}
+
+func TestRawLogStatusReportsNoVisibleSourceLine(t *testing.T) {
+	tests := []struct {
+		name string
+		make func() Model
+	}{
+		{"empty", func() Model {
+			m := New(&model.Log{}, "empty.log")
+			m.width, m.height = 100, 24
+			m.setView(ViewRawLog)
+			return m
+		}},
+		{"filtered empty", func() Model { m := rawLogView(t, "provider-rpc.log"); m.raw.scope = []int{}; return m }},
+		{"zero body", func() Model { m := rawLogView(t, "provider-rpc.log"); m.height = 4; return m }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.make()
+			got := strings.ToLower(rawLogStatus(&m))
+			if !strings.Contains(got, "no visible source line") || strings.Contains(got, "line 1") {
+				t.Fatalf("status = %q", got)
+			}
+		})
+	}
+}
+
+func TestRawLogStatusKeepsPhysicalLineFirstAtNarrowWidths(t *testing.T) {
+	for _, width := range []int{24, 40, 60} {
+		m := New(sourceLineLog(t, "\n"), "source.log")
+		m.width, m.height = width, 24
+		m.setView(ViewRawLog)
+		m = submitSourceLine(t, m, "3")
+		got := rawLogStatus(&m)
+		if !strings.HasPrefix(strings.TrimSpace(got), "Line 3") || strings.Contains(got, "line 2") {
+			t.Errorf("width %d status = %q", width, got)
+		}
+	}
+	m := New(sourceLineLog(t, "\n"), "source.log")
+	m.width, m.height = 5, 24
+	m.setView(ViewRawLog)
+	if got := rawLogStatus(&m); got != "Line…" {
+		t.Errorf("five-column status = %q, want marked physical-line clipping", got)
+	}
+}
+
 // unstyledLines is unstyled over a block of lines, for the render functions
 // that return one line per field.
 func unstyledLines(lines []string) []string {

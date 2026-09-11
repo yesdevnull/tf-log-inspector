@@ -15,10 +15,10 @@ func TestEmptyRawLogStatusOmitsPosition(t *testing.T) {
 	m.width, m.height = 100, 24
 	m.setView(ViewRawLog)
 	status := strings.Split(ansi.Strip(m.View()), "\n")[22]
-	if !strings.Contains(status, "Entry 0/0") || !strings.Contains(status, "all entries") {
+	if !strings.Contains(status, "No visible source line") || !strings.Contains(status, "whole log") {
 		t.Fatalf("empty raw log loses count or scope: %q", status)
 	}
-	if strings.Contains(status, "line") || strings.Contains(status, "column") {
+	if strings.Contains(status, "line 1") || strings.Contains(status, "column") {
 		t.Fatalf("empty raw log claims a position: %q", status)
 	}
 }

@@ -429,18 +429,26 @@ func entryVisible(f model.Filter, compProviders map[uint16]string, e logfmt.Entr
 // one a jump or a search put there, and its lines are cut to h by the pane
 // row that composes them (framePanes, at every width) rather than being
 // allowed to push the caveat off the frame.
-func (m Model) rawLogLines(h int) []string {
+type rawLogLine struct {
+	text       string
+	entry      int
+	entryLine  int
+	sourceLine uint64
+}
+
+func (m Model) rawLogRows(h int) []rawLogLine {
 	f := m.filter()
 	compProviders := componentProviders(m.log.RPCSpans, m.log.Entries)
 
-	var lines []string
+	var rows []rawLogLine
 	var scratch []byte
-	for i, ok := m.nextRawEntry(m.TopEntry()); ok && len(lines) < h; i, ok = m.nextRawEntry(i + 1) {
+	for i, ok := m.nextRawEntry(m.TopEntry()); ok && len(rows) < h; i, ok = m.nextRawEntry(i + 1) {
 		e := m.log.Entries[i]
 		if !entryVisible(f, compProviders, e) {
 			continue
 		}
 		entryLines := m.entryLines(e)
+		firstEntryLine := 0
 		// The top entry starts partway down where the reader has scrolled
 		// into it. Only that one: every entry after it is drawn from its
 		// own first line.
@@ -448,6 +456,7 @@ func (m Model) rawLogLines(h int) []string {
 			if m.TopLine() >= len(entryLines) {
 				continue
 			}
+			firstEntryLine = m.TopLine()
 			entryLines = entryLines[m.TopLine():]
 		}
 		// The level is the ENTRY's, so every line of a multi-line entry is
@@ -455,13 +464,14 @@ func (m Model) rawLogLines(h int) []string {
 		// belongs to that error, and marking only the header would leave the
 		// rest reading as unrelated traffic.
 		style, marked := semantic.forLevel(e.Level)
-		for _, ln := range entryLines {
+		location, hasLocation := m.log.SourceLocation(uint32(i))
+		for j, ln := range entryLines {
 			// The budget is checked per LINE, so an entry taller than the
 			// pane is BEGUN rather than dropped and the pane always fills.
 			// Dropped whole, a forty-line entry below a one-line one left
 			// eleven rows blank with the content that would have filled
 			// them immediately beneath, and nothing saying why.
-			if len(lines) >= h {
+			if len(rows) >= h {
 				break
 			}
 			var plain string
@@ -470,10 +480,50 @@ func (m Model) rawLogLines(h int) []string {
 			if marked {
 				line = style.Render(line)
 			}
-			lines = append(lines, line)
+			entryLine := firstEntryLine + j
+			var sourceLine uint64
+			if hasLocation {
+				sourceLine = location.StartLine + uint64(entryLine)
+			}
+			rows = append(rows, rawLogLine{text: line, entry: i, entryLine: entryLine, sourceLine: sourceLine})
 		}
 	}
+	return rows
+}
+
+func (m Model) rawLogLines(h int) []string {
+	rows := m.rawLogRows(h)
+	lines := make([]string, len(rows))
+	for i, row := range rows {
+		lines[i] = row.text
+	}
 	return lines
+}
+
+func (m *Model) jumpToSourceLine(line uint64) bool {
+	position, ok := m.log.SourcePosition(line)
+	if !ok {
+		return false
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if uint64(position.Entry) > maxInt || position.EntryLine > maxInt {
+		return false
+	}
+	entry, entryLine := int(position.Entry), int(position.EntryLine)
+	parent := m.captureNavigation()
+	m.history = append(m.history, parent)
+	m.raw.scope = nil
+	m.setFacetExclusions(dimProvider, nil)
+	m.setFacetExclusions(dimLevel, nil)
+	m.invalidateRows()
+	m.changeView(ViewRawLog)
+	m.pane = PaneList
+	m.raw.top = entry
+	m.raw.topLine = entryLine
+	m.raw.column = 0
+	m.raw.match = nil
+	m.raw.notFound = false
+	return true
 }
 
 func (m Model) renderRawLog(w, h int) string {

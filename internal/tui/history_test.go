@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -217,6 +218,7 @@ func TestHistoryModalEscPrecedesReturn(t *testing.T) {
 		{"resource evidence", func(m *Model) { m.showResourceEvidence = true }, func(m Model) bool { return m.showResourceEvidence }, func(m Model) bool { return !m.showResourceEvidence }},
 		{"response", func(m *Model) { pressRune(t, m, 'r') }, func(m Model) bool { return m.response.open }, func(m Model) bool { return !m.response.open }},
 		{"raw search", func(m *Model) { pressRune(t, m, '/') }, func(m Model) bool { return m.raw.searching }, func(m Model) bool { return !m.raw.searching }},
+		{"source line", func(m *Model) { pressRune(t, m, 'g') }, func(m Model) bool { return m.sourceLine.editing }, func(m Model) bool { return !m.sourceLine.editing }},
 		{"facet search", func(m *Model) {
 			m.pane = PaneFacets
 			setFacetCursor(t, m, dimResource, "aws_instance.a")
@@ -239,6 +241,52 @@ func TestHistoryModalEscPrecedesReturn(t *testing.T) {
 				t.Fatalf("second Esc did not return: view %v depth %d", m.view, len(m.history))
 			}
 		})
+	}
+}
+
+func TestHistorySourceLineJumpReturnsToExactFilteredScope(t *testing.T) {
+	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
+	m.width, m.height = 100, 30
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view != ViewRawLog || m.raw.scope == nil {
+		t.Fatal("Enter did not establish a call-scoped raw log")
+	}
+	line := uint64(0)
+	for candidate := uint64(1); candidate <= m.log.PhysicalLineCount(); candidate++ {
+		position, ok := m.log.SourcePosition(candidate)
+		if ok && !slices.Contains(m.raw.scope, int(position.Entry)) {
+			line = candidate
+			break
+		}
+	}
+	if line == 0 {
+		t.Fatal("fixture has no source line outside the call scope")
+	}
+	m.setFacetExclusions(dimProvider, map[string]bool{"registry.terraform.io/hashicorp/aws": true})
+	m.setFacetExclusions(dimLevel, map[string]bool{"DEBUG": true})
+	m.setFacetExclusions(dimRPC, map[string]bool{"ReadResource": true})
+	m.setFacetExclusions(dimType, map[string]bool{"aws_subnet": true})
+	m.resourceSelection = model.ResourceSelection{Addresses: map[string]bool{}, Modules: map[string]bool{}}
+	m.facetSearch.query = "aws"
+	m.raw.top, m.raw.topLine, m.raw.column = m.raw.scope[0], 0, 4
+	m.raw.query, m.raw.lastQuery, m.raw.notFound = "typed", "kept", true
+	m.raw.match = &rawMatch{entry: m.raw.top, line: 0, text: literalPosition{byteOffset: 1, column: 1}}
+	m.timeline = timelineState{lane: 1, span: 2}
+	parent := m.captureNavigation()
+	depth := len(m.history)
+	m = submitSourceLine(t, m, fmt.Sprint(line))
+	if m.raw.scope != nil || len(m.excludedFacets[dimProvider]) != 0 || len(m.excludedFacets[dimLevel]) != 0 {
+		t.Fatalf("jump did not widen raw visibility: scope=%v exclusions=%v", m.raw.scope, m.excludedFacets)
+	}
+	if !maps.Equal(m.excludedFacets[dimRPC], parent.excludedFacets[dimRPC]) || !maps.Equal(m.excludedFacets[dimType], parent.excludedFacets[dimType]) || !reflect.DeepEqual(m.resourceSelection, parent.resourceSelection) {
+		t.Fatal("jump discarded timing/resource filters")
+	}
+	if m.raw.lastQuery != "kept" || m.raw.match != nil || m.raw.notFound || m.raw.column != 0 || len(m.history) != depth+1 {
+		t.Fatalf("jump child state wrong: history=%d raw=%+v", len(m.history), m.raw)
+	}
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !reflect.DeepEqual(m.captureNavigation(), parent) {
+		t.Fatal("Esc did not restore the complete parent investigation")
 	}
 }
 

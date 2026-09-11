@@ -258,6 +258,8 @@ type Model struct {
 	// raw is the raw log view's own state: which entry sits at its top, and
 	// any free-text search in progress or last run. See rawlog.go.
 	raw rawLogState
+	// sourceLine is a transient modal editor, outside navigation history.
+	sourceLine sourceLineInputState
 
 	// timeline is the timeline view's own state: which lane the cursor is on,
 	// and which of that lane's spans is selected within it. See
@@ -426,6 +428,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.response.open {
 			return m.handleResponseKey(msg)
 		}
+		if m.sourceLine.editing {
+			m.handleSourceLineInputKey(msg)
+			if m.quitting {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		// A blocked jump describes the Enter that was just refused, so it
 		// lasts exactly until the next key: any other key moves the
 		// selection, the filter or the view out from under it.
@@ -577,6 +586,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if m.view == ViewRawLog && m.pane == PaneList {
 				m.openResponse()
+			}
+		case "g":
+			if m.view == ViewRawLog && m.pane == PaneList {
+				m.beginSourceLineInput()
 			}
 		case "/":
 			if m.facetSearchAvailable() {
