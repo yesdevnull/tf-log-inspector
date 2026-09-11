@@ -227,6 +227,11 @@ func providerJSONOuter(line string) (comp string, offset int, header bool) {
 	}
 	_, rest = splitLevel(rest)
 	colon := strings.IndexByte(rest, ':')
+	// Empty provider records omit both the colon and message, but still
+	// identify the owner of any following physical continuations.
+	if colon < 0 && strings.HasPrefix(rest, "provider.") && !strings.ContainsAny(rest, " \t") {
+		return rest, len(line), true
+	}
 	if colon <= 0 || strings.ContainsAny(rest[:colon], " \t") {
 		return "", 0, true
 	}
