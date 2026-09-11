@@ -268,7 +268,7 @@ func (m *Model) footer(w int) string {
 		return m.responseFooter(w)
 	}
 	if m.quality.open {
-		return clipWidth(qualityNavigation, w) + "\n" + clipWidth(quitHint, w)
+		return clipWidth(qualityNavigation, w) + "\n" + clipWidth("Enter open/check  "+quitHint, w)
 	}
 	// The help is modal in Update, so it is modal here too. The raw log's
 	// search report below describes a view the help is not drawing, and it

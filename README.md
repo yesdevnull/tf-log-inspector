@@ -149,8 +149,11 @@ keep a compact timing qualification beside their action hints.
 `i` opens the whole-log capture-quality panel. It reports admitted, rejected
 and positioned timing evidence, extraction anomalies and their first source
 lines, attribution coverage, context limitations, and the lazy response
-reconstruction status. Scroll with arrows, `j`/`k` or `PgUp`/`PgDn`; `i` or
-`Esc` returns without changing the active view, filters, scope or search.
+reconstruction status. Select actions and findings with arrows or `j`/`k`, page
+with `PgUp`/`PgDn`, and press `Enter` to check responses or jump to a finding's
+first example. Response checks continue if the panel closes and their immutable
+result is cached. `i` or `Esc` closes the panel without cancelling a check or
+changing the active view, filters, scope or search.
 
 Key `3` opens Resources, which groups exact Terraform addresses and ranks them
 by summed observed UI duration. Repeated completions of one address count as

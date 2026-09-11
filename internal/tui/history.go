@@ -4,6 +4,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
@@ -32,6 +33,7 @@ type navigationFrame struct {
 	operationSort      int
 	associatedCalls    bool
 	associatedCallSort int
+	quality            qualityNavigationState
 }
 
 func cloneExclusions(src map[string]map[string]bool) map[string]map[string]bool {
@@ -76,6 +78,7 @@ func (m *Model) captureNavigation() navigationFrame {
 		raw: cloneRawState(m.raw), timeline: m.timeline,
 		resourceOperations: m.resourceOperations, operationSort: m.operationSort,
 		associatedCalls: m.associatedCalls, associatedCallSort: m.associatedCallSort,
+		quality: m.captureQualityNavigation(),
 	}
 }
 
@@ -114,6 +117,20 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.raw = cloneRawState(frame.raw)
 	m.reconcileRawCursor()
 	m.keepFocusOnADrawnPane()
+	m.restoreQualityNavigation(frame.quality)
+}
+
+func (m *Model) captureQualityNavigation() qualityNavigationState {
+	return qualityNavigationState{open: m.quality.open, selected: m.quality.selected, offset: m.quality.viewport.YOffset}
+}
+
+func (m *Model) restoreQualityNavigation(state qualityNavigationState) {
+	m.quality = qualityState{open: state.open, selected: state.selected, viewport: viewport.New(1, 1)}
+	m.quality.viewport.MouseWheelEnabled = false
+	m.quality.viewport.SetYOffset(state.offset)
+	if state.open {
+		m.renderQuality(panelContentWidth(m.paneWidth()), paneBodyHeight(workbenchPaneHeight(m.height)))
+	}
 }
 
 func (m *Model) returnFromHistory() bool {
