@@ -140,7 +140,7 @@ func TestComparisonTextEscapesEveryKeyAndPreservesJSONValues(t *testing.T) {
 	// span.DurationMs values, so exercise those formatter boundaries directly.
 	report.Data.Sections[0].Rows[0].Changes.TotalMs = &large
 	report.Data.Sections[0].Rows[0].Changes.MeanMs = &rounded
-	wantReport := report
+	wantReport := deepCopyComparisonReport(report)
 	var textOut, jsonOut bytes.Buffer
 	if err := RenderComparisonText(&textOut, report, ComparisonMetadata{}, TextOptions{}); err != nil {
 		t.Fatal(err)
