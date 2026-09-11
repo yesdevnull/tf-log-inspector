@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Small, straightforward changes; no new dependencies or backwards-compatibility modes.
+- Small, straightforward changes; no new dependencies or backwards-compatibility modes. JSON schema_version stays 1 during alpha MVP; breaking contracts permitted until v1 is tagged.
 - British/Australian spelling; sanitised fixtures; never commit Downloads captures.
 - TDD for behaviour changes; preserve truthful source and timing qualifications.
 - All commits signed with `/Users/dan/.codex/bin/codex-git`; signing failure stops work immediately. No pushes or merges.
@@ -59,12 +59,12 @@ if strings.Contains(text, "all durations are rounded") || !strings.Contains(text
 
 **Files:** `internal/profile/json_data.go`, JSON data/contract tests, comparison JSON/text rendering and tests; `internal/model/comparison.go`, delta ordering and tests; schema documentation under `docs`; relevant CLI JSON contract tests.
 
-**Interfaces:** Consume Task 1 provenance and source range helpers. Schema version is `3` for profile and comparison. Retain RPC/UI top-level tier keys. Resource observation `duration_source` is one of the three values in the spec. Source-aware totals expose source counts and durations. Resource comparison keys include duration source.
+**Interfaces:** Consume Task 1 provenance and source range helpers. Schema version is `1` for profile and comparison. Retain RPC/UI top-level tier keys. Resource observation `duration_source` is one of the three values in the spec. Source-aware totals expose source counts and durations. Resource comparison keys include duration source. Update existing schema documentation to version 1 and repair links; do not retain compatibility export modes or introduce a v3 contract.
 
-- [ ] Add failing contract tests requiring version 3, source provenance, refresh source range and null CLI positions. Add comparison tests proving identical addresses/actions with different duration sources stay separate.
+- [ ] Add failing contract tests requiring version 1, source provenance, refresh source range and null CLI positions. Add comparison tests proving identical addresses/actions with different duration sources stay separate.
 
 ```go
-if doc["schema_version"] != float64(3) {
+if doc["schema_version"] != float64(1) {
     t.Fatalf("schema_version = %v", doc["schema_version"])
 }
 ```

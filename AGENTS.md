@@ -47,6 +47,10 @@ Never accept regenerated output solely to silence a failure.
 
 ## Commit & Pull Request Guidelines
 
+This tool is an alpha MVP. Keep JSON `schema_version` at `1`; breaking
+contract changes are permitted until v1 is tagged. Update schema documentation
+and tests directly without compatibility modes or schema-version increments.
+
 Use a topic branch and signed commits. Recent history uses imperative subjects
 such as “Name…” and “Correct…”, without a mandatory prefix. Describe the concrete
 behaviour changed. PRs should explain the problem, resulting behaviour and
