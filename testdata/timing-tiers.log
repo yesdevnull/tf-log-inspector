@@ -1,0 +1,6 @@
+2026-09-11T00:00:00.000Z [TRACE] terraform: origin
+2025-09-11T00:00:00.010Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=10
+2026-09-11T00:00:01.000Z [TRACE] provider.aws: Received downstream response: tf_rpc=ReadResource tf_req_duration_ms=100
+2026-09-11T00:00:02.000Z [TRACE] provider.azurerm: Received downstream response: tf_rpc=PlanResourceChange tf_req_duration_ms=200
+{"@level":"info","@timestamp":"2026-09-11T01:00:03Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":1,"resource":{"addr":"google_compute_instance.first","resource_type":"google_compute_instance","implied_provider":"google"}}}
+{"@level":"info","@timestamp":"2026-09-11T01:00:08Z","type":"apply_complete","hook":{"action":"read","elapsed_seconds":2,"resource":{"addr":"module.long_module_path_for_timing_details.aws_instance.second","resource_type":"aws_instance","implied_provider":"aws"}}}

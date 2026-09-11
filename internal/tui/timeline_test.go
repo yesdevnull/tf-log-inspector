@@ -2441,7 +2441,7 @@ func TestLaneOrderGivesOnePlaceToEachShortProviderName(t *testing.T) {
 		{Provider: "registry.terraform.io/hashicorp/google"},
 	}}
 
-	order := laneOrderFor(l)
+	order := laneOrderFor(l, timelineTierFor(l))
 	if len(order) != 2 {
 		t.Fatalf("laneOrderFor placed %d providers over two short names (%v)", len(order), order)
 	}

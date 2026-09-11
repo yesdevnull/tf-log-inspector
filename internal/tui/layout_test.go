@@ -1006,11 +1006,12 @@ func TestSidePaneWidthsAreMeasuredAtLoad(t *testing.T) {
 	if got, want := m.facetPaneNatural, facetNaturalWidth(m.facets); got != want {
 		t.Errorf("facetPaneNatural = %d, want %d", got, want)
 	}
-	if got, want := m.detailPaneNatural, detailNaturalWidth(m.log); got != want {
+	if got, want := m.detailPaneNatural, detailNaturalWidth(m.log, m.activeTimelineTier()); got != want {
 		t.Errorf("detailPaneNatural = %d, want %d", got, want)
 	}
 
 	before := paneSepColumns(t, m.View())
+	m.timeline.tier = tierRPC
 	m.log, m.facets = &model.Log{}, nil
 	m.invalidateRows()
 	if got := paneSepColumns(t, m.View()); !slices.Equal(got, before) {
@@ -1847,7 +1848,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForRollupDetail(t *testing.T) {
 	}
 
 	wantLine := detailIndent + uiOnlyType
-	if got := detailNaturalWidth(l); got < lipgloss.Width(wantLine) {
+	if got := detailNaturalWidth(l, timelineTierFor(l)); got < lipgloss.Width(wantLine) {
 		t.Errorf("detailNaturalWidth = %d, too narrow for the rollup line %q of %d columns", got, wantLine, lipgloss.Width(wantLine))
 	}
 
@@ -2206,7 +2207,7 @@ func TestTheDetailPaneIsMeasuredWideEnoughForAUIHookAddress(t *testing.T) {
 	if !addresses[widest] {
 		t.Fatalf("the widest UI-hook detail line is %q, not an address, so this asserts nothing", widest)
 	}
-	if got := detailNaturalWidth(l); got < lipgloss.Width(widest) {
+	if got := detailNaturalWidth(l, timelineTierFor(l)); got < lipgloss.Width(widest) {
 		t.Errorf("detailNaturalWidth = %d, want at least %d for %q", got, lipgloss.Width(widest), widest)
 	}
 }
@@ -2239,7 +2240,7 @@ func TestDetailNaturalWidthSkipsUISpansTheDetailPaneCannotReach(t *testing.T) {
 
 	addr := detailValueFor(t, unstyledLines(spanDetailLines(ui, attrib.Attribution{}, false, hugeWidth)), "address")
 
-	got := detailNaturalWidth(l)
+	got := detailNaturalWidth(l, timelineTierFor(l))
 	for _, line := range reachableDetailLines(l) {
 		if w := lipgloss.Width(line); w >= lipgloss.Width(addr) {
 			t.Fatalf("the pane can draw %q at %d columns, as wide as the address line %q -- this case no longer isolates the unreachable tier", line, w, addr)
