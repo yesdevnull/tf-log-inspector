@@ -416,7 +416,7 @@ The benchmark file imports `fmt`, `strings`, `testing`; `providerRecord` comes f
 
 **Interfaces:** Consumes `logfmt.InspectProviderJSON`, `logfmt.ReconstructProviderJSON`, `scrub.Scrub(data []byte, extra []string) (Result, error)`, and existing `runScrub(inputPath, outputPath, valuesPath string, stderr io.Writer) error`. No new production API or viewer integration is required.
 
-- [ ] **Step 1: Add strict-policy regressions using real input.** Cover good A/malformed B/good A, pending A/malformed B/completed A, complete A/incomplete A at EOF, invalid UTF-8, invalid JSON syntax, invalid suffix grammar, malformed inline UI, quarantined same-component restart and global ownership failure. Each fixture includes at least one independently verified body and a distinctive private sentinel. In the package test, first require `InspectProviderJSON` to retain a message and report a diagnostic, then require `Scrub` to return an error and `Result{}`. Assert diagnostics do not contain the sentinel, component names, or body fragments.
+- [x] **Step 1: Add strict-policy regressions using real input.** Cover good A/malformed B/good A, pending A/malformed B/completed A, complete A/incomplete A at EOF, invalid UTF-8, invalid JSON syntax, invalid suffix grammar, malformed inline UI, quarantined same-component restart and global ownership failure. Each fixture includes at least one independently verified body and a distinctive private sentinel. In the package test, first require `InspectProviderJSON` to retain a message and report a diagnostic, then require `Scrub` to return an error and `Result{}`. Assert diagnostics do not contain the sentinel, component names, or body fragments.
 
 ```go
 partial := "2026-09-08T00:00:00.000Z [DEBUG] provider.a: {\"id\":\"private-sentinel\"}\n" +
@@ -437,8 +437,8 @@ if strings.Contains(err.Error(), "private-sentinel") || strings.Contains(err.Err
 
 In CLI tests, write those inputs into `t.TempDir`, call the actual `runScrub` and assert: returned error is safe, stderr is empty, absent output remains absent, and pre-existing output sentinel bytes remain unchanged. Do not replace `openScrubOutput`, reconstruction functions or the scrubber with mocks. Retain existing successful fragment round-trip, provider metadata, UTF-8, token-collision and privacy tests.
 
-- [ ] **Step 2: Run the policy tests.** `go test ./internal/scrub ./cmd/tfli -run 'Test.*(Recovery|Partial|Fragment)' -count=1`. These may pass immediately because strict policy was retained in task 1; record them as regression coverage, not false RED evidence. If they fail, preserve that behavioural RED and make only the strict-gate correction before rerunning.
-- [ ] **Step 3: Confirm the gate remains before transformation/publication.** The required call order is already explicit and must stay so:
+- [x] **Step 2: Run the policy tests.** `go test ./internal/scrub ./cmd/tfli -run 'Test.*(Recovery|Partial|Fragment)' -count=1`. These may pass immediately because strict policy was retained in task 1; record them as regression coverage, not false RED evidence. If they fail, preserve that behavioural RED and make only the strict-gate correction before rerunning.
+- [x] **Step 3: Confirm the gate remains before transformation/publication.** The required call order is already explicit and must stay so:
 
 ```go
 messages, err := logfmt.ReconstructProviderJSON(input)
@@ -507,7 +507,7 @@ Self-review checked task dependencies against the declared interfaces, strict
 rejection throughout intermediate commits, deterministic EOF ordering, all
 diagnostic families in the publication matrix, and source-range ownership.
 Relative links and code fences pass; no unfinished-value markers remain.
-Implementation, independent code review and test cleanup remain future work.
+This was the draft baseline; implementation and review evidence is recorded below.
 
 ## Plan review follow-up
 
@@ -521,7 +521,7 @@ Scoped verification checked both findings against the revised contract and the
 existing parser helpers, finding no collateral contradictions. Markdown links,
 code fences, syntax of the three new Go examples and literal fixture offsets
 were checked successfully. These are plan checks; no recovery implementation or
-application test changes have been made. Dan subsequently approved I1 subagent implementation. The execution record below will distinguish completed work from the planned checks.
+application test changes were made during plan review. Dan subsequently approved I1 subagent implementation. The execution record below distinguishes completed work from the planned checks.
 
 ## Execution record
 
@@ -530,3 +530,26 @@ Task 1 completed in signed commit `bdb6974`. The outcome API retains verified co
 Task 2 completed in signed commits `2656c07` and `532473b`. Recovery retains independent completed responses, quarantines damaged components without restart, stops globally when ownership is ambiguous, and emits deterministic source-mapped diagnostics. Initial behavioural RED demonstrated the previous stop-at-first-failure behaviour; focused parser and full repository tests passed after implementation. Review identified five gaps in mandatory evidence. The follow-up added exact slice/disjointness assertions, all malformed-owner forms, interleaved EOF variants, inline-UI/split-UTF-8 interactions and repeated component responses. Those tests passed against unchanged production code; scoped review marked all five findings addressed with no new issues. Separate cleanup retained all original and follow-up cases.
 
 Recovery benchmarks on Darwin arm64 (Apple M4) used 1,000/10,000 groups. Repeated damaged keys measured 1.315/13.317 ms, 442,709/6,623,932 bytes and 6,048/60,072 allocations per operation; distinct keys measured 1.997/20.731 ms, 1,626,537/20,046,654 bytes and 29,048/290,138 allocations. These are descriptive local measurements, not a performance guarantee. No implementation rulings were needed.
+
+Task 3 implementation and task review completed at signed commit `d563e59`. The nine failure scenarios exercise the real parser and scrubber and each scenario exercises both absent and pre-existing output paths through the real CLI. Every case rejects publication, returns an empty scrub result and emits content-free diagnostics; CLI stderr remains empty. These tests passed the existing strict gate immediately and are regression evidence, not a new behavioural RED. Independent review approved specification compliance and quality with no findings. Separate cleanup retained all 27 package/CLI subtests. The full-branch review remains the final gate.
+
+### Final application validation
+
+The controller ran all final-validation commands above at `d563e59`. All eleven packages passed `go test -race -count=1 ./...`, including the script tests. The normal build passed; `gofmt -d .` and `go mod tidy -diff` produced no output; module verification reported all modules verified; lint reported zero issues. All eight package/CLI build commands passed for Linux/macOS on amd64/arm64. These are local checks; remote CI was not run. The branch diff also passed whitespace checking.
+
+### Requirement evidence and I2 interface handover
+
+| Requirement | Verified evidence |
+| --- | --- |
+| Verified messages survive independent failures, ordered by message start | `TestInspectProviderJSONRecovery`, `TestInspectProviderJSONRangesAndOrdering`, `TestInspectProviderJSONRetainsInterleavedMessageCompletedBeforeFailure` |
+| Failed streams never restart; other components remain independent | `TestInspectProviderJSONRangesAndOrdering`, `TestInspectProviderJSONRecoversRepeatedComponentMessages`, `TestInspectProviderJSONInvalidInlineUIQuarantinesItsOwner` |
+| Ambiguous ownership stops all later recovery and aborts pending bodies | `TestInspectProviderJSONGlobalDiagnosticShape`, `TestInspectProviderJSONGlobalStopMalformedOwners` |
+| EOF diagnostics are deterministic and ranges exclude line terminators | `TestInspectProviderJSONEOFPendingOrderingAndRanges` |
+| Exact structural tails and global diagnostic shapes on LF/CRLF | `TestInspectProviderJSONStructuralFailureRanges`, `TestInspectProviderJSONGlobalDiagnosticShape` |
+| Valid inline UI is excluded from fragments; split UTF-8 remains valid | `TestInspectProviderJSONRecoveryPreservesInlineUIAndSplitUTF8` |
+| Every local failure preserves safe diagnostic facts and independent results | `TestInspectProviderJSONProjectsFailureDiagnostics`, `TestInspectProviderJSONProjectsInlineUIAndIncompleteFailures`, `TestInspectProviderJSONRecoversAfterEveryLocalFailure` |
+| Strict scrubbing returns no partial result or file output for every family | `TestScrubRejectsPartialProviderJSONRecovery`, `TestRunScrubRejectsPartialProviderJSONRecoveryBeforePublication` |
+
+The implemented API is `InspectProviderJSON(text string) ProviderJSONResult` in `internal/logfmt/fragments.go`. `ProviderJSONResult` and `ProviderJSONDiagnostic` in `internal/logfmt/reconstruction.go` have exactly the fields and types specified above. `ReconstructProviderJSON(text string) ([]ProviderJSON, error)` remains the strict adapter over that one scan, and `ProviderJSONDiagnostic.Error() string` formats only fixed reasons and numeric facts. `ProviderJSON` and `JSONFragment` retain their existing source-byte contract.
+
+I2 will consume `Messages` and `Diagnostics`, resolving selected physical positions against complete fragments, failed-attempt `Ranges` and later `Unavailable` ranges. The exact field semantics above are the handover contract, including structural tails, trigger-owned global tails, empty ranges and deterministic order. Model caching, lazy quality state, viewer notices, raw fallback and navigation remain I2 work. I1 does not complete Boundary I or change TUI/profile schemas. No rulings were needed during these implementation tasks.

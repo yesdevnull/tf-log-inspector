@@ -92,9 +92,11 @@ unimplemented.
 After Boundary H and its input-identity review fix merged into local main at
 `f614493`, Dan authorised drafting the first Boundary I plan on 11 September
 2026: [response recovery parser and strict scrubbing](../plans/2026-09-11-response-recovery-parser.md).
-Viewer and quality integration will be a separate second plan. This authorises
-planning; Boundary I's implementation and the new plan's precise contracts
-remain subject to review and approval.
+Viewer and quality integration will be a separate second plan. Dan subsequently
+approved I1 subagent implementation after both plan-review findings were fixed
+and verified. Its parser, strict-policy tests and task reviews are implemented
+through `d563e59`; final whole-branch review is pending. I2 remains unplanned and
+unimplemented, so Boundary I is not yet complete.
 
 ## Evidence and relationship to existing designs
 
