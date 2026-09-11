@@ -72,6 +72,60 @@ func TestHistoryPreservesRememberedCallsCursor(t *testing.T) {
 	}
 }
 
+func TestHistoryRestoresNonzeroQualityOffset(t *testing.T) {
+	m := qualityModel(t, "capture.log")
+	m.openQuality()
+	m.renderQuality(30, 3)
+	m.quality.viewport.SetYOffset(7)
+	m.quality.selected = qualityItemID{}
+	frame := m.captureNavigation()
+	m.quality.viewport.SetYOffset(0)
+	m.restoreNavigation(frame)
+	if !m.quality.open || m.quality.viewport.YOffset != 7 {
+		t.Fatalf("restored quality state = %+v", m.captureQualityNavigation())
+	}
+}
+
+func TestQualityJumpRestoresTimelineInvestigationState(t *testing.T) {
+	m := New(testLog(t, "timing-tiers.log"), "timing-tiers.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 18})
+	m.setView(ViewTimeline)
+	m.timeline.tier = tierUI
+	m.invalidateRows()
+	m.clampTimelineSelection()
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyRight})
+	if id := m.selectedIdentity(); id.kind != "ui" {
+		t.Fatalf("fixture selection = %+v, want UI", id)
+	}
+	m.setFacetExclusions(dimLevel, map[string]bool{"ERROR": true})
+	m.invalidateRows()
+	m.raw.lastQuery = "apply"
+	m.searchFrom(0, true, true)
+	m.openQuality()
+	m.renderQuality(40, 4)
+	m.quality.selected = qualityItemID{kind: "anomaly", stage: "test", code: "located"}
+	m.quality.viewport.SetYOffset(6)
+	want := m.captureNavigation()
+	m.activateQualityAction(qualityActionRow{id: m.quality.selected, sourceLine: 1})
+	if m.view != ViewRawLog || len(m.history) != 1 {
+		t.Fatal("quality action did not open raw child")
+	}
+	m.setFacetExclusions(dimLevel, nil)
+	m.raw.query, m.raw.lastQuery, m.raw.match = "child", "changed", nil
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 10})
+	pressKey(t, &m, tea.KeyMsg{Type: tea.KeyEsc})
+	got := m.captureNavigation()
+	if got.view != want.view || got.pane != want.pane || got.identity != want.identity || got.timeline != want.timeline || !reflect.DeepEqual(got.excludedFacets, want.excludedFacets) {
+		t.Fatalf("timeline parent mismatch:\ngot  %+v\nwant %+v", got, want)
+	}
+	if got.raw.query != want.raw.query || got.raw.lastQuery != want.raw.lastQuery || !reflect.DeepEqual(got.raw.match, want.raw.match) {
+		t.Fatal("raw query/match was not restored")
+	}
+	if !got.quality.open || got.quality.selected != want.quality.selected || got.quality.offset == 0 {
+		t.Fatalf("quality state = %+v, want selected %+v and nonzero offset", got.quality, want.quality.selected)
+	}
+}
+
 func TestHistoryRestoresParentAfterRawChildFilterEdit(t *testing.T) {
 	m := New(testLog(t, "resources-accounting.log"), "resources-accounting.log")
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})

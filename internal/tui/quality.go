@@ -41,17 +41,7 @@ func (m *Model) handleQualityKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if action.id != m.quality.selected {
 				continue
 			}
-			if action.id.kind == "check" {
-				return m, m.requestResponseCheck()
-			}
-			if action.sourceLine != 0 && m.jumpToSourceLine(action.sourceLine) {
-				m.quality.open = false
-				return m, nil
-			}
-			if action.sourceLine != 0 {
-				m.quality.notice = "Source location unavailable."
-			}
-			return m, nil
+			return m, m.activateQualityAction(action)
 		}
 	case "up", "k", "down", "j":
 		m.View()
@@ -71,6 +61,21 @@ func (m *Model) handleQualityKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) activateQualityAction(action qualityActionRow) tea.Cmd {
+	if action.id.kind == "check" {
+		return m.requestResponseCheck()
+	}
+	if action.sourceLine == 0 {
+		return nil
+	}
+	if m.jumpToSourceLine(action.sourceLine) {
+		m.quality.open = false
+		return nil
+	}
+	m.quality.notice = "Source location unavailable."
+	return nil
+}
+
 func (m *Model) buildQualityContent(w int) ([]string, []qualityActionRow) {
 	reconstruction := m.log.ReconstructionQuality()
 	records := m.qualityRecords(m.log.CaptureQuality(), reconstruction)
@@ -80,6 +85,9 @@ func (m *Model) buildQualityContent(w int) ([]string, []qualityActionRow) {
 func (m *Model) revealQualityAction(action qualityActionRow) {
 	v := &m.quality.viewport
 	if v.Height <= 0 {
+		return
+	}
+	if action.end > v.YOffset && action.start < v.YOffset+v.Height {
 		return
 	}
 	if action.start < v.YOffset {
@@ -134,7 +142,7 @@ func (m *Model) selectVisibleQualityAction(actions []qualityActionRow, down bool
 	m.quality.selected = qualityItemID{}
 	if down {
 		for _, a := range actions {
-			if a.start >= start && a.start < end {
+			if a.end > start && a.start < end {
 				m.quality.selected = a.id
 				return
 			}
@@ -142,7 +150,7 @@ func (m *Model) selectVisibleQualityAction(actions []qualityActionRow, down bool
 	} else {
 		for i := len(actions) - 1; i >= 0; i-- {
 			a := actions[i]
-			if a.start >= start && a.start < end {
+			if a.end > start && a.start < end {
 				m.quality.selected = a.id
 				return
 			}

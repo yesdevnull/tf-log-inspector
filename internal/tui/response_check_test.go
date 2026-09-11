@@ -170,6 +170,34 @@ func TestResponsePendingGuidanceAndKeys(t *testing.T) {
 }
 
 func TestResponseCheckKeepsTerminalResponsiveWhileInspectionRuns(t *testing.T) {
+	t.Run("quality check joins repeated activation and resolves response without reopening modal", func(t *testing.T) {
+		m := responseModel(t, `{"message":"available"}`)
+		m.openQuality()
+		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		_, duplicate := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if inspect == nil || duplicate != nil {
+			t.Fatal("quality activation did not schedule exactly one inspection")
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		_, joined := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		if joined != nil || !m.response.open {
+			t.Fatal("response did not join quality inspection")
+		}
+		_, present := m.Update(inspect())
+		if present == nil {
+			t.Fatal("inspection did not resolve active response")
+		}
+		m.Update(present())
+		if m.quality.open || !m.response.open || !strings.Contains(unstyled(m.View()), "available") {
+			t.Fatal("completion reopened wrong modal or lost response")
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		if !strings.Contains(unstyled(m.renderQuality(100, 200)), "complete: 1 responses available") {
+			t.Fatal("quality did not reuse cached result")
+		}
+	})
+
 	t.Run("close and reopen retains the real deferred request", func(t *testing.T) {
 		m := responseModel(t, `{"message":"available"}`)
 		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})

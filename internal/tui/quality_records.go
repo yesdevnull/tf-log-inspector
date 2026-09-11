@@ -78,7 +78,7 @@ func diagnosticQualityRecords(diagnostics []logfmt.ProviderJSONDiagnostic) []qua
 
 func (m *Model) qualityRecords(q model.CaptureQuality, reconstruction model.ReconstructionQuality) []qualityRecord {
 	records := []qualityRecord{{id: qualityItemID{kind: "check"}, text: "Check responses"}}
-	if m.inspection.running {
+	if m.inspection.running && reconstruction.State == "not_checked" {
 		records[0].text += " — checking responses…"
 		records = append(records, qualityRecord{text: "Closing this panel leaves the check running."})
 	}
@@ -176,13 +176,15 @@ func (m *Model) qualityRecords(q model.CaptureQuality, reconstruction model.Reco
 }
 
 func wrapQualityRecords(records []qualityRecord, width int) ([]string, []qualityActionRow) {
-	wrapWidth := max(1, width-2)
+	prefixWidth := min(2, max(0, width))
+	prefix := strings.Repeat(" ", prefixWidth)
+	wrapWidth := max(1, width-prefixWidth)
 	var lines []string
 	var actions []qualityActionRow
 	for _, record := range records {
 		start := len(lines)
 		for _, line := range strings.Split(ansi.Wrap(record.text, wrapWidth, ""), "\n") {
-			lines = append(lines, "  "+line)
+			lines = append(lines, clipWidth(prefix+line, max(0, width)))
 		}
 		if record.id.kind != "" {
 			actions = append(actions, qualityActionRow{id: record.id, start: start, end: len(lines), sourceLine: record.sourceLine})

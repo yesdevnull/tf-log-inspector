@@ -127,10 +127,10 @@ func (m *Model) captureQualityNavigation() qualityNavigationState {
 func (m *Model) restoreQualityNavigation(state qualityNavigationState) {
 	m.quality = qualityState{open: state.open, selected: state.selected, viewport: viewport.New(1, 1)}
 	m.quality.viewport.MouseWheelEnabled = false
-	m.quality.viewport.SetYOffset(state.offset)
 	if state.open {
 		m.renderQuality(panelContentWidth(m.paneWidth()), paneBodyHeight(workbenchPaneHeight(m.height)))
 	}
+	m.quality.viewport.SetYOffset(state.offset)
 }
 
 func (m *Model) returnFromHistory() bool {
