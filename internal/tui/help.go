@@ -63,6 +63,7 @@ var helpGroups = func() []helpGroup {
 		{title: "VIEWS", entries: viewEntries},
 		{title: "THE LIST", entries: []helpEntry{
 			{keys: "↑ ↓ j k", what: "move the cursor in the focused pane"},
+			{keys: "t", what: "switch RPC/UI timing with the timeline list focused"},
 			{keys: "← → h l", what: "step within a timeline lane -- the footer's ↔"},
 			{keys: "← → h l", what: "scroll horizontally in raw log or response"},
 			{keys: "PgUp PgDn", what: "page through raw log or response"},

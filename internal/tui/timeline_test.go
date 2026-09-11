@@ -1033,7 +1033,7 @@ func TestRenderTimelineDrawsOneRowPerLanePlusTheAxis(t *testing.T) {
 			t.Errorf("lane %d = %q, want %q", i, got, want)
 		}
 	}
-	if want := strings.Repeat(" ", labelW+1) + timeAxis(wallClock, barW); lines[len(lanes)] != want {
+	if want := timelineAxisGutter(tierRPC, 0, labelW) + " " + timeAxis(wallClock, barW); lines[len(lanes)] != want {
 		t.Errorf("axis line = %q, want %q", lines[len(lanes)], want)
 	}
 	for i, want := range annotationLines {
@@ -1073,7 +1073,7 @@ func TestRenderTimelineKeepsTheAxisWhenLanesDoNotFit(t *testing.T) {
 	barW := 40 - labelW - 1
 	// One of the two lanes is drawn, so the axis gutter carries the mark for
 	// the other; see TestTheAxisMarksLaneRowsScrolledOffScreen.
-	want := padRight("+1", labelW) + " " + timeAxis(timelineWallClockMs(spans), barW)
+	want := timelineAxisGutter(tierRPC, 1, labelW) + " " + timeAxis(timelineWallClockMs(spans), barW)
 	if lines[1] != want {
 		t.Errorf("renderTimeline(h=3) = %q, want the axis on its second line: %q", lines, want)
 	}
@@ -1148,7 +1148,7 @@ func TestTheAxisMarksLaneRowsScrolledOffScreen(t *testing.T) {
 	if len(short) != 5 {
 		t.Fatalf("renderTimeline(h=5) produced %d lines, want 5 (two lane rows, the axis and two notes)", len(short))
 	}
-	if got, want := short[2], padRight("+3", labelW)+" "+axis; got != want {
+	if got, want := short[2], timelineAxisGutter(tierRPC, 3, labelW)+" "+axis; got != want {
 		t.Errorf("axis row with two of five lanes drawn = %q, want %q -- the three that scrolled off go unmarked", got, want)
 	}
 
@@ -1156,7 +1156,7 @@ func TestTheAxisMarksLaneRowsScrolledOffScreen(t *testing.T) {
 	if len(tall) != 8 {
 		t.Fatalf("renderTimeline(h=8) produced %d lines, want 8 (five lane rows, the axis and two notes)", len(tall))
 	}
-	if got, want := tall[5], strings.Repeat(" ", labelW+1)+axis; got != want {
+	if got, want := tall[5], timelineAxisGutter(tierRPC, 0, labelW)+" "+axis; got != want {
 		t.Errorf("axis row with every lane drawn = %q, want %q -- nothing was cut, so nothing may be marked", got, want)
 	}
 }

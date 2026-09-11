@@ -358,10 +358,10 @@ func TestGoldenHelp(t *testing.T) {
 // TestAClippedHelpDescriptionIsMarked), so this is no longer the only thing
 // standing between a reader and a silently broadened claim -- but the tail
 // is where each qualifier lives, "in the table views" and "in a timeline
-// lane", and a table that fits without cutting states them all.
+// lane", and the rendered table clips every longer qualification visibly.
 func TestEveryHelpLineFitsTheNarrowestSupportedWidth(t *testing.T) {
 	const narrowest = 60
-	for _, line := range strings.Split(renderHelp(hugeWidth, 200), "\n") {
+	for _, line := range strings.Split(renderHelp(narrowest, 200), "\n") {
 		if n := lipgloss.Width(line); n > narrowest {
 			t.Errorf("help line is %d columns, more than the %d a narrow terminal gives it: %q", n, narrowest, line)
 		}

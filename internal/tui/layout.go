@@ -292,6 +292,9 @@ func (m *Model) footer(w int) string {
 	if m.facetSearch.editing {
 		return m.facetSearchPrompt(w)
 	}
+	if m.timelineNoticeVisible(w) {
+		return clipWidth(styles.alert.Render(m.timeline.notice), w) + "\n" + clipWidth(quitHint, w)
+	}
 	if m.blockedJump {
 		if len(m.history) > 0 {
 			return styles.alert.Render("target entry hidden by the active filter -- Esc goes back")
@@ -314,6 +317,10 @@ func (m *Model) footer(w int) string {
 		}
 	}
 	return m.renderKeyHints(w)
+}
+
+func (m *Model) timelineNoticeVisible(w int) bool {
+	return m.timeline.notice != "" && m.view == ViewTimeline && m.pane == PaneList && !m.facetOverlayShowing(w)
 }
 
 // styleHintKeys accents the KEY at the head of every hint on a composed hint
@@ -503,6 +510,9 @@ const sortHint = "s sort"
 // a pane that is not drawn is not somewhere the reader can look.
 func (m *Model) actionKeys(w int) string {
 	keys := []string{"⇥ pane"}
+	if m.view == ViewTimeline && m.pane == PaneList && !m.facetOverlayShowing(w) {
+		keys = append(keys, "t tier")
+	}
 	if w > detailInlineWidth {
 		keys = append(keys, "␣ facet")
 	}
@@ -565,6 +575,26 @@ func (m *Model) actionKeys(w int) string {
 		keys = append(keys, "/ narrow")
 	}
 	keys = append(keys, esc, quitHint)
+	if m.view == ViewTimeline && m.pane == PaneList {
+		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
+			removed := false
+			for _, secondary := range []string{"f facets", "␣ facet", "⇥ pane"} {
+				for i, key := range keys {
+					if key == secondary {
+						keys = append(keys[:i], keys[i+1:]...)
+						removed = true
+						break
+					}
+				}
+				if removed {
+					break
+				}
+			}
+			if !removed {
+				break
+			}
+		}
+	}
 	if m.view == ViewResources || m.associatedCalls {
 		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
 			removed := false

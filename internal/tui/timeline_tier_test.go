@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestTimelineTierSwitchSelectsIndependentClock(t *testing.T) {
@@ -26,6 +27,171 @@ func TestTimelineTierSwitchSelectsIndependentClock(t *testing.T) {
 	m.switchTimelineTier()
 	if id := m.selectedTimelineIdentity(); id.kind != "rpc" || id.index != 0 {
 		t.Fatalf("RPC source identity = %#v", id)
+	}
+}
+
+func TestTimelineTierKeySwitchesOnlyTheFocusedVisibleTimeline(t *testing.T) {
+	newTimeline := func(t *testing.T) Model {
+		t.Helper()
+		m := update(t, New(testLog(t, "timing-tiers.log"), "timing-tiers.log"),
+			tea.WindowSizeMsg{Width: 160, Height: 40})
+		return update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	}
+	pressT := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}
+
+	t.Run("list", func(t *testing.T) {
+		m := update(t, newTimeline(t), pressT)
+		if tier, _ := m.timelineSpans(); tier != tierUI {
+			t.Fatal("t did not switch the focused timeline")
+		}
+		if !strings.Contains(unstyled(m.timelineTitle()), "ui, whole seconds") {
+			t.Fatal("UI timing qualification missing")
+		}
+		if len(m.history) != 0 {
+			t.Fatalf("switch added %d history frames", len(m.history))
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"facets", func(m *Model) { m.pane = PaneFacets }},
+		{"detail", func(m *Model) { m.pane = PaneDetail }},
+		{"narrow facet overlay", func(m *Model) {
+			m.width = 60
+			m.showFacetOverlay = true
+			m.pane = PaneFacets
+		}},
+		{"help", func(m *Model) { m.showHelp = true }},
+		{"quality", func(m *Model) { m.quality.open = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTimeline(t)
+			tc.setup(&m)
+			m = update(t, m, pressT)
+			if tier, _ := m.timelineSpans(); tier != tierRPC {
+				t.Fatalf("t switched timeline while %s had focus", tc.name)
+			}
+		})
+	}
+}
+
+func TestTimelineTierKeyRemainsTextInsideModalInputs(t *testing.T) {
+	pressT := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}
+	for _, tc := range []struct {
+		name  string
+		setup func(*Model)
+		text  func(Model) string
+	}{
+		{"raw search", func(m *Model) { m.raw.searching = true; m.raw.input = newSearchInput() }, func(m Model) string { return m.raw.input.Value() }},
+		{"response search", func(m *Model) {
+			m.response.open = true
+			m.response.searching = true
+			m.response.input = newSearchInput()
+		}, func(m Model) string { return m.response.input.Value() }},
+		{"facet search", func(m *Model) { m.facetSearch.editing = true; m.facetSearch.input = newSearchInput() }, func(m Model) string { return m.facetSearch.input.Value() }},
+		{"source line", func(m *Model) { m.sourceLine.editing = true; m.sourceLine.input = newSourceLineInput() }, func(m Model) string { return m.sourceLine.input.Value() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := update(t, New(testLog(t, "timing-tiers.log"), "timing-tiers.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+			tc.setup(&m)
+			m = update(t, m, pressT)
+			if tier, _ := m.timelineSpans(); tier != tierRPC || tc.text(m) != "t" {
+				t.Fatalf("modal t = tier %v text %q, want RPC and literal t", tier, tc.text(m))
+			}
+		})
+	}
+}
+
+func TestTimelineTierNoticeClearsOnTheNextKeyWithoutInterceptingQuit(t *testing.T) {
+	for _, tc := range []struct{ fixture, notice string }{
+		{"provider-rpc.log", "RPC timing only; UI timing unavailable"},
+		{"structured-ui.log", "UI timing only; RPC timing unavailable"},
+		{"core-only.log", "No RPC or UI timing observations"},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			m := update(t, New(testLog(t, tc.fixture), tc.fixture), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+			if !strings.Contains(unstyled(m.footer(100)), tc.notice) {
+				t.Fatalf("footer did not show unavailable-tier notice: %q", unstyled(m.footer(100)))
+			}
+			if !strings.Contains(unstyled(m.View()), tc.notice) {
+				t.Fatalf("frame did not show unavailable-tier notice: %q", unstyled(m.View()))
+			}
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+			if m.timeline.notice != "" {
+				t.Fatalf("notice survived the next key: %q", m.timeline.notice)
+			}
+		})
+	}
+
+	m := update(t, New(testLog(t, "provider-rpc.log"), "provider-rpc.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil || !next.(*Model).Quitting() {
+		t.Fatal("tier notice intercepted quit")
+	}
+}
+
+func TestTimelineTierFooterAdvertisesSwitchOnlyWhereItWorks(t *testing.T) {
+	m := update(t, New(testLog(t, "timing-tiers.log"), "timing-tiers.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	if got := m.actionKeys(160); !strings.Contains(got, "t tier") {
+		t.Fatalf("focused timeline footer omits t tier: %q", got)
+	}
+	for _, pane := range []Pane{PaneFacets, PaneDetail} {
+		m.pane = pane
+		if got := m.actionKeys(160); strings.Contains(got, "t tier") {
+			t.Fatalf("pane %v footer advertises inert t: %q", pane, got)
+		}
+	}
+	m.pane = PaneList
+	m.width = 60
+	m.showFacetOverlay = true
+	if got := m.actionKeys(60); strings.Contains(got, "t tier") {
+		t.Fatalf("covered timeline footer advertises inert t: %q", got)
+	}
+}
+
+func TestTimelineAxisGutterNamesTierAndPreservesLaneCut(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tier   timelineTier
+		hidden int
+		width  int
+		want   string
+	}{
+		{"rpc", tierRPC, 0, 5, "rpc  "},
+		{"ui", tierUI, 0, 5, "ui   "},
+		{"tier and cut", tierRPC, 3, 7, "rpc +3 "},
+		{"cut replaces tier when narrow", tierUI, 12, 3, "+12"},
+		{"cut survives at minimum width", tierRPC, 4, 1, "…"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := timelineAxisGutter(tc.tier, tc.hidden, tc.width); got != tc.want {
+				t.Fatalf("timelineAxisGutter(%v, %d, %d) = %q, want %q", tc.tier, tc.hidden, tc.width, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTimelineTierRenderNamesActiveTierAndKeepsWidthAndLaneCut(t *testing.T) {
+	for _, width := range []int{160, 100, 60} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := update(t, New(testLog(t, "timing-tiers.log"), "timing-tiers.log"), tea.WindowSizeMsg{Width: width, Height: 9})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+			view := unstyled(m.View())
+			axis := unstyled(m.renderTimeline(m.paneWidth(), 3))
+			if !strings.Contains(strings.ToLower(view), "timeline (ui, whole seconds)") || !strings.Contains(axis, "ui +") {
+				t.Fatalf("%d-column UI frame lacks tier title or tier-labelled cut axis:\n%s\naxis:\n%s", width, view, axis)
+			}
+			for i, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("line %d is %d columns in a %d-column frame: %q", i, got, width, line)
+				}
+			}
+		})
 	}
 }
 

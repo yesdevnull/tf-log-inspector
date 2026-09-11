@@ -80,6 +80,8 @@ func (m *Model) workbenchView() string {
 			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.showResourceEvidence:
 			status = resourceEvidenceTitle
+		case m.timelineNoticeVisible(w):
+			status = m.timeline.notice
 		case m.view == ViewRawLog:
 			scope := "whole log"
 			if m.raw.scope != nil {
