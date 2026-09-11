@@ -194,7 +194,7 @@ For clean single/interleaved messages, assert `reflect.DeepEqual(result.Messages
 
 **Interfaces:** Consumes `InspectProviderJSON(text string) ProviderJSONResult`, `ProviderJSONDiagnostic` and strict `ReconstructProviderJSON` from task 1. Produces the same APIs with all ownership transitions and final ordering specified above; no public signature changes.
 
-- [ ] **Step 1: Add the recovery matrix.** Use this table as concrete input/output cases inside `TestInspectProviderJSONRecovery`. The helper `join` below is test-local.
+- [x] **Step 1: Add the recovery matrix.** Use this table as concrete input/output cases inside `TestInspectProviderJSONRecovery`. The helper `join` below is test-local.
 
 ```go
 join := func(lines ...string) string { return strings.Join(lines, "\n") }
@@ -346,8 +346,8 @@ These full-struct expectations also pin all zero body/syntax fields on the trigg
 
 Exercise every local failure code from the table followed by an independent good component. Reuse the valid inline-UI literal in `TestProviderJSONInlineUI`: place an event in a retained A body around a malformed B; assert A's original fragments exclude it. A malformed inline event quarantines only its known owner. Include split UTF-8 across A fragments with a B failure between them, multiple completed responses from one component, and the existing ordinary-continuation isolation cases. These additions must assert both retained bodies and diagnostic/unavailable positions, not just success.
 
-- [ ] **Step 2: Run RED.** `go test ./internal/logfmt -run TestInspectProviderJSON -count=1`. Task 1's stop-at-first-failure implementation must fail the independent continuation and quarantine/unavailable assertions.
-- [ ] **Step 3: Implement the six transitions.** Add a private component-to-diagnostic quarantine map, keep active-entry ownership updates before skipping quarantined payloads, and append line-local unavailable ranges without invoking body parsing. On local failure, collect numeric/range evidence, clear the failed message slot, delete its pending builder, and continue the physical-line loop. On global failure, abandon all pending builders with typed diagnostics and collect remaining line locations only. At EOF, finalise pending diagnostics; compact complete message slots; sort diagnostic values after attachment of ranges.
+- [x] **Step 2: Run RED.** `go test ./internal/logfmt -run TestInspectProviderJSON -count=1`. Task 1's stop-at-first-failure implementation must fail the independent continuation and quarantine/unavailable assertions.
+- [x] **Step 3: Implement the six transitions.** Add a private component-to-diagnostic quarantine map, keep active-entry ownership updates before skipping quarantined payloads, and append line-local unavailable ranges without invoking body parsing. On local failure, collect numeric/range evidence, clear the failed message slot, delete its pending builder, and continue the physical-line loop. On global failure, abandon all pending builders with typed diagnostics and collect remaining line locations only. At EOF, finalise pending diagnostics; compact complete message slots; sort diagnostic values after attachment of ranges.
 
 The local-failure control-flow change is:
 
@@ -375,7 +375,7 @@ func providerJSONOwnershipUnknown(line string) bool {
 }
 ```
 
-- [ ] **Step 4: Run GREEN and descriptive scaling.** Run all logfmt tests, then `go test ./...`. Add `BenchmarkInspectProviderJSON` using `b.Run` for 1,000 and 10,000 groups of complete A, damaged B and later apparent B restart with distinct component keys; build input before `b.ResetTimer`, call `b.ReportAllocs`, and require exactly the expected retained/diagnostic counts outside the measured loop. Also measure repeated healthy A with one quarantined B to expose per-line tail copying. Run `go test ./internal/logfmt -run '^$' -bench BenchmarkInspectProviderJSON -benchmem -count=1`; report measurements without thresholds. Inspect that memory is proportional to source/range count and no failed body is retained behind quarantine state.
+- [x] **Step 4: Run GREEN and descriptive scaling.** Run all logfmt tests, then `go test ./...`. Add `BenchmarkInspectProviderJSON` using `b.Run` for 1,000 and 10,000 groups of complete A, damaged B and later apparent B restart with distinct component keys; build input before `b.ResetTimer`, call `b.ReportAllocs`, and require exactly the expected retained/diagnostic counts outside the measured loop. Also measure repeated healthy A with one quarantined B to expose per-line tail copying. Run `go test ./internal/logfmt -run '^$' -bench BenchmarkInspectProviderJSON -benchmem -count=1`; report measurements without thresholds. Inspect that memory is proportional to source/range count and no failed body is retained behind quarantine state.
 
 ```go
 func BenchmarkInspectProviderJSON(b *testing.B) {
@@ -408,7 +408,7 @@ func BenchmarkInspectProviderJSON(b *testing.B) {
 
 The benchmark file imports `fmt`, `strings`, `testing`; `providerRecord` comes from the existing package tests.
 
-- [ ] **Step 5: Review, cleanup and commit.** Independent review must check unsafe same-stream restart, ordinary continuation ownership, global-stop detection, range overlap and ordering. Run separate test cleanup. Signed commit: `Recover verified responses from independent provider streams`.
+- [x] **Step 5: Review, cleanup and commit.** Independent review must check unsafe same-stream restart, ordinary continuation ownership, global-stop detection, range overlap and ordering. Run separate test cleanup. Signed commit: `Recover verified responses from independent provider streams`.
 
 ### Task 3: Prove strict scrub publication and prepare the viewer handover
 
@@ -526,3 +526,7 @@ application test changes have been made. Dan subsequently approved I1 subagent i
 ## Execution record
 
 Task 1 completed in signed commit `bdb6974`. The outcome API retains verified completed messages and projects content-free diagnostics; the strict gate returns no messages on any diagnostic. Behavioural RED covered prefix retention and an interleaved message completing before an earlier slot failed. Focused parser tests and all six affected consumer packages passed. Independent task review approved both specification compliance and quality with no findings. Separate cleanup classified all 12 added behavioural cases as useful and retained them. Continued recovery and quarantine remain Task 2 work. No implementation rulings were needed.
+
+Task 2 completed in signed commits `2656c07` and `532473b`. Recovery retains independent completed responses, quarantines damaged components without restart, stops globally when ownership is ambiguous, and emits deterministic source-mapped diagnostics. Initial behavioural RED demonstrated the previous stop-at-first-failure behaviour; focused parser and full repository tests passed after implementation. Review identified five gaps in mandatory evidence. The follow-up added exact slice/disjointness assertions, all malformed-owner forms, interleaved EOF variants, inline-UI/split-UTF-8 interactions and repeated component responses. Those tests passed against unchanged production code; scoped review marked all five findings addressed with no new issues. Separate cleanup retained all original and follow-up cases.
+
+Recovery benchmarks on Darwin arm64 (Apple M4) used 1,000/10,000 groups. Repeated damaged keys measured 1.315/13.317 ms, 442,709/6,623,932 bytes and 6,048/60,072 allocations per operation; distinct keys measured 1.997/20.731 ms, 1,626,537/20,046,654 bytes and 29,048/290,138 allocations. These are descriptive local measurements, not a performance guarantee. No implementation rulings were needed.
