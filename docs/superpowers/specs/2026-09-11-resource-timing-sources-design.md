@@ -41,7 +41,7 @@ Source links for refresh show the start-to-completion physical range. CLI comple
 
 ## Export and comparison
 
-Profile and comparison JSON advance together to schema version 3 because the resource timing contract is broader. Keep existing RPC/UI collection keys to avoid a needless global rename; document `ui` as the resource-operation tier. Add `duration_source` to resource observations and source breakdowns to resource totals/capture evidence. No v2 compatibility output mode is required.
+Profile and comparison JSON use schema version 1. Dan explicitly permits breaking contracts during the alpha MVP until v1 is tagged; update the current contract directly without compatibility modes or schema-version increments. Keep existing RPC/UI collection keys to avoid a needless global rename; document `ui` as the resource-operation tier. Add `duration_source` to resource observations and source breakdowns to resource totals/capture evidence.
 
 Comparisons separate source kinds in resource operation and type keys. A refresh-window measurement must not be compared with a reported completion merely because the address/type and action match. Explain changes in observed source coverage. Preserve unavailable values, lower-bound handling and independent scrub-alias qualifications.
 
