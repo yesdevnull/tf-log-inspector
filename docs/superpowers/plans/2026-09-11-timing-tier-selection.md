@@ -67,7 +67,7 @@ The saved selections contain original indices and the existing `"rpc"`/`"ui"` ki
 
 **Interfaces:** Consume `model.PreferredTiming(*model.Log) (span.Fidelity, bool)`, `model.SelectTiming([]span.Span) model.TimingSelection`, `selectedTimelineIdentity() selectionIdentity`, `restoreTimelineIdentity(selectionIdentity) bool` and `invalidateRows()`. Produce methods `activeTimelineTier() timelineTier`, `switchTimelineTier()`, `rememberTimelineSelection()`, `reconcileTimelineSelection()` and `refreshTimelinePresentation()`.
 
-- [ ] **Step 1: Add failing tier and identity tests.**
+- [x] **Step 1: Add failing tier and identity tests.**
 
 Start with the existing real `loadedMixedPositionLog(t)` fixture, which includes admitted but unpositioned RPC evidence and a UI operation:
 
@@ -119,11 +119,11 @@ This gives RPC original index 0 unavailable for positioning, selectable RPC indi
 
 Warm spans, lanes, labels and wall-clock caches before switching. Use different providers, clocks and long UI addresses to prove returned labels, colours, notes, detail width and jump target belong to the new tier. Do not use cache booleans as the only evidence. Existing `TestAViewThatDrawsNoTimelineDoesNotPackItsLanes` must continue to pass.
 
-- [ ] **Step 2: Run focused tests and record RED.**
+- [x] **Step 2: Run focused tests and record RED.**
 
 Run `go test ./internal/tui -run 'TestTimelineTier' -count=1`. Initially the switching interface is absent; after adding scaffolding, assertions must expose the missing behaviour. Keep fixtures independent of the implementation's index mapping.
 
-- [ ] **Step 3: Implement tier and identity transitions.**
+- [x] **Step 3: Implement tier and identity transitions.**
 
 Move `timelineTierFor` to `timeline_tier.go` and delegate the default decision:
 
@@ -166,7 +166,7 @@ Implement switching using whole-capture `len(m.log.RPCSpans)` and `len(m.log.UIS
 
 Change `filteredTimelineTiming` to switch on `m.activeTimelineTier()`. At the end of `invalidateRows`, replace timeline-only clamping with reconciliation. Persist the final cursor after both movement methods, including the nearest-time lane reseek; remember navigation snapshots before copying their value-owned state. Preserve modal and non-timeline packing boundaries.
 
-- [ ] **Step 4: Make presentation measurements tier-aware.**
+- [x] **Step 4: Make presentation measurements tier-aware.**
 
 Change the existing signatures and every caller/test without compatibility wrappers:
 
@@ -181,7 +181,7 @@ Add `timelinePresentationTier timelineTier` and `timelinePresentationCached bool
 
 Update inaccurate comments claiming the tier cannot change. Do not refactor unrelated layout or analysis code.
 
-- [ ] **Step 5: Verify and commit the core.**
+- [x] **Step 5: Verify and commit the core.**
 
 Run focused tests, `go test ./internal/tui`, `go test ./...`, `golangci-lint run`, `gofmt` on changed Go files and `codex-git diff --check`. Review any intentional fixture/golden changes before accepting them. Commit explicit paths with a signed subject `Preserve independent timing-tier selections`. Request task review and separate test cleanup before Task 2.
 
@@ -191,7 +191,7 @@ Run focused tests, `go test ./internal/tui`, `go test ./...`, `golangci-lint run
 
 **Interfaces:** Consume Task 1's `switchTimelineTier`, `activeTimelineTier`, `timeline.notice`, and tier-aware presentation. Produce `timelineAxisGutter(tier timelineTier, hidden, width int) string` for a tier-labelled axis gutter that preserves lane truncation evidence.
 
-- [ ] **Step 1: Add failing real key/render journeys.**
+- [x] **Step 1: Add failing real key/render journeys.**
 
 Route the Task 1 mixed-capture journey through the actual key dispatcher:
 
@@ -209,7 +209,7 @@ Test `t` with the list focused, with facets/detail focused, with a narrow facet 
 
 At widths 160, 100 and 60, assert the title and axis identify the active tier, the UI title retains whole-second qualification, the lane-cut count survives limited height, and output stays within the terminal width. Include a UI-only provider colour and long UI address in a mixed capture so old default-tier caches cannot pass. Keep direct `timeAxis` numeric-label tests unchanged; update rendered-axis expectations for the new gutter.
 
-- [ ] **Step 2: Record RED, then wire key and status behaviour.**
+- [x] **Step 2: Record RED, then wire key and status behaviour.**
 
 Run `go test ./internal/tui -run 'TestTimelineTier' -count=1`. Add this case to the main key switch, after the existing modal handlers:
 
@@ -222,7 +222,7 @@ case "t":
 
 Clear `m.timeline.notice` at the same start-of-key stage as `m.blockedJump`. In `footer`, after modal/footer overrides and before ordinary key hints, display a nonempty notice only for the visible timeline list, with clipped notice on the first line and the existing quit hint on the second. Keep the footer at two rows. Add `t tier` near the start of `actionKeys` only for that same focus/visibility condition, preserving quit/back hints at narrow widths.
 
-- [ ] **Step 3: Label the axis and document the control.**
+- [x] **Step 3: Label the axis and document the control.**
 
 Keep numeric `timeAxis` and its column alignment unchanged. Replace only its existing label gutter composition with:
 
@@ -235,7 +235,7 @@ The helper uses `rpc`/`ui`, adds `laneCutMark(hidden)` after it when needed, and
 
 Add a help row: `t` — `switch RPC/UI timing with the timeline list focused`. README wording: “With the timeline focused, `t` switches between available RPC and UI timing. Each tier keeps its own selected observation. UI timing retains whole-second resolution; filtering does not switch clocks.” State that a single available tier stays selected and reports the unavailable alternative.
 
-- [ ] **Step 4: Verify the complete behaviour and commit.**
+- [x] **Step 4: Verify the complete behaviour and commit.**
 
 Run focused/TUI tests, full `go test ./...`, `go test -race -count=1 ./...`, `golangci-lint run`, `go build ./...`, formatting and diff checks. If snapshots change, regenerate with `go test ./internal/tui -update`, inspect the raw styling diff and `scripts/read-golden.sh` output, then rerun affected tests. Preserve existing profile/JSON tests as the boundary against changing their default preference.
 
@@ -248,3 +248,17 @@ Review the whole branch against boundary C, including lazy reconciliation while 
 ## Planning self-review
 
 Boundary C's default preference, whole-capture availability, independent selections, deterministic filter reconciliation, cache invalidation, history ownership and original-source drill-down are assigned to Task 1. Task 2 covers key scope, unavailable-tier status, tier/axis labels, UI qualification, help and terminal verification. The model preference remains authoritative for CLI/JSON consumers. Per-tier display windows are explicitly reserved for F. The interface names above are consistent across both tasks; there are no unresolved scope choices or placeholder steps.
+
+## Delivery record
+
+Implemented on `feature/timing-tier-selection` from `323a114`. Core selection and identity handling landed in `20bcc35`, with transition coverage and test diagnostics in `e6c3bac` and `bfb4f48`. Keyboard controls, axis labels, notices and documentation landed in `67b4749`; final test/comment clarifications landed in `73a61f3`. All branch commits have verified SSH signatures.
+
+Both task reviews and the final whole-branch review approved the implementation. Missing transition coverage was added during core review. Real terminal verification exposed a workbench status composition bug that hid unavailable-tier notices; a full-view regression test reproduced it before the fix. Final scoped review confirmed both remaining test/comment findings resolved, with no open findings. Separate test-cleanup passes retained the meaningful cases and removed none.
+
+Verification: focused and full TUI tests, `go test ./...`, `go test -race -count=1 ./...`, `golangci-lint run` (0 issues), `go build ./...`, formatting and diff checks passed. The full suite and build were checked again at `73a61f3`. Updated help and timeline goldens were inspected as rendered output and raw ANSI diffs.
+
+Seven real PTY sessions passed 78 checkpoints: mixed RPC/UI at 100 and 60 columns with colour and `NO_COLOR`, plus RPC-only, UI-only and no-timing captures. Journeys verified independent selections, original source entries, raw-log return, resize, filtered-empty tiers, unavailable-tier notices and dismissal. ANSI attributes and selected-lane markers were inspected. The reproducible local harness is `/private/tmp/tfli-timing-tier-pty.py`; terminal evidence is in `/private/tmp/tfli-timing-tier-terminal`. These temporary artefacts use only sanitised fixtures.
+
+Review decision: retain the independently measured help-rendering width test. Its output bound remains observable behaviour; if that judgement is wrong, the cost is one redundant test. No architectural or compatibility rulings were required.
+
+Boundary C is complete locally. Profile/JSON preference is unchanged. Integration remains with Dan; boundaries D and F remain separate work.
