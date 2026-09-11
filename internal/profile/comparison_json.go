@@ -53,14 +53,19 @@ type jsonProviderKey struct {
 type jsonResourceTypeKey struct {
 	ResourceType string `json:"resource_type"`
 }
+type jsonUIResourceTypeKey struct {
+	ResourceType   string `json:"resource_type"`
+	DurationSource string `json:"duration_source"`
+}
 type jsonRPCMethodKey struct {
 	Provider     string `json:"provider"`
 	ResourceType string `json:"resource_type"`
 	Method       string `json:"method"`
 }
 type jsonUIOperationKey struct {
-	Address string `json:"address"`
-	Action  string `json:"action"`
+	Address        string `json:"address"`
+	Action         string `json:"action"`
+	DurationSource string `json:"duration_source"`
 }
 
 type jsonComparisonTotal struct {
@@ -117,7 +122,7 @@ func buildComparisonJSON(report ComparisonReport, metadata ComparisonMetadata) (
 	if err := validStrings(append(beforeProviders, afterProviders...)...); err != nil {
 		return jsonComparison{}, errInvalidComparisonUTF8
 	}
-	doc := jsonComparison{SchemaVersion: 2, Kind: "comparison", ToolVersion: metadata.ToolVersion, DurationUnit: "ms", Before: before, After: after,
+	doc := jsonComparison{SchemaVersion: 1, Kind: "comparison", ToolVersion: metadata.ToolVersion, DurationUnit: "ms", Before: before, After: after,
 		Comparability: jsonComparability{LoggingConfiguration: "unknown", ProviderIdentityStatus: report.Data.ProviderIdentityStatus, BeforeProviders: beforeProviders, AfterProviders: afterProviders},
 		Sections:      make([]jsonComparisonSection, 0, len(report.Data.Sections)), Qualifications: comparisonQualifications()}
 	for _, section := range report.Data.Sections {
@@ -161,15 +166,18 @@ func comparisonKeyJSON(kind string, key model.ComparisonKey) (any, error) {
 	case "rpc_providers":
 		values = []string{key.Provider}
 		result = jsonProviderKey{key.Provider}
-	case "rpc_resource_types", "ui_resource_types":
+	case "rpc_resource_types":
 		values = []string{key.ResourceType}
 		result = jsonResourceTypeKey{key.ResourceType}
+	case "ui_resource_types":
+		values = []string{key.ResourceType}
+		result = jsonUIResourceTypeKey{key.ResourceType, key.DurationSource.String()}
 	case "rpc_methods":
 		values = []string{key.Provider, key.ResourceType, key.Method}
 		result = jsonRPCMethodKey{key.Provider, key.ResourceType, key.Method}
 	case "ui_operations":
 		values = []string{key.Address, key.Action}
-		result = jsonUIOperationKey{key.Address, key.Action}
+		result = jsonUIOperationKey{key.Address, key.Action, key.DurationSource.String()}
 	default:
 		return nil, errors.New("comparison JSON has invalid section kind")
 	}
@@ -209,7 +217,7 @@ func comparisonJSONError(err error) error {
 	return err
 }
 func comparisonQualifications() []string {
-	return []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
+	return []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_elapsed_duration_rounding", "refresh_windows_are_hook_measurements", "cli_elapsed_displayed_resolution", "resource_duration_sources_not_interchangeable", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
 }
 
 func finiteComparisonJSON(doc jsonComparison) bool {

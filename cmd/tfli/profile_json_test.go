@@ -89,7 +89,7 @@ func TestRunProfileJSONProducesOneCompleteDocument(t *testing.T) {
 	}
 
 	document := decodeCLIJSONProfile(t, stdout.Bytes())
-	if document.SchemaVersion != 2 || document.Kind != "profile" || document.ToolVersion != version {
+	if document.SchemaVersion != 1 || document.Kind != "profile" || document.ToolVersion != version {
 		t.Fatalf("identity = schema %d, kind %q, version %q", document.SchemaVersion, document.Kind, document.ToolVersion)
 	}
 	if document.Input.Basename != "complete-profile.log" || document.Input.Bytes != uint64(len(call)*21) {
@@ -164,7 +164,7 @@ func TestRunProfileJSONRealFixtureWorkflows(t *testing.T) {
 			}
 
 			document := decodeCLIJSONProfile(t, data)
-			if document.SchemaVersion != 2 || document.Kind != "profile" || document.ToolVersion != version {
+			if document.SchemaVersion != 1 || document.Kind != "profile" || document.ToolVersion != version {
 				t.Fatalf("identity = schema %d, kind %q, version %q", document.SchemaVersion, document.Kind, document.ToolVersion)
 			}
 			if document.Input.Basename != tc.fixture || document.Input.Bytes != tc.bytes {

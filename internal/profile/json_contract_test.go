@@ -55,19 +55,20 @@ func TestJSONProjectionMapsCompleteReportContract(t *testing.T) {
 	assertEqual(t, "quality", jsonQuality{"whole_log", 17, 13, true,
 		[]jsonIssue{{"rpc_duration", "duration_invalid", 2, nil}, {"scan", "timestamp_before_origin", 1, uint32Pointer(0)}},
 		&jsonAttributionQuality{5, 500, []jsonConfidenceTotal{{"unattributed", 1, 10}, {"ambiguous", 2, 20}, {"overlapping", 3, 30}, {"likely", 4, 40}, {"contained", 5, 50}}, []jsonCandidateCount{{2, 4}, {11, 1}}},
-		90, 701, floatPointer(0.4), jsonReconstruction{"complete", intPointer(0), intPointer(0), nil}}, d.Quality)
+		90, 701, floatPointer(0.4), jsonReconstruction{"complete", intPointer(0), intPointer(0), nil}, []jsonDurationSource{{"ui_elapsed", 1, 1000, 1000, true}}}, d.Quality)
 	assertEqual(t, "rpc observation", []jsonRPCObservation{{3, 8, &jsonSource{8, 10, 12, 100, 190}, "Méthod", "provider.a", "type_a", 25, jsonPosition{uint32Pointer(0), uint32Pointer(25), true, []string{}, true}, jsonAttribution{"likely", stringPointer("module.x.resource.a"), 2}}}, d.RPCObservations)
-	assertEqual(t, "ui observation", []jsonUIObservation{{4, 9, nil, "resource.ui", "create", "type_ui", 1000, true, jsonPosition{nil, nil, false, []string{"timestamp_missing", "duration_saturated"}, false}}}, d.UIObservations)
+	assertEqual(t, "ui observation", []jsonUIObservation{{4, 9, nil, "resource.ui", "create", "type_ui", 1000, true, jsonPosition{nil, nil, false, []string{"timestamp_missing", "duration_saturated"}, false}, "ui_elapsed"}}, d.UIObservations)
 	assertEqual(t, "aggregates", jsonAggregates{
 		Providers:     []jsonProvider{{"provider.z", jsonTotal{2, 200, 120, false}}, {"provider.a", jsonTotal{2, 200, 100, false}}},
-		ResourceTypes: []jsonResourceType{{"type_b", jsonTotal{3, 330, 130, false}, jsonTotal{2, 2200, 1200, true}}},
-		Resources:     []jsonResource{{"resource.ui", jsonTotal{2, 2200, 1200, true}, jsonTotal{3, 330, 130, false}, jsonTotal{1, 30, 30, false}, []int{4, 1}}},
+		ResourceTypes: []jsonResourceType{{"type_b", jsonTotal{3, 330, 130, false}, jsonTotal{2, 2200, 1200, true}, []jsonDurationSource{}}},
+		Resources:     []jsonResource{{"resource.ui", jsonTotal{2, 2200, 1200, true}, jsonTotal{3, 330, 130, false}, jsonTotal{1, 30, 30, false}, []int{4, 1}, []jsonDurationSource{{"ui_elapsed", 1, 1000, 1000, true}}}},
 		UI:            jsonTotal{4, 4000, 1200, true}, UnnamedUI: jsonTotal{1, 800, 800, false},
-		RPCEvidence: jsonRPCEvidence{jsonTotal{8, 800, 180, true}, jsonTotal{1, 10, 10, false}, jsonTotal{1, 20, 20, false}, jsonTotal{1, 30, 30, false}, jsonTotal{1, 40, 40, false}, jsonTotal{1, 50, 50, false}, jsonTotal{1, 60, 60, false}, jsonTotal{2, 590, 380, true}},
+		RPCEvidence:     jsonRPCEvidence{jsonTotal{8, 800, 180, true}, jsonTotal{1, 10, 10, false}, jsonTotal{1, 20, 20, false}, jsonTotal{1, 30, 30, false}, jsonTotal{1, 40, 40, false}, jsonTotal{1, 50, 50, false}, jsonTotal{1, 60, 60, false}, jsonTotal{2, 590, 380, true}},
+		DurationSources: []jsonDurationSource{{"ui_elapsed", 1, 1000, 1000, true}},
 	}, d.Aggregates)
 	assertEqual(t, "timeline", jsonTimeline{stringPointer("rpc"), "partial", stringPointer("2026-09-11T00:02:03.000000004Z"), "zero_to_latest_positioned_end", 2, 1, 1, 225, true, 25, 200, true, map[string]uint64{"timestamp_missing": 1}, &jsonMetrics{100, 3, 75, floatPointer(0.75), 25, floatPointer(0.25)}, uint32Pointer(20), []jsonInterval{{25, 40, 15, 1, 2, 3, intPointer(3)}, {40, 50, 10, 0, 0, 3, nil}}}, d.Timeline)
-	assertEqual(t, "root constants", []any{uint8(2), "profile", "1.2.3", "ms"}, []any{d.SchemaVersion, d.Kind, d.ToolVersion, d.DurationUnit})
-	assertEqual(t, "qualifications", []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}, d.Qualifications)
+	assertEqual(t, "root constants", []any{uint8(1), "profile", "1.2.3", "ms"}, []any{d.SchemaVersion, d.Kind, d.ToolVersion, d.DurationUnit})
+	assertEqual(t, "qualifications", []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_elapsed_duration_rounding", "refresh_windows_are_hook_measurements", "cli_elapsed_displayed_resolution", "resource_duration_sources_not_interchangeable", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}, d.Qualifications)
 }
 
 func TestJSONProjectionMapsAbsentAndUIOnlyStates(t *testing.T) {

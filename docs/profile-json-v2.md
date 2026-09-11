@@ -1,5 +1,7 @@
 # Profile JSON v2
 
+Superseded reference: the alpha CLI emits [Profile JSON v1](profile-json-v1.md), which is the current authoritative contract and includes reconstruction diagnostics and resource duration provenance. The historical schema-version increment below is no longer emitted.
+
 Profile JSON exports the complete admitted evidence used by `tfli`'s profile report. It contains unmasked identifiers and source references, but no raw log bodies, credential fields, absolute input path, or generation timestamp. Version 2 makes no compatibility promise for a future schema version.
 
 All object fields are mandatory and appear in the order documented below. Names use `snake_case`. Arrays preserve report order except `candidate_counts`, which is numerically ascending. Empty arrays and maps are `[]` and `{}`. Unavailable values are `null`; a measured zero remains `0`. Durations and offsets are integer milliseconds. Counts, byte offsets, and line numbers are JSON integers and may exceed JavaScript's exactly representable integer range. Invalid UTF-8 in any exported string makes rendering fail with the fixed diagnostic `profile JSON contains invalid UTF-8`.

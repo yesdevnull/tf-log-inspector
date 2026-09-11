@@ -13,8 +13,8 @@ bounded performance investigation. Each delivery boundary gets its own
 implementation plan later.
 
 The [completed investigation design](2026-09-09-investigation-workflows-design.md)
-remains the baseline. The [profile JSON v2](../../profile-json-v2.md) and
-[comparison JSON v2](../../comparison-json-v2.md) contracts remain authoritative.
+remains the baseline. The [profile JSON v1](../../profile-json-v1.md) and
+[comparison JSON v1](../../comparison-json-v1.md) contracts remain authoritative.
 This draft proposes no schema change or compatibility adapter.
 
 ## Approach and scope
@@ -212,7 +212,7 @@ resolves the requested source position when the result arrives. Apply completion
 only to the currently open request/generation; late completion must neither
 reopen a modal the user closed nor replace a newer response selection.
 
-Running is a transient TUI state, not a new reconstruction state in JSON v2.
+Running is a transient TUI state, not a new reconstruction state in JSON v1.
 Ordinary CLI reporting remains lazy. No new CLI validation mode is introduced.
 No export or scrub output is produced by checking responses.
 

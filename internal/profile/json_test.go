@@ -58,7 +58,7 @@ func TestJSONRendererProducesOneDeterministicCompleteDocument(t *testing.T) {
 		t.Fatalf("second decode error = %v, want EOF", err)
 	}
 	assertJSONKeys(t, "root", root, "schema_version", "kind", "tool_version", "input", "duration_unit", "tiers", "quality", "rpc_observations", "ui_observations", "aggregates", "timeline", "qualifications")
-	assertJSONLiteral(t, root, "schema_version", "2")
+	assertJSONLiteral(t, root, "schema_version", "1")
 	assertJSONLiteral(t, root, "kind", `"profile"`)
 	assertJSONLiteral(t, root, "tool_version", `"test"`)
 	assertJSONLiteral(t, root, "duration_unit", `"ms"`)
@@ -76,7 +76,7 @@ func TestJSONRendererProducesOneDeterministicCompleteDocument(t *testing.T) {
 		t.Fatalf("observation counts = rpc %d, ui %d", len(rpc), len(ui))
 	}
 	assertJSONKeys(t, "rpc observation", rpc[0], "index", "entry", "source", "method", "provider", "resource_type", "duration_ms", "position", "attribution")
-	assertJSONKeys(t, "ui observation", ui[0], "index", "entry", "source", "address", "action", "resource_type", "duration_ms", "duration_lower_bound", "position")
+	assertJSONKeys(t, "ui observation", ui[0], "index", "entry", "source", "address", "action", "resource_type", "duration_ms", "duration_lower_bound", "position", "duration_source")
 	assertJSONLiteral(t, rpc[0], "duration_ms", "120")
 	assertJSONLiteral(t, ui[0], "duration_ms", "1000")
 
@@ -170,7 +170,7 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	assertJSONKeys(t, "attribution", decodeJSONObject(t, rpc["attribution"]), "confidence", "address", "candidates")
 
 	quality := decodeJSONObject(t, root["quality"])
-	assertJSONKeys(t, "quality", quality, "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction")
+	assertJSONKeys(t, "quality", quality, "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction", "duration_sources")
 	issues := decodeJSONArray(t, quality["issues"])
 	assertJSONKeys(t, "issue", issues[0], "stage", "code", "count", "first_entry")
 	assertJSONNull(t, "absent issue first entry", issues[1]["first_entry"])
@@ -182,12 +182,12 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	assertJSONNull(t, "complete reconstruction code", decodeJSONObject(t, quality["reconstruction"])["code"])
 
 	aggregates := decodeJSONObject(t, root["aggregates"])
-	assertJSONKeys(t, "aggregates", aggregates, "providers", "resource_types", "resources", "ui", "unnamed_ui", "rpc_evidence")
+	assertJSONKeys(t, "aggregates", aggregates, "providers", "resource_types", "resources", "ui", "unnamed_ui", "rpc_evidence", "duration_sources")
 	provider := decodeJSONArray(t, aggregates["providers"])[0]
 	assertJSONKeys(t, "provider", provider, "provider", "rpc")
 	assertJSONKeys(t, "total", decodeJSONObject(t, provider["rpc"]), "count", "total_ms", "max_ms", "lower_bound")
-	assertJSONKeys(t, "resource type", decodeJSONArray(t, aggregates["resource_types"])[0], "resource_type", "rpc", "ui")
-	assertJSONKeys(t, "resource", decodeJSONArray(t, aggregates["resources"])[0], "address", "ui", "named_rpc", "overlapping_rpc", "ui_observation_indices")
+	assertJSONKeys(t, "resource type", decodeJSONArray(t, aggregates["resource_types"])[0], "resource_type", "rpc", "ui", "duration_sources")
+	assertJSONKeys(t, "resource", decodeJSONArray(t, aggregates["resources"])[0], "address", "ui", "named_rpc", "overlapping_rpc", "ui_observation_indices", "duration_sources")
 	assertJSONKeys(t, "RPC evidence", decodeJSONObject(t, aggregates["rpc_evidence"]), "baseline", "missing_type", "no_context", "contained", "likely", "overlapping", "ambiguous", "unattributed")
 
 	timeline := decodeJSONObject(t, root["timeline"])
