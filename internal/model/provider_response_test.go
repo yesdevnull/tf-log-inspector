@@ -68,30 +68,29 @@ func TestExplicitInspectionWithoutSourceSelection(t *testing.T) {
 func TestReconstructionDiagnosticsReturnsDetachedMetadata(t *testing.T) {
 	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
 	tests := []struct {
-		name        string
-		source      string
-		wantQuality ReconstructionQuality
-		wantCodes   []string
-		wantStarts  []int
+		name       string
+		source     string
+		wantCodes  []string
+		wantLines  []int
+		wantStarts []int
 	}{
 		{
-			name:        "complete",
-			source:      head + "a: {\"ok\":1}\n",
-			wantQuality: ReconstructionQuality{State: "complete", Responses: 1},
+			name:   "complete",
+			source: head + "a: {\"ok\":1}\n",
 		},
 		{
-			name:        "partial recovered",
-			source:      head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n",
-			wantQuality: ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"},
-			wantCodes:   []string{"delimiter_mismatch"},
-			wantStarts:  []int{2},
+			name:       "recovered malformed response",
+			source:     head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n",
+			wantCodes:  []string{"delimiter_mismatch"},
+			wantLines:  []int{2},
+			wantStarts: []int{2},
 		},
 		{
-			name:        "failed ambiguous",
-			source:      head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\nordinary tail\n",
-			wantQuality: ReconstructionQuality{State: "failed", Diagnostics: 2, Code: "reconstruction_failed"},
-			wantCodes:   []string{"ambiguous_ownership", "ambiguous_ownership"},
-			wantStarts:  []int{1, 2},
+			name:       "ambiguous ownership",
+			source:     head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\nordinary tail\n",
+			wantCodes:  []string{"ambiguous_ownership", "ambiguous_ownership"},
+			wantLines:  []int{2, 2},
+			wantStarts: []int{1, 2},
 		},
 	}
 
@@ -99,15 +98,12 @@ func TestReconstructionDiagnosticsReturnsDetachedMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			l := loadResponseLog(t, tc.source)
 			l.InspectProviderResponses()
-			if got := l.ReconstructionQuality(); got != tc.wantQuality {
-				t.Fatalf("quality = %+v, want %+v", got, tc.wantQuality)
-			}
 			diagnostics := l.ReconstructionDiagnostics()
 			if len(diagnostics) != len(tc.wantCodes) {
 				t.Fatalf("diagnostics = %#v", diagnostics)
 			}
 			for i, diagnostic := range diagnostics {
-				if diagnostic.Code != tc.wantCodes[i] || diagnostic.StartLine != tc.wantStarts[i] || diagnostic.Ranges != nil || diagnostic.Unavailable != nil {
+				if diagnostic.Code != tc.wantCodes[i] || diagnostic.Line != tc.wantLines[i] || diagnostic.StartLine != tc.wantStarts[i] || diagnostic.Ranges != nil || diagnostic.Unavailable != nil {
 					t.Errorf("diagnostic %d = %#v", i, diagnostic)
 				}
 			}
@@ -123,7 +119,7 @@ func TestReconstructionDiagnosticsReturnsDetachedMetadata(t *testing.T) {
 			diagnostics = append(diagnostics, logfmt.ProviderJSONDiagnostic{Code: "appended"})
 
 			repeated := l.ReconstructionDiagnostics()
-			if len(repeated) != len(tc.wantCodes) || repeated[0].Code != tc.wantCodes[0] || repeated[0].StartLine != tc.wantStarts[0] || repeated[0].Ranges != nil || repeated[0].Unavailable != nil {
+			if len(repeated) != len(tc.wantCodes) || repeated[0].Code != tc.wantCodes[0] || repeated[0].Line != tc.wantLines[0] || repeated[0].StartLine != tc.wantStarts[0] || repeated[0].Ranges != nil || repeated[0].Unavailable != nil {
 				t.Fatalf("stored diagnostics mutated: %#v", repeated)
 			}
 		})

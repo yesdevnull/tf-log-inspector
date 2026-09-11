@@ -184,7 +184,7 @@ func TestReconstructionQualityIsLazyAndSeparate(t *testing.T) {
 			}
 			data := append([]byte(nil), l.Data...)
 			entries := append([]logfmt.Entry(nil), l.Entries...)
-			_ = l.ProviderResponseAt(0, 0)
+			l.InspectProviderResponses()
 			if got := l.ReconstructionQuality(); got.State != tc.state || got.Responses != tc.responses || got.Diagnostics != tc.diagnostics || got.Code != tc.code || strings.Contains(fmt.Sprintf("%+v", got), "secret") {
 				t.Fatalf("completed = %+v", got)
 			}
