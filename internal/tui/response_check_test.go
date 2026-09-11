@@ -64,32 +64,57 @@ func TestResponseCheckJoinsRunningInspectionAndCloseDoesNotReopen(t *testing.T) 
 }
 
 func TestResponseCompletionRejectsStaleCaptureRequestAndQuit(t *testing.T) {
-	m := responseModel(t, `{"message":"first"}`)
-	_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	_, selectFirst := m.Update(inspect())
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.raw.topLine = 1
-	_, selectSecond := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	if selectSecond == nil {
-		t.Fatal("checked capture did not queue a new selection")
-	}
-	m.Update(selectSecond())
-	want := m.renderResponse(100, 20)
-	m.Update(selectFirst())
-	if got := m.renderResponse(100, 20); got != want {
-		t.Fatal("old request replaced newer response")
+	newJourney := func(t *testing.T) (*Model, tea.Cmd, tea.Cmd) {
+		t.Helper()
+		source := responseRecoveryHead + `a: {"message":"old body"}` + "\n" +
+			responseRecoveryHead + `b: {"message":"new body"}` + "\n"
+		m := loadedResponseModel(t, source)
+		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		_, oldSelection := m.Update(inspect())
+		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m.raw.top = 1
+		_, newSelection := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		if oldSelection == nil || newSelection == nil || !m.response.pending || !m.response.resolving {
+			t.Fatal("fixture did not produce an eligible newer request")
+		}
+		return &m, oldSelection, newSelection
 	}
 
-	other := responseModel(t, `{"message":"other"}`)
-	m.Update(responseReadyMsg{log: other.log, requestID: m.response.request.id, presentation: responseState{lines: []string{"wrong capture"}}})
-	if got := m.renderResponse(100, 20); got != want {
-		t.Fatal("different capture replaced response")
-	}
-	m.quitting = true
-	m.Update(responseReadyMsg{log: m.log, requestID: m.response.request.id, presentation: responseState{lines: []string{"after quit"}}})
-	if got := m.renderResponse(100, 20); got != want {
-		t.Fatal("completion changed response after quit")
-	}
+	t.Run("old request while newer request is eligible", func(t *testing.T) {
+		m, oldSelection, newSelection := newJourney(t)
+		m.Update(oldSelection())
+		if got := m.renderResponse(100, 20); !m.response.pending || !strings.Contains(got, "Preparing response") || strings.Contains(got, "old body") {
+			t.Fatalf("old request changed eligible newer response: %q", got)
+		}
+		m.Update(newSelection())
+		newBody := m.renderResponse(100, 20)
+		if !strings.Contains(newBody, "new body") || strings.Contains(newBody, "old body") {
+			t.Fatalf("new request did not publish distinct body: %q", newBody)
+		}
+		m.Update(oldSelection())
+		if got := m.renderResponse(100, 20); got != newBody {
+			t.Fatal("old result replaced already-published newer response")
+		}
+	})
+
+	t.Run("foreign capture while request is eligible", func(t *testing.T) {
+		m, _, newSelection := newJourney(t)
+		foreign := newSelection().(responseReadyMsg)
+		foreign.log = responseModel(t, `{"message":"foreign"}`).log
+		m.Update(foreign)
+		if got := m.renderResponse(100, 20); !m.response.pending || !strings.Contains(got, "Preparing response") || strings.Contains(got, "new body") {
+			t.Fatalf("foreign capture changed eligible response: %q", got)
+		}
+	})
+
+	t.Run("completion after quit while request is eligible", func(t *testing.T) {
+		m, _, newSelection := newJourney(t)
+		m.quitting = true
+		m.Update(newSelection())
+		if got := m.renderResponse(100, 20); !m.response.pending || !strings.Contains(got, "Preparing response") || strings.Contains(got, "new body") {
+			t.Fatalf("completion after quit changed eligible response: %q", got)
+		}
+	})
 }
 
 func TestResponseCompletionQueuesSelectionOnlyOnceAfterPublication(t *testing.T) {
@@ -112,18 +137,22 @@ func TestResponseCompletionQueuesSelectionOnlyOnceAfterPublication(t *testing.T)
 func TestResponsePendingGuidanceAndKeys(t *testing.T) {
 	m := responseModel(t, `{"message":"verified"}`)
 	_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	for _, frame := range []string{unstyled(m.View()), unstyled(m.workbenchView())} {
-		for _, absent := range []string{"search", "next/previous", "scroll", "PgUp"} {
-			if strings.Contains(frame, absent) {
-				t.Fatalf("pending frame advertised %q:\n%s", absent, frame)
+	assertPendingGuidance := func(phase string) {
+		t.Helper()
+		for _, frame := range []string{unstyled(m.View()), unstyled(m.workbenchView())} {
+			for _, absent := range []string{"search", "next/previous", "scroll", "PgUp"} {
+				if strings.Contains(frame, absent) {
+					t.Fatalf("%s frame advertised %q:\n%s", phase, absent, frame)
+				}
 			}
-		}
-		for _, want := range []string{"Esc/r back", "q quit"} {
-			if !strings.Contains(frame, want) {
-				t.Fatalf("pending frame omitted %q:\n%s", want, frame)
+			for _, want := range []string{"Esc/r back", "q quit"} {
+				if !strings.Contains(frame, want) {
+					t.Fatalf("%s frame omitted %q:\n%s", phase, want, frame)
+				}
 			}
 		}
 	}
+	assertPendingGuidance("inspection")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	if m.response.searching {
 		t.Fatal("pending response accepted search")
@@ -132,6 +161,7 @@ func TestResponsePendingGuidanceAndKeys(t *testing.T) {
 	if selection == nil || !strings.Contains(unstyled(m.View()), "Preparing response") {
 		t.Fatal("selection preparation was not visible")
 	}
+	assertPendingGuidance("preparation")
 	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 	m.Update(selection())
 	if frame := unstyled(m.View()); !strings.Contains(frame, "search") || !strings.Contains(frame, "scroll") {
@@ -140,35 +170,50 @@ func TestResponsePendingGuidanceAndKeys(t *testing.T) {
 }
 
 func TestResponseCheckKeepsTerminalResponsiveWhileInspectionRuns(t *testing.T) {
-	m := responseModel(t, `{"message":"verified"}`)
-	_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	done := make(chan tea.Msg, 1)
-	go func() { done <- inspect() }()
+	t.Run("mixed recovery renders quality and closes before completion delivery", func(t *testing.T) {
+		source := responseRecoveryHead + `a: {"message":"recovered"}` + "\n" +
+			responseRecoveryHead + `b: {"broken":]}` + "\n"
+		m := loadedResponseModel(t, source)
+		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		done := make(chan tea.Msg, 1)
+		go func() { done <- inspect() }()
 
-	if frame := unstyled(m.View()); !strings.Contains(frame, "Checking responses") {
-		t.Fatalf("inspection was not visible while command ran:\n%s", frame)
-	}
-	m.Update(tea.WindowSizeMsg{Width: 60, Height: 8})
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.response.open {
-		t.Fatal("close was not responsive while inspection ran")
-	}
-	_, joined := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	_, completed := m.Update(<-done)
-	if joined != nil && completed != nil {
-		t.Fatal("publication and completion queued duplicate selections")
-	}
-	if joined == nil {
-		joined = completed
-	}
-	if joined == nil {
-		t.Fatal("reopened response did not queue a selection")
-	}
-	if !m.response.resolving {
-		t.Fatal("reopened response did not begin resolving")
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	if !m.quitting {
-		t.Fatal("quit was not responsive while response was resolving")
-	}
+		m.Update(tea.WindowSizeMsg{Width: 60, Height: 8})
+		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if m.response.open {
+			t.Fatal("close was not responsive before completion delivery")
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		if frame := unstyled(m.View()); !strings.Contains(frame, "CAPTURE QUALITY") {
+			t.Fatalf("quality did not render while completion was outstanding:\n%s", frame)
+		}
+		m.Update(<-done)
+		if got := m.log.ReconstructionQuality(); got.State != "partial" || got.Responses != 1 || got.Diagnostics != 1 {
+			t.Fatalf("mixed inspection outcome = %+v", got)
+		}
+		if frame := unstyled(m.renderQuality(60, 200)); !strings.Contains(frame, "partial: 1 responses available; 1 reconstruction") || !strings.Contains(frame, "diagnostics") {
+			t.Fatalf("published partial quality did not render:\n%s", frame)
+		}
+	})
+
+	t.Run("malformed recovery renders quality and quits before completion delivery", func(t *testing.T) {
+		m := responseModel(t, `{"secret":`)
+		_, inspect := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		done := make(chan tea.Msg, 1)
+		go func() { done <- inspect() }()
+
+		m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		if frame := unstyled(m.View()); !strings.Contains(frame, "CAPTURE QUALITY") {
+			t.Fatalf("quality did not render while malformed completion was outstanding:\n%s", frame)
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if !m.quitting {
+			t.Fatal("quit was not responsive before completion delivery")
+		}
+		m.Update(<-done)
+		if got := m.log.ReconstructionQuality(); got.State != "failed" || got.Responses != 0 || got.Diagnostics != 1 {
+			t.Fatalf("malformed inspection outcome = %+v", got)
+		}
+	})
 }
