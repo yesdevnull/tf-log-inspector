@@ -284,3 +284,20 @@ text and JSON are byte-identical to the pre-H binary on `two-tier.log`. All eigh
 local package/trimpath-CLI builds passed for Linux/macOS amd64/arm64 with CGO
 disabled, local toolchain and readonly modules. Remote CI has not run. Final
 workflow coverage, documentation and combined review remain in task 4.
+
+Task 4 completed in signed commits `8e7b9f4`, `8e6fc0c` and `d04a8dd`.
+Real-file workflows cover both formats, independent fixture totals, directory
+and basename reproducibility, empty/unpositioned/disjoint tiers, repeated
+operations, count-versus-mean changes, lower bounds and control/Unicode strings.
+The two deferred review notes are resolved: exact key-object wording and an
+independent JSON report snapshot. A temporary nested mutation failed that
+snapshot assertion and was restored. Review added complete renamed-document
+comparison and text empty/unpositioned assertions; scoped re-review approved
+with no remaining findings. Cleanup retained the required cases and removed
+two predicates subsumed by the stronger temporary-directory leakage check.
+
+Controller race tests passed all eleven packages at `8e6fc0c`, with zero lint
+issues and clean formatting. Subsequent cleanup removed only redundant test
+predicates and passed its focused checks. Build, module consistency/checksums,
+local platform builds and manual output checks passed on unchanged production.
+Final combined review remains before Boundary H completion.
