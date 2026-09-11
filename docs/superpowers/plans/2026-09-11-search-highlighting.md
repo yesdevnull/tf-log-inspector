@@ -59,7 +59,7 @@ func renderLiteralMatch(line, query string, position literalPosition, base lipgl
 
 `line` is already safe displayed text with no source ANSI. Invalid, empty, mismatched or out-of-bounds ranges return `base.Render(line)` without highlighting. The helper does not change any model state.
 
-- [ ] **Step 1: Write failing styling and Raw Log journey tests.**
+- [x] **Step 1: Write failing styling and Raw Log journey tests.**
 
 Use real loaded bytes through `horizontalLog`. A representative repeated-occurrence journey is:
 
@@ -102,11 +102,11 @@ For raw severity, use a loaded ERROR or WARN line with text before and after the
 
 Include source ANSI splitting a literal, C0/C1 controls and invalid UTF-8, comparing against the existing `StripANSI` then `DisplayText` result. Exercise horizontal clipping through `renderRawLog`, including a match wider than the viewport and a wide/combining character at a clipping edge. Manual scrolling, a real facet change, and a source jump must remove the highlight; Esc must restore a valid parent match from history. Extend an existing history test rather than duplicating its state-only assertions.
 
-- [ ] **Step 2: Run the focused tests and record RED.**
+- [x] **Step 2: Run the focused tests and record RED.**
 
 Run `go test ./internal/tui -run 'Test(RawSearchHighlight|LiteralMatchHighlight)' -count=1`. The missing helper or absent reverse styling must explain the failure; correct test-fixture mistakes separately.
 
-- [ ] **Step 3: Implement the bounded shared helper.**
+- [x] **Step 3: Implement the bounded shared helper.**
 
 Use the existing grapheme API, avoiding a new Unicode dependency:
 
@@ -148,7 +148,7 @@ if match := m.raw.match; match != nil && !m.raw.notFound && match.entry == i && 
 
 Keep `renderRawLog`'s existing `ansi.Cut` after this step. Preserve every source coordinate in `rawLogLine`; no change to `findLiteral`, search order or scope traversal is needed.
 
-- [ ] **Step 4: Verify GREEN, inspect styling and commit.**
+- [x] **Step 4: Verify GREEN, inspect styling and commit.**
 
 Run the focused tests, then `go test ./internal/tui`, and the full `go test ./...` before committing. Inspect actual SGR spans, clipping resets and both colour settings. If old tests compare prose split by the new style boundaries, change only those assertions to compare `unstyled` text and retain their original positional checks. Run `gofmt` on changed Go files and `/Users/dan/.codex/bin/codex-git diff --check`. Stage only explicit changed paths and make a signed commit with subject `Highlight active raw log search matches`. The controller then requests review and separate test cleanup.
 
@@ -158,7 +158,7 @@ Run the focused tests, then `go test ./internal/tui`, and the full `go test ./..
 
 **Interfaces:** Consume Task 1's `renderLiteralMatch` and test-only style assertions. Keep `responseState`, `r.lines`, original `viewport` content, `responseMatch`, query ownership and search routines as the authoritative existing state. No persistent highlight cache or replacement search engine.
 
-- [ ] **Step 1: Write failing response/lifecycle tests.**
+- [x] **Step 1: Write failing response/lifecycle tests.**
 
 Extend existing real `responseModel` journeys with actual ANSI assertions. Start with `{"message":"needle first needle second"}` reconstructed from split provider fragments; submit `/needle`, then `n`, a failing `n`, and `N`. Assert exactly one visible occurrence highlights on success, none on the miss, the retained anchor still permits reversal, and original `r.lines` and query/match offsets do not change during rendering.
 
@@ -170,11 +170,11 @@ Cover decoded multi-line `@message`, source controls displayed as escapes, combi
 
 Use existing response notice/resize tests to prove the partial-reconstruction notice retains its row and is never highlighted, including notice-only height one. The matching response line index must be relative to response content, not the notice. Manual horizontal/vertical movement removes response highlighting; closing the response restores the original raw highlight. A failed search does not mutate the raw investigation or scrub acceptance.
 
-- [ ] **Step 2: Run the focused tests and record RED.**
+- [x] **Step 2: Run the focused tests and record RED.**
 
 Run `go test ./internal/tui -run 'Test(ResponseSearchHighlight|ResponseSearchMissAndEmptyInputPreserveOccurrence|ResponseRecoveryJourney)' -count=1`. Expected failure: no reverse styling on the response, while prior plain-text search behaviour remains intact.
 
-- [ ] **Step 3: Render only the visible response slice through a temporary viewport.**
+- [x] **Step 3: Render only the visible response slice through a temporary viewport.**
 
 Keep the existing geometry/clamping at the start of `renderResponse`. After updating the original viewport dimensions and offsets, derive `body` from `r.viewport.View()` by default. When there is a successful active match on a visible content line, construct the styled visible slice instead:
 
@@ -203,7 +203,7 @@ if match := r.match; match != nil && !r.notFound {
 
 Return the existing notice plus `body`, or just `body`. Clipping the styled lines before putting them in the temporary viewport deliberately avoids clamping the authoritative horizontal offset against only the shorter visible subset. The copy exists only for padding/rendering: never assign it back to `r.viewport`. Leave original searchable response lines and full-content scroll bounds untouched. Only visible lines are joined and re-indexed; never rebuild the full response on every frame.
 
-- [ ] **Step 4: Document and verify the delivered behaviour.**
+- [x] **Step 4: Document and verify the delivered behaviour.**
 
 Add one sentence beside README search guidance: the active match is highlighted in Raw Log and reconstructed responses; `n`/`N` visit individual occurrences without wrapping. Do not advertise counts, regex, multiple highlights or automatic wrapping.
 
@@ -214,3 +214,15 @@ Run focused response/highlight tests and `go test ./internal/tui`; then `go test
 Run a real PTY journey with sanitised raw and fragmented-response input containing repeated literals, Unicode clusters and escaped controls. Capture original ANSI output and inspect active reverse spans at normal and narrow widths, including a clipped occurrence, miss/reverse recovery, scrolling, response return, resize and `NO_COLOR`. Validate rendered text/width and search position independently of the styling.
 
 Review the complete branch against the shared invariants and boundary B; fix findings and re-review the fix diff. Retain the test-cleanup classification and TDD/verification evidence in the ignored per-plan workspace while work is active. Record final results in this plan before removing that scratch workspace. Keep the feature branch local until Dan requests integration; boundaries C–H remain separate work.
+
+## Delivery record
+
+Completed on `feature/search-highlighting`: `575ae12` implements Raw Log highlighting, `aeddaa4` adds the reviewed cross-row style-isolation check, and `2834647` implements response highlighting. All commits have verified SSH signatures.
+
+Both tasks recorded focused RED then GREEN results. The Raw Log tests initially failed because the shared renderer was absent; four response journeys initially failed because no occurrence was highlighted. Full uncached tests, the race suite, lint, build, formatting and diff checks passed. The controller independently ran the full uncached suite at `2834647`; all eleven packages passed with pristine output.
+
+Independent task review found one missing two-row style-containment assertion. It was added, passed focused verification and scoped re-review, and was kept by a separate cleanup pass. Cleanup classified all fourteen touched Raw Log tests and eleven response tests as protecting distinct behaviour or boundaries; none were removed. The final whole-branch review of `9c7c25b..2834647` found no outstanding issues. No design rulings, deferred findings or parked findings remain.
+
+Real PTY journeys passed at 100 columns with colour and 60 columns with `NO_COLOR`. Actual reverse-video spans were checked for repeated occurrences, misses and reversal, query editing/cancellation, combining and wide characters, visible control escapes, a clipped long response match, manual movement, resize and exact Raw Log restoration after closing a response. Local evidence is in `/private/tmp/tfli-search-highlight-terminal` (raw ANSI, readable frames, reverse-span JSON and reconstructed SVG frames); the sanitised fixture recorder is `/private/tmp/tfli-search-highlight-pty.py`.
+
+Boundary B is complete. The branch remains local for integration; boundary C, explicit timing-tier selection, is the next separate feature.
