@@ -27,7 +27,7 @@
 
 ## Status and delivery boundary
 
-Draft authorised by Dan on 11 September 2026 after comparison and its input-identity fix merged locally at `f614493`. This is I1, the first of two sequential plans. It requires review and implementation approval; no application changes are authorised by the draft itself.
+Draft authorised by Dan on 11 September 2026 after comparison and its input-identity fix merged locally at `f614493`. This is I1, the first of two sequential plans. Dan approved subagent implementation after both plan-review findings were resolved and verified in `5a4e0d8`. Approval covers I1 only; I2 remains a separate planning and implementation decision.
 
 I1 supplies reconstruction outcomes and locks down strict publication. I2 will specify physical-position lookup, model caching, viewer notices/navigation and complete/partial/failed quality presentation. I1 leaves existing `model.ProviderResponse`, text/JSON quality schemas and TUI behaviour unchanged. Boundary I is not complete when I1 alone finishes.
 
@@ -521,4 +521,4 @@ Scoped verification checked both findings against the revised contract and the
 existing parser helpers, finding no collateral contradictions. Markdown links,
 code fences, syntax of the three new Go examples and literal fixture offsets
 were checked successfully. These are plan checks; no recovery implementation or
-application test changes have been made. Implementation approval remains open.
+application test changes have been made. Dan subsequently approved I1 subagent implementation. The execution record below will distinguish completed work from the planned checks.
