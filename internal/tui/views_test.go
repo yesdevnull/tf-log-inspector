@@ -610,6 +610,17 @@ func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
 	}
 }
 
+func TestCompactCaptureGuidanceExplainsUnsupportedTiming(t *testing.T) {
+	m := New(testLog(t, "core-only.log"), "x.log")
+	// Available list space in the 80-by-24 terminal layout.
+	text := strings.Join(strings.Fields(unstyled(m.renderList(52, 18))), " ")
+	for _, want := range []string{"No supported timing observations", "Plain-text CLI timings are not parsed", "terraform.ui", "TF_LOG_PROVIDER=TRACE", "TF_LOG_SDK_PROTO=TRACE", "Raw Log: press 6"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("compact guidance missing %q: %s", want, text)
+		}
+	}
+}
+
 // sortKey is the 's' press, spelled once: every sort test sends it several
 // times over and the literal is long enough to bury what the test is doing.
 var sortKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
