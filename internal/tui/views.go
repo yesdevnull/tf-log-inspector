@@ -492,14 +492,18 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
+		rpcTotal, rpcMax := "n/a", "n/a"
+		if r.RPCCalls > 0 {
+			rpcTotal, rpcMax = formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs))
+		}
 		rows[i] = rollupRow(
 			[]string{
 				r.ResourceType,
 				strconv.Itoa(r.UIResources),
 				formatMs(r.UITotalMs),
 				strconv.Itoa(r.RPCCalls),
-				formatMs(r.RPCTotalMs),
-				formatMs(uint64(r.RPCMaxMs)),
+				rpcTotal,
+				rpcMax,
 			},
 			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs)},
 			&rollupDetail{
@@ -508,8 +512,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
 					{label: "UI total", value: formatMs(r.UITotalMs), kind: numericColumn},
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
-					{label: "RPC total", value: formatMs(r.RPCTotalMs), kind: numericColumn},
-					{label: "RPC max", value: formatMs(uint64(r.RPCMaxMs)), kind: numericColumn},
+					{label: "RPC total", value: rpcTotal, kind: numericColumn},
+					{label: "RPC max", value: rpcMax, kind: numericColumn},
 				},
 				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
 			},
@@ -887,16 +891,14 @@ func (m *Model) fitCaptureGuidance(w, h int) string {
 	return fitCaptureGuidance(w, h)
 }
 
-// captureGuidance is what the centre pane shows for a log with no spans at
-// all: what such a log is missing, how to capture one that is not, and how
-// to check this file's structure. Every sentence is internal/diagnose's --
-// the EXTRACTION section's "nothing to profile" line, writeRPCCaptureHint's
-// two-gates explanation, and the HCP capture instruction from tfli's own
-// usage text -- rewrapped to 40 columns, which is narrower than the centre
-// pane at any supported terminal width.
+// captureGuidance distinguishes unsupported input from an absence of work
+// and explains which evidence can be profiled. Lines fit a 40-column pane.
 var captureGuidance = []string{
-	"This log contains no provider RPC",
-	"entries, so there is nothing to profile.",
+	"No supported timing observations.",
+	"Plain-text CLI timings are not parsed.",
+	"Use terraform.ui JSON completion hooks",
+	"for resource timings, or provider TRACE",
+	"for RPC timings. Raw Log: press 6.",
 	"",
 	"Provider RPC entries are emitted only at",
 	"TRACE, so debug logging alone will not",

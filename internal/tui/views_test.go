@@ -63,7 +63,7 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
 		{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0s", "0s"},         // UI tier only
+		{"local_file", "1", "1.0s", "0", "n/a", "n/a"},       // UI tier only
 		{"aws_subnet", "0", "0s", "1", "40ms", "40ms"},       // RPC tier only
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
@@ -88,7 +88,7 @@ func TestAProviderFacetLeavesTheUITierIndependent(t *testing.T) {
 	// Cells in typeColumns' order: resource type, UI res., UI total,
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
-		{"github_repository", "1", "4.0s", "0", "0s", "0s"},
+		{"github_repository", "1", "4.0s", "0", "n/a", "n/a"},
 		{"local_file", "1", "1.0s", "1", "900ms", "900ms"},
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
@@ -568,6 +568,7 @@ func TestTheTableSaysWhenAFilterHasEmptiedIt(t *testing.T) {
 // never set.
 func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
 	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if len(m.log.RPCSpans) != 0 || len(m.log.UISpans) == 0 {
 		t.Fatalf("fixture assumption changed: %d RPC and %d UI spans, want a UI-only log", len(m.log.RPCSpans), len(m.log.UISpans))
 	}
@@ -593,7 +594,8 @@ func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
 
 	centre := centrePaneOf(m.View())
 	for _, want := range []string{
-		"nothing to profile",    // internal/diagnose's EXTRACTION verdict
+		"No supported timing observations",
+		"Plain-text CLI timings are not parsed",
 		"TF_LOG_PROVIDER=TRACE", // both gates, from writeRPCCaptureHint
 		"TF_LOG_SDK_PROTO=TRACE",
 		"debug logging on a run", // the HCP capture instruction
@@ -963,6 +965,12 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 				}
 				for i, c := range cols {
 					if c.kind != numericColumn {
+						continue
+					}
+					if tc.view == ViewTypes && (c.header == "RPC total" || c.header == "RPC max") && rw.numeric[3] == 0 {
+						if rw.cells[i] != "n/a" {
+							t.Errorf("unobserved RPC duration displayed as %q", rw.cells[i])
+						}
 						continue
 					}
 					// The two renderings the builders use: a duration

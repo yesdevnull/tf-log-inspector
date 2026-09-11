@@ -186,8 +186,8 @@ func (m *Model) timelineLanes() []model.Lane {
 // whose calls merely happen not to overlap share a lane -- and on a real
 // multi-provider capture most lanes end up that way. Such a lane belongs to
 // no provider, which leaves the stall annotation naming a row and blaming
-// nobody ("waiting on mixed/2"). That destroys the annotation's whole
-// justification for naming lanes rather than spans: "waiting on aws/1"
+// nobody ("active in mixed/2"). That destroys the annotation's whole
+// justification for naming lanes rather than spans: "active in aws/1"
 // earns its place by pointing at exactly one bar a reader can go and look
 // at. The cost is rows: a provider whose calls never overlap anything still
 // gets a row of its own, so the timeline is taller than the log's peak
@@ -407,7 +407,7 @@ func (m *Model) selectedTimelineSpanValue() (span.Span, bool) {
 // ["aws", "aws", "google"], the third lane is "google/1", not "google/3" --
 // google only has one lane. This is what makes the label answer "which of
 // THIS provider's lanes is this" rather than "which row is this", the
-// distinction the stall text ("...waiting on aws/1") depends on: a reader
+// distinction the stall text ("...active in aws/1") depends on: a reader
 // matching that text to a bar is looking for aws's own first lane, wherever
 // it sits among the rows google or azurerm also occupy.
 func laneLabels(spans []span.Span, lanes []model.Lane) []string {
@@ -466,7 +466,7 @@ func laneLabelWidth(labels []string) int {
 // The pair is returned together, and cached together, because the two
 // callers must agree on both. renderTimeline draws each lane row's label
 // clipped to that width, and stallAnnotation names a stall's lane with the
-// same label clipped the same way -- "waiting on aws/1" points at exactly
+// same label clipped the same way -- "active in aws/1" points at exactly
 // one bar only if the bar carries that same text, so a label measured to a
 // different width in the two places sends the reader looking for a row that
 // is not on screen. Two hand-kept copies of that rule are what the one
@@ -819,7 +819,7 @@ func timingExclusionNotes(timing model.TimingSelection, w int) []string {
 // stall annotation names -- is swept over the spans the filter left, while
 // each is worded as a statement about the plan. On testdata/timeline.log,
 // ticking aws deletes the log's one real finding and opens a window
-// reporting "nothing running -- between calls" across a stretch google was
+// reporting "no observed work -- between calls" across a stretch google was
 // working in: the clause this view reserves for "the time is not in the
 // providers", handed to a reader who would act on it by going to look at
 // Terraform core. The busy percentage moves the same way, and is the figure
@@ -1193,23 +1193,13 @@ func axisLabelsFit(left, right string, barW int) bool {
 // noMatchNote already state for the lanes above it.
 const stallAnnotationNoStalls = "no stalls"
 
-// nothingRunningClause opens the two lines that report a window with no
-// span running anywhere. It replaces the count the other line carries
-// rather than sitting beside it: "concurrency 0 of 3" is arithmetic where
-// "nothing running" is the finding, and these two windows are the ones a
-// reader most needs to pick out of the block at a glance -- they are the
-// ones no amount of provider tuning will touch.
-const nothingRunningClause = "nothing running"
+// Gaps are limited to the selected observations. Short suffixes distinguish
+// leading gaps from gaps between observations within the common pane width.
+const nothingRunningClause = "no observed work"
 
-// betweenCallsClause and beforeAnyCallClause close the two all-idle lines,
-// and are the only thing telling them apart. Both fit
-// commonCentrePaneWidth whole with the clause attached (measured in
-// TestTheAllIdleStallLinesFitTheCommonPaneWidth), which is what these two
-// lines can promise and a blocked wait cannot: they carry no lane label, so
-// their width does not vary with the log.
 const (
-	betweenCallsClause  = " — between calls"
-	beforeAnyCallClause = " — before any call"
+	betweenCallsClause  = " — gap"
+	beforeAnyCallClause = " — before first"
 )
 
 // maxStallsShown bounds how many stall windows the annotation names. The
@@ -1252,7 +1242,7 @@ func stallThresholdMs(wallClock uint32) uint32 {
 // of indexing lanes with a value that silently means something else.
 //
 // It is never asked about model.Stall's own -1 -- the sentinel for a window
-// with nothing running at all. That is a legitimate value with its own
+// with no observed work at all. That is a legitimate value with its own
 // wording (see stallAnnotation), which is decided before a lane is looked
 // for, so a negative answer HERE still means only one thing.
 func stallLane(lanes []model.Lane, idx int) int {
@@ -1273,7 +1263,7 @@ func stallLane(lanes []model.Lane, idx int) int {
 // zero, because a window beginning at 0 can still hold a call that
 // completed inside it. A zero-extent span occupies no instant and so is
 // never running (see model.PeakConcurrency), which leaves model.Stalls
-// reporting nothing running across a stretch a call finished in. The
+// reporting no observed work across a stretch a call finished in. The
 // UI-hook tier makes that the ordinary shape rather than an edge case:
 // Terraform rounds hook timings to whole seconds, so every resource that
 // refreshed in "0s" produces one, and the lane row draws it as a lit
@@ -1315,86 +1305,11 @@ func concurrencyClause(s model.Stall) string {
 	return fmt.Sprintf("concurrency %d–%d of %d", s.MinRunning, s.MaxRunning, s.Capacity)
 }
 
-// stallAnnotation renders the windows model.Stalls found beneath the lanes
-// and axis, naming each by the lane label the reader already sees the bars
-// under -- "waiting on aws/1" points at exactly one bar, the way naming the
-// blocking span's RPC and resource type would not once a lane has packed
-// more than one call sharing that name. At most maxStallsShown, longest
-// first: the pane's height is finite, and a screenful of short stalls is
-// noise beside the one that mattered. A list SHORTENED to that few carries
-// moreBelowMark, so that what was left out is visible rather than silently
-// absent -- see the mark's own doc comment, and writeSlowestCalls in
-// internal/profile, which states the same rule as "(top N)" only when it
-// actually truncated.
-//
-// Three kinds of window are worded differently, because they are three
-// different findings:
-//
-//   - A blocked wait names the lane still working, which is where a reader
-//     goes to look ("waiting on aws/1, 3.3s–20.0s — concurrency 1 of 2",
-//     or "concurrency 1–2 of 3" for a window whose depth changed inside it;
-//     see concurrencyClause).
-//   - A window with nothing running anywhere has no lane to blame, and
-//     says so ("nothing running, 5.5s–9.0s — between calls"): the time is
-//     not in the providers, so tuning provider parallelism will not touch
-//     it.
-//   - The window BEFORE any provider call is that same finding about
-//     Terraform core starting up -- loading plugins, fetching schemas --
-//     and is named for it ("nothing running, 0s–3.0s — before any call").
-//     It appears on nearly every capture, so wording it as a mid-plan
-//     collapse would tell every reader their plan fell over at the start.
-//     Which of the two an all-idle window is comes from the spans, not
-//     from its own start: see callStartedBefore.
-//
-// The lane comes FIRST on a blocked wait, ahead of the window and the
-// concurrency figure, because the line is clipped from its end
-// (clipValueEnd) and the centre pane is 44 columns at the 100-column
-// terminal this tool is actually run at -- narrower than at 70 or 160, both
-// of which give it more. With the lane last, that pane's clip lands on the
-// lane itself: it keeps the arithmetic and drops the one thing the line
-// names a lane FOR. Ordering it first makes the lane structurally safe
-// rather than usually safe: it is what survives at every width, whatever the
-// label and the window measure, and what a narrow pane gives up is the tail
-// of "concurrency 1 of 2", which is arithmetic the reader can also take off
-// the bars.
-//
-// None of the three says "lane", and that is the point of the wording. The
-// number model.Stalls carries is measured against the spans' PEAK
-// CONCURRENCY, not against the rows this view draws, and per-provider
-// packing (see packLanesByProvider) makes the two diverge by construction:
-// a provider that has finished still occupies a row but is no longer
-// capacity a later window can leave idle. "N lanes idle" would therefore
-// make a claim about the screen that its number is not entitled to make,
-// and could be read straight off as false -- "no stalls" beside a visibly
-// blank row, or "2 lanes idle" on a five-row timeline. Concurrency is the
-// right measure for "was this work or waiting", so the line names what the
-// number is ("concurrency 1 of 2") rather than what a reader might count.
-//
-// A blocked wait states the concurrency that REMAINED and the peak it fell
-// from, because a drop is only legible against what it dropped from -- "1"
-// alone says nothing about whether the plan was running wide or narrow.
-// Both numbers are read off the Stall rather than swept again here, which is
-// what keeps the two halves of "M of N" one measurement; see
-// concurrencyClause. The two all-idle windows state the finding in words
-// instead (see nothingRunningClause).
-//
-// Every one of the three is measured over the spans the active filter
-// leaves, so a narrowed timeline can report a window nothing SHOWN ran in
-// across a stretch a hidden provider was working through. The all-idle
-// wording is the reading that goes furthest wrong there, and it is a
-// sentence with no room to qualify itself -- both all-idle lines only just
-// fit the common centre pane (see betweenCallsClause) -- so the
-// qualification is carried above the block instead, by timelineFilterNote.
-//
-// Offsets are rendered with formatMs, the same duration formatter every
-// other number in this package uses, rather than a wall-clock time: span
-// times are milliseconds from a per-builder zero point (see the doc
-// comment on span.Span), and rendering a time of day out of that offset
-// would be inventing a fact the log does not carry.
-//
-// A tier with no spans -- including one a filter has emptied entirely --
-// reports stallAnnotationNoStalls rather than an empty string: see its own
-// doc comment for why silence is not an acceptable answer here.
+// stallAnnotation names the longest intervals with reduced observed
+// concurrency. Activity identifies a lane to inspect, not a cause of waiting;
+// gaps describe only the selected timing evidence, not Terraform idleness.
+// Lane labels match the bars and precede offsets so narrow layouts retain
+// the observation's identity. Leading and intervening gaps remain distinct.
 func (m *Model) stallAnnotation(w int) string {
 	_, spans := m.timelineSpans()
 	if len(spans) == 0 {
@@ -1434,7 +1349,7 @@ func (m *Model) stallAnnotation(w int) string {
 
 	// The lane is named with the label the LANE ROW renders, from the same
 	// measurement it renders from (timelineLaneLabels) and clipped by the
-	// same rule to the same width. "waiting on aws/1" points at exactly one
+	// same rule to the same width. "active in aws/1" points at exactly one
 	// bar only if the bar carries that same text: naming a lane
 	// "googleworkspace/1" beside a row reading "…workspace/1" would send
 	// the reader looking for a bar that is not on screen. One measurement
@@ -1466,7 +1381,7 @@ func (m *Model) stallAnnotation(w int) string {
 				// would actually be.
 				panic(fmt.Sprintf("tui: stallAnnotation: span %d (stall %d's Blocking) is not in any lane", s.Blocking, i))
 			}
-			line = fmt.Sprintf("waiting on %s, %s — %s",
+			line = fmt.Sprintf("active in %s, %s — %s",
 				clipValueForKind(labels[l], labelW, tailIdentifierColumn), window, concurrencyClause(s))
 		}
 		// clipValueEnd rather than clipWidth: clipWidth cuts with no marker,

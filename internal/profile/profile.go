@@ -151,7 +151,11 @@ func writeResourceTypeJoin(b *strings.Builder, rows []TypeSummary, limit int) {
 	fmt.Fprintf(b, "  %-*s %9s %9s %9s %9s %9s\n", width, "resource type", "UI res.", "UI total", "RPC calls", "RPC total", "RPC max")
 	for _, row := range rows[:shown] {
 		name := truncate(row.ResourceType, width)
-		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n", width, name, row.UIResources, formatLowerBoundMs(row.UITotalMs, row.UILowerBound), row.RPCCalls, formatMs(row.RPCTotalMs), formatMs(uint64(row.RPCMaxMs)))
+		rpcTotal, rpcMax := "n/a", "n/a"
+		if row.RPCCalls > 0 {
+			rpcTotal, rpcMax = formatMs(row.RPCTotalMs), formatMs(uint64(row.RPCMaxMs))
+		}
+		fmt.Fprintf(b, "  %-*s %9d %9s %9d %9s %9s\n", width, name, row.UIResources, formatLowerBoundMs(row.UITotalMs, row.UILowerBound), row.RPCCalls, rpcTotal, rpcMax)
 		if name != logfmt.DisplayText(row.ResourceType) {
 			fmt.Fprintf(b, "    resource type: %s\n", logfmt.DisplayText(row.ResourceType))
 		}
