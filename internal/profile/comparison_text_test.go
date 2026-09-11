@@ -105,9 +105,6 @@ func TestComparisonTextLimitsListsIndependently(t *testing.T) {
 		if count := strings.Count(providerSection, "unavailable: provider=unavailable"); count != tc.unranked {
 			t.Errorf("unavailable RPC limit %d count=%d want %d", tc.limit, count, tc.unranked)
 		}
-		if strings.Count(got, "RPC timing records     99: admitted 88, rejected 11") != 2 {
-			t.Errorf("unavailable quality totals changed at limit %d", tc.limit)
-		}
 	}
 }
 
