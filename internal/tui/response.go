@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
+	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
 
 type responseMatch struct {
@@ -20,6 +21,8 @@ type responseMatch struct {
 type responseState struct {
 	open      bool
 	fragments int
+	notice    string
+	status    bool
 	viewport  viewport.Model
 	lines     []string
 	searching bool
@@ -32,33 +35,57 @@ type responseState struct {
 
 const responseNavigation = "Esc/r back  ↑↓/←→ scroll  PgUp/PgDn page"
 
+const (
+	responsePartialNotice = "Partial reconstruction: other responses could not be reconstructed. Raw Log remains available."
+	responseReturnText    = "Raw Log remains available. Press Esc or r to return."
+)
+
+func (m *Model) rawResponsePosition() (entry, lineOffset int, ok bool) {
+	visible := m.rawLogVisible()
+	for i, found := m.nextRawEntry(m.raw.top); found; i, found = m.nextRawEntry(i + 1) {
+		if !visible(i) {
+			continue
+		}
+		line := 0
+		if i == m.raw.top && m.raw.topLine > 0 {
+			if m.raw.topLine >= len(m.entryLines(m.log.Entries[i])) {
+				continue
+			}
+			line = m.raw.topLine
+		}
+		return i, line, true
+	}
+	return 0, 0, false
+}
+
 func (m *Model) openResponse() {
 	r := responseState{open: true, viewport: viewport.New(1, 1)}
 	r.viewport.MouseWheelEnabled = false
 	r.viewport.SetHorizontalStep(4)
-	text := "No reconstructed response for this entry."
-	visible := m.rawLogVisible()
-	for i, ok := m.nextRawEntry(m.raw.top); ok; i, ok = m.nextRawEntry(i + 1) {
-		if !visible(i) {
-			continue
+	entry, lineOffset, ok := m.rawResponsePosition()
+	selection := model.ProviderResponseSelection{State: "none"}
+	if ok {
+		selection = m.log.ProviderResponseAt(uint32(entry), lineOffset)
+	}
+	text, status := responsePresentation(selection)
+	r.status = status
+	if selection.State == "complete" {
+		response := selection.Response
+		r.fragments = len(response.Fragments)
+		text = response.Text
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, []byte(response.Text), "", "  "); err == nil {
+			text = pretty.String()
 		}
-		response, err := m.log.ProviderResponse(m.log.Entries[i])
-		if err != nil {
-			text = "Cannot reconstruct provider response: malformed or incomplete log. Raw Log remains available."
-		} else if response.Text != "" {
-			r.fragments = len(response.Fragments)
-			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, []byte(response.Text), "", "  "); err == nil {
-				text = pretty.String()
-			}
-			var envelope struct {
-				Message string `json:"@message"`
-			}
-			if json.Unmarshal([]byte(response.Text), &envelope) == nil && strings.Contains(envelope.Message, "\n") {
-				text = "Decoded @message:\n" + envelope.Message + "\n\nJSON:\n" + text
-			}
+		var envelope struct {
+			Message string `json:"@message"`
 		}
-		break
+		if json.Unmarshal([]byte(response.Text), &envelope) == nil && strings.Contains(envelope.Message, "\n") {
+			text = "Decoded @message:\n" + envelope.Message + "\n\nJSON:\n" + text
+		}
+		if selection.HasDiagnostics {
+			r.notice = responsePartialNotice
+		}
 	}
 	r.lines = strings.Split(text, "\n")
 	for i, line := range r.lines {
@@ -68,12 +95,49 @@ func (m *Model) openResponse() {
 	m.response = r
 }
 
+func responsePresentation(selection model.ProviderResponseSelection) (text string, status bool) {
+	if selection.State == "complete" {
+		return selection.Response.Text, false
+	}
+	if selection.State == "none" {
+		if selection.SourceLine == 0 {
+			return "No reconstructed response at this position.\n\n" + responseReturnText, true
+		}
+		return fmt.Sprintf("No reconstructed response at this physical line.\n\nSource line %d.\n\n%s", selection.SourceLine, responseReturnText), true
+	}
+	if selection.Diagnostic == nil {
+		return "Response details are unavailable.\n\n" + responseReturnText, true
+	}
+
+	headline := "This response is incomplete or invalid."
+	if selection.State == "unavailable" {
+		headline = "This stream is unavailable after an earlier failure."
+		if selection.Diagnostic.Code == "ambiguous_ownership" {
+			headline = "Response ownership is unavailable at this position."
+		}
+	}
+	return fmt.Sprintf("%s\n\nSource line %d.\n\n%s\n\n%s", headline, selection.SourceLine, selection.Diagnostic.Error(), responseReturnText), true
+}
+
 func (m *Model) renderResponse(w, h int) string {
+	if w <= 0 || h <= 0 {
+		return ""
+	}
 	r := &m.response
-	r.viewport.Width, r.viewport.Height = max(1, w), max(1, h)
+	if r.notice != "" && h == 1 {
+		return clipWidth(r.notice, w)
+	}
+	bodyHeight := h
+	if r.notice != "" {
+		bodyHeight--
+	}
+	r.viewport.Width, r.viewport.Height = w, bodyHeight
 	r.viewport.SetYOffset(r.viewport.YOffset)
 	r.column = min(r.column, rawLogMaxColumn(r.lines, r.viewport.Width))
 	r.viewport.SetXOffset(r.column)
+	if r.notice != "" {
+		return clipWidth(r.notice, w) + "\n" + r.viewport.View()
+	}
 	return r.viewport.View()
 }
 
@@ -176,5 +240,12 @@ func (m *Model) responseFooter(w int) string {
 }
 
 func (m *Model) responseTitle() string {
-	return fmt.Sprintf("RECONSTRUCTED RESPONSE (%d fragments)", m.response.fragments)
+	if m.response.status {
+		return "RESPONSE STATUS"
+	}
+	title := fmt.Sprintf("RECONSTRUCTED RESPONSE (%d fragments)", m.response.fragments)
+	if m.response.notice != "" {
+		title += " — partial capture"
+	}
+	return title
 }
