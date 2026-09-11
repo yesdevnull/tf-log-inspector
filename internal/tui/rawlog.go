@@ -105,7 +105,7 @@ func (m Model) TopLine() int {
 // that disagreed with what renderRawLog draws would put the scroll position
 // and the pane out of step.
 func (m Model) entryLines(e logfmt.Entry) []string {
-	return strings.Split(strings.TrimRight(string(m.log.Bytes(e)), "\n"), "\n")
+	return strings.Split(strings.TrimSuffix(string(m.log.Bytes(e)), "\n"), "\n")
 }
 
 // rawLogVisible reports which entries the active filter admits, built once

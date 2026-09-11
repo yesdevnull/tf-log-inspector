@@ -176,6 +176,65 @@ func TestGoToSourceLineTargetsEveryPhysicalLine(t *testing.T) {
 	}
 }
 
+func TestSourceLineJumpRetainsTrailingBlankPhysicalLines(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      string
+		forwardLine uint64
+		downLine    uint64
+		upLine      uint64
+	}{
+		{"LF before next header", "2026-09-11T00:00:00.000Z [INFO] needle\n\n2026-09-11T00:00:01.000Z [WARN] needle\n", 3, 3, 2},
+		{"LF at EOF", "2026-09-11T00:00:00.000Z [INFO] needle\n\n", 2, 2, 1},
+		{"CRLF before next header", "2026-09-11T00:00:00.000Z [INFO] needle\r\n\r\n2026-09-11T00:00:01.000Z [WARN] needle\r\n", 3, 3, 2},
+		{"CRLF at EOF", "2026-09-11T00:00:00.000Z [INFO] needle\r\n\r\n", 2, 2, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "source.log")
+			if err := os.WriteFile(path, []byte(tc.source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			l, err := model.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := New(l, "source.log")
+			m.width, m.height = 100, 24
+			m.setView(ViewRawLog)
+			m.raw.lastQuery = "needle"
+			m = submitSourceLine(t, m, "2")
+
+			rows := m.rawLogRows(1)
+			if len(rows) != 1 || rows[0].sourceLine != 2 || rows[0].entry != 0 || rows[0].entryLine != 1 {
+				t.Fatalf("blank target row = %+v, want source line 2 at entry 1 line 2", rows)
+			}
+			if got := rawLogStatus(&m); !strings.Contains(got, "Line 2 · entry 1/") {
+				t.Fatalf("blank target status = %q", got)
+			}
+
+			pressRune(t, &m, 'N')
+			if m.raw.top != 0 || m.raw.topLine != 0 {
+				t.Fatalf("reverse search position = %d+%d, want source line 1", m.raw.top, m.raw.topLine)
+			}
+			m = submitSourceLine(t, m, "2")
+			pressRune(t, &m, 'n')
+			if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != tc.forwardLine {
+				t.Fatalf("forward search from blank target = %+v, want source line %d", rows, tc.forwardLine)
+			}
+			m = submitSourceLine(t, m, "2")
+			pressRune(t, &m, 'j')
+			if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != tc.downLine {
+				t.Fatalf("down from blank target = %+v, want source line %d", rows, tc.downLine)
+			}
+			pressRune(t, &m, 'k')
+			if rows := m.rawLogRows(1); len(rows) != 1 || rows[0].sourceLine != tc.upLine {
+				t.Fatalf("up after down from blank target = %+v, want source line %d", rows, tc.upLine)
+			}
+		})
+	}
+}
+
 // The whole point: from a slow call, land on the log lines that produced it.
 func TestEnterJumpsFromACallToItsLogEntry(t *testing.T) {
 	m := callsModel(t, "provider-rpc.log", "x.log")

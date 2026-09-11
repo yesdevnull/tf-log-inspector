@@ -85,6 +85,10 @@ func (m *Model) workbenchView() string {
 			if m.raw.scope != nil {
 				scope = "call scope"
 			}
+			if m.facetOverlayShowing(w) {
+				status = "No visible source line · " + scope
+				break
+			}
 			rows := m.rawLogRows(paneBodyHeight(workbenchPaneHeight(h)))
 			visible := make([]string, len(rows))
 			for i, row := range rows {

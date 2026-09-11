@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -94,5 +95,25 @@ func TestWorkbenchRawStatusAndSearchRemainVisible(t *testing.T) {
 	view := ansi.Strip(m.workbenchView())
 	if strings.Contains(view, "pattern not found") || strings.Contains(view, "under logging") || !strings.Contains(view, "close help") || !strings.Contains(strings.Split(view, "\n")[22], "scroll") {
 		t.Fatalf("help chrome leaks underlying state: %s", view)
+	}
+}
+
+func TestWorkbenchRawStatusTracksFacetOverlayVisibility(t *testing.T) {
+	m := rawLogView(t, "provider-rpc.log")
+	m = update(t, m, tea.WindowSizeMsg{Width: 60, Height: 24})
+	pressRune(t, &m, 'f')
+	if !m.facetOverlayShowing(m.width) {
+		t.Fatal("facet overlay did not replace the Raw Log pane")
+	}
+	if got := rawLogStatus(&m); !strings.Contains(got, "No visible source line") || strings.Contains(got, "Line 1") {
+		t.Fatalf("hidden Raw Log pane has source position status: %q", got)
+	}
+
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 24})
+	if m.facetOverlayShowing(m.width) {
+		t.Fatal("wide layout still replaces the Raw Log pane")
+	}
+	if got := rawLogStatus(&m); !strings.Contains(got, "Line 1 · entry 1/") {
+		t.Fatalf("visible Raw Log pane lacks source position status: %q", got)
 	}
 }
