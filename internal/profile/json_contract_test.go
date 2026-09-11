@@ -40,7 +40,7 @@ func TestJSONProjectionMapsCompleteReportContract(t *testing.T) {
 			Evidence: model.ResourceEvidence{Baseline: total(8, 800, 180, true), MissingType: total(1, 10, 10, false), NoContext: total(1, 20, 20, false), Contained: total(1, 30, 30, false), Likely: total(1, 40, 40, false), Overlapping: total(1, 50, 50, false), Ambiguous: total(1, 60, 60, false), Unattributed: total(2, 590, 380, true)},
 		},
 		Timeline:       Timeline{Tier: &tier, PositionedIndices: []int{0}, Analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 2, ExcludedCount: 1, AdmittedMs: 225, PositionedMs: 25, ExcludedMs: 200, AdmittedLowerBound: true, ExcludedLowerBound: true, Exclusions: map[string]uint64{"timestamp_missing": 1}}, Metrics: &model.TimingMetrics{WindowMs: 100, Peak: 3, BusyMs: 75, BusyFraction: &busy}, ThresholdMs: 20, Intervals: []model.Stall{{StartMs: 25, EndMs: 40, MinRunning: 1, MaxRunning: 2, Capacity: 3, Blocking: 0}, {StartMs: 40, EndMs: 50, MinRunning: 0, MaxRunning: 0, Capacity: 3, Blocking: -1}}}},
-		Reconstruction: model.ReconstructionQuality{State: "checked", Responses: 0},
+		Reconstruction: model.ReconstructionQuality{State: "complete", Responses: 0},
 	}
 
 	d, err := buildJSONProfile(r, JSONMetadata{ToolVersion: "1.2.3", InputBasename: "capture.log"})
@@ -55,7 +55,7 @@ func TestJSONProjectionMapsCompleteReportContract(t *testing.T) {
 	assertEqual(t, "quality", jsonQuality{"whole_log", 17, 13, true,
 		[]jsonIssue{{"rpc_duration", "duration_invalid", 2, nil}, {"scan", "timestamp_before_origin", 1, uint32Pointer(0)}},
 		&jsonAttributionQuality{5, 500, []jsonConfidenceTotal{{"unattributed", 1, 10}, {"ambiguous", 2, 20}, {"overlapping", 3, 30}, {"likely", 4, 40}, {"contained", 5, 50}}, []jsonCandidateCount{{2, 4}, {11, 1}}},
-		90, 701, floatPointer(0.4), jsonReconstruction{"checked", intPointer(0), nil}}, d.Quality)
+		90, 701, floatPointer(0.4), jsonReconstruction{"complete", intPointer(0), intPointer(0), nil}}, d.Quality)
 	assertEqual(t, "rpc observation", []jsonRPCObservation{{3, 8, &jsonSource{8, 10, 12, 100, 190}, "Méthod", "provider.a", "type_a", 25, jsonPosition{uint32Pointer(0), uint32Pointer(25), true, []string{}, true}, jsonAttribution{"likely", stringPointer("module.x.resource.a"), 2}}}, d.RPCObservations)
 	assertEqual(t, "ui observation", []jsonUIObservation{{4, 9, nil, "resource.ui", "create", "type_ui", 1000, true, jsonPosition{nil, nil, false, []string{"timestamp_missing", "duration_saturated"}, false}}}, d.UIObservations)
 	assertEqual(t, "aggregates", jsonAggregates{
@@ -66,7 +66,7 @@ func TestJSONProjectionMapsCompleteReportContract(t *testing.T) {
 		RPCEvidence: jsonRPCEvidence{jsonTotal{8, 800, 180, true}, jsonTotal{1, 10, 10, false}, jsonTotal{1, 20, 20, false}, jsonTotal{1, 30, 30, false}, jsonTotal{1, 40, 40, false}, jsonTotal{1, 50, 50, false}, jsonTotal{1, 60, 60, false}, jsonTotal{2, 590, 380, true}},
 	}, d.Aggregates)
 	assertEqual(t, "timeline", jsonTimeline{stringPointer("rpc"), "partial", stringPointer("2026-09-11T00:02:03.000000004Z"), "zero_to_latest_positioned_end", 2, 1, 1, 225, true, 25, 200, true, map[string]uint64{"timestamp_missing": 1}, &jsonMetrics{100, 3, 75, floatPointer(0.75), 25, floatPointer(0.25)}, uint32Pointer(20), []jsonInterval{{25, 40, 15, 1, 2, 3, intPointer(3)}, {40, 50, 10, 0, 0, 3, nil}}}, d.Timeline)
-	assertEqual(t, "root constants", []any{uint8(1), "profile", "1.2.3", "ms"}, []any{d.SchemaVersion, d.Kind, d.ToolVersion, d.DurationUnit})
+	assertEqual(t, "root constants", []any{uint8(2), "profile", "1.2.3", "ms"}, []any{d.SchemaVersion, d.Kind, d.ToolVersion, d.DurationUnit})
 	assertEqual(t, "qualifications", []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}, d.Qualifications)
 }
 
@@ -77,7 +77,7 @@ func TestJSONProjectionMapsAbsentAndUIOnlyStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEqual(t, "absent tier", jsonTimeline{Status: "unavailable", WindowScope: "zero_to_latest_positioned_end", Exclusions: map[string]uint64{}, Intervals: []jsonInterval{}}, d.Timeline)
-	if d.Quality.Attribution != nil || d.Quality.NameableShare != nil || d.Quality.Reconstruction.Responses != nil || d.Quality.Reconstruction.Code != nil {
+	if d.Quality.Attribution != nil || d.Quality.NameableShare != nil || d.Quality.Reconstruction.Responses != nil || d.Quality.Reconstruction.Diagnostics != nil || d.Quality.Reconstruction.Code != nil {
 		t.Fatal("absent quality values must be null")
 	}
 	if d.Tiers.RPC.DurationAvailable || d.Tiers.UI.DurationAvailable {
@@ -151,9 +151,6 @@ func TestJSONProjectionRejectsInvalidUTF8OnEveryVariableStringRoute(t *testing.T
 		},
 		"ui address": func(r *Report, _ *JSONMetadata) { r.UI = []Observation{{Span: span.Span{Address: bad}}} }, "ui action": func(r *Report, _ *JSONMetadata) { r.UI = []Observation{{Span: span.Span{RPC: bad}}} }, "ui type": func(r *Report, _ *JSONMetadata) { r.UI = []Observation{{Span: span.Span{ResourceType: bad}}} },
 		"provider aggregate": func(r *Report, _ *JSONMetadata) { r.Providers = []model.Bucket{{Key: bad}} }, "type aggregate": func(r *Report, _ *JSONMetadata) { r.Types = []TypeSummary{{TypeRow: model.TypeRow{ResourceType: bad}}} }, "resource aggregate": func(r *Report, _ *JSONMetadata) { r.Resources.Rows = []model.ResourceRow{{Address: bad}} },
-		"reconstruction code": func(r *Report, _ *JSONMetadata) {
-			r.Reconstruction = model.ReconstructionQuality{State: "failed", Code: bad}
-		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

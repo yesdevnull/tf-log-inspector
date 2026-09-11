@@ -139,20 +139,28 @@ func TestBuildReportsLowerBoundsAndDoesNotMutateInput(t *testing.T) {
 }
 
 func TestBuildSnapshotsReconstructionWithoutTriggeringIt(t *testing.T) {
-	l, err := model.Load("../../testdata/resources-accounting.log")
-	if err != nil {
-		t.Fatal(err)
-	}
+	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
+	const source = head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n"
+	l := &model.Log{Data: []byte(source), Entries: []logfmt.Entry{{Len: uint32(len(source)), Lines: 2}}}
 
-	got, err := Build(l)
+	before, err := Build(l)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) {
-		t.Fatalf("reconstruction snapshot = %+v", got.Reconstruction)
+	if before.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) {
+		t.Fatalf("reconstruction snapshot = %+v", before.Reconstruction)
 	}
 	if after := l.ReconstructionQuality(); after.State != "not_checked" {
 		t.Fatalf("Build triggered reconstruction: %+v", after)
+	}
+	_ = l.ProviderResponseAt(0, 0)
+	after, err := Build(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := model.ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"}
+	if before.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) || after.Reconstruction != want || l.ReconstructionQuality() != want {
+		t.Fatalf("snapshots before=%+v after=%+v current=%+v", before.Reconstruction, after.Reconstruction, l.ReconstructionQuality())
 	}
 }
 

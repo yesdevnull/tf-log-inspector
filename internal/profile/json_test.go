@@ -58,7 +58,7 @@ func TestJSONRendererProducesOneDeterministicCompleteDocument(t *testing.T) {
 		t.Fatalf("second decode error = %v, want EOF", err)
 	}
 	assertJSONKeys(t, "root", root, "schema_version", "kind", "tool_version", "input", "duration_unit", "tiers", "quality", "rpc_observations", "ui_observations", "aggregates", "timeline", "qualifications")
-	assertJSONLiteral(t, root, "schema_version", "1")
+	assertJSONLiteral(t, root, "schema_version", "2")
 	assertJSONLiteral(t, root, "kind", `"profile"`)
 	assertJSONLiteral(t, root, "tool_version", `"test"`)
 	assertJSONLiteral(t, root, "duration_unit", `"ms"`)
@@ -115,7 +115,7 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	origin := time.Date(2026, 9, 11, 1, 2, 3, 0, time.UTC)
 	report := Report{
 		HasContext:     true,
-		Reconstruction: model.ReconstructionQuality{State: "checked", Responses: 1},
+		Reconstruction: model.ReconstructionQuality{State: "complete", Responses: 1},
 		Quality: model.CaptureQuality{
 			HasContext: true,
 			RPC:        model.TierQuality{Admitted: 1, Positioned: 1, Origin: &origin, Exclusions: map[string]uint64{}},
@@ -178,8 +178,8 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	assertJSONKeys(t, "attribution quality", attributionQuality, "spans", "duration_ms", "by_confidence", "candidate_counts")
 	assertJSONKeys(t, "confidence total", decodeJSONArray(t, attributionQuality["by_confidence"])[0], "confidence", "count", "duration_ms")
 	assertJSONKeys(t, "candidate count", decodeJSONArray(t, attributionQuality["candidate_counts"])[0], "candidates", "count")
-	assertJSONKeys(t, "reconstruction", decodeJSONObject(t, quality["reconstruction"]), "state", "responses", "code")
-	assertJSONNull(t, "checked reconstruction code", decodeJSONObject(t, quality["reconstruction"])["code"])
+	assertJSONKeys(t, "reconstruction", decodeJSONObject(t, quality["reconstruction"]), "state", "responses", "diagnostics", "code")
+	assertJSONNull(t, "complete reconstruction code", decodeJSONObject(t, quality["reconstruction"])["code"])
 
 	aggregates := decodeJSONObject(t, root["aggregates"])
 	assertJSONKeys(t, "aggregates", aggregates, "providers", "resource_types", "resources", "ui", "unnamed_ui", "rpc_evidence")
@@ -215,7 +215,7 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	assertJSONNull(t, "absent UI tier origin", uiTier["clock_origin"])
 
 	failedReport := Report{
-		Reconstruction: model.ReconstructionQuality{State: "failed", Code: "decode_failed"},
+		Reconstruction: model.ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"},
 		Timeline: Timeline{Tier: &tier, Analysis: model.TimingAnalysis{
 			Timing:  model.TimingSelection{Exclusions: map[string]uint64{}},
 			Metrics: &model.TimingMetrics{},
@@ -227,7 +227,8 @@ func TestJSONRendererEncodesEverySchemaObjectKey(t *testing.T) {
 	}
 	failedQuality := decodeJSONObject(t, decodeJSONObject(t, failed.Bytes())["quality"])
 	failedReconstruction := decodeJSONObject(t, failedQuality["reconstruction"])
-	assertJSONNull(t, "failed reconstruction responses", failedReconstruction["responses"])
+	assertJSONLiteral(t, failedReconstruction, "responses", "0")
+	assertJSONLiteral(t, failedReconstruction, "diagnostics", "1")
 	if string(failedReconstruction["code"]) == "null" {
 		t.Fatal("failed reconstruction code encoded as null")
 	}
@@ -376,6 +377,7 @@ func TestJSONRendererLeavesOutputUntouchedOnProjectionOrEncodingFailure(t *testi
 		want   string
 	}{
 		{"invalid mapping", Report{Reconstruction: model.ReconstructionQuality{State: "invalid"}}, JSONMetadata{}, "profile JSON has invalid reconstruction state"},
+		{"invalid snapshot", Report{Reconstruction: model.ReconstructionQuality{State: "partial", Diagnostics: 1, Code: "reconstruction_partial"}}, JSONMetadata{}, "profile JSON has invalid reconstruction snapshot"},
 		{"invalid UTF-8", Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, JSONMetadata{ToolVersion: badUTF8}, "profile JSON contains invalid UTF-8"},
 		{"non-finite fraction", Report{Reconstruction: model.ReconstructionQuality{State: "not_checked"}, Quality: model.CaptureQuality{NameableShare: &nan}}, JSONMetadata{}, "encoding profile JSON failed"},
 	} {

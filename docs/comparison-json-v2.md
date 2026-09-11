@@ -1,11 +1,9 @@
-# Comparison JSON v1
-
-This is the historical version 1 contract. The current CLI emits [Comparison JSON v2](comparison-json-v2.md).
+# Comparison JSON v2
 
 Comparison JSON reports the observed differences between two complete profile
 captures. It contains no generated timestamp, absolute path, raw body,
 interned identifier, source observation array, or copied profile ranking list.
-Schema version 1 makes no compatibility promise for future versions.
+Schema version 2 makes no compatibility promise for future versions.
 
 All fields are mandatory and use `snake_case`; field order is the order below.
 Empty arrays and objects are `[]` and `{}`. Unavailable values are `null`; a
@@ -15,13 +13,13 @@ Exported strings must be valid UTF-8, otherwise encoding fails with
 
 ## Root
 
-The root has `schema_version` (`1`), `kind` (`"comparison"`), `tool_version`,
+The root has `schema_version` (`2`), `kind` (`"comparison"`), `tool_version`,
 `duration_unit` (`"ms"`), `before`, `after`, `comparability`, `sections`, and
 `qualifications`.
 
 Each capture has `input`, `tiers`, `quality`, and `unnamed_ui`. `input`,
 `tiers`, and `quality` use exactly the fields, nullability, and meanings of
-[Profile JSON v1](profile-json-v1.md), including each capture's local
+[Profile JSON v2](profile-json-v2.md), including each capture's local
 quality entry locations and reconstruction status. `unnamed_ui` is a summary
 or `null` when the UI tier is unavailable. The shared capture objects retain
 the same origins, quality summaries, rejected counts, context limitations, and

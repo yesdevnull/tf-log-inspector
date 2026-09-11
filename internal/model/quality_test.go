@@ -162,11 +162,12 @@ func TestLoadBuildsStableQualityFromRealScan(t *testing.T) {
 func TestReconstructionQualityIsLazyAndSeparate(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, state, code string
-		responses                 int
+		responses, diagnostics    int
 	}{
-		{"success", "2026-01-01T00:00:00.000Z [DEBUG] provider.x: {\"ok\":true}\n", "checked", "", 1},
-		{"zero responses", "2026-01-01T00:00:00.000Z [INFO] core: ordinary log line\n", "checked", "", 0},
-		{"failure", "2026-01-01T00:00:00.000Z [DEBUG] provider.x: {\"secret\":\n", "failed", "reconstruction_failed", 0},
+		{"complete", "2026-01-01T00:00:00.000Z [DEBUG] provider.x: {\"ok\":true}\n", "complete", "", 1, 0},
+		{"complete with zero responses", "2026-01-01T00:00:00.000Z [INFO] core: ordinary log line\n", "complete", "", 0, 0},
+		{"partial", "2026-01-01T00:00:00.000Z [DEBUG] provider.x: {\"ok\":true}\n2026-01-01T00:00:00.000Z [DEBUG] provider.y: {\"secret\":\n", "partial", "reconstruction_partial", 1, 1},
+		{"failed", "2026-01-01T00:00:00.000Z [DEBUG] provider.x: {\"secret\":\n", "failed", "reconstruction_failed", 0, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "response.log")
@@ -181,11 +182,13 @@ func TestReconstructionQualityIsLazyAndSeparate(t *testing.T) {
 			if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "not_checked"}) {
 				t.Fatalf("initial = %+v", got)
 			}
-			_, _ = l.ProviderResponse(l.Entries[0])
-			if got := l.ReconstructionQuality(); got.State != tc.state || got.Responses != tc.responses || got.Code != tc.code || strings.Contains(fmt.Sprintf("%+v", got), "secret") {
+			data := append([]byte(nil), l.Data...)
+			entries := append([]logfmt.Entry(nil), l.Entries...)
+			_ = l.ProviderResponseAt(0, 0)
+			if got := l.ReconstructionQuality(); got.State != tc.state || got.Responses != tc.responses || got.Diagnostics != tc.diagnostics || got.Code != tc.code || strings.Contains(fmt.Sprintf("%+v", got), "secret") {
 				t.Fatalf("completed = %+v", got)
 			}
-			if after := l.CaptureQuality(); !reflect.DeepEqual(before, after) {
+			if after := l.CaptureQuality(); !reflect.DeepEqual(before, after) || !reflect.DeepEqual(l.Data, data) || !reflect.DeepEqual(l.Entries, entries) {
 				t.Fatalf("static quality changed: before=%+v after=%+v", before, after)
 			}
 		})
@@ -205,7 +208,7 @@ func TestQualityAccessorsAreConcurrent(t *testing.T) {
 	start := make(chan struct{})
 	wg.Go(func() {
 		<-start
-		_, _ = l.ProviderResponse(l.Entries[0])
+		_ = l.ProviderResponseAt(0, 0)
 	})
 	for range 20 {
 		wg.Go(func() {
@@ -213,8 +216,8 @@ func TestQualityAccessorsAreConcurrent(t *testing.T) {
 			status := l.ReconstructionQuality()
 			switch status.State {
 			case "not_checked":
-			case "checked":
-				if status.Responses != 1 || status.Code != "" {
+			case "complete":
+				if status.Responses != 1 || status.Diagnostics != 0 || status.Code != "" {
 					t.Errorf("partially published reconstruction status = %+v", status)
 				}
 			default:
@@ -226,7 +229,7 @@ func TestQualityAccessorsAreConcurrent(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
-	if got := l.ReconstructionQuality(); got.State != "checked" || got.Responses != 1 {
+	if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "complete", Responses: 1}) {
 		t.Fatalf("final reconstruction status = %+v", got)
 	}
 }

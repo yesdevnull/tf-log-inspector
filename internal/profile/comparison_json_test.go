@@ -41,7 +41,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 		t.Fatalf("second decode: %v", err)
 	}
 	assertJSONKeys(t, "root", root, "schema_version", "kind", "tool_version", "duration_unit", "before", "after", "comparability", "sections", "qualifications")
-	assertJSONLiteral(t, root, "schema_version", "1")
+	assertJSONLiteral(t, root, "schema_version", "2")
 	assertJSONLiteral(t, root, "kind", `"comparison"`)
 	for side, wantName := range map[string]string{"before": "before.log", "after": "after.log"} {
 		capture := decodeJSONObject(t, root[side])
@@ -51,6 +51,8 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 		assertJSONLiteral(t, input, "basename", `"`+wantName+`"`)
 		assertJSONKeys(t, side+" tiers", decodeJSONObject(t, capture["tiers"]), "rpc", "ui")
 		assertJSONKeys(t, side+" quality", decodeJSONObject(t, capture["quality"]), "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction")
+		reconstruction := decodeJSONObject(t, decodeJSONObject(t, capture["quality"])["reconstruction"])
+		assertJSONKeys(t, side+" reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
 	}
 	assertJSONLiteral(t, decodeJSONObject(t, decodeJSONObject(t, root["before"])["input"]), "bytes", "1152")
 	assertJSONLiteral(t, decodeJSONObject(t, decodeJSONObject(t, root["after"])["input"]), "bytes", "4259")
@@ -94,6 +96,36 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	}
 	if !reflect.DeepEqual(report, original) {
 		t.Fatal("renderer mutated report")
+	}
+}
+
+func TestComparisonJSONUsesProfileV2ReconstructionStates(t *testing.T) {
+	tests := []struct {
+		name          string
+		before, after model.ReconstructionQuality
+		wantBefore    []string
+		wantAfter     []string
+	}{
+		{"unchecked and complete", model.ReconstructionQuality{State: "not_checked"}, model.ReconstructionQuality{State: "complete"}, []string{`"not_checked"`, "null", "null", "null"}, []string{`"complete"`, "0", "0", "null"}},
+		{"partial and failed", model.ReconstructionQuality{State: "partial", Responses: 2, Diagnostics: 1, Code: "reconstruction_partial"}, model.ReconstructionQuality{State: "failed", Diagnostics: 3, Code: "reconstruction_failed"}, []string{`"partial"`, "2", "1", `"reconstruction_partial"`}, []string{`"failed"`, "0", "3", `"reconstruction_failed"`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := ComparisonReport{Before: Report{Reconstruction: tc.before}, After: Report{Reconstruction: tc.after}, Data: model.Comparison{Sections: []model.ComparisonSection{}}}
+			var out bytes.Buffer
+			if err := RenderComparisonJSON(&out, report, ComparisonMetadata{}); err != nil {
+				t.Fatal(err)
+			}
+			root := decodeJSONObject(t, out.Bytes())
+			assertJSONLiteral(t, root, "schema_version", "2")
+			for side, want := range map[string][]string{"before": tc.wantBefore, "after": tc.wantAfter} {
+				reconstruction := decodeJSONObject(t, decodeJSONObject(t, decodeJSONObject(t, root[side])["quality"])["reconstruction"])
+				assertJSONKeys(t, side+" reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
+				for i, key := range []string{"state", "responses", "diagnostics", "code"} {
+					assertJSONLiteral(t, reconstruction, key, want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -161,6 +193,9 @@ func TestComparisonJSONValidationAndWriterFailures(t *testing.T) {
 		{"exclusion key utf8", func(r *ComparisonReport, _ *ComparisonMetadata) {
 			r.Before.Quality.RPC.Exclusions = map[string]uint64{"\xff": 1}
 		}, "comparison JSON contains invalid UTF-8"},
+		{"reconstruction snapshot", func(r *ComparisonReport, _ *ComparisonMetadata) {
+			r.Before.Reconstruction = model.ReconstructionQuality{State: "partial", Diagnostics: 1, Code: "reconstruction_partial"}
+		}, "profile JSON has invalid reconstruction snapshot"},
 		{"section kind", func(r *ComparisonReport, _ *ComparisonMetadata) {
 			r.Data.Sections = []model.ComparisonSection{{Kind: "other"}}
 		}, "comparison JSON has invalid section kind"},
@@ -337,7 +372,7 @@ func assertComparisonCaptureKeys(t *testing.T, name string, capture map[string]j
 			assertJSONKeys(t, name+" candidates", row, "candidates", "count")
 		}
 	}
-	assertJSONKeys(t, name+" reconstruction", decodeJSONObject(t, quality["reconstruction"]), "state", "responses", "code")
+	assertJSONKeys(t, name+" reconstruction", decodeJSONObject(t, quality["reconstruction"]), "state", "responses", "diagnostics", "code")
 	if string(capture["unnamed_ui"]) != "null" {
 		assertJSONKeys(t, name+" unnamed UI", decodeJSONObject(t, capture["unnamed_ui"]), "count", "total_ms", "mean_ms", "max_ms", "lower_bound")
 	}

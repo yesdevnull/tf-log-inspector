@@ -32,7 +32,6 @@ type Log struct {
 	responseMessageRanges     []responseRange
 	responseFailedRanges      []responseRange
 	responseUnavailableRanges []responseRange
-	responseErr               error
 	sourceLinesOnce           sync.Once
 	sourceLineStarts          []uint64
 	Data                      []byte
@@ -173,25 +172,6 @@ func LoadFile(f *os.File) (*Log, error) {
 // Bytes returns every line of an entry, including its continuations.
 func (l *Log) Bytes(e logfmt.Entry) []byte {
 	return l.Data[e.Off : e.Off+uint64(e.Len)]
-}
-
-// ProviderResponse lazily reconstructs provider JSON without changing source
-// entries. Errors contain structural diagnostics only; raw inspection remains
-// available even when reconstruction fails. Empty Text means no matching body.
-func (l *Log) ProviderResponse(e logfmt.Entry) (logfmt.ProviderJSON, error) {
-	l.inspectProviderResponses()
-	if l.responseErr != nil {
-		return logfmt.ProviderJSON{}, l.responseErr
-	}
-	for _, response := range l.responses {
-		for _, fragment := range response.Fragments {
-			if uint64(fragment.Start) < e.Off+uint64(e.Len) && uint64(fragment.End) > e.Off {
-				response.Fragments = append([]logfmt.JSONFragment(nil), response.Fragments...)
-				return response, nil
-			}
-		}
-	}
-	return logfmt.ProviderJSON{}, nil
 }
 
 // HasAddressContext reports whether this log carries any address context at

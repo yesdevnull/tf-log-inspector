@@ -170,6 +170,16 @@ func TestComparisonJSONIsOneDocumentAndOutputOnly(t *testing.T) {
 		t.Fatalf("decode after document = %v", err)
 	}
 	root := document.(map[string]any)
+	if root["schema_version"] != float64(2) {
+		t.Fatalf("schema version = %v, want 2", root["schema_version"])
+	}
+	for _, side := range []string{"before", "after"} {
+		capture := root[side].(map[string]any)
+		reconstruction := capture["quality"].(map[string]any)["reconstruction"].(map[string]any)
+		if !reflect.DeepEqual(reconstruction, map[string]any{"state": "not_checked", "responses": nil, "diagnostics": nil, "code": nil}) {
+			t.Fatalf("%s reconstruction = %#v", side, reconstruction)
+		}
+	}
 	for _, sectionValue := range root["sections"].([]any) {
 		for _, rowValue := range sectionValue.(map[string]any)["rows"].([]any) {
 			for metric, value := range rowValue.(map[string]any)["changes"].(map[string]any) {

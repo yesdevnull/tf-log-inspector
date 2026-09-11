@@ -117,7 +117,7 @@ func buildComparisonJSON(report ComparisonReport, metadata ComparisonMetadata) (
 	if err := validStrings(append(beforeProviders, afterProviders...)...); err != nil {
 		return jsonComparison{}, errInvalidComparisonUTF8
 	}
-	doc := jsonComparison{SchemaVersion: 1, Kind: "comparison", ToolVersion: metadata.ToolVersion, DurationUnit: "ms", Before: before, After: after,
+	doc := jsonComparison{SchemaVersion: 2, Kind: "comparison", ToolVersion: metadata.ToolVersion, DurationUnit: "ms", Before: before, After: after,
 		Comparability: jsonComparability{LoggingConfiguration: "unknown", ProviderIdentityStatus: report.Data.ProviderIdentityStatus, BeforeProviders: beforeProviders, AfterProviders: afterProviders},
 		Sections:      make([]jsonComparisonSection, 0, len(report.Data.Sections)), Qualifications: comparisonQualifications()}
 	for _, section := range report.Data.Sections {

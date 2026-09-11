@@ -127,10 +127,14 @@ func (m *Model) qualityText(q model.CaptureQuality, reconstruction model.Reconst
 
 	b.WriteString("\nRECONSTRUCTION\n")
 	switch reconstruction.State {
-	case "checked":
-		fmt.Fprintf(&b, "  checked: %d responses available\n", reconstruction.Responses)
+	case "complete":
+		fmt.Fprintf(&b, "  complete: %d responses available\n", reconstruction.Responses)
+	case "partial":
+		fmt.Fprintf(&b, "  partial: %d responses available; %d reconstruction diagnostics\n", reconstruction.Responses, reconstruction.Diagnostics)
+		b.WriteString("  Diagnostic counts can include ownership triggers and aborted messages.\n")
 	case "failed":
-		fmt.Fprintf(&b, "  failed: %s\n", logfmt.DisplayText(reconstruction.Code))
+		fmt.Fprintf(&b, "  failed: 0 responses available; %d reconstruction diagnostics\n", reconstruction.Diagnostics)
+		b.WriteString("  Diagnostic counts can include ownership triggers and aborted messages.\n")
 	default:
 		b.WriteString("  not checked (response reconstruction is lazy)\n")
 	}
@@ -169,7 +173,7 @@ func qualityHasLimitations(q model.CaptureQuality, reconstruction model.Reconstr
 	if q.HasContext {
 		limited = limited || q.Attribution.ByConfidence[attrib.Likely] > 0 || q.Attribution.ByConfidence[attrib.Overlapping] > 0 || q.Attribution.ByConfidence[attrib.Ambiguous] > 0 || q.Attribution.ByConfidence[attrib.Unattributed] > 0
 	}
-	if reconstruction.State == "failed" {
+	if reconstruction.State == "partial" || reconstruction.State == "failed" {
 		limited = true
 	}
 	return limited

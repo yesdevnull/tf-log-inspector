@@ -50,6 +50,36 @@ func TestBuildComparisonKeepsCaptureEvidence(t *testing.T) {
 	}
 }
 
+func TestBuildComparisonRetainsLazyReconstructionSnapshots(t *testing.T) {
+	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
+	const source = head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n"
+	log := &model.Log{Data: []byte(source), Entries: []logfmt.Entry{{Len: uint32(len(source)), Lines: 2}}}
+	beforeReport, err := Build(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := BuildComparison(beforeReport, beforeReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Before.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) || log.ReconstructionQuality().State != "not_checked" {
+		t.Fatalf("comparison triggered reconstruction: report=%+v log=%+v", before.Before.Reconstruction, log.ReconstructionQuality())
+	}
+	_ = log.ProviderResponseAt(0, 0)
+	afterReport, err := Build(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := BuildComparison(afterReport, afterReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := model.ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"}
+	if before.Before.Reconstruction != (model.ReconstructionQuality{State: "not_checked"}) || after.Before.Reconstruction != want || after.After.Reconstruction != want {
+		t.Fatalf("comparison snapshots before=%+v after=%+v", before.Before.Reconstruction, after.Before.Reconstruction)
+	}
+}
+
 func TestBuildComparisonIncludesEverySectionAndUnavailableSides(t *testing.T) {
 	before := comparisonReportFixture(t, "structured-ui.log")
 	after := comparisonReportFixture(t, "core-only.log")

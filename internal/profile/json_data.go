@@ -136,9 +136,10 @@ type jsonCandidateCount struct {
 	Count      int    `json:"count"`
 }
 type jsonReconstruction struct {
-	State     string  `json:"state"`
-	Responses *int    `json:"responses"`
-	Code      *string `json:"code"`
+	State       string  `json:"state"`
+	Responses   *int    `json:"responses"`
+	Diagnostics *int    `json:"diagnostics"`
+	Code        *string `json:"code"`
 }
 type jsonAggregates struct {
 	Providers     []jsonProvider     `json:"providers"`
@@ -219,7 +220,7 @@ func buildJSONProfile(r Report, metadata JSONMetadata) (jsonProfile, error) {
 			return jsonProfile{}, err
 		}
 	}
-	d := jsonProfile{SchemaVersion: 1, Kind: "profile", ToolVersion: metadata.ToolVersion, Input: jsonInput{metadata.InputBasename, r.Bytes}, DurationUnit: "ms", RPCObservations: make([]jsonRPCObservation, 0, len(r.RPC)), UIObservations: make([]jsonUIObservation, 0, len(r.UI)), Qualifications: []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}}
+	d := jsonProfile{SchemaVersion: 2, Kind: "profile", ToolVersion: metadata.ToolVersion, Input: jsonInput{metadata.InputBasename, r.Bytes}, DurationUnit: "ms", RPCObservations: make([]jsonRPCObservation, 0, len(r.RPC)), UIObservations: make([]jsonUIObservation, 0, len(r.UI)), Qualifications: []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}}
 	d.Tiers = jsonTiers{tierJSON(r.Quality.RPC), tierJSON(r.Quality.UI)}
 	q, err := qualityJSON(r)
 	if err != nil {
@@ -387,15 +388,27 @@ func reconstructionJSON(q model.ReconstructionQuality) (jsonReconstruction, erro
 	o := jsonReconstruction{State: q.State}
 	switch q.State {
 	case "not_checked":
-	case "checked":
-		v := q.Responses
-		o.Responses = &v
-	case "failed":
-		if err := validStrings(q.Code); err != nil {
-			return o, err
+		if q.Responses != 0 || q.Diagnostics != 0 || q.Code != "" {
+			return o, errors.New("profile JSON has invalid reconstruction snapshot")
 		}
-		v := q.Code
-		o.Code = &v
+	case "complete":
+		if q.Responses < 0 || q.Diagnostics != 0 || q.Code != "" {
+			return o, errors.New("profile JSON has invalid reconstruction snapshot")
+		}
+		responses, diagnostics := q.Responses, 0
+		o.Responses, o.Diagnostics = &responses, &diagnostics
+	case "partial":
+		if q.Responses <= 0 || q.Diagnostics <= 0 || q.Code != "reconstruction_partial" {
+			return o, errors.New("profile JSON has invalid reconstruction snapshot")
+		}
+		responses, diagnostics, code := q.Responses, q.Diagnostics, q.Code
+		o.Responses, o.Diagnostics, o.Code = &responses, &diagnostics, &code
+	case "failed":
+		if q.Responses != 0 || q.Diagnostics <= 0 || q.Code != "reconstruction_failed" {
+			return o, errors.New("profile JSON has invalid reconstruction snapshot")
+		}
+		responses, diagnostics, code := 0, q.Diagnostics, q.Code
+		o.Responses, o.Diagnostics, o.Code = &responses, &diagnostics, &code
 	default:
 		return o, errors.New("profile JSON has invalid reconstruction state")
 	}

@@ -181,12 +181,12 @@ func TestQualityReportsLazyReconstructionWithoutTriggeringIt(t *testing.T) {
 	}
 	qualityKey(m, "i")
 	qualityKey(m, "r")
-	if got := m.log.ReconstructionQuality().State; got != "checked" {
+	if got := m.log.ReconstructionQuality().State; got != "complete" {
 		t.Fatalf("viewing response left reconstruction state %q", got)
 	}
 	qualityKey(m, "r")
 	qualityKey(m, "i")
-	if got := m.renderQuality(100, 200); !strings.Contains(got, "checked:") {
+	if got := m.renderQuality(100, 200); !strings.Contains(got, "complete: 1 responses available") {
 		t.Fatalf("quality did not report completed reconstruction:\n%s", got)
 	}
 }
@@ -199,8 +199,32 @@ func TestQualityReportsFailedReconstruction(t *testing.T) {
 	}
 	qualityKey(m, "r")
 	qualityKey(m, "i")
-	if got := m.renderQuality(100, 200); !strings.Contains(got, "failed: reconstruction_failed") {
+	if got := m.renderQuality(100, 200); !strings.Contains(got, "failed: 0 responses available; 1 reconstruction diagnostics") || !strings.Contains(got, "Diagnostic counts can include ownership triggers and aborted messages.") {
 		t.Fatalf("quality did not report reconstruction failure:\n%s", got)
+	}
+}
+
+func TestQualityReportsPartialReconstructionAndFlagsItAsALimitation(t *testing.T) {
+	reconstruction := model.ReconstructionQuality{State: "partial", Responses: 2, Diagnostics: 1, Code: "reconstruction_partial"}
+	m := New(&model.Log{}, "capture.log")
+	completeCapture := model.CaptureQuality{HasContext: true}
+	text := m.qualityText(completeCapture, reconstruction)
+	for _, want := range []string{
+		"partial: 2 responses available; 1 reconstruction diagnostics",
+		"Diagnostic counts can include ownership triggers and aborted messages.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("quality text missing %q:\n%s", want, text)
+		}
+	}
+	if qualityHasLimitations(completeCapture, model.ReconstructionQuality{State: "complete"}) {
+		t.Fatal("fixture has an unrelated capture limitation")
+	}
+	if !qualityHasLimitations(completeCapture, reconstruction) {
+		t.Fatal("partial reconstruction was not flagged as a limitation")
+	}
+	if !qualityHasLimitations(completeCapture, model.ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"}) {
+		t.Fatal("failed reconstruction was not flagged as a limitation")
 	}
 }
 

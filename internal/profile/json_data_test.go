@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"testing"
@@ -112,7 +113,7 @@ func TestJSONProjectionMapsExactValuesNullsAndOrdering(t *testing.T) {
 	first := uint32(0)
 	tier := span.FidelityReported
 	r := Report{
-		Bytes: 1<<53 + 9, HasContext: true, Reconstruction: model.ReconstructionQuality{State: "checked", Responses: 0},
+		Bytes: 1<<53 + 9, HasContext: true, Reconstruction: model.ReconstructionQuality{State: "complete", Responses: 0},
 		Quality:   model.CaptureQuality{HasContext: true, RPC: model.TierQuality{Records: 3, Admitted: 2, Rejected: 1, Positioned: 1, DurationMs: 1<<53 + 7, PositionedMs: 0, ExcludedMs: 9, DurationLowerBound: true, Origin: &origin, Exclusions: map[string]uint64{"z": 2}}, Issues: []model.QualityIssue{{Stage: "scan", Code: "x", Count: 1, FirstEntry: &first}}, Attribution: attrib.Coverage{Spans: 2, TotalMs: 9, Candidates: map[uint32]int{10: 1, 2: 3}}, NameableMs: 2, RPCDurationMs: 9, NameableShare: &share},
 		RPC:       []Observation{{Index: 0, Span: span.Span{Entry: 5, DurationMs: 9, TimestampStatus: logfmt.TimestampMissing}, Attribution: attrib.Attribution{Confidence: attrib.Ambiguous, Candidates: 2}}, {Index: 1, Span: span.Span{Entry: 4, StartMs: 0, EndMs: 0, DurationMs: 0, StartClamped: true, TimestampStatus: logfmt.TimestampValid, RPC: "m", Provider: "p", ResourceType: "t"}, Attribution: attrib.Attribution{Confidence: attrib.Overlapping, Address: "a", Candidates: 1}}},
 		Timeline:  Timeline{Tier: &tier, PositionedIndices: []int{1}, Analysis: model.TimingAnalysis{Timing: model.TimingSelection{AdmittedCount: 2, ExcludedCount: 1, AdmittedMs: 9, PositionedMs: 0, ExcludedMs: 9, AdmittedLowerBound: true, ExcludedLowerBound: true, Exclusions: map[string]uint64{"timestamp_missing": 1}}, Metrics: &model.TimingMetrics{WindowMs: 0, Peak: 1, BusyMs: 0}, Intervals: []model.Stall{{StartMs: 0, EndMs: 0, MinRunning: 0, MaxRunning: 1, Capacity: 1, Blocking: 0}, {StartMs: 1, EndMs: 2, Blocking: -1}}}},
@@ -134,8 +135,8 @@ func TestJSONProjectionMapsExactValuesNullsAndOrdering(t *testing.T) {
 	if got := []uint32{d.Quality.Attribution.CandidateCounts[0].Candidates, d.Quality.Attribution.CandidateCounts[1].Candidates}; !reflect.DeepEqual(got, []uint32{2, 10}) {
 		t.Fatalf("candidate order %v", got)
 	}
-	if d.Quality.Reconstruction.Responses == nil || *d.Quality.Reconstruction.Responses != 0 || d.Quality.Reconstruction.Code != nil {
-		t.Fatal("checked-zero reconstruction")
+	if d.Quality.Reconstruction.Responses == nil || *d.Quality.Reconstruction.Responses != 0 || d.Quality.Reconstruction.Diagnostics == nil || *d.Quality.Reconstruction.Diagnostics != 0 || d.Quality.Reconstruction.Code != nil {
+		t.Fatal("complete-zero reconstruction")
 	}
 	if d.Timeline.Status != "partial" || d.Timeline.Metrics == nil || d.Timeline.Metrics.SummedWindowRatio != nil || d.Timeline.Intervals[0].ActiveObservationIndex == nil || *d.Timeline.Intervals[0].ActiveObservationIndex != 1 || d.Timeline.Intervals[1].ActiveObservationIndex != nil {
 		t.Fatal("timeline mapping/nulls")
@@ -187,7 +188,7 @@ func TestJSONProjectionRejectsInvalidStatesAndUTF8(t *testing.T) {
 }
 
 func TestJSONProjectionMapsAllConfidenceStates(t *testing.T) {
-	r := Report{HasContext: true, Quality: model.CaptureQuality{HasContext: true}, Reconstruction: model.ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}}
+	r := Report{HasContext: true, Quality: model.CaptureQuality{HasContext: true}, Reconstruction: model.ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"}}
 	for i, c := range []attrib.Confidence{attrib.Unattributed, attrib.Ambiguous, attrib.Overlapping, attrib.Likely, attrib.Contained} {
 		r.RPC = append(r.RPC, Observation{Index: i, Attribution: attrib.Attribution{Confidence: c, Address: "a", Candidates: uint32(i)}})
 	}
@@ -204,8 +205,68 @@ func TestJSONProjectionMapsAllConfidenceStates(t *testing.T) {
 	if d.RPCObservations[0].Attribution.Address != nil || d.RPCObservations[1].Attribution.Address != nil || d.RPCObservations[2].Attribution.Address == nil {
 		t.Fatal("confidence address mapping")
 	}
-	if d.Quality.Reconstruction.Code == nil || *d.Quality.Reconstruction.Code != "reconstruction_failed" || d.Quality.Reconstruction.Responses != nil {
+	if d.Quality.Reconstruction.Code == nil || *d.Quality.Reconstruction.Code != "reconstruction_failed" || d.Quality.Reconstruction.Responses == nil || *d.Quality.Reconstruction.Responses != 0 || d.Quality.Reconstruction.Diagnostics == nil || *d.Quality.Reconstruction.Diagnostics != 1 {
 		t.Fatal("failed reconstruction mapping")
+	}
+}
+
+func TestReconstructionJSONMapsEveryV2State(t *testing.T) {
+	tests := []struct {
+		name string
+		in   model.ReconstructionQuality
+		want []string
+	}{
+		{"not checked", model.ReconstructionQuality{State: "not_checked"}, []string{`"not_checked"`, "null", "null", "null"}},
+		{"complete zero", model.ReconstructionQuality{State: "complete"}, []string{`"complete"`, "0", "0", "null"}},
+		{"complete positive", model.ReconstructionQuality{State: "complete", Responses: 2}, []string{`"complete"`, "2", "0", "null"}},
+		{"partial", model.ReconstructionQuality{State: "partial", Responses: 2, Diagnostics: 1, Code: "reconstruction_partial"}, []string{`"partial"`, "2", "1", `"reconstruction_partial"`}},
+		{"failed", model.ReconstructionQuality{State: "failed", Diagnostics: 3, Code: "reconstruction_failed"}, []string{`"failed"`, "0", "3", `"reconstruction_failed"`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := RenderJSON(&out, Report{Reconstruction: tc.in}, JSONMetadata{}); err != nil {
+				t.Fatal(err)
+			}
+			root := decodeJSONObject(t, out.Bytes())
+			assertJSONLiteral(t, root, "schema_version", "2")
+			reconstruction := decodeJSONObject(t, decodeJSONObject(t, root["quality"])["reconstruction"])
+			assertJSONKeys(t, "reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
+			for i, key := range []string{"state", "responses", "diagnostics", "code"} {
+				assertJSONLiteral(t, reconstruction, key, tc.want[i])
+			}
+		})
+	}
+}
+
+func TestReconstructionJSONRejectsInvalidV2Snapshots(t *testing.T) {
+	tests := []struct {
+		name string
+		in   model.ReconstructionQuality
+		want string
+	}{
+		{"unknown state", model.ReconstructionQuality{State: "checked"}, "profile JSON has invalid reconstruction state"},
+		{"not checked count", model.ReconstructionQuality{State: "not_checked", Responses: 1}, "profile JSON has invalid reconstruction snapshot"},
+		{"not checked code", model.ReconstructionQuality{State: "not_checked", Code: "x"}, "profile JSON has invalid reconstruction snapshot"},
+		{"complete negative responses", model.ReconstructionQuality{State: "complete", Responses: -1}, "profile JSON has invalid reconstruction snapshot"},
+		{"complete diagnostics", model.ReconstructionQuality{State: "complete", Diagnostics: 1}, "profile JSON has invalid reconstruction snapshot"},
+		{"complete code", model.ReconstructionQuality{State: "complete", Code: "x"}, "profile JSON has invalid reconstruction snapshot"},
+		{"partial zero responses", model.ReconstructionQuality{State: "partial", Diagnostics: 1, Code: "reconstruction_partial"}, "profile JSON has invalid reconstruction snapshot"},
+		{"partial zero diagnostics", model.ReconstructionQuality{State: "partial", Responses: 1, Code: "reconstruction_partial"}, "profile JSON has invalid reconstruction snapshot"},
+		{"partial negative diagnostics", model.ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: -1, Code: "reconstruction_partial"}, "profile JSON has invalid reconstruction snapshot"},
+		{"partial code", model.ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "x"}, "profile JSON has invalid reconstruction snapshot"},
+		{"failed responses", model.ReconstructionQuality{State: "failed", Responses: 1, Diagnostics: 1, Code: "reconstruction_failed"}, "profile JSON has invalid reconstruction snapshot"},
+		{"failed zero diagnostics", model.ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}, "profile JSON has invalid reconstruction snapshot"},
+		{"failed negative diagnostics", model.ReconstructionQuality{State: "failed", Diagnostics: -1, Code: "reconstruction_failed"}, "profile JSON has invalid reconstruction snapshot"},
+		{"failed code", model.ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "x"}, "profile JSON has invalid reconstruction snapshot"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := reconstructionJSON(tc.in)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

@@ -27,6 +27,12 @@ type cliJSONProfile struct {
 	Quality struct {
 		ProviderEntries uint64 `json:"provider_entries"`
 		StructuredLines uint64 `json:"structured_lines"`
+		Reconstruction  struct {
+			State       string  `json:"state"`
+			Responses   *int    `json:"responses"`
+			Diagnostics *int    `json:"diagnostics"`
+			Code        *string `json:"code"`
+		} `json:"reconstruction"`
 	} `json:"quality"`
 	RPCObservations []cliJSONObservation `json:"rpc_observations"`
 	UIObservations  []cliJSONObservation `json:"ui_observations"`
@@ -83,7 +89,7 @@ func TestRunProfileJSONProducesOneCompleteDocument(t *testing.T) {
 	}
 
 	document := decodeCLIJSONProfile(t, stdout.Bytes())
-	if document.SchemaVersion != 1 || document.Kind != "profile" || document.ToolVersion != version {
+	if document.SchemaVersion != 2 || document.Kind != "profile" || document.ToolVersion != version {
 		t.Fatalf("identity = schema %d, kind %q, version %q", document.SchemaVersion, document.Kind, document.ToolVersion)
 	}
 	if document.Input.Basename != "complete-profile.log" || document.Input.Bytes != uint64(len(call)*21) {
@@ -94,6 +100,9 @@ func TestRunProfileJSONProducesOneCompleteDocument(t *testing.T) {
 	}
 	if document.Quality.ProviderEntries != 21 || document.Quality.StructuredLines != 0 {
 		t.Fatalf("quality totals = %+v", document.Quality)
+	}
+	if reconstruction := document.Quality.Reconstruction; reconstruction.State != "not_checked" || reconstruction.Responses != nil || reconstruction.Diagnostics != nil || reconstruction.Code != nil {
+		t.Fatalf("lazy reconstruction = %+v", reconstruction)
 	}
 	if len(document.RPCObservations) != 21 {
 		t.Fatalf("JSON observation count = %d, want 21", len(document.RPCObservations))
@@ -155,7 +164,7 @@ func TestRunProfileJSONRealFixtureWorkflows(t *testing.T) {
 			}
 
 			document := decodeCLIJSONProfile(t, data)
-			if document.SchemaVersion != 1 || document.Kind != "profile" || document.ToolVersion != version {
+			if document.SchemaVersion != 2 || document.Kind != "profile" || document.ToolVersion != version {
 				t.Fatalf("identity = schema %d, kind %q, version %q", document.SchemaVersion, document.Kind, document.ToolVersion)
 			}
 			if document.Input.Basename != tc.fixture || document.Input.Bytes != tc.bytes {

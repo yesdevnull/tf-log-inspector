@@ -227,11 +227,12 @@ func cloneCandidates(src map[uint32]int) map[uint32]int {
 	return dst
 }
 
-// ReconstructionQuality reports whether lazy provider-response reconstruction completed.
+// ReconstructionQuality reports the published lazy provider-response outcome.
 type ReconstructionQuality struct {
-	State     string
-	Responses int
-	Code      string
+	State       string
+	Responses   int
+	Diagnostics int
+	Code        string
 }
 
 // ReconstructionQuality returns status without triggering response reconstruction.
@@ -239,8 +240,18 @@ func (l *Log) ReconstructionQuality() ReconstructionQuality {
 	if !l.responseChecked.Load() {
 		return ReconstructionQuality{State: "not_checked"}
 	}
-	if l.responseErr != nil {
-		return ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}
+	quality := ReconstructionQuality{
+		State:       "complete",
+		Responses:   len(l.responses),
+		Diagnostics: len(l.responseDiagnostics),
 	}
-	return ReconstructionQuality{State: "checked", Responses: len(l.responses)}
+	if quality.Diagnostics > 0 {
+		quality.State = "failed"
+		quality.Code = "reconstruction_failed"
+		if quality.Responses > 0 {
+			quality.State = "partial"
+			quality.Code = "reconstruction_partial"
+		}
+	}
+	return quality
 }

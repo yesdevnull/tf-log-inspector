@@ -1,12 +1,10 @@
-# Profile JSON v1
+# Profile JSON v2
 
-This is the historical version 1 contract. The current CLI emits [Profile JSON v2](profile-json-v2.md).
-
-Profile JSON exports the complete admitted evidence used by `tfli`'s profile report. It contains unmasked identifiers and source references, but no raw log bodies, credential fields, absolute input path, or generation timestamp. Version 1 makes no compatibility promise for a future schema version.
+Profile JSON exports the complete admitted evidence used by `tfli`'s profile report. It contains unmasked identifiers and source references, but no raw log bodies, credential fields, absolute input path, or generation timestamp. Version 2 makes no compatibility promise for a future schema version.
 
 All object fields are mandatory and appear in the order documented below. Names use `snake_case`. Arrays preserve report order except `candidate_counts`, which is numerically ascending. Empty arrays and maps are `[]` and `{}`. Unavailable values are `null`; a measured zero remains `0`. Durations and offsets are integer milliseconds. Counts, byte offsets, and line numbers are JSON integers and may exceed JavaScript's exactly representable integer range. Invalid UTF-8 in any exported string makes rendering fail with the fixed diagnostic `profile JSON contains invalid UTF-8`.
 
-The root fields are `schema_version` (always `1`), `kind` (`"profile"`), `tool_version`, `input`, `duration_unit` (`"ms"`), `tiers`, `quality`, `rpc_observations`, `ui_observations`, `aggregates`, `timeline`, and `qualifications`.
+The root fields are `schema_version` (always `2`), `kind` (`"profile"`), `tool_version`, `input`, `duration_unit` (`"ms"`), `tiers`, `quality`, `rpc_observations`, `ui_observations`, `aggregates`, `timeline`, and `qualifications`.
 
 `input` has `basename` and `bytes`. A `source` object has `entry`, `start_line`, `end_line`, `start_byte`, and `end_byte`; lines are one-based inclusive and bytes are half-open. A missing source is `null`.
 
@@ -18,7 +16,7 @@ Each RPC observation has `index`, `entry`, `source`, `method`, `provider`, `reso
 
 `quality` has `scope` (`"whole_log"`), `provider_entries`, `structured_lines`, `has_address_context`, `issues`, `attribution`, `nameable_ms`, `rpc_duration_ms`, `nameable_share`, and `reconstruction`. Each issue has `stage`, `code`, `count`, and nullable `first_entry`. Attribution is null without address context; otherwise it has `spans`, `duration_ms`, `by_confidence`, and `candidate_counts`. The five confidence totals appear as unattributed, ambiguous, overlapping, likely, and contained, each with `confidence`, `count`, and `duration_ms`. Candidate rows have `candidates` and `count`.
 
-`reconstruction` has `state`, `responses`, and `code`. `not_checked` has two null details, `checked` has a response count (including zero) and null code, and `failed` has null responses and its failure code. Export never triggers reconstruction.
+`reconstruction` has `state`, `responses`, `diagnostics`, and `code`. `not_checked` has three null details. `complete` has a measured response count, including zero, zero diagnostics, and a null code. `partial` has positive response and diagnostic counts with code `reconstruction_partial`. `failed` has zero responses, a positive diagnostic count, and code `reconstruction_failed`. Diagnostic counts are diagnostic records; ownership failures can produce a trigger diagnostic and aborted-message diagnostics. Export never triggers reconstruction.
 
 `aggregates` has `providers`, `resource_types`, `resources`, `ui`, `unnamed_ui`, and `rpc_evidence`. Provider rows have `provider` and `rpc`. Resource-type rows have `resource_type`, `rpc`, and `ui`. Resource rows have `address`, `ui`, `named_rpc`, `overlapping_rpc`, and `ui_observation_indices`. A total has `count`, `total_ms`, `max_ms`, and `lower_bound`. UI and RPC measure different work and must not be added. In `rpc_evidence`, `baseline` is the denominator represented by the seven disjoint partitions `missing_type`, `no_context`, `contained`, `likely`, `overlapping`, `ambiguous`, and `unattributed`; do not add `baseline` to those partitions.
 

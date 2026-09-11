@@ -65,12 +65,6 @@ func (l *Log) inspectProviderResponses() {
 		l.responseMessageRanges = providerResponseRanges(l.responses)
 		l.responseFailedRanges = providerDiagnosticRanges(l.responseDiagnostics, false)
 		l.responseUnavailableRanges = providerDiagnosticRanges(l.responseDiagnostics, true)
-		if len(l.responseDiagnostics) != 0 {
-			diagnostic := l.responseDiagnostics[0]
-			diagnostic.Ranges = nil
-			diagnostic.Unavailable = nil
-			l.responseErr = diagnostic
-		}
 		l.responseChecked.Store(true)
 	})
 }

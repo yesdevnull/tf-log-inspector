@@ -164,7 +164,7 @@ func TestProviderResponseAtValidBlankLineTriggersInspection(t *testing.T) {
 	if got.State != "none" || got.SourceLine != 1 || got.Response.Text != "" || got.Diagnostic != nil || got.HasDiagnostics {
 		t.Fatalf("selection = %+v", got)
 	}
-	if quality := l.ReconstructionQuality(); quality != (ReconstructionQuality{State: "checked"}) {
+	if quality := l.ReconstructionQuality(); quality != (ReconstructionQuality{State: "complete"}) {
 		t.Fatalf("quality = %+v", quality)
 	}
 }
@@ -220,6 +220,9 @@ func TestProviderResponseAtReturnsDetachedCachedValues(t *testing.T) {
 	if !reflect.DeepEqual(l.responseDiagnostics, outcome.Diagnostics) {
 		t.Fatalf("cached diagnostics changed: %#v", l.responseDiagnostics)
 	}
+	if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "partial", Responses: 2, Diagnostics: 1, Code: "reconstruction_partial"}) {
+		t.Fatalf("selection mutation changed quality counts: %+v", got)
+	}
 }
 
 func TestProviderResponseAtDetachesGlobalDiagnosticPositions(t *testing.T) {
@@ -255,23 +258,26 @@ func TestProviderResponseAtDetachesGlobalDiagnosticPositions(t *testing.T) {
 	if !reflect.DeepEqual(l.responseDiagnostics, outcome.Diagnostics) {
 		t.Fatalf("cached global diagnostics changed: %#v", l.responseDiagnostics)
 	}
+	if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "failed", Diagnostics: 2, Code: "reconstruction_failed"}) {
+		t.Fatalf("quality did not count diagnostic records: %+v", got)
+	}
 }
 
-func TestProviderResponseAtPublishesInterimFailedQuality(t *testing.T) {
+func TestProviderResponseAtPublishesOutcomeQuality(t *testing.T) {
 	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
 	for _, tc := range []struct {
 		name, source, state string
+		wantQuality         ReconstructionQuality
 	}{
-		{"mixed", head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n", "complete"},
-		{"malformed only", head + "b: {\"broken\":]}\n", "invalid"},
+		{"mixed", head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n", "complete", ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"}},
+		{"malformed only", head + "b: {\"broken\":]}\n", "invalid", ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			l := &Log{Data: []byte(tc.source), Entries: []logfmt.Entry{{Len: uint32(len(tc.source)), Lines: uint16(strings.Count(tc.source, "\n"))}}}
 			if got := l.ProviderResponseAt(0, 0); got.State != tc.state || !got.HasDiagnostics {
 				t.Fatalf("selection = %+v", got)
 			}
-			want := ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}
-			if got := l.ReconstructionQuality(); got != want {
+			if got := l.ReconstructionQuality(); got != tc.wantQuality {
 				t.Fatalf("quality = %+v", got)
 			}
 		})
@@ -280,11 +286,14 @@ func TestProviderResponseAtPublishesInterimFailedQuality(t *testing.T) {
 
 func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 	const head = "2026-09-11T00:00:00.000Z [DEBUG] provider."
-	for _, source := range []string{
-		head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n",
-		head + "b: {\"broken\":]}\n",
+	for _, tc := range []struct {
+		source string
+		want   ReconstructionQuality
+	}{
+		{head + "a: {\"ok\":1}\n" + head + "b: {\"broken\":]}\n", ReconstructionQuality{State: "partial", Responses: 1, Diagnostics: 1, Code: "reconstruction_partial"}},
+		{head + "b: {\"broken\":]}\n", ReconstructionQuality{State: "failed", Diagnostics: 1, Code: "reconstruction_failed"}},
 	} {
-		l := &Log{Data: []byte(source), Entries: []logfmt.Entry{{Len: uint32(len(source)), Lines: uint16(strings.Count(source, "\n"))}}}
+		l := &Log{Data: []byte(tc.source), Entries: []logfmt.Entry{{Len: uint32(len(tc.source)), Lines: uint16(strings.Count(tc.source, "\n"))}}}
 		start := make(chan struct{})
 		errs := make(chan error, 64)
 		var wg sync.WaitGroup
@@ -293,7 +302,7 @@ func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 				<-start
 				for range 100 {
 					got := l.ReconstructionQuality()
-					if got != (ReconstructionQuality{State: "not_checked"}) && got != (ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}) {
+					if got != (ReconstructionQuality{State: "not_checked"}) && got != tc.want {
 						errs <- fmt.Errorf("quality = %+v", got)
 						return
 					}
@@ -316,40 +325,8 @@ func TestProviderResponseAtPublishesCacheAtomically(t *testing.T) {
 		for err := range errs {
 			t.Error(err)
 		}
-		if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}) {
+		if got := l.ReconstructionQuality(); got != tc.want {
 			t.Fatalf("final quality = %+v", got)
-		}
-
-		start = make(chan struct{})
-		errs = make(chan error, 32)
-		wg = sync.WaitGroup{}
-		for range 16 {
-			wg.Go(func() {
-				<-start
-				for range 100 {
-					_, err := l.ProviderResponse(l.Entries[0])
-					d, ok := err.(logfmt.ProviderJSONDiagnostic)
-					if !ok || d.Ranges != nil || d.Unavailable != nil {
-						errs <- fmt.Errorf("legacy error = %#v", err)
-						return
-					}
-				}
-			})
-			wg.Go(func() {
-				<-start
-				for range 100 {
-					if got := l.ReconstructionQuality(); got != (ReconstructionQuality{State: "failed", Code: "reconstruction_failed"}) {
-						errs <- fmt.Errorf("legacy quality = %+v", got)
-						return
-					}
-				}
-			})
-		}
-		close(start)
-		wg.Wait()
-		close(errs)
-		for err := range errs {
-			t.Error(err)
 		}
 	}
 }
@@ -438,7 +415,7 @@ func projectedDiagnosticAtSourceLine(diagnostics []logfmt.ProviderJSONDiagnostic
 	return logfmt.ProviderJSONDiagnostic{}, false
 }
 
-func TestProviderResponsePreservesSourceEntries(t *testing.T) {
+func TestProviderResponseAtPreservesSourceEntries(t *testing.T) {
 	const head = "2026-01-01T00:00:00.000Z [DEBUG] provider.example: "
 	const source = head + `{"value":"fir` + "\n" + "ordinary text\n" + head + `st"}` + "\n"
 	path := filepath.Join(t.TempDir(), "synthetic.log")
@@ -451,11 +428,11 @@ func TestProviderResponsePreservesSourceEntries(t *testing.T) {
 	}
 	entries := append(l.Entries[:0:0], l.Entries...)
 	var wg sync.WaitGroup
-	for _, e := range l.Entries {
+	for i, e := range l.Entries {
 		wg.Go(func() {
-			response, err := l.ProviderResponse(e)
-			if err != nil || response.Text != `{"value":"firordinary textst"}` || len(response.Fragments) != 3 {
-				t.Errorf("response = %+v, error = %v", response, err)
+			selection := l.ProviderResponseAt(uint32(i), 0)
+			if selection.State != "complete" || selection.Response.Text != `{"value":"firordinary textst"}` || len(selection.Response.Fragments) != 3 {
+				t.Errorf("selection = %+v", selection)
 			}
 			if !strings.Contains(source, string(l.Bytes(e))) {
 				t.Error("source bytes changed")
@@ -468,7 +445,7 @@ func TestProviderResponsePreservesSourceEntries(t *testing.T) {
 	}
 }
 
-func TestProviderResponseMalformedDoesNotBlockLoad(t *testing.T) {
+func TestProviderResponseAtMalformedDoesNotBlockLoad(t *testing.T) {
 	const source = "2026-01-01T00:00:00.000Z [DEBUG] provider.example: {\"secret\":\n"
 	path := filepath.Join(t.TempDir(), "synthetic.log")
 	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
@@ -478,9 +455,9 @@ func TestProviderResponseMalformedDoesNotBlockLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := l.ProviderResponse(l.Entries[0])
-	if err == nil || strings.Contains(err.Error(), "secret") || response.Text != "" {
-		t.Fatalf("response = %+v, error = %v", response, err)
+	selection := l.ProviderResponseAt(0, 0)
+	if selection.State != "invalid" || selection.Diagnostic == nil || strings.Contains(selection.Diagnostic.Error(), "secret") || selection.Response.Text != "" {
+		t.Fatalf("selection = %+v", selection)
 	}
 	if string(l.Bytes(l.Entries[0])) != source {
 		t.Fatal("raw entry unavailable")

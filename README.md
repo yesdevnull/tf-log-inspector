@@ -185,21 +185,25 @@ time. While searching with `/`, use `←`/`→`, `Home`/`End`, `Backspace` and `
 to edit the query. Long queries scroll with the cursor. `Enter` searches,
 `Esc` cancels, and `n`/`N` repeat the submitted search forwards/backwards.
 
-With the Raw Log list focused, `r` opens the complete provider JSON response
-containing the entry at the top of the pane, joining timestamped fragments
-even when different providers are interleaved. The centre pane shows the
-fragment count, decoded multiline `@message` text and indented JSON. Terminal
-controls are displayed as visible escapes. Use arrows or `h`/`j`/`k`/`l` to
-scroll, `PgUp`/`PgDn` to page, `/` to search the displayed text and `n`/`N` for
-the next/previous matching line. `Esc` or `r` restores the exact raw position.
+With the Raw Log list focused, `r` inspects the physical line at the top of the
+pane. When that line contains a verified provider fragment, it opens the
+complete JSON response, joining timestamped fragments even when different
+providers are interleaved. The centre pane shows the fragment count, decoded
+multiline `@message` text and indented JSON. Terminal controls are displayed as
+visible escapes. Use arrows or `h`/`j`/`k`/`l` to scroll, `PgUp`/`PgDn` to page,
+`/` to search the displayed text and `n`/`N` for the next/previous matching
+line. `Esc` or `r` restores the exact raw position.
 
 Reconstruction runs lazily and leaves source bytes and entry identities intact.
-Malformed, incomplete or observably ambiguous provider JSON anywhere in the file
-makes reconstructed responses unavailable; ordinary loading and Raw Log still
-work. Ordered fragments from each exact provider component are required:
-unrelated same-component text inserted inside an unfinished JSON string cannot
-always be distinguished from payload. Scrubbing uses this same reconstruction
-and refuses to publish output on reconstruction failure.
+A malformed or incomplete response produces a position-specific status instead
+of exposing its body. Responses recovered elsewhere remain available, with a
+persistent partial-capture notice when other reconstruction diagnostics exist.
+The quality panel distinguishes not checked, complete, partial and failed
+reconstruction and reports verified-response and diagnostic-record counts.
+Ordered fragments from each exact provider component are required: unrelated
+same-component text inserted inside an unfinished JSON string cannot always be
+distinguished from payload. Scrubbing uses this same reconstruction and refuses
+to publish output on any reconstruction diagnostic.
 
 Key `5` swaps the centre table for a timeline: one bar per lane of concurrent
 work, shaded by how busy each column of it was, with the idle time between
@@ -231,7 +235,7 @@ delta.
 Text output defaults to 20 exact rows and 20 unranked or unavailable rows in
 each section; `--limit` applies independently to every list. Use `--limit 0`
 to show all text rows. JSON always contains every row and does not accept
-`--limit`; see the [Comparison JSON v1 schema](docs/comparison-json-v1.md).
+`--limit`; see the [Comparison JSON v2 schema](docs/comparison-json-v2.md).
 
 Comparison output contains unmasked identifiers and capture metadata, but no
 raw log bodies or absolute input paths. Separately scrubbed captures can assign
@@ -366,7 +370,7 @@ does not change whole-log counts, durations, concurrency totals or capture
 quality.
 
 JSON profiles export the complete data without a row limit. The
-[versioned JSON schema](docs/profile-json-v1.md) uses explicit `null` values for
+[versioned JSON schema](docs/profile-json-v2.md) uses explicit `null` values for
 unavailable measurements and `0` for measured zeroes. Durations and separate
 RPC and UI clock offsets are integer milliseconds; the two tiers measure
 different work and their durations must not be added. Observations retain full
