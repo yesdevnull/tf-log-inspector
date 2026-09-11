@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -32,6 +30,9 @@ type responseState struct {
 	notFound  bool
 	match     *responseMatch
 	column    int
+	pending   bool
+	resolving bool
+	request   responseRequest
 }
 
 const responseNavigation = "Esc/r back  ↑↓/←→ scroll  PgUp/PgDn page"
@@ -59,41 +60,23 @@ func (m *Model) rawResponsePosition() (entry, lineOffset int, ok bool) {
 	return 0, 0, false
 }
 
-func (m *Model) openResponse() {
-	r := responseState{open: true, viewport: viewport.New(1, 1)}
-	r.viewport.MouseWheelEnabled = false
-	r.viewport.SetHorizontalStep(4)
+func (m *Model) openResponse() tea.Cmd {
 	entry, lineOffset, ok := m.rawResponsePosition()
-	selection := model.ProviderResponseSelection{State: "none"}
-	if ok {
-		selection = m.log.ProviderResponseAt(uint32(entry), lineOffset)
+	m.nextResponseRequestID++
+	request := responseRequest{id: m.nextResponseRequestID, entry: uint32(entry), lineOffset: lineOffset, valid: ok}
+	m.response = presentResponse(model.ProviderResponseSelection{State: "none"})
+	m.response.open = true
+	m.response.pending = true
+	m.response.request = request
+	m.response.lines = []string{"Checking responses…", "", "Closing this view leaves the check running."}
+	m.response.viewport.SetContent(strings.Join(m.response.lines, "\n"))
+	if m.log.ReconstructionQuality().State != "not_checked" {
+		return m.queueResponseSelection()
 	}
-	text, status := responsePresentation(selection)
-	r.status = status
-	if selection.State == "complete" {
-		response := selection.Response
-		r.fragments = len(response.Fragments)
-		text = response.Text
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, []byte(response.Text), "", "  "); err == nil {
-			text = pretty.String()
-		}
-		var envelope struct {
-			Message string `json:"@message"`
-		}
-		if json.Unmarshal([]byte(response.Text), &envelope) == nil && strings.Contains(envelope.Message, "\n") {
-			text = "Decoded @message:\n" + envelope.Message + "\n\nJSON:\n" + text
-		}
-		if selection.HasDiagnostics {
-			r.notice = responsePartialNotice
-		}
+	if cmd := m.requestResponseCheck(); cmd != nil {
+		return cmd
 	}
-	r.lines = strings.Split(text, "\n")
-	for i, line := range r.lines {
-		r.lines[i] = logfmt.DisplayText(line)
-	}
-	r.viewport.SetContent(strings.Join(r.lines, "\n"))
-	m.response = r
+	return m.queueResponseSelection()
 }
 
 func responsePresentation(selection model.ProviderResponseSelection) (text string, status bool) {
@@ -167,6 +150,12 @@ func (m *Model) handleResponseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" || (!r.searching && msg.String() == "q") {
 		m.quitting = true
 		return m, tea.Quit
+	}
+	if r.pending {
+		if msg.String() == "esc" || msg.String() == "r" {
+			r.open = false
+		}
+		return m, nil
 	}
 	if r.searching {
 		switch msg.Type {
@@ -250,6 +239,9 @@ func (m *Model) searchResponse(direction int, includeCurrent bool) {
 
 func (m *Model) responseFooter(w int) string {
 	r := &m.response
+	if r.pending {
+		return clipWidth(m.responseNavigationHint(), w) + "\n" + clipWidth("q quit", w)
+	}
 	if r.searching {
 		r.input.Width = max(1, w-2)
 		return clipWidth(r.input.View(), w)

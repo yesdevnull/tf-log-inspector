@@ -111,12 +111,16 @@ func TestReconstructionDiagnosticsReturnsDetachedMetadata(t *testing.T) {
 				return
 			}
 
+			originalLen := len(diagnostics)
 			diagnostics[0].Code = "changed"
 			diagnostics[0].Line = 999
 			diagnostics[0].StartLine = 999
 			diagnostics[0].Ranges = append(diagnostics[0].Ranges, logfmt.JSONFragment{Start: 1, End: 2})
 			diagnostics[0].Unavailable = append(diagnostics[0].Unavailable, logfmt.JSONFragment{Start: 2, End: 3})
 			diagnostics = append(diagnostics, logfmt.ProviderJSONDiagnostic{Code: "appended"})
+			if len(diagnostics) != originalLen+1 {
+				t.Fatal("diagnostic append did not extend returned copy")
+			}
 
 			repeated := l.ReconstructionDiagnostics()
 			if len(repeated) != len(tc.wantCodes) || repeated[0].Code != tc.wantCodes[0] || repeated[0].Line != tc.wantLines[0] || repeated[0].StartLine != tc.wantStarts[0] || repeated[0].Ranges != nil || repeated[0].Unavailable != nil {

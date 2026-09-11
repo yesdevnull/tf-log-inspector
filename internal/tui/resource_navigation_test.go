@@ -369,7 +369,7 @@ func TestResourceOperationAssociatedCallResponseHistoryComposition(t *testing.T)
 		t.Fatal("associated call scope omitted its parsed response entry")
 	}
 	m.raw.top = responseEntry
-	pressRune(t, &m, 'r')
+	responseKeyAndDrain(t, &m, "r")
 	if !m.response.open {
 		t.Fatal("associated call response did not open")
 	}

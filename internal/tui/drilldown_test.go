@@ -272,7 +272,7 @@ func TestDrillDownProviderCallRawResponseRoundTrip(t *testing.T) {
 	m.raw.query, m.raw.lastQuery = "response", "provider"
 	m.raw.match = &rawMatch{entry: m.raw.top, line: 0, text: literalPosition{byteOffset: 1, column: 1}}
 	rawParent := cloneRawState(m.raw)
-	pressRune(t, &m, 'r')
+	responseKeyAndDrain(t, &m, "r")
 	if !m.response.open || !strings.Contains(m.renderCentre(100, 20), "composed response") {
 		t.Fatalf("real reconstructed response did not open:\n%s", m.renderCentre(100, 20))
 	}

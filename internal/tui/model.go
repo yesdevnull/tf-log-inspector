@@ -118,10 +118,12 @@ const (
 // Init, Update and View all take pointer receivers for that reason, and
 // the compile-time assertion below pins it.
 type Model struct {
-	response responseState
-	quality  qualityState
-	log      *model.Log
-	name     string
+	response              responseState
+	inspection            responseInspectionState
+	nextResponseRequestID uint64
+	quality               qualityState
+	log                   *model.Log
+	name                  string
 
 	// resourceIndex belongs to log for the Model's entire lifetime. The
 	// projection is the one shared selection for every timing consumer and
@@ -423,6 +425,11 @@ func (m *Model) Init() tea.Cmd {
 // model while another is rendered.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case responseInspectionDoneMsg:
+		return m, m.completeResponseInspection(msg)
+	case responseReadyMsg:
+		m.completeResponseSelection(msg)
+		return m, nil
 	case tea.KeyMsg:
 		if m.response.open {
 			return m.handleResponseKey(msg)
@@ -589,7 +596,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			if m.view == ViewRawLog && m.pane == PaneList {
-				m.openResponse()
+				return m, m.openResponse()
 			}
 		case "g":
 			if m.view == ViewRawLog && m.pane == PaneList {
