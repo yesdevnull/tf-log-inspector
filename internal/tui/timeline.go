@@ -18,8 +18,11 @@ import (
 // owns them: which lane the cursor is on, and which of that lane's spans is
 // selected within it.
 type timelineState struct {
-	lane int
-	span int // index into the selected lane's Spans, not into the span slice
+	lane       int
+	span       int // index into the selected lane's Spans, not into the span slice
+	tier       timelineTier
+	selections [3]selectionIdentity
+	notice     string
 }
 
 // timelineTier is which of the log's two span sets the timeline draws.
@@ -78,7 +81,7 @@ func (m *Model) timelineTiming() (timelineTier, model.TimingSelection) {
 // separate only so the cache above it is one branch rather than three
 // returns each having to remember to fill it.
 func (m *Model) filteredTimelineTiming() (timelineTier, model.TimingSelection) {
-	switch tier := timelineTierFor(m.log); tier {
+	switch tier := m.activeTimelineTier(); tier {
 	case tierRPC:
 		return tier, model.SelectTiming(m.selectedRPCSpans())
 	case tierUI:
@@ -86,25 +89,6 @@ func (m *Model) filteredTimelineTiming() (timelineTier, model.TimingSelection) {
 	default:
 		return tierNone, model.SelectTiming(nil)
 	}
-}
-
-// timelineTierFor is the tier decision itself, as a property of the LOG
-// alone: RPC where the log has one, otherwise UI, and tierNone only for a
-// log carrying neither. It is separate from filteredTimelineSpans because
-// the question is asked outside the timeline too -- detailNaturalWidth
-// sizes the detail pane over the spans a selection can actually reach, and
-// a UI-hook span is reachable only in a log this answers tierUI for. Two
-// copies of the rule would let the pane be measured for a tier the view
-// never draws, sizing it for a line no keypress can produce out of columns
-// the centre pane would otherwise have.
-func timelineTierFor(l *model.Log) timelineTier {
-	switch {
-	case len(l.RPCSpans) > 0:
-		return tierRPC
-	case len(l.UISpans) > 0:
-		return tierUI
-	}
-	return tierNone
 }
 
 // timelineTitle names the pane after the tier timelineSpans has chosen for
@@ -304,14 +288,17 @@ func (m *Model) moveTimelineLane(delta int) {
 	m.timeline.lane += delta
 	m.clampTimelineSelection()
 	if !seek || m.timeline.lane == was {
+		m.rememberTimelineSelection()
 		return
 	}
 	lanes := m.timelineLanes()
 	if m.timeline.lane >= len(lanes) {
+		m.rememberTimelineSelection()
 		return
 	}
 	_, spans := m.timelineSpans()
 	m.timeline.span = nearestSpanByStart(spans, lanes[m.timeline.lane].Spans, at.StartMs)
+	m.rememberTimelineSelection()
 }
 
 // nearestSpanByStart is the position WITHIN lane of the span whose start is
@@ -349,6 +336,7 @@ func nearestSpanByStart(spans []span.Span, lane []int, startMs uint32) int {
 func (m *Model) moveTimelineSpan(delta int) {
 	m.timeline.span += delta
 	m.clampTimelineSelection()
+	m.rememberTimelineSelection()
 }
 
 // selectedLaneStepsThroughSpans reports whether ←/→ have anywhere to go
@@ -1504,9 +1492,9 @@ func (m *Model) stallAnnotation(w int) string {
 // and the first then names the position: counting entries already made,
 // letting the second overwrite the first would hand the next provider a
 // position already in use and draw two providers' lanes alike.
-func laneOrderFor(l *model.Log) map[string]int {
+func laneOrderFor(l *model.Log, tier timelineTier) map[string]int {
 	src := l.RPCSpans
-	if timelineTierFor(l) == tierUI {
+	if tier == tierUI {
 		src = l.UISpans
 	}
 	seen := map[string]bool{}

@@ -205,9 +205,8 @@ type Model struct {
 	// sorts what it is given. On a real capture that is thousands of spans
 	// copied and sorted several times over for one keystroke.
 	//
-	// Anything that can change what timelineSpans() returns -- the filter,
-	// since the tier itself is a property of the log rather than of the
-	// selection (see timelineSpans) -- must invalidate these via
+	// Anything that can change what timelineSpans() returns -- the filter or
+	// the explicit tier selection -- must invalidate these via
 	// invalidateRows, along with everything derived from them below.
 	timelineTierCache   timelineTier
 	timelineSpansCache  []span.Span
@@ -239,9 +238,8 @@ type Model struct {
 
 	// facetPaneNatural and detailPaneNatural are how wide each side pane
 	// would have to be to show its widest line in full. Both are functions
-	// of data that never changes after New -- the log's spans, and the
-	// facets built from them -- so both are measured there rather than per
-	// frame: measuring the detail pane means formatting every span in the
+	// of the log's spans and facets. Facets are measured in New; detail width
+	// is cached per active timeline tier. Measuring the detail pane means formatting every span in the
 	// log and rolling it up by provider and by resource type, which on a
 	// real capture is thousands of lines built and thrown away for every
 	// keystroke. Only the terminal-relative clamp (capPaneWidth) depends on
@@ -250,7 +248,9 @@ type Model struct {
 	// keyed by the short name the lane labels use. The POSITION is stored
 	// rather than the style, so a palette rebuilt for a NO_COLOR terminal
 	// reaches lanes drawn from a model that was built before it.
-	laneOrder map[string]int
+	laneOrder                  map[string]int
+	timelinePresentationTier   timelineTier
+	timelinePresentationCached bool
 
 	facetPaneNatural  int
 	detailPaneNatural int
@@ -358,9 +358,8 @@ func New(l *model.Log, path string) Model {
 	// Settled at load for the reason the pane widths beside it are: the
 	// timeline is redrawn on every keystroke and this walks every span in
 	// the tier, which is thousands of them on a real capture.
-	m.laneOrder = laneOrderFor(l)
 	m.facetPaneNatural = facetNaturalWidth(m.facets)
-	m.detailPaneNatural = detailNaturalWidth(l)
+	m.refreshTimelinePresentation()
 	return m
 }
 
@@ -786,6 +785,9 @@ func (m *Model) setView(v View) {
 }
 
 func (m *Model) changeView(v View) {
+	if m.view == ViewTimeline {
+		m.rememberTimelineSelection()
+	}
 	m.viewSelected[m.view] = m.selected
 	m.view = v
 	m.keepFocusOnADrawnPane()
@@ -849,12 +851,13 @@ func (m *Model) invalidateRows() {
 	m.timelineWallClockCached = false
 	m.raw.notFound = false
 	m.raw.match = nil
+	m.refreshTimelinePresentation()
 	m.clampSelection()
 	if m.view == ViewRawLog {
 		m.reconcileRawCursor()
 	}
 	if m.view == ViewTimeline {
-		m.clampTimelineSelection()
+		m.reconcileTimelineSelection()
 	}
 }
 

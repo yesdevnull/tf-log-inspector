@@ -96,43 +96,39 @@ func facetNaturalWidth(facets []model.Facet) int {
 // collapsing distinct module paths to identical text with terminal width to
 // spare.
 //
-// A log carrying BOTH tiers is measured over its RPC spans alone, because
-// that is all it can show: timelineSpans draws the UI tier only where there
-// is no RPC span to draw instead, and row.spanIdx only ever indexes
-// RPCSpans. Measuring the UI tier there would size the pane for a line no
-// keypress can produce, and the columns it claimed would come out of the
-// centre pane -- in the timeline, the bar area the view exists for.
+// RPC details and rollups remain reachable from the calls views whichever
+// timeline tier is active. When UI timing is active its resource addresses
+// are measured as well, because the timeline cursor can reach those details.
 //
 // It formats every span in the log and rolls the log up twice, so like
-// facetNaturalWidth it is measured once in New over data that cannot change
-// afterwards, not per frame. It measures the UNFILTERED rollups, which is
+// facetNaturalWidth it is measured once per active tier, not per frame. It
+// measures the UNFILTERED rollups, which is
 // what makes it a load-time measurement at all: a filter can only remove
 // spans, so it can offer no group key these rows do not already carry, and
 // the identifier lines -- the wide ones -- are covered exactly. A filtered
 // sub-total can render at most one column wider than the total it came from
 // ("999ms" against "1.0s"), which clipWidth absorbs the way it absorbs any
 // other overrun.
-func detailNaturalWidth(l *model.Log) int {
+func detailNaturalWidth(l *model.Log, tier timelineTier) int {
 	width := minDetailPaneWidth
-	spans := l.RPCSpans
-	uiTier := timelineTierFor(l) == tierUI
-	if uiTier {
-		spans = l.UISpans
-	}
 	hasContext := l.HasAddressContext()
-	for _, s := range spans {
+	for _, s := range l.RPCSpans {
 		// Attribs is parallel to RPCSpans only -- a UI-hook span's address is
 		// observed rather than inferred, so it carries none, and spanDetailLines
 		// never asks attributionFields about one anyway (see its Fidelity gate).
 		// Looked up by entry (model.Log.AttributionForEntry) rather than by
 		// position, the one supported way to do this lookup -- see its own
 		// doc comment for why a positional index is not safe in general.
-		var a attrib.Attribution
-		if !uiTier {
-			a = l.AttributionForEntry(s.Entry)
-		}
+		a := l.AttributionForEntry(s.Entry)
 		for _, line := range spanDetailLines(s, a, hasContext, hugeWidth) {
 			width = max(width, lipgloss.Width(line))
+		}
+	}
+	if tier == tierUI {
+		for _, s := range l.UISpans {
+			for _, line := range spanDetailLines(s, attrib.Attribution{}, hasContext, hugeWidth) {
+				width = max(width, lipgloss.Width(line))
+			}
 		}
 	}
 	rollups := append(providerRows(l.RPCSpans), typeRows(l.RPCSpans, l.UISpans)...)

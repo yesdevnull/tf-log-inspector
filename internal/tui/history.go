@@ -59,6 +59,9 @@ func cloneRawState(src rawLogState) rawLogState {
 }
 
 func (m *Model) captureNavigation() navigationFrame {
+	if m.view == ViewTimeline {
+		m.rememberTimelineSelection()
+	}
 	return navigationFrame{
 		view: m.view, pane: m.pane, selected: m.selected,
 		identity: m.selectedIdentity(), sortCol: m.sortCol,
@@ -93,7 +96,6 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.facetSearch.input.SetValue(frame.facetQuery)
 	m.facetSearch.input.CursorEnd()
 	m.showFacetOverlay = frame.showFacetOverlay
-	m.timeline = frame.timeline
 	m.resourceOperations = frame.resourceOperations
 	m.operationSort = frame.operationSort
 	m.associatedCalls = frame.associatedCalls
@@ -101,6 +103,10 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.pane = frame.pane
 	m.selected = frame.selected
 	m.changeView(frame.view)
+	// changeView records the outgoing child's timeline state. Restore the
+	// parent's value-owned snapshot only after that departure is complete.
+	m.timeline = frame.timeline
+	m.invalidateRows()
 	// The transition records an outgoing cursor; a return must retain the
 	// snapshot's remembered positions instead of that child departure.
 	m.viewSelected = frame.viewSelected
@@ -160,9 +166,11 @@ func (m *Model) selectedTimelineIdentity() selectionIdentity {
 func (m *Model) restoreIdentity(id selectionIdentity, fallback int) {
 	if m.view == ViewTimeline && (id.kind == "rpc" || id.kind == "ui") {
 		if m.restoreTimelineIdentity(id) {
+			m.rememberTimelineSelection()
 			return
 		}
 		m.clampTimelineSelection()
+		m.rememberTimelineSelection()
 		return
 	}
 	rows := m.rows()
@@ -180,6 +188,9 @@ func (m *Model) restoreIdentity(id selectionIdentity, fallback int) {
 }
 
 func (m *Model) restoreTimelineIdentity(id selectionIdentity) bool {
+	if id.kind != "rpc" && id.kind != "ui" {
+		return false
+	}
 	tier, _ := m.timelineSpans()
 	if (id.kind == "rpc" && tier != tierRPC) || (id.kind == "ui" && tier != tierUI) {
 		return false
@@ -207,7 +218,8 @@ func (m *Model) restoreTimelineIdentity(id selectionIdentity) bool {
 	for laneIndex, lane := range m.timelineLanes() {
 		for spanIndex, candidate := range lane.Spans {
 			if candidate == positioned {
-				m.timeline = timelineState{lane: laneIndex, span: spanIndex}
+				m.timeline.lane = laneIndex
+				m.timeline.span = spanIndex
 				return true
 			}
 		}
