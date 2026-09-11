@@ -197,7 +197,7 @@ Append `Diagnostic counts can include ownership triggers and aborted messages.` 
 
 **Interfaces:** Consume `logfmt.InspectProviderJSON(string) logfmt.ProviderJSONResult`, `Log.SourceLocation(uint32) (SourceLocation, bool)` and the existing lazy publication fields. Produce `ProviderResponseSelection`, `Log.ProviderResponseAt`, `inspectProviderResponses`, `responseSourceLine`, `responseRangeMatch` exactly as above. Store responses/diagnostics and the three indexes. Existing quality wire states and the entry API remain until the coordinated final migration in Task 3.
 
-- [ ] **Step 1: Add behavioural tests.** Use real `Load` from synthetic files for normal ownership/recovery. Include this direct model fixture to prove two complete bodies within one authoritative entry range are selected independently; it deliberately supplies a broad entry index, not a claim about ordinary scanner grouping:
+- [x] **Step 1: Add behavioural tests.** Use real `Load` from synthetic files for normal ownership/recovery. Include this direct model fixture to prove two complete bodies within one authoritative entry range are selected independently; it deliberately supplies a broad entry index, not a claim about ordinary scanner grouping:
 
 ```go
 func TestProviderResponseAtSelectsPhysicalLineWithinEntry(t *testing.T) {
@@ -233,8 +233,8 @@ func TestProviderResponseAtPublishesInterimFailedQuality(t *testing.T) {
 
 Run this case with malformed-only input as well (selection `invalid`, same interim quality). On fresh logs of both fixtures, release quality readers and first `ProviderResponseAt` calls from one start channel. Before publication, readers may see only the exact `not_checked` zero snapshot; afterwards, only the exact interim `failed` snapshot above. Join all workers and assert final `failed`. Then exercise the old entry API concurrently with quality readers on that inspected log to catch any post-publication assignment. Use finite iterations and a wait group, without sleeps; check worker errors in the test goroutine. In Task 3 migrate these tests to final `partial` with one response/one diagnostic for the mixed fixture and `failed` with zero responses/one diagnostic for malformed-only input; remove the old-API phase while retaining concurrent first-selection coverage.
 
-- [ ] **Step 2: Observe behavioural RED.** Add compiling declarations only if needed, then run `go test ./internal/model -run 'TestProviderResponseAt' -count=1`. Record wrong/empty selected response assertions, not only undefined symbols.
-- [ ] **Step 3: Implement the shared cache and range selection.** Follow the exact contracts above. Copy fragments only for a selected complete message; project failure diagnostics to scalar facts:
+- [x] **Step 2: Observe behavioural RED.** Add compiling declarations only if needed, then run `go test ./internal/model -run 'TestProviderResponseAt' -count=1`. Record wrong/empty selected response assertions, not only undefined symbols.
+- [x] **Step 3: Implement the shared cache and range selection.** Follow the exact contracts above. Copy fragments only for a selected complete message; project failure diagnostics to scalar facts:
 
 ```go
 func (l *Log) ProviderResponseAt(entry uint32, lineOffset int) ProviderResponseSelection {
@@ -277,7 +277,7 @@ l.responseChecked.Store(true)
 
 The zero-value error remains nil for diagnostic-free input. Clear the temporary error's slice fields so returning that error from the old method cannot expose cached range storage; its safe error text remains identical. Extend Task 1's old-API phase to assert the returned diagnostic error has nil ranges. Neither response method writes the error outside this closure, including on repeated calls. This keeps current TUI/quality consumers correct even when `ProviderResponseAt` performs the first inspection. Do not add a second strict reconstruction pass. Task 3 removes this temporary assignment, its field and the old method together; it is not an additional supported API or compatibility feature.
 
-- [ ] **Step 4: Verify and measure.** Run `go test ./internal/model ./internal/tui ./internal/profile -count=1` and `go test -race ./internal/model -run 'TestProviderResponseAt' -count=1`. Add `BenchmarkProviderResponseAtFirst` and `BenchmarkProviderResponseAtRepeated`, with 1,000 and 10,000 synthetic groups of good A / bad unique B / apparent B restart; alternate lookups of a complete, invalid and unavailable last-group line. Build input and entries outside measurement. First-access iterations construct a fresh `Log` with immutable fixture Data/Entries and no copied sync primitives; repeated access uses one inspected log. Validate expected selection before timing, `ReportAllocs`, and assign the returned selection to a package benchmark sink.
+- [x] **Step 4: Verify and measure.** Run `go test ./internal/model ./internal/tui ./internal/profile -count=1` and `go test -race ./internal/model -run 'TestProviderResponseAt' -count=1`. Add `BenchmarkProviderResponseAtFirst` and `BenchmarkProviderResponseAtRepeated`, with 1,000 and 10,000 synthetic groups of good A / bad unique B / apparent B restart; alternate lookups of a complete, invalid and unavailable last-group line. Build input and entries outside measurement. First-access iterations construct a fresh `Log` with immutable fixture Data/Entries and no copied sync primitives; repeated access uses one inspected log. Validate expected selection before timing, `ReportAllocs`, and assign the returned selection to a package benchmark sink.
 
 Also add `BenchmarkProviderResponseAtFailureTail` with separate local/global sub-benchmarks and tail lengths 1,000, 10,000 and 100,000. Construct these real-parser sources outside measurement (`tailLines` is the sub-benchmark's length):
 
@@ -290,7 +290,7 @@ globalSource := head + "a: {\"pending\":\n" + head + ": {\"unknown\":1}\n" +
 ```
 
 Use the real loaded entry index to resolve the requested physical lines before timing, including a continuation offset when the final global-tail line shares an entry. Pre-inspect each log. For local input, measure the invalid first line and unavailable final tail line separately; the owning diagnostic must have `tailLines` unavailable ranges. For global input, measure the aborted invalid first line, unavailable trigger line and unavailable final tail line separately; the trigger diagnostic must have `tailLines+1` unavailable ranges. Assert these fixture sizes and expected selection states before timing so the benchmark cannot silently measure an ordinary/no-match path. Each status result must have a diagnostic with nil range slices. Keep validation, fixture construction and first inspection outside repeated-lookup timing; use `ReportAllocs` and the same package sink. Run `go test ./internal/model -run '^$' -bench BenchmarkProviderResponseAt -benchmem -count=1`. Record ns/op, B/op and allocs/op for each case: repeated status-selection B/op and allocs/op must remain bounded independently of tail length; investigate any growth rather than accepting an aggregate number. Do not impose a wall-clock threshold. First inspection and selected complete-message fragment copying have separate costs.
-- [ ] **Step 5: Review, cleanup and signed commit.** Independent task review and separate test cleanup; resolve findings. Commit `Resolve recovered responses by physical source line`.
+- [x] **Step 5: Review, cleanup and signed commit.** Independent task review and separate test cleanup; resolve findings. Commit `Resolve recovered responses by physical source line`.
 
 ### Task 2: Integrate recovered responses into the existing modal
 
@@ -462,3 +462,7 @@ Self-review checked exact existing/new paths, type/field agreement, interim cons
 - `I2-PAR-2`: the selection contract, dispatch example and detachment tests return only scalar diagnostic facts with nil ranges. Full cached ranges remain available to the indexes. Separate local/global failure-tail benchmarks measure invalid and unavailable selections at 1,000, 10,000 and 100,000 tail lines, checking that repeated status allocation does not scale with the tail.
 
 The corrected document passes link, fence and unfinished-value checks; all thirteen Go examples parse with `gofmt`. These are plan checks only. Runtime race, allocation and behaviour evidence belongs to the implementation tasks above.
+
+## Implementation evidence
+
+Task 1 completed in signed commit `2501d7c`. Independent task review approved specification and quality with no findings. Separate cleanup retained all twelve changed test functions and three benchmark functions; no cleanup changes were needed. Behavioural RED preceded implementation. Focused, full and race tests, lint, formatting, module checks and four cross-build targets passed. Every local/global failure-status selection used 128 B/op and one allocation at 1,000, 10,000 and 100,000 tail lines; measured lookup times were 35–49 ns/op on darwin/arm64 (Apple M4). These are local measurements, not timing thresholds.
