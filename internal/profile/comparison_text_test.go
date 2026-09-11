@@ -12,25 +12,13 @@ import (
 	"testing"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
 func TestComparisonTextRendersQualifiedMetrics(t *testing.T) {
-	meanBefore, meanAfter, meanDelta := 10.0, 20.0, 10.0
-	maxBefore, maxAfter := uint32(10), uint32(20)
-	minusOne := model.SignedChange{Negative: true, Magnitude: 1}
-	zero := model.SignedChange{}
-	plusTen := model.SignedChange{Magnitude: 10}
-	minus50, plus100, roundedZero := -50.0, 100.0, -0.001
-	report := comparisonTextReport([]model.ComparisonSection{{
-		Kind: "rpc_methods", Tier: "rpc", BeforeAvailable: true, AfterAvailable: true,
-		Rows: []model.ComparisonRow{{
-			Key: model.ComparisonKey{Provider: "p\x1b", ResourceType: "r\n", Method: "Read\t"}, State: "matched",
-			Before: &model.ComparisonTotal{Count: 2, TotalMs: 20, MeanMs: &meanBefore, MaxMs: &maxBefore},
-			After:  &model.ComparisonTotal{Count: 1, TotalMs: 20, MeanMs: &meanAfter, MaxMs: &maxAfter},
-			Changes: model.ComparisonChanges{Count: &minusOne, TotalMs: &zero, MeanMs: &meanDelta, MaxMs: &plusTen,
-				CountPercent: &minus50, TotalPercent: &roundedZero, MeanPercent: &plus100, MaxPercent: &plus100},
-		}},
-	}})
+	before := []span.Span{{Provider: "p\x1b", ResourceType: "r\n", RPC: "Read\t", DurationMs: 10}, {Provider: "p\x1b", ResourceType: "r\n", RPC: "Read\t", DurationMs: 10}}
+	after := []span.Span{{Provider: "p\x1b", ResourceType: "r\n", RPC: "Read\t", DurationMs: 20}}
+	report := comparisonTextReport(t, model.ComparisonInput{RPC: before}, model.ComparisonInput{RPC: after})
 	var out bytes.Buffer
 	metadata := ComparisonMetadata{BeforeBasename: "before\n.log", AfterBasename: "after\x1b.log"}
 	if err := RenderComparisonText(&out, report, metadata, TextOptions{Limit: 20}); err != nil {
@@ -51,25 +39,19 @@ func TestComparisonTextRendersQualifiedMetrics(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "-0.00") {
-		t.Errorf("rounded negative zero in:\n%s", got)
-	}
 }
 
 func TestComparisonTextLowerBoundsNullsAndUnavailable(t *testing.T) {
-	mean := 0.4
-	max := uint32(1)
-	report := comparisonTextReport([]model.ComparisonSection{{Kind: "ui_operations", Tier: "ui", BeforeAvailable: true, AfterAvailable: true, Rows: []model.ComparisonRow{{
-		Key: model.ComparisonKey{Address: "addr\r", Action: "apply\b"}, State: "matched",
-		Before: &model.ComparisonTotal{Count: 1, TotalMs: 0, MeanMs: &mean, MaxMs: &max, LowerBound: true}, After: &model.ComparisonTotal{Count: 2, TotalMs: 1, MeanMs: &mean, MaxMs: &max},
-		Changes: model.ComparisonChanges{Count: &model.SignedChange{Magnitude: 1}},
-	}}}, {Kind: "rpc_providers", Tier: "rpc", Rows: []model.ComparisonRow{{Key: model.ComparisonKey{Provider: "missing"}, State: "unavailable"}}}})
+	report := comparisonTextReport(t,
+		model.ComparisonInput{UI: []span.Span{{Address: "addr\r", RPC: "apply\b", ResourceType: "type", DurationMs: 1, DurationSaturated: true}}},
+		model.ComparisonInput{UI: []span.Span{{Address: "addr\r", RPC: "apply\b", ResourceType: "type", DurationMs: 1}, {Address: "addr\r", RPC: "apply\b", ResourceType: "type", DurationMs: 1}}},
+	)
 	var out bytes.Buffer
 	if err := RenderComparisonText(&out, report, ComparisonMetadata{}, TextOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"UNRANKED / UNAVAILABLE", "address=addr\\r  action=apply\\b", ">=0", ">=0.40", ">=1", "timing deltas unavailable: lower bound", "n/a", "before unavailable; after unavailable", "UI durations are rounded by up to one second per observation", "missing addresses cannot be matched"} {
+	for _, want := range []string{"UNRANKED / UNAVAILABLE", "address=addr\\r  action=apply\\b", ">=1", ">=1.00", "timing deltas unavailable: lower bound", "count         1            2            +1          +100.00%", "total ms      >=1          2            n/a         n/a", "UI durations are rounded by up to one second per observation", "missing addresses cannot be matched"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
@@ -77,15 +59,24 @@ func TestComparisonTextLowerBoundsNullsAndUnavailable(t *testing.T) {
 }
 
 func TestComparisonTextLimitsListsIndependently(t *testing.T) {
-	rows := make([]model.ComparisonRow, 0, 42)
+	beforeUI := make([]span.Span, 0, 42)
+	afterUI := make([]span.Span, 0, 42)
 	for i := 0; i < 21; i++ {
-		change := model.SignedChange{Magnitude: uint64(21 - i)}
-		rows = append(rows, model.ComparisonRow{Key: model.ComparisonKey{Provider: "exact" + string(rune('A'+i))}, State: "matched", Before: &model.ComparisonTotal{}, After: &model.ComparisonTotal{}, Changes: model.ComparisonChanges{TotalMs: &change}})
+		address := "exact" + string(rune('A'+i))
+		beforeUI = append(beforeUI, span.Span{Address: address, RPC: "apply", ResourceType: "type", DurationMs: 1})
+		afterUI = append(afterUI, span.Span{Address: address, RPC: "apply", ResourceType: "type", DurationMs: uint32(22 - i)})
 	}
 	for i := 0; i < 21; i++ {
-		rows = append(rows, model.ComparisonRow{Key: model.ComparisonKey{Provider: "unranked" + string(rune('A'+i))}, State: "unavailable"})
+		address := "lower" + string(rune('A'+i))
+		beforeUI = append(beforeUI, span.Span{Address: address, RPC: "apply", ResourceType: "type", DurationMs: 1, DurationSaturated: true})
+		afterUI = append(afterUI, span.Span{Address: address, RPC: "apply", ResourceType: "type", DurationMs: 2})
 	}
-	report := comparisonTextReport([]model.ComparisonSection{{Kind: "rpc_providers", Tier: "rpc", BeforeAvailable: true, AfterAvailable: true, Rows: rows}})
+	report := comparisonTextReport(t, model.ComparisonInput{UI: beforeUI}, model.ComparisonInput{UI: afterUI})
+	unavailableRPC := make([]span.Span, 21)
+	for i := range unavailableRPC {
+		unavailableRPC[i] = span.Span{Provider: "unavailable" + string(rune('A'+i)), DurationMs: 1}
+	}
+	unavailableReport := comparisonTextReport(t, model.ComparisonInput{RPC: unavailableRPC}, model.ComparisonInput{})
 	for _, tc := range []struct {
 		limit           int
 		exact, unranked int
@@ -95,7 +86,7 @@ func TestComparisonTextLimitsListsIndependently(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := out.String()
-		if strings.Count(got, "matched: provider=exact") != tc.exact || strings.Count(got, "unavailable: provider=unranked") != tc.unranked {
+		if strings.Count(got, "matched: address=exact") != tc.exact || strings.Count(got, "matched: address=lower") != tc.unranked {
 			t.Errorf("limit %d counts wrong", tc.limit)
 		}
 		if tc.limit > 0 && !strings.Contains(got, "shown "+strconv.Itoa(tc.limit)+" of 21") {
@@ -104,11 +95,24 @@ func TestComparisonTextLimitsListsIndependently(t *testing.T) {
 		if strings.Count(got, "RPC timing records     99: admitted 88, rejected 11") != 2 {
 			t.Errorf("quality totals were absent or duplicated at limit %d", tc.limit)
 		}
+		out.Reset()
+		if err := RenderComparisonText(&out, unavailableReport, ComparisonMetadata{}, TextOptions{Limit: tc.limit}); err != nil {
+			t.Fatal(err)
+		}
+		got = out.String()
+		providerSection := strings.SplitN(got, "RPC RESOURCE TYPES AVAILABILITY", 2)[0]
+		providerSection = strings.SplitN(providerSection, "RPC PROVIDERS AVAILABILITY", 2)[1]
+		if count := strings.Count(providerSection, "unavailable: provider=unavailable"); count != tc.unranked {
+			t.Errorf("unavailable RPC limit %d count=%d want %d", tc.limit, count, tc.unranked)
+		}
+		if strings.Count(got, "RPC timing records     99: admitted 88, rejected 11") != 2 {
+			t.Errorf("unavailable quality totals changed at limit %d", tc.limit)
+		}
 	}
 }
 
 func TestComparisonTextValidationAndWriterFailures(t *testing.T) {
-	report := comparisonTextReport(nil)
+	report := comparisonTextReport(t, model.ComparisonInput{}, model.ComparisonInput{})
 	var out bytes.Buffer
 	if err := RenderComparisonText(&out, report, ComparisonMetadata{}, TextOptions{Limit: -1}); err == nil || err.Error() != "comparison limit must be non-negative" || out.Len() != 0 {
 		t.Fatalf("negative limit: %v, output %q", err, out.String())
@@ -124,17 +128,21 @@ func TestComparisonTextValidationAndWriterFailures(t *testing.T) {
 
 func TestComparisonTextEscapesEveryKeyAndPreservesJSONValues(t *testing.T) {
 	large := model.SignedChange{Magnitude: math.MaxUint64}
-	mean := 1.234
+	rounded := -0.001
 	longProvider := strings.Repeat("very-long-provider-", 12) + "end"
-	report := comparisonTextReport([]model.ComparisonSection{
-		{Kind: "rpc_providers", Tier: "rpc", BeforeAvailable: true, AfterAvailable: true, Rows: []model.ComparisonRow{{Key: model.ComparisonKey{Provider: "provider\a" + longProvider}, State: "added", Before: &model.ComparisonTotal{}, After: &model.ComparisonTotal{}, Changes: model.ComparisonChanges{TotalMs: &large, MeanMs: &mean}}}},
-		{Kind: "rpc_resource_types", Tier: "rpc", BeforeAvailable: true, AfterAvailable: true, Rows: []model.ComparisonRow{{Key: model.ComparisonKey{ResourceType: "rpc-type\v"}, State: "removed", Before: &model.ComparisonTotal{}, After: &model.ComparisonTotal{}, Changes: model.ComparisonChanges{TotalMs: &large}}}},
-		{Kind: "ui_resource_types", Tier: "ui", BeforeAvailable: true, AfterAvailable: true, Rows: []model.ComparisonRow{{Key: model.ComparisonKey{ResourceType: "ui-type\f"}, State: "matched", Before: &model.ComparisonTotal{}, After: &model.ComparisonTotal{}, Changes: model.ComparisonChanges{TotalMs: &large}}}},
-		{Kind: "ui_operations", Tier: "ui", BeforeAvailable: true, AfterAvailable: true, Rows: []model.ComparisonRow{{Key: model.ComparisonKey{Address: "address\x00", Action: "action\x7f"}, State: "matched", Before: &model.ComparisonTotal{}, After: &model.ComparisonTotal{}, Changes: model.ComparisonChanges{TotalMs: &large}}}},
-		{Kind: "rpc_methods", Tier: "rpc"},
-	})
-	report.Data.BeforeProviders = []string{"provider-set\n"}
-	report.Data.AfterProviders = []string{"other-set\t"}
+	before := model.ComparisonInput{
+		RPC: []span.Span{{Provider: "provider\a" + longProvider, ResourceType: "rpc-type\v", RPC: "method\r", DurationMs: 1}},
+		UI:  []span.Span{{ResourceType: "ui-type\f", Address: "address\x00", RPC: "action\x7f", DurationMs: 1}},
+	}
+	after := model.ComparisonInput{
+		RPC: []span.Span{{Provider: "other-set\t", ResourceType: "rpc-type\v", RPC: "method\r", DurationMs: 2}},
+		UI:  []span.Span{{ResourceType: "ui-type\f", Address: "address\x00", RPC: "action\x7f", DurationMs: 2}},
+	}
+	report := comparisonTextReport(t, before, after)
+	// Maximal signed magnitudes and sub-cent rounding cannot be produced by
+	// span.DurationMs values, so exercise those formatter boundaries directly.
+	report.Data.Sections[0].Rows[0].Changes.TotalMs = &large
+	report.Data.Sections[0].Rows[0].Changes.MeanMs = &rounded
 	wantReport := report
 	var textOut, jsonOut bytes.Buffer
 	if err := RenderComparisonText(&textOut, report, ComparisonMetadata{}, TextOptions{}); err != nil {
@@ -144,13 +152,16 @@ func TestComparisonTextEscapesEveryKeyAndPreservesJSONValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := textOut.String()
-	for _, want := range []string{"provider=provider\\a" + longProvider, "resource_type=rpc-type\\v", "resource_type=ui-type\\f", "address=address\\x00  action=action\\x7f", "provider-set\\n", "other-set\\t", "+18446744073709551615", "+1.23", "RPC METHODS AVAILABILITY\n  before: unavailable; after: unavailable\n  no rows"} {
+	for _, want := range []string{"provider=provider\\a" + longProvider, "resource_type=rpc-type\\v", "method=method\\r", "resource_type=ui-type\\f", "address=address\\x00  action=action\\x7f", "provider\\a" + longProvider, "other-set\\t", "+18446744073709551615", "+0.00"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
 	if !reflect.DeepEqual(report, wantReport) {
 		t.Fatal("renderer mutated report")
+	}
+	if strings.Contains(got, "-0.00") {
+		t.Errorf("rounded negative zero in:\n%s", got)
 	}
 	var decoded struct {
 		Sections []struct {
@@ -170,12 +181,17 @@ func TestComparisonTextEscapesEveryKeyAndPreservesJSONValues(t *testing.T) {
 	if got := decoded.Sections[0].Rows[0].Changes.TotalMs.String(); got != "18446744073709551615" {
 		t.Fatalf("JSON total delta=%s", got)
 	}
-	if got := decoded.Sections[0].Rows[0].Changes.MeanMs; got != 1.234 {
+	if got := decoded.Sections[0].Rows[0].Changes.MeanMs; got != -0.001 {
 		t.Fatalf("JSON mean delta=%v", got)
 	}
 }
 
-func comparisonTextReport(sections []model.ComparisonSection) ComparisonReport {
+func comparisonTextReport(t *testing.T, before, after model.ComparisonInput) ComparisonReport {
+	t.Helper()
+	comparison, err := model.Compare(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
 	quality := model.CaptureQuality{RPC: model.TierQuality{Records: 99, Admitted: 88, Rejected: 11}}
-	return ComparisonReport{Before: Report{Bytes: 12, Quality: quality, Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, After: Report{Bytes: 34, Quality: quality, Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, Data: model.Comparison{Sections: sections, BeforeProviders: []string{"before-provider"}, AfterProviders: []string{"after-provider"}, ProviderIdentityStatus: "different"}}
+	return ComparisonReport{Before: Report{Bytes: 12, Quality: quality, Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, After: Report{Bytes: 34, Quality: quality, Reconstruction: model.ReconstructionQuality{State: "not_checked"}}, Data: comparison}
 }
