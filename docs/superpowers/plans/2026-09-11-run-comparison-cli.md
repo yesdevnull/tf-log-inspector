@@ -161,7 +161,7 @@ if err == nil || err.Error() != "comparison limit must be non-negative" || outpu
 
 **Interfaces:** Consume both H2 renderer signatures and H1 `BuildComparison`. Produce `runComparison`, `comparisonOptions` and the list-based `writeReport` signature above. Migrate every existing `writeReport` caller/test in this task; no legacy signature or compatibility wrapper.
 
-- [ ] **Step 1: Add failing option and input-safety tests.** Table-test compare arity 0/1/2/3, every competing mode, irrelevant scrub-values, empty/uppercase/control-bearing formats, default/explicit/repeated format and limit, negative/malformed/overflow limit, help/version and `--compare=false`. Use sentinel output and nonexistent inputs so validation must return the expected fixed error without changing output. Capture and assert parser/usage diagnostics using current conventions. Tests for profile/diagnose/scrub/TUI must retain their meaningful exact-message checks.
+- [x] **Step 1: Add failing option and input-safety tests.** Table-test compare arity 0/1/2/3, every competing mode, irrelevant scrub-values, empty/uppercase/control-bearing formats, default/explicit/repeated format and limit, negative/malformed/overflow limit, help/version and `--compare=false`. Use sentinel output and nonexistent inputs so validation must return the expected fixed error without changing output. Capture and assert parser/usage diagnostics using current conventions. Tests for profile/diagnose/scrub/TUI must retain their meaningful exact-message checks.
 
 ```go
 var stdout, stderr bytes.Buffer
@@ -172,8 +172,8 @@ if err != nil || string(data) != "keep\n" || stdout.Len() != 0 || stderr.Len() !
 ```
 
 Test both input roles × same path/symlink/hard link × text/JSON. Read each input's bytes before and after every attempt, require an error, unchanged input bytes and no successful report. Retain existing platform skip/error handling for unavailable symlink creation. Also test identical before/after paths with a distinct output: success and zero defined changes.
-- [ ] **Step 2: Run RED.** `go test ./cmd/tfli -run 'TestCompare|TestComparison' -count=1`. Run existing writer tests during the signature migration so preserving the one-input modes is a behavioural requirement.
-- [ ] **Step 3: Implement validation and the shared writer extension.** Add `--compare` and the exact validation order above. Change only the writer's input identity phase: stat every input before opening output, open output without truncation, stat the output descriptor, compare it with every input's FileInfo, then perform the existing regular-file truncation/render/close logic. Keep render-error precedence and nonregular-file handling. Single-input callers pass `[]string{path}`. Do not duplicate writer logic in comparison or alter scrub's separate publication path.
+- [x] **Step 2: Run RED.** `go test ./cmd/tfli -run 'TestCompare|TestComparison' -count=1`. Run existing writer tests during the signature migration so preserving the one-input modes is a behavioural requirement.
+- [x] **Step 3: Implement validation and the shared writer extension.** Add `--compare` and the exact validation order above. Change only the writer's input identity phase: stat every input before opening output, open output without truncation, stat the output descriptor, compare it with every input's FileInfo, then perform the existing regular-file truncation/render/close logic. Keep render-error precedence and nonregular-file handling. Single-input callers pass `[]string{path}`. Do not duplicate writer logic in comparison or alter scrub's separate publication path.
 
 ```go
 inputInfos := make([]os.FileInfo, len(inputPaths))
@@ -192,8 +192,8 @@ for i, info := range inputInfos {
 ```
 
 `runComparison` loads before then after exactly once each with `model.Load`, builds each with `profile.Build`, then calls `profile.BuildComparison`. Wrap failures by role using `%w` (`loading before`, `loading after`, `profiling before`, `profiling after`, `comparing captures`) without raw log contents. Only after both inputs and model assembly succeed call `writeReport` with both paths and the selected renderer. Metadata uses `version` and each `filepath.Base`. Do not parallelise loads. Keep JSON rendering inside the existing writer policy: unrelated output may be truncated before an encoding failure, with no atomic replacement claim.
-- [ ] **Step 4: Run GREEN.** Require two missing/unreadable input role cases, second-input failure preserving an existing output, directory output error, failing/short stdout, no stdout with `-o`, alias checks, exact one JSON document and EOF, default-text equality to explicit text, and no stale accepted `--format`/`--limit` outside allowed modes. Run full CLI package and `go test ./...` to detect writer regressions.
-- [ ] **Step 5: Review, cleanup and commit.** Independent task review and separate cleanup. Signed commit: `Expose raw-log comparison with two-input protection`.
+- [x] **Step 4: Run GREEN.** Require two missing/unreadable input role cases, second-input failure preserving an existing output, directory output error, failing/short stdout, no stdout with `-o`, alias checks, exact one JSON document and EOF, default-text equality to explicit text, and no stale accepted `--format`/`--limit` outside allowed modes. Run full CLI package and `go test ./...` to detect writer regressions.
+- [x] **Step 5: Review, cleanup and commit.** Independent task review and separate cleanup. Signed commit: `Expose raw-log comparison with two-input protection`.
 
 ## Task 4: Verify complete workflows and document interpretation
 
@@ -270,4 +270,17 @@ scale cases plus a separate unavailable RPC report. Corrected tests passed
 scoped review with all findings addressed, including retained count-line output.
 Separate cleanup removed one duplicated quality assertion block while preserving
 all required coverage; profile package tests pass at 96.1% statement coverage.
-No production correction was needed after review. CLI integration remains next.
+No production correction was needed after review.
+
+Task 3 completed in signed commits `3437edf` and `4110ea4`. New-flag behavioural
+RED preceded implementation; focused/CLI/full-suite tests passed. Review required
+arbitrary failing-stdout coverage in both formats; added real-log cases passed
+scoped review and separate cleanup. No production correction was needed.
+
+Controller checks on `3437edf` production verified compiled text/JSON against
+independently inspected fixture counts and durations, unavailable UI semantics,
+saturated lower-bound delta nulls and nine qualification codes. Existing profile
+text and JSON are byte-identical to the pre-H binary on `two-tier.log`. All eight
+local package/trimpath-CLI builds passed for Linux/macOS amd64/arm64 with CGO
+disabled, local toolchain and readonly modules. Remote CI has not run. Final
+workflow coverage, documentation and combined review remain in task 4.
