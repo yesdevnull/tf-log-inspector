@@ -1,0 +1,5 @@
+Terraform will perform these actions:
+module.example["a.b"].aws_instance.example: Creation complete after 2m16s [id=example]
+aws_instance.other: Read complete after 0s
+aws_instance.other: Read complete after 1s
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
