@@ -31,6 +31,8 @@ Draft authorised by Dan on 11 September 2026 after comparison and its input-iden
 
 I1 supplies reconstruction outcomes and locks down strict publication. I2 will specify physical-position lookup, model caching, viewer notices/navigation and complete/partial/failed quality presentation. I1 leaves existing `model.ProviderResponse`, text/JSON quality schemas and TUI behaviour unchanged. Boundary I is not complete when I1 alone finishes.
 
+I1 completed on 11 September 2026 after task reviews, separate test cleanup, final local validation and independent whole-branch review of `f614493..2fd6200`. No actionable findings remain. The execution record contains the evidence and I2 handover; integration remains Dan's decision.
+
 Current code at `f614493`:
 
 - `internal/logfmt/fragments.go` holds the single parser. `ReconstructProviderJSON` abandons all messages at the first error. Pending messages occupy start-ordered slots; exact component strings key the pending map.
@@ -450,8 +452,8 @@ if err != nil {
 
 `runScrub` must continue to call `scrub.Scrub` before `openScrubOutput`. Neither valid recovered bodies nor prior inspection permits output. No permissive flag, diagnostic filtering, best-effort scrub result or API that switches parser grammar by caller.
 
-- [ ] **Step 4: Complete final validation and review.** Run the commands below once on the final application tree and inspect all results. Obtain independent combined I1 review and separate cleanup, resolving actionable findings. In the execution record, enumerate each retention/ownership/publication requirement with evidence. Record actual signatures/types for I2. No TUI goldens or profile JSON schema changes belong here.
-- [ ] **Step 5: Commit verified handover.** Signed commit: `Verify strict scrubbing of partially recovered captures`. Mark I1 complete only after evidence; leave Boundary I as a whole unimplemented until I2 is approved, implemented and reviewed. Integration remains Dan's decision.
+- [x] **Step 4: Complete final validation and review.** Run the commands below once on the final application tree and inspect all results. Obtain independent combined I1 review and separate cleanup, resolving actionable findings. In the execution record, enumerate each retention/ownership/publication requirement with evidence. Record actual signatures/types for I2. No TUI goldens or profile JSON schema changes belong here.
+- [x] **Step 5: Commit verified handover.** Signed commit: `Verify strict scrubbing of partially recovered captures`. Mark I1 complete only after evidence; leave Boundary I as a whole unimplemented until I2 is approved, implemented and reviewed. Integration remains Dan's decision.
 
 ## Final validation
 
@@ -531,7 +533,7 @@ Task 2 completed in signed commits `2656c07` and `532473b`. Recovery retains ind
 
 Recovery benchmarks on Darwin arm64 (Apple M4) used 1,000/10,000 groups. Repeated damaged keys measured 1.315/13.317 ms, 442,709/6,623,932 bytes and 6,048/60,072 allocations per operation; distinct keys measured 1.997/20.731 ms, 1,626,537/20,046,654 bytes and 29,048/290,138 allocations. These are descriptive local measurements, not a performance guarantee. No implementation rulings were needed.
 
-Task 3 implementation and task review completed at signed commit `d563e59`. The nine failure scenarios exercise the real parser and scrubber and each scenario exercises both absent and pre-existing output paths through the real CLI. Every case rejects publication, returns an empty scrub result and emits content-free diagnostics; CLI stderr remains empty. These tests passed the existing strict gate immediately and are regression evidence, not a new behavioural RED. Independent review approved specification compliance and quality with no findings. Separate cleanup retained all 27 package/CLI subtests. The full-branch review remains the final gate.
+Task 3 implementation and task review completed at signed commit `d563e59`. The nine failure scenarios exercise the real parser and scrubber and each scenario exercises both absent and pre-existing output paths through the real CLI. Every case rejects publication, returns an empty scrub result and emits content-free diagnostics; CLI stderr remains empty. These tests passed the existing strict gate immediately and are regression evidence, not a new behavioural RED. Independent review approved specification compliance and quality with no findings. Separate cleanup retained all 27 package/CLI subtests. The full-branch review subsequently passed as recorded below.
 
 ### Final application validation
 
@@ -553,3 +555,9 @@ The controller ran all final-validation commands above at `d563e59`. All eleven 
 The implemented API is `InspectProviderJSON(text string) ProviderJSONResult` in `internal/logfmt/fragments.go`. `ProviderJSONResult` and `ProviderJSONDiagnostic` in `internal/logfmt/reconstruction.go` have exactly the fields and types specified above. `ReconstructProviderJSON(text string) ([]ProviderJSON, error)` remains the strict adapter over that one scan, and `ProviderJSONDiagnostic.Error() string` formats only fixed reasons and numeric facts. `ProviderJSON` and `JSONFragment` retain their existing source-byte contract.
 
 I2 will consume `Messages` and `Diagnostics`, resolving selected physical positions against complete fragments, failed-attempt `Ranges` and later `Unavailable` ranges. The exact field semantics above are the handover contract, including structural tails, trigger-owned global tails, empty ranges and deterministic order. Model caching, lazy quality state, viewer notices, raw fallback and navigation remain I2 work. I1 does not complete Boundary I or change TUI/profile schemas. No rulings were needed during these implementation tasks.
+
+### Final review and completion
+
+Independent whole-branch review of `f614493..2fd6200` found no Critical, Important or Minor findings and judged I1 ready to merge. The reviewer checked the parser, all new tests and benchmarks, binding grammar, strict consumers and I2 contract. It confirmed permanent exact-component quarantine, safe global-tail ownership, deterministic source mapping, diagnostic privacy and rejection before transformation/publication. It also confirmed that validation at `d563e59` applies to the reviewed application tree because later changes only update documentation. The final completion update is documentation-only.
+
+All I1 implementation and review requirements are complete, with no deferred findings or rulings. Branch commits use verified SSH signatures. Nothing has been merged or pushed as part of I1; Dan chooses integration. I2 remains a separate plan and implementation decision.

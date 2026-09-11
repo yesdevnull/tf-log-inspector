@@ -94,9 +94,11 @@ After Boundary H and its input-identity review fix merged into local main at
 2026: [response recovery parser and strict scrubbing](../plans/2026-09-11-response-recovery-parser.md).
 Viewer and quality integration will be a separate second plan. Dan subsequently
 approved I1 subagent implementation after both plan-review findings were fixed
-and verified. Its parser, strict-policy tests and task reviews are implemented
-through `d563e59`; final whole-branch review is pending. I2 remains unplanned and
-unimplemented, so Boundary I is not yet complete.
+and verified. I1 completed with parser and strict-policy tests through `d563e59`,
+task reviews, separate cleanup and all local validation checks. Independent
+whole-branch review of `f614493..2fd6200` found no actionable issues. I2 remains
+unplanned and unimplemented, so Boundary I is not yet complete. I1 integration
+remains Dan's decision.
 
 ## Evidence and relationship to existing designs
 
