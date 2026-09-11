@@ -98,6 +98,19 @@ func (m *Model) revealQualityAction(action qualityActionRow) {
 	}
 }
 
+func (m *Model) revealQualityActionFirstRow(action qualityActionRow) {
+	v := &m.quality.viewport
+	if v.Height <= 0 {
+		return
+	}
+	if action.start < v.YOffset {
+		v.SetYOffset(action.start)
+	}
+	if action.start >= v.YOffset+v.Height {
+		v.SetYOffset(action.start - v.Height + 1)
+	}
+}
+
 func (m *Model) moveQualitySelection(actions []qualityActionRow, down bool) {
 	if len(actions) == 0 {
 		m.quality.selected = qualityItemID{}
@@ -133,7 +146,7 @@ func (m *Model) moveQualitySelection(actions []qualityActionRow, down bool) {
 	}
 	if i >= 0 {
 		m.quality.selected = actions[i].id
-		m.revealQualityAction(actions[i])
+		m.revealQualityActionFirstRow(actions[i])
 	}
 }
 
