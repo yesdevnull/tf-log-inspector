@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,7 +404,7 @@ func TestComparisonJSONDependsOnlyOnBytesAndBasenames(t *testing.T) {
 	if err := os.WriteFile(right, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, first := runComparisonJSONDocument(t, left, right)
+	baseline, first := runComparisonJSONDocument(t, left, right)
 	_, second := runComparisonJSONDocument(t, right, left)
 	if !bytes.Equal(first, second) || bytes.Contains(first, []byte(dir)) {
 		t.Fatalf("directory affected output or leaked: equal=%v", bytes.Equal(first, second))
@@ -418,11 +419,18 @@ func TestComparisonJSONDependsOnlyOnBytesAndBasenames(t *testing.T) {
 	}
 	beforeRoot, _ := runComparisonJSONDocument(t, renamedBefore, right)
 	afterRoot, _ := runComparisonJSONDocument(t, left, renamedAfter)
-	if comparisonCLIInput(beforeRoot, "before") != "renamed-before.log" || comparisonCLIInput(beforeRoot, "after") != "capture.log" {
-		t.Fatalf("before rename metadata=%#v", beforeRoot)
+	expectedBefore := decodeComparisonJSONDocument(t, first)
+	expectedBefore["before"].(map[string]any)["input"].(map[string]any)["basename"] = "renamed-before.log"
+	if !reflect.DeepEqual(beforeRoot, expectedBefore) {
+		t.Fatalf("before rename changed more than before.input.basename\ngot:  %#v\nwant: %#v", beforeRoot, expectedBefore)
 	}
-	if comparisonCLIInput(afterRoot, "before") != "capture.log" || comparisonCLIInput(afterRoot, "after") != "renamed-after.log" {
-		t.Fatalf("after rename metadata=%#v", afterRoot)
+	expectedAfter := decodeComparisonJSONDocument(t, first)
+	expectedAfter["after"].(map[string]any)["input"].(map[string]any)["basename"] = "renamed-after.log"
+	if !reflect.DeepEqual(afterRoot, expectedAfter) {
+		t.Fatalf("after rename changed more than after.input.basename\ngot:  %#v\nwant: %#v", afterRoot, expectedAfter)
+	}
+	if comparisonCLIInput(baseline, "before") != "capture.log" || comparisonCLIInput(baseline, "after") != "capture.log" {
+		t.Fatalf("baseline metadata=%#v", baseline)
 	}
 }
 
@@ -447,6 +455,23 @@ func TestComparisonEmptyAndAdmittedUnpositionedCaptures(t *testing.T) {
 		t.Fatalf("unpositioned row=%#v", row)
 	}
 	assertCLIComparisonSummary(t, row["after"], "1", "9000")
+	var text bytes.Buffer
+	if err := run([]string{"--compare", "--limit=0", empty, unpositioned}, &text, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"UI OPERATIONS AVAILABILITY\n  before: unavailable; after: available",
+		"unavailable: address=thing.example  action=read",
+		"count         n/a          1",
+		"total ms      n/a          9000",
+	} {
+		if !strings.Contains(text.String(), want) {
+			t.Fatalf("text omitted %q:\n%s", want, text.String())
+		}
+	}
+	if strings.Contains(text.String(), dir) || strings.Contains(text.String(), empty) || strings.Contains(text.String(), unpositioned) {
+		t.Fatalf("text leaked an absolute input path:\n%s", text.String())
+	}
 }
 
 func rpcCompletion(provider string, duration int) string {
@@ -463,7 +488,12 @@ func runComparisonJSONDocument(t *testing.T, before, after string) (map[string]a
 	if err := run([]string{"--compare", "--format=json", before, after}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	return decodeComparisonJSONDocument(t, out.Bytes()), out.Bytes()
+}
+
+func decodeComparisonJSONDocument(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	var root map[string]any
 	if err := decoder.Decode(&root); err != nil {
@@ -474,7 +504,7 @@ func runComparisonJSONDocument(t *testing.T, before, after string) (map[string]a
 		t.Fatalf("extra JSON: %v", err)
 	}
 	normaliseJSONNumbers(root)
-	return root, out.Bytes()
+	return root
 }
 
 func normaliseJSONNumbers(value any) {
