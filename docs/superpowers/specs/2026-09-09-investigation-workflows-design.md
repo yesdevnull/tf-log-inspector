@@ -97,8 +97,11 @@ approved I1 subagent implementation after both plan-review findings were fixed
 and verified. I1 completed with parser and strict-policy tests through `d563e59`,
 task reviews, separate cleanup and all local validation checks. Independent
 whole-branch review of `f614493..2fd6200` found no actionable issues. I2 remains
-unplanned and unimplemented, so Boundary I is not yet complete. I1 integration
-remains Dan's decision.
+unimplemented, so Boundary I is not yet complete. I1 subsequently merged into
+local main at `04d28da`. Dan authorised drafting the
+[I2 viewer and quality implementation plan](../plans/2026-09-11-response-recovery-viewer.md).
+Its physical-line selection and JSON v2 contracts are proposals for review;
+I2 implementation has not started.
 
 ## Evidence and relationship to existing designs
 
