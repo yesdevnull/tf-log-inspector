@@ -159,7 +159,7 @@ Use the existing single physical-line loop. A map associates a component with pe
 
 **Interfaces:** Consumes existing `ProviderJSON`, `JSONFragment`, `providerJSONPending.consume` and `providerJSONFailure`. Produces the three public signatures and diagnostic fields above. For this task, stop inspection at its first failure but return earlier verified messages plus that diagnostic; task 2 adds continued independent recovery and quarantine. Strict callers remain fail-closed throughout.
 
-- [ ] **Step 1: Add outcome and strict-policy tests.** Include the following behavioural seed, imports `reflect`, `strings`, `testing`; use the existing `providerRecord` helper. Add declarations with a compiling empty-result body only when required, then observe the assertion failure before implementing retention.
+- [x] **Step 1: Add outcome and strict-policy tests.** Include the following behavioural seed, imports `reflect`, `strings`, `testing`; use the existing `providerRecord` helper. Add declarations with a compiling empty-result body only when required, then observe the assertion failure before implementing retention.
 
 ```go
 func TestInspectProviderJSONRetainsVerifiedPrefix(t *testing.T) {
@@ -183,10 +183,10 @@ func TestInspectProviderJSONRetainsVerifiedPrefix(t *testing.T) {
 
 For clean single/interleaved messages, assert `reflect.DeepEqual(result.Messages, strict)` and no diagnostics. For each existing failure family, assert the fixed code, start/detection lines, safe formatting and exact numeric/source mapping expected in `fragments_test.go`; retain those existing tests instead of replacing their assertions with weaker code-only checks. Include zero messages/zero diagnostics for empty/ordinary input. Assert each complete message's joined original fragments equals its text.
 
-- [ ] **Step 2: Run behavioural RED.** `go test ./internal/logfmt -run 'TestInspectProviderJSON|TestProviderJSON' -count=1`. Record an actual missing-retained-message/diagnostic assertion, not merely an undefined symbol.
-- [ ] **Step 3: Implement structured failure projection and the strict gate.** Move the public strict entry point to `reconstruction.go`; rename the single scanning implementation to `InspectProviderJSON`. Replace error exits with an outcome containing the completed slots and typed diagnostic. Make diagnostic construction precede discarding the failed builder. Finalise incomplete EOF slots safely even when their last fragment is empty. Keep grammar helpers in place and preserve source-syntax offset mapping. Implement the exact strict gate shown above and a closed switch mapping the table's codes to existing reasons. Do not add a second scanning pass in the strict entry point.
-- [ ] **Step 4: Run GREEN and consumer parity.** `go test ./internal/logfmt ./internal/scrub ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -count=1`. Confirm old strict rejection and safe diagnostic tests still pass. No viewer or quality expectation changes are allowed in I1.
-- [ ] **Step 5: Review, cleanup and commit.** Obtain independent task review, address findings, run separate test cleanup. Signed commit: `Separate reconstruction outcomes from strict consumer policy`.
+- [x] **Step 2: Run behavioural RED.** `go test ./internal/logfmt -run 'TestInspectProviderJSON|TestProviderJSON' -count=1`. Record an actual missing-retained-message/diagnostic assertion, not merely an undefined symbol.
+- [x] **Step 3: Implement structured failure projection and the strict gate.** Move the public strict entry point to `reconstruction.go`; rename the single scanning implementation to `InspectProviderJSON`. Replace error exits with an outcome containing the completed slots and typed diagnostic. Make diagnostic construction precede discarding the failed builder. Finalise incomplete EOF slots safely even when their last fragment is empty. Keep grammar helpers in place and preserve source-syntax offset mapping. Implement the exact strict gate shown above and a closed switch mapping the table's codes to existing reasons. Do not add a second scanning pass in the strict entry point.
+- [x] **Step 4: Run GREEN and consumer parity.** `go test ./internal/logfmt ./internal/scrub ./internal/model ./internal/tui ./internal/profile ./cmd/tfli -count=1`. Confirm old strict rejection and safe diagnostic tests still pass. No viewer or quality expectation changes are allowed in I1.
+- [x] **Step 5: Review, cleanup and commit.** Obtain independent task review, address findings, run separate test cleanup. Signed commit: `Separate reconstruction outcomes from strict consumer policy`.
 
 ### Task 2: Recover independent streams and quarantine uncertain ownership
 
@@ -522,3 +522,7 @@ existing parser helpers, finding no collateral contradictions. Markdown links,
 code fences, syntax of the three new Go examples and literal fixture offsets
 were checked successfully. These are plan checks; no recovery implementation or
 application test changes have been made. Dan subsequently approved I1 subagent implementation. The execution record below will distinguish completed work from the planned checks.
+
+## Execution record
+
+Task 1 completed in signed commit `bdb6974`. The outcome API retains verified completed messages and projects content-free diagnostics; the strict gate returns no messages on any diagnostic. Behavioural RED covered prefix retention and an interleaved message completing before an earlier slot failed. Focused parser tests and all six affected consumer packages passed. Independent task review approved both specification compliance and quality with no findings. Separate cleanup classified all 12 added behavioural cases as useful and retained them. Continued recovery and quarantine remain Task 2 work. No implementation rulings were needed.
