@@ -298,7 +298,7 @@ Use the real loaded entry index to resolve the requested physical lines before t
 
 **Interfaces:** Consume `Log.ProviderResponseAt(uint32, int) ProviderResponseSelection` and the exact selection states above. Produce `rawResponsePosition() (entry, lineOffset int, ok bool)` and `responseState.notice string`; preserve `openResponse`, response key handlers and title/render interfaces used by the workbench.
 
-- [ ] **Step 1: Add failing modal tests.** A synthetic broad-entry fixture with two timestamped complete responses and `raw.topLine=1` must open the second body. A real loaded good A/bad B/good A fixture must open both A bodies with a recovery notice and select B as invalid. Add these assertions through real `Model.Update`/`r`:
+- [x] **Step 1: Add failing modal tests.** A synthetic broad-entry fixture with two timestamped complete responses and `raw.topLine=1` must open the second body. A real loaded good A/bad B/good A fixture must open both A bodies with a recovery notice and select B as invalid. Add these assertions through real `Model.Update`/`r`:
 
 ```go
 before := m.raw
@@ -318,8 +318,8 @@ For this assertion body, write the real good A/bad B/good A fixture to `t.TempDi
 
 Keep existing raw/response search and control-escaping regressions. Add recovered-body search across decoded multiline `@message`, multiple occurrences, wide Unicode and escaped controls; page/scroll/resize and return must preserve raw top, topLine, column, match, query, scope, filters and navigation history. Search and horizontal scroll select the same physical line rather than treating display columns as byte offsets. Test notice rows at widths 20/60/100 and heights 0/1/2/8; enlarging a one-line pane restores the body/search state.
 
-- [ ] **Step 2: Observe RED.** `go test ./internal/tui -run 'TestResponse.*(Recovery|Physical|Notice|Unavailable|Position)' -count=1`; require wrong-body, missing-notice or wrong-status assertions against current modal behaviour.
-- [ ] **Step 3: Implement position and presentation.** Replace the entry-wide query in `openResponse` with `rawResponsePosition` followed by one `ProviderResponseAt` call. Branch by the table above, then reuse the existing pretty/decoded body processing and terminal escaping. Add the persistent notice row without putting it in `response.lines` or changing raw/history state:
+- [x] **Step 2: Observe RED.** `go test ./internal/tui -run 'TestResponse.*(Recovery|Physical|Notice|Unavailable|Position)' -count=1`; require wrong-body, missing-notice or wrong-status assertions against current modal behaviour.
+- [x] **Step 3: Implement position and presentation.** Replace the entry-wide query in `openResponse` with `rawResponsePosition` followed by one `ProviderResponseAt` call. Branch by the table above, then reuse the existing pretty/decoded body processing and terminal escaping. Add the persistent notice row without putting it in `response.lines` or changing raw/history state:
 
 ```go
 if r.notice != "" {
@@ -331,8 +331,8 @@ return r.viewport.View()
 ```
 
 Handle nonpositive dimensions before this block, and keep existing offset clamps/search anchors applied to the body viewport. Use `Diagnostic.Error()` only after checking the diagnostic pointer. A malformed internal selection with no diagnostic must display fixed `Response details are unavailable.` rather than panic or disclose source.
-- [ ] **Step 4: Verify.** `go test ./internal/tui ./internal/model -count=1`. Review any intentional golden change using `go test ./internal/tui -update`, `scripts/read-golden.sh <changed-name>` and the raw diff; do not regenerate unrelated goldens. Existing golden output need not change if it does not open the response modal.
-- [ ] **Step 5: Review, cleanup and signed commit.** Independent task review and separate cleanup; resolve findings. Commit `Show recovered responses and position-specific failures`.
+- [x] **Step 4: Verify.** `go test ./internal/tui ./internal/model -count=1`. Review any intentional golden change using `go test ./internal/tui -update`, `scripts/read-golden.sh <changed-name>` and the raw diff; do not regenerate unrelated goldens. Existing golden output need not change if it does not open the response modal.
+- [x] **Step 5: Review, cleanup and signed commit.** Independent task review and separate cleanup; resolve findings. Commit `Show recovered responses and position-specific failures`.
 
 ### Task 3: Publish lazy quality and the explicit JSON v2 schema
 
@@ -466,3 +466,5 @@ The corrected document passes link, fence and unfinished-value checks; all thirt
 ## Implementation evidence
 
 Task 1 completed in signed commit `2501d7c`. Independent task review approved specification and quality with no findings. Separate cleanup retained all twelve changed test functions and three benchmark functions; no cleanup changes were needed. Behavioural RED preceded implementation. Focused, full and race tests, lint, formatting, module checks and four cross-build targets passed. Every local/global failure-status selection used 128 B/op and one allocation at 1,000, 10,000 and 100,000 tail lines; measured lookup times were 35–49 ns/op on darwin/arm64 (Apple M4). These are local measurements, not timing thresholds.
+
+Task 2 completed in signed commit `25c39fe`. Independent task review approved specification and quality without findings. Separate cleanup retained all eight new test functions without changes. Behavioural RED demonstrated entry-wide wrong-body selection, missing recovery notices, generic failure status and invalid-top-line selection; focused and full Go suites then passed. No goldens changed. Real terminal validation remains in Task 4.
