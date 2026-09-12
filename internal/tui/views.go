@@ -211,6 +211,7 @@ var resourceColumns = []column{
 	{header: "operations", kind: numericColumn},
 	{header: "res total", kind: numericColumn},
 	{header: "res max", kind: numericColumn},
+	{header: "sources", kind: numericColumn},
 	{header: "inferred RPCs", kind: numericColumn},
 	{header: "inferred total", kind: numericColumn},
 	{header: "overlap RPCs", kind: numericColumn},
@@ -783,6 +784,9 @@ func (m *Model) renderList(w, h int) string {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
 		return m.fitCaptureGuidance(w, h)
 	}
+	if m.view == ViewCalls && len(m.log.RPCSpans) == 0 && !m.associatedCalls {
+		return renderResourceEmpty("No RPC timings in this capture.\nUse 3 Resources for operation timings.\nProvider RPC timings require TRACE logging.\nThis does not mean no provider calls occurred.", w, h)
+	}
 	empty := noRowsNote
 	if m.associatedCalls && (m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) {
 		empty = "This does not establish that no provider calls occurred."
@@ -821,17 +825,31 @@ func (m *Model) renderList(w, h int) string {
 		}
 	}
 	rows := m.rows()
-	if len(rows) > 0 && len(preamble) > max(0, h-2) {
-		// Keep the selected row visible in short panes. The complete timing
-		// qualifications remain available in help and evidence.
-		preamble = preamble[:max(0, h-2)]
-	}
+	preamble = fitTableGuidance(preamble, w, h)
 	cols := t.cols
 	sortCol := m.activeSort()
 	if m.view == ViewTypes {
 		cols, rows, sortCol = visibleTypeColumns(cols, rows, sortCol, w)
 	}
 	return renderTable(preamble, cols, sortCol, rows, empty, m.selected, m.pane == PaneList, w, h)
+}
+
+// fitTableGuidance wraps complete paragraphs while reserving a header and row.
+// Short panes direct readers to evidence instead of clipping a qualification.
+func fitTableGuidance(paragraphs []string, w, h int) []string {
+	var lines []string
+	for _, paragraph := range paragraphs {
+		lines = append(lines, wrapToWidth(paragraph, w)...)
+	}
+	limit := max(0, h-2)
+	if len(lines) <= limit {
+		return lines
+	}
+	if limit == 0 {
+		return nil
+	}
+	lines = wrapToWidth("e evidence: timing details", w)
+	return lines[:min(limit, len(lines))]
 }
 
 // visibleTypeColumns drops non-sort measurement columns on narrow panes until

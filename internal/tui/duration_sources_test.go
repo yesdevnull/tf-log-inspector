@@ -93,13 +93,11 @@ func TestResourceRPCEvidenceUnavailableWithoutObservations(t *testing.T) {
 	if len(rows) == 0 {
 		t.Fatal("missing CLI resource rows")
 	}
-	if rows[0].cells[5] != "n/a" || rows[0].cells[7] != "n/a" {
+	if rows[0].cells[6] != "n/a" || rows[0].cells[8] != "n/a" {
 		t.Errorf("absent RPC evidence fabricated measured zero: %v", rows[0].cells)
 	}
 	detail := strings.Join(resourceDetailSections(rows[0].resource, 100)[0], "\n")
-	for _, want := range []string{"Contained/Likely RPCs: 0, n/a", "Overlapping RPCs: 0, n/a"} {
-		if !strings.Contains(detail, want) {
-			t.Errorf("missing %q: %s", want, detail)
-		}
+	if strings.Contains(detail, "inferred") {
+		t.Errorf("empty inferred RPC sections were not collapsed: %s", detail)
 	}
 }

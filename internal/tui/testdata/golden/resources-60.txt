@@ -1,15 +1,15 @@
 [7m tfli [0m  [1;36mi limitations · resources-accounting.log[0m  [2m3 RPC span[0m
 [7m 3 res [0m  [36m?[0m help
-
+[2m3 resource operations · 3 RPC timings[0m
 [36m╭▶[0m[1;36m Resources (observed) [0m[36m───────────────────────────────────╮[0m
-[36m│[0m Scopes: UI type/resource/module; RPC provider/type/metho [36m│[0m
-[36m│[0m Inferred RPC evidence is partial; resource duration rank [36m│[0m
 [36m│[0m ui_elapsed: rounded to whole seconds, +/- 1s each.       [36m│[0m
 [36m│[0m refresh_window: timestamp-derived hook window, not RPC.  [36m│[0m
-[36m│[0m [1maddress       [0m  [1moperations[0m  [1;36mres total▾[0m  [1mres max[0m          [36m│[0m
-[36m│[0m [7maws_instance.a           1        1.0s     1.0s         [0m [36m│[0m
-[36m│[0m aws_instance.b           1        1.0s     1.0s          [36m│[0m
-[36m│[0m aws_instance.c           1        20ms     20ms          [36m│[0m
+[36m│[0m [1maddress       [0m  [1mops[0m  [1;36mtotal▾[0m  [1m max[0m  [1msources[0m               [36m│[0m
+[36m│[0m [7maws_instance.a    1    1.0s  1.0s       UI              [0m [36m│[0m
+[36m│[0m aws_instance.b    1    1.0s  1.0s  refresh               [36m│[0m
+[36m│[0m aws_instance.c    1    20ms  20ms  refresh               [36m│[0m
+[36m│[0m                                                          [36m│[0m
+[36m│[0m                                                          [36m│[0m
 [36m│[0m                                                          [36m│[0m
 [36m│[0m                                                          [36m│[0m
 [36m│[0m                                                          [36m│[0m

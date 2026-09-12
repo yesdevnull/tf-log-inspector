@@ -573,7 +573,7 @@ func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
 		t.Fatalf("fixture assumption changed: %d RPC and %d UI spans, want a UI-only log", len(m.log.RPCSpans), len(m.log.UISpans))
 	}
 	centre := centrePaneOf(m.View())
-	if !strings.Contains(centre, "this view has no rows for this log") {
+	if !strings.Contains(centre, "No RPC timings in this capture") {
 		t.Errorf("the calls view of a UI-only log says nothing about being empty:\n%s", centre)
 	}
 	if strings.Contains(centre, "nothing matches the filter") {

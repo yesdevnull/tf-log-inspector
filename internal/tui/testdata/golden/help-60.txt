@@ -1,6 +1,6 @@
 [7m tfli [0m  [1;36mi limitations · x.log[0m        [2m3 RPC spans, 3 UI spans[0m
 [36m?[0m close  [2mEsc closes help[0m
-
+[2m3 resource operations · 3 RPC timings[0m
 [2m╭─[0m[1;36m Keys [0m[2m───────────────────────────────────────────────────╮[0m
 [2m│[0m [1;36mVIEWS[0m                                                    [2m│[0m
 [2m│[0m   [36m1[0m          providers                                   [2m│[0m
