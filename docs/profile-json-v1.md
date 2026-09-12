@@ -2,7 +2,7 @@
 
 This is the current alpha contract. Profile and comparison JSON keep `schema_version: 1` until v1 is tagged. Breaking contract changes are permitted during the alpha; there are no compatibility export modes.
 
-Profile JSON exports the complete admitted evidence used by `tfli`'s profile report. It contains unmasked identifiers and source references, but no raw log bodies, credential fields, absolute input path, or generation timestamp. Version 1 makes no compatibility promise for a future schema version.
+Profile JSON exports the complete admitted evidence used by `tfli`'s profile report. It contains unmasked identifiers and source references, but no raw log bodies, credential fields, absolute input path, or generation timestamp.
 
 All object fields are mandatory and appear in the order documented below. Names use `snake_case`. Arrays preserve report order except `candidate_counts`, which is numerically ascending. Empty arrays and maps are `[]` and `{}`. Unavailable values are `null`; a measured zero remains `0`. Durations and offsets are integer milliseconds. Counts, byte offsets, and line numbers are JSON integers and may exceed JavaScript's exactly representable integer range. Invalid UTF-8 in any exported string makes rendering fail with the fixed diagnostic `profile JSON contains invalid UTF-8`.
 

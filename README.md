@@ -3,7 +3,7 @@
 Find where a slow Terraform plan spent its time.
 
 See the [investigation workflow release notes](docs/release-notes.md) for the
-completed features and JSON v2 migration details.
+completed features and the alpha JSON v1 contracts.
 
 ## Install
 

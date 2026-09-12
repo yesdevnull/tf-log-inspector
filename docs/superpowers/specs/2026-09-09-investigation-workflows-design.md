@@ -52,7 +52,7 @@ without relaxing the scrubber's acceptance rules.
 
 Dan approved the expansion to JSON profile export and CLI run comparison.
 The original application design remains a historical record; this document and
-the published v2 schemas describe the current investigation behaviour.
+the current JSON v1 contracts describe the investigation behaviour.
 
 ## Approaches considered
 
@@ -734,7 +734,7 @@ dependencies concealed inside the eight agreed areas for exploration.
 3. Explicit drill-down saves the parent selection and position for Esc.
    Numbered view changes end the history chain.
 4. JSON exports complete structured results; text alone has explicit list
-   limits. Both JSON report kinds use v2, without a v1 writer or version flag.
+   limits. Both JSON report kinds use v1 throughout the alpha, without a compatibility writer or version flag.
 5. Comparison accepts two raw logs and emits text or JSON. It does not produce
    a performance pass/fail verdict or assume equal logging configurations.
 6. Response recovery quarantines damaged streams without guessing a restart.
@@ -772,7 +772,7 @@ text and JSON retained the 35ms RPC baseline and respective 1000ms/3000ms UI
 totals; comparison capture objects matched independently generated profiles.
 Repeated UI operations retained distinct source entries and physical lines.
 The missing after-side RPC tier stayed unavailable, while the UI type total
-change was 2000ms. At that delivery, both report kinds emitted one JSON v2 document with lazy
-reconstruction snapshots; the current alpha contract now retains version 1. Scrubbing `response-recovery.log` failed with only a
+change was 2000ms. Both report kinds retained lazy reconstruction snapshots.
+The current alpha contract uses version 1. Scrubbing `response-recovery.log` failed with only a
 structural diagnostic and left no output file. Complete CLI streams are retained
 locally under `/tmp/tfli-closeout-validation`.

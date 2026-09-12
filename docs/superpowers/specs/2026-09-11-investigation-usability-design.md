@@ -254,7 +254,7 @@ a selected address. Preserve overlapping versus contained/likely associations.
 
 Reject these options with JSON, diagnose, scrub or bare TUI invocation before
 creating output. Filtered JSON would need an explicit schema design describing
-scope and denominators; that is deferred. No v2 payload is silently redefined.
+scope and denominators; that is deferred. JSON continues to describe whole captures.
 
 ### Reporting semantics
 

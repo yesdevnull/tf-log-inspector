@@ -50,14 +50,13 @@ The reconstruction object has four mandatory fields in this order:
 | `partial` | Positive count | Positive count | `reconstruction_partial` |
 | `failed` | `0` | Positive count | `reconstruction_failed` |
 
-The old `checked` state is replaced by `complete`; `partial` represents retained
-verified messages alongside reconstruction diagnostics. Diagnostic counts are
+The `partial` state represents retained verified messages alongside
+reconstruction diagnostics. Diagnostic counts are
 records, so ownership failures can produce more than one diagnostic. Ordinary
 CLI report generation remains lazy and exports `not_checked`.
 
 See the complete [profile JSON v1](profile-json-v1.md) and
-[comparison JSON v1](comparison-json-v1.md) contracts. The v2 documents remain
-superseded references. Reports contain unmasked identifiers and source metadata;
+[comparison JSON v1](comparison-json-v1.md) contracts. Reports contain unmasked identifiers and source metadata;
 they are not anonymised outputs.
 
 ## Scope
