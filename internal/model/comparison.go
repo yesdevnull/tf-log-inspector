@@ -22,7 +22,10 @@ type ComparisonChanges struct {
 	MeanMs                                              *float64
 	CountPercent, TotalPercent, MeanPercent, MaxPercent *float64
 }
-type ComparisonKey struct{ Provider, ResourceType, Method, Address, Action string }
+type ComparisonKey struct {
+	Provider, ResourceType, Method, Address, Action string
+	DurationSource                                  span.DurationSource
+}
 type ComparisonRow struct {
 	Key           ComparisonKey
 	State         string
@@ -107,16 +110,22 @@ func compareSection(spec comparisonSectionSpec, before, after []span.Span, befor
 	for key := range afterGroups {
 		keys[key] = struct{}{}
 	}
+	beforeSources, afterSources := durationSourceSet(before), durationSourceSet(after)
 	for key := range keys {
 		beforeTotal, beforeFound := beforeGroups[key]
 		afterTotal, afterFound := afterGroups[key]
 		row := ComparisonRow{Key: key}
-		if !section.BeforeAvailable || !section.AfterAvailable {
+		beforeAvailable, afterAvailable := section.BeforeAvailable, section.AfterAvailable
+		if spec.tier == "ui" {
+			beforeAvailable = beforeSources[key.DurationSource]
+			afterAvailable = afterSources[key.DurationSource]
+		}
+		if !beforeAvailable || !afterAvailable {
 			row.State = "unavailable"
-			if section.BeforeAvailable {
+			if beforeAvailable {
 				row.Before = totalForPresence(beforeTotal, beforeFound)
 			}
-			if section.AfterAvailable {
+			if afterAvailable {
 				row.After = totalForPresence(afterTotal, afterFound)
 			}
 		} else {
@@ -136,6 +145,14 @@ func compareSection(spec comparisonSectionSpec, before, after []span.Span, befor
 	}
 	sortComparisonRows(section.Rows)
 	return section
+}
+
+func durationSourceSet(observations []span.Span) map[span.DurationSource]bool {
+	sources := make(map[span.DurationSource]bool)
+	for _, observation := range observations {
+		sources[observation.DurationSource] = true
+	}
+	return sources
 }
 
 type comparisonAggregates struct {
@@ -214,15 +231,17 @@ func comparisonKeyForSpan(observation span.Span, fields comparisonKeyFields) (Co
 	switch fields {
 	case keyProvider:
 		return ComparisonKey{Provider: observation.Provider}, true
-	case keyResourceType, keyUIResourceType:
+	case keyResourceType:
 		return ComparisonKey{ResourceType: observation.ResourceType}, true
+	case keyUIResourceType:
+		return ComparisonKey{ResourceType: observation.ResourceType, DurationSource: observation.DurationSource}, true
 	case keyRPCMethod:
 		return ComparisonKey{Provider: observation.Provider, ResourceType: observation.ResourceType, Method: observation.RPC}, true
 	case keyUIOperation:
 		if observation.Address == "" {
 			return ComparisonKey{}, false
 		}
-		return ComparisonKey{Address: observation.Address, Action: observation.RPC}, true
+		return ComparisonKey{Address: observation.Address, Action: observation.RPC, DurationSource: observation.DurationSource}, true
 	default:
 		panic("unknown comparison key fields")
 	}

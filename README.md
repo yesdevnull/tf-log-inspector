@@ -3,7 +3,7 @@
 Find where a slow Terraform plan spent its time.
 
 See the [investigation workflow release notes](docs/release-notes.md) for the
-completed features and JSON v2 migration details.
+completed features and the alpha JSON v1 contracts.
 
 ## Install
 
@@ -127,6 +127,27 @@ right, and the raw log with `/` search. `q` quits. Read
 [What each mode discloses](#what-each-mode-discloses) before you share a
 session — the interface shows more of your log than either report does.
 
+Captures with only resource timings open on Resources. RPC durations
+without observations display as `n/a` in the resource-type tables; measured
+zero durations remain zero. Timeline activity and gaps describe the selected
+observations and do not establish waiting or Terraform idleness.
+
+A compact summary beneath the filename shows resource-operation counts and
+whether RPC timings are present. CLI-only captures also identify missing
+timestamps. The Resources table labels timing sources as `UI`, `refresh`, `CLI`,
+or a combination. Empty inferred-RPC sections are omitted from resource details;
+Calls explains when the capture has no RPC timings. Timing guidance wraps in
+narrow panes, with `e` evidence providing full details in short panes.
+
+Resource timings identify three duration sources: `ui_elapsed` for reported
+structured completion durations, `refresh_window` for timestamp-derived
+`refresh_start`/`refresh_complete` windows, and `cli_elapsed` for plain-text CLI
+completion durations. Refresh windows measure the hook interval, not a provider
+RPC. CLI completions are a fallback for captures without structured lifecycle
+hooks or timestamped provider/core entries; mixed captures suppress CLI
+candidates to avoid double-counting. CLI operations retain their displayed
+duration resolution and physical source lines, but have no timeline positions.
+
 The top tab bar highlights the active view; its number keys switch views.
 `Tab` moves the arrow and accented panel border to the pane receiving keyboard
 input. The filter title counts hidden values. Raw Log uses the available width
@@ -156,20 +177,21 @@ result is cached. `i` or `Esc` closes the panel without cancelling a check or
 changing the active view, filters, scope or search.
 
 Key `3` opens Resources, which groups exact Terraform addresses and ranks them
-by summed observed UI duration. Repeated completions of one address count as
-operations of that resource. UI totals and maxima come from Terraform's
-structured UI stream and retain its whole-second rounding and lower-bound
-qualifications. The associated RPC counts and time are inferred, partial
+by summed observed resource duration. Repeated completions of one address count
+as separate operations. Totals and maxima include all admitted duration sources;
+only `ui_elapsed` carries the whole-second rounding qualification. Saturated
+durations remain lower bounds. Operation totals can overlap and are not run
+elapsed time. The associated RPC counts and time are inferred, partial
 evidence split into Contained/Likely and weaker Overlapping groups; they do not
 replace the observed ranking or recover every provider call. `Enter` on a
 resource opens its observed operations. From there, `Enter` opens the selected
 operation's source and `c` opens inferred calls for the current resource
-selection. Those calls are not assigned to an individual UI operation. `Esc`
+selection. Those calls are not assigned to an individual resource operation. `Esc`
 returns through each parent; a numbered view starts a new navigation path.
 
-Resource type, exact-resource and module-subtree selections apply to UI
+Resource type, exact-resource and module-subtree selections apply to resource
 operations. RPC evidence also uses provider and RPC-method selections; those
-two filters do not imply a provider or method for UI operations. In the facet
+two filters do not imply a provider or method for resource operations. In the facet
 pane, `/` narrows the visible resource or module choices without changing the
 result set. Use `Space` to toggle a choice or `o` to select it alone. Module
 instance keys remain exact. Module subtrees combine with OR semantics, so an
@@ -181,7 +203,9 @@ evidence does not become root.
 Press `e` from a timing view for scrollable evidence about the current selected
 scope, including selected/other/unresolved RPC partitions and preselection
 attribution buckets. From Resources it also carries the complete selected-row
-address and qualifications when the detail pane is absent or clipped. Press
+address, source counts and durations, and qualifications when the detail pane
+is absent or clipped. Refresh source links show the start-to-completion physical
+line range; CLI completions link to their own physical line. Press
 `i` for capture quality measured over the whole log; its denominator is
 deliberately different from the scoped evidence panel. Both panels close with
 their opening key or `Esc` and leave the investigation state intact.
@@ -227,8 +251,9 @@ detail pane follows the step, and `⏎` opens that call's own log lines,
 scoped to it by its `tf_req_id`; `\` returns to the whole log.
 
 With the timeline list focused, `t` switches between available RPC and UI timing.
-Each tier keeps its own selected observation. UI timing retains whole-second
-resolution; filtering does not switch clocks. A single available tier stays
+Each tier keeps its own selected observation. Structured completion and refresh
+windows share the UI clock; CLI durations never contribute lanes, concurrency
+or capture wall-clock duration. Filtering does not switch clocks. A single available tier stays
 selected and reports the unavailable alternative.
 
 `-o` writes a report for `--diagnose`, `--profile`, and `--compare`, and is
@@ -244,16 +269,18 @@ change a mean even when total duration is unchanged. A percentage is
 unavailable when its baseline is zero or missing, and a whole tier is
 unavailable when that capture has no admitted observations for it.
 
-RPC durations measure provider calls while UI-hook durations measure resource
+RPC durations measure provider calls while resource durations measure resource
 operations. Their clocks and work are separate and may overlap, so do not add
-or subtract the tiers. Rows containing a lower-bound UI duration retain their
+or subtract the tiers. Resource comparison keys keep duration sources separate,
+so a refresh window is never compared with a reported completion. Rows
+containing a lower-bound resource duration retain their
 observed values but are unranked because they do not define an exact timing
 delta.
 
 Text output defaults to 20 exact rows and 20 unranked or unavailable rows in
 each section; `--limit` applies independently to every list. Use `--limit 0`
 to show all text rows. JSON always contains every row and does not accept
-`--limit`; see the [Comparison JSON v2 schema](docs/comparison-json-v2.md).
+`--limit`; see the [Comparison JSON v1 schema](docs/comparison-json-v1.md).
 
 Comparison output contains unmasked identifiers and capture metadata, but no
 raw log bodies or absolute input paths. Separately scrubbed captures can assign
@@ -388,7 +415,7 @@ does not change whole-log counts, durations, concurrency totals or capture
 quality.
 
 JSON profiles export the complete data without a row limit. The
-[versioned JSON schema](docs/profile-json-v2.md) uses explicit `null` values for
+[versioned JSON schema](docs/profile-json-v1.md) uses explicit `null` values for
 unavailable measurements and `0` for measured zeroes. Durations and separate
 RPC and UI clock offsets are integer milliseconds; the two tiers measure
 different work and their durations must not be added. Observations retain full
@@ -399,9 +426,10 @@ profile remains unchanged.
 Individual observations include their physical source line or line range in
 the input log. RPC resource addresses are inferred from nearby context and
 carry a confidence label such as contained, likely or overlapping; ambiguous
-and unattributed calls are identified explicitly. UI resource addresses are
-directly observed in Terraform's structured output. UI durations are reported
-to whole-second precision, and saturated durations and affected totals are
+and unattributed calls are identified explicitly. Resource addresses are
+directly observed in structured hooks or CLI completions. Resource observations
+name their `duration_source`; only `ui_elapsed` has whole-second precision.
+Source breakdowns retain admitted counts and durations. Saturated durations and affected totals are
 shown as lower bounds. Observed gaps do not establish that Terraform was idle,
 and a long active observation does not prove that it made other work wait.
 

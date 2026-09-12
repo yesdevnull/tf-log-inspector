@@ -1,27 +1,27 @@
 [7m tfli [0m  [1;36mi limitations · resources-modules.log[0m  [2m0 RPC spans, 2 UI spans[0m
  [36m1[0m prov    [36m2[0m types   [7m 3 res [0m   [36m4[0m calls    [36m5[0m time    [36m6[0m log   [36m?[0m help
-
-[36m╭▶[0m[1;36m Resources (observed ui) [0m[36m──────────────────╮[0m [2m╭─[0m[1;36m Resource detail [0m[2m───╮[0m
-[36m│[0m Scopes: UI type/resource/module; RPC provi [36m│[0m[2m [0m[2m│[0m address:            [2m│[0m
-[36m│[0m Inferred RPC evidence is partial; observed [36m│[0m[2m [0m[2m│[0m module.app["a.b"].m [2m│[0m
-[36m│[0m Observed UI operations; measurements round [36m│[0m[2m [0m[2m│[0m odule.db[0].aws_ins [2m│[0m
-[36m│[0m [1maddress    [0m  [1moperations[0m  [1;36mUI total▾[0m  [1mUI max[0m [36m│[0m[2m [0m[2m│[0m tance.web["key[part [2m│[0m
-[36m│[0m [7m…key[part"]           2       3.0s    2.0s[0m [36m│[0m[2m [0m[2m│[0m "]                  [2m│[0m
+[2m2 resource operations · no RPC timings[0m
+[36m╭▶[0m[1;36m Resources (observed) [0m[36m─────────────────────╮[0m [2m╭─[0m[1;36m Resource detail [0m[2m───╮[0m
+[36m│[0m ui_elapsed: rounded to whole seconds, +/-  [36m│[0m[2m [0m[2m│[0m address:            [2m│[0m
+[36m│[0m 1s each.                                   [36m│[0m[2m [0m[2m│[0m module.app["a.b"].m [2m│[0m
+[36m│[0m [1maddress       [0m  [1mops[0m  [1;36mtotal▾[0m  [1m max[0m  [1msources[0m [36m│[0m[2m [0m[2m│[0m odule.db[0].aws_ins [2m│[0m
+[36m│[0m [7m…b["key[part"]    2    3.0s  2.0s       UI[0m [36m│[0m[2m [0m[2m│[0m tance.web["key[part [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m "]                  [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m operations: 2       [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m observed UI total:  [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m 3.0s                [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m observed UI max:    [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m 2.0s                [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m inferred            [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m Contained/Likely    [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m RPCs: 0, 0s         [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m inferred            [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m Overlapping RPCs:   [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m 0, 0s               [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m UI timings are      [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m rounded to whole    [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m seconds, +/- 1s     [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m each.               [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m observed resource   [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m total: 3.0s         [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m observed resource   [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m max: 2.0s           [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m Duration sources    [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m and qualifications: [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m e evidence.         [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m

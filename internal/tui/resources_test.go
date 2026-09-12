@@ -80,20 +80,20 @@ func TestResourcesRPCOnlyExplainsObservedRankingUnavailable(t *testing.T) {
 	m := New(&model.Log{RPCSpans: []span.Span{{DurationMs: 10, ResourceType: "aws_instance"}}}, "rpc.log")
 	m.setView(ViewResources)
 	got := m.renderResources(100, 20)
-	for _, want := range []string{"no observed UI resource operations", "4 calls", "2 types", "i quality", "e evidence"} {
+	for _, want := range []string{"no observed resource operations", "4 calls", "2 types", "i quality", "e evidence"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("resources = %q, want %q", got, want)
 		}
 	}
 }
 
-func TestResourcesNameSeparateUIAndRPCScopes(t *testing.T) {
+func TestResourcesKeepScopeDetailsInEvidence(t *testing.T) {
 	m := New(&model.Log{UISpans: []span.Span{{Address: "aws_instance.a", ResourceType: "aws_instance"}}}, "ui.log")
 	m.setView(ViewResources)
-	got := m.renderResources(180, 20)
+	got := m.resourceEvidenceText()
 	for _, want := range []string{
-		"Scopes: UI type/resource/module; RPC provider/type/method/resource/module.",
-		"Inferred RPC evidence is partial",
+		"UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply.",
+		"RPC evidence is inferred and partial.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("resources missing %q:\n%s", want, got)
@@ -108,7 +108,7 @@ func TestResourcesDistinguishUnnamedRejectedAndFilteredEmpty(t *testing.T) {
 		prep func(*Model)
 		want string
 	}{
-		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, nil, "no exact address: observed UI operations are ungrouped"},
+		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, nil, "no exact address: observed resource operations are ungrouped"},
 		{"rejected", &model.Log{UIEvidence: span.TimingEvidence{Records: 1, Rejected: map[string]span.IssueCount{"duration_missing": {Count: 1}}}}, nil, "completion records were rejected"},
 		{"filtered", &model.Log{UISpans: []span.Span{{Address: "aws_instance.a", ResourceType: "aws_instance"}}}, func(m *Model) {
 			m.resourceSelection.Addresses = map[string]bool{"aws_instance.a": false}
@@ -133,7 +133,7 @@ func TestResourcesKeepAddressAndObservedMeasurementsAtOrdinaryWidth(t *testing.T
 	m := New(&model.Log{UISpans: []span.Span{{Address: "aws_instance.accounting", DurationMs: 1200, ResourceType: "aws_instance"}}}, "ui.log")
 	m.setView(ViewResources)
 	got := unstyled(m.renderResources(46, 20))
-	for _, want := range []string{"accounting", "operations", "UI total", "UI max"} {
+	for _, want := range []string{"accounting", "ops", "total", "max", "sources", "UI"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("46-column resources lost %q:\n%s", want, got)
 		}
@@ -153,7 +153,7 @@ func TestResourceDetailWrapsTheFullEscapedAddress(t *testing.T) {
 		t.Fatalf("resource detail did not preserve the full address:\n%s", got)
 	}
 	prose := strings.Join(strings.Fields(got), " ")
-	for _, want := range []string{"observed UI total: 3.0s", "inferred Contained/Likely RPCs: 1, 10ms", "inferred Overlapping RPCs: 1, 5ms"} {
+	for _, want := range []string{"observed resource total: 3.0s", "inferred Contained/Likely RPCs: 1, 10ms", "inferred Overlapping RPCs: 1, 5ms"} {
 		if !strings.Contains(prose, want) {
 			t.Errorf("resource detail lost %q:\n%s", want, got)
 		}
@@ -166,7 +166,7 @@ func TestResourcesShortEmptyFramePrioritisesExplanation(t *testing.T) {
 		log  *model.Log
 		want []string
 	}{
-		{"rpc only", &model.Log{RPCSpans: []span.Span{{ResourceType: "aws_instance"}}}, []string{"no observed UI resource operations", "4 calls", "e evidence"}},
+		{"rpc only", &model.Log{RPCSpans: []span.Span{{ResourceType: "aws_instance"}}}, []string{"no observed resource operations", "4 calls", "e evidence"}},
 		{"unnamed", &model.Log{UISpans: []span.Span{{ResourceType: "aws_instance"}}}, []string{"ungrouped", "exact address"}},
 	}
 	for _, tt := range tests {

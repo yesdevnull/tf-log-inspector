@@ -59,11 +59,11 @@ func TestTypesViewShowsBothTiers(t *testing.T) {
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
 
-	// Cells in typeColumns' order: resource type, UI res., UI total,
+	// Cells in typeColumns' order: resource type, res ops, res total,
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
 		{"aws_instance", "2", "5.0s", "2", "370ms", "250ms"}, // both tiers
-		{"local_file", "1", "1.0s", "0", "0s", "0s"},         // UI tier only
+		{"local_file", "1", "1.0s", "0", "n/a", "n/a"},       // UI tier only
 		{"aws_subnet", "0", "0s", "1", "40ms", "40ms"},       // RPC tier only
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
@@ -85,10 +85,10 @@ func TestAProviderFacetLeavesTheUITierIndependent(t *testing.T) {
 	}
 
 	centre := strings.TrimRight(centrePaneOf(m.View()), " \n")
-	// Cells in typeColumns' order: resource type, UI res., UI total,
+	// Cells in typeColumns' order: resource type, res ops, res total,
 	// RPC calls, RPC total, RPC max.
 	for _, want := range [][]string{
-		{"github_repository", "1", "4.0s", "0", "0s", "0s"},
+		{"github_repository", "1", "4.0s", "0", "n/a", "n/a"},
 		{"local_file", "1", "1.0s", "1", "900ms", "900ms"},
 	} {
 		got, _ := paneRowStartingWith(t, centre, want[0])
@@ -105,7 +105,7 @@ func TestAProviderFacetLeavesTheUITierIndependent(t *testing.T) {
 }
 
 // An empty provider allow-list admits no RPC evidence but still cannot erase
-// observed UI operations, which carry no trustworthy provider relationship.
+// observed resource operations, which carry no trustworthy provider relationship.
 func TestUntickingEveryProviderEmptiesOnlyTheRPCTier(t *testing.T) {
 	m := update(t, New(testLog(t, "mixed-provider-addrs.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -568,11 +568,12 @@ func TestTheTableSaysWhenAFilterHasEmptiedIt(t *testing.T) {
 // never set.
 func TestATableWithNoRowsAndNoFilterDoesNotBlameAFilter(t *testing.T) {
 	m := update(t, New(testLog(t, "structured-ui.log"), "x.log"), tea.WindowSizeMsg{Width: 160, Height: 40})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 	if len(m.log.RPCSpans) != 0 || len(m.log.UISpans) == 0 {
 		t.Fatalf("fixture assumption changed: %d RPC and %d UI spans, want a UI-only log", len(m.log.RPCSpans), len(m.log.UISpans))
 	}
 	centre := centrePaneOf(m.View())
-	if !strings.Contains(centre, "this view has no rows for this log") {
+	if !strings.Contains(centre, "No RPC timings in this capture") {
 		t.Errorf("the calls view of a UI-only log says nothing about being empty:\n%s", centre)
 	}
 	if strings.Contains(centre, "nothing matches the filter") {
@@ -593,7 +594,8 @@ func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
 
 	centre := centrePaneOf(m.View())
 	for _, want := range []string{
-		"nothing to profile",    // internal/diagnose's EXTRACTION verdict
+		"No supported timing observations",
+		"CLI completion durations",
 		"TF_LOG_PROVIDER=TRACE", // both gates, from writeRPCCaptureHint
 		"TF_LOG_SDK_PROTO=TRACE",
 		"debug logging on a run", // the HCP capture instruction
@@ -605,6 +607,17 @@ func TestALogWithNoSpansGetsCaptureGuidanceInsteadOfAnEmptyTable(t *testing.T) {
 	}
 	if strings.Contains(centre, "total  calls  max") {
 		t.Errorf("an empty providers table was rendered instead of the guidance:\n%s", centre)
+	}
+}
+
+func TestCompactCaptureGuidanceExplainsUnsupportedTiming(t *testing.T) {
+	m := New(testLog(t, "core-only.log"), "x.log")
+	// Available list space in the 80-by-24 terminal layout.
+	text := strings.Join(strings.Fields(unstyled(m.renderList(52, 18))), " ")
+	for _, want := range []string{"No supported timing observations", "CLI completion durations", "terraform.ui", "TF_LOG_PROVIDER=TRACE", "TF_LOG_SDK_PROTO=TRACE", "Raw Log: press 6"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("compact guidance missing %q: %s", want, text)
+		}
 	}
 }
 
@@ -694,7 +707,7 @@ func TestSortingByAnIdentifierColumnOrdersItAscending(t *testing.T) {
 // every ranked view in this tool means by an order: the slowest thing is the
 // thing worth looking at.
 //
-// two-tier.log tells this apart from the default. Ranked by UI total the
+// two-tier.log tells this apart from the default. Ranked by res total the
 // order is aws_instance (5s), local_file (1s), aws_subnet (none); ranked by
 // RPC total it is aws_instance (370ms), aws_subnet (40ms), local_file
 // (none). local_file and aws_subnet swap, so the assertion fails if the
@@ -705,11 +718,11 @@ func TestSortingByANumericColumnOrdersItDescending(t *testing.T) {
 	_, subnet, _ := findPaneRow(centrePaneOf(m.View()), "aws_subnet")
 	_, local, _ := findPaneRow(centrePaneOf(m.View()), "local_file")
 	if subnet <= local {
-		t.Fatalf("fixture assumption changed: aws_subnet already ranks above local_file by UI total, so this test cannot tell a re-sort from the default")
+		t.Fatalf("fixture assumption changed: aws_subnet already ranks above local_file by res total, so this test cannot tell a re-sort from the default")
 	}
 
-	// typeColumns is resource type, UI res., UI total, RPC calls, RPC total,
-	// RPC max: two presses from the UI total default lands on RPC total.
+	// typeColumns is resource type, res ops, res total, RPC calls, RPC total,
+	// RPC max: two presses from the res total default lands on RPC total.
 	m = update(t, update(t, m, sortKey), sortKey)
 	if got := typeColumns[m.sortCol[ViewTypes]].header; got != "RPC total" {
 		t.Fatalf("two presses landed the sort on %q, want RPC total", got)
@@ -738,7 +751,7 @@ func TestSortingByANumericColumnOrdersItDescending(t *testing.T) {
 //
 // tied-ui-totals.log is the only fixture that can observe this. Both its
 // types total 2s of UI-hook time, so the join's tie-break decides the order
-// (aws_zulu first, on 500ms of RPC against 10ms) and ranking by UI total
+// (aws_zulu first, on 500ms of RPC against 10ms) and ranking by res total
 // alone would put aws_alpha first on its name.
 func TestTheDefaultSortServesTheBuildersOrderRatherThanReSortingIt(t *testing.T) {
 	m := update(t, New(testLog(t, "tied-ui-totals.log"), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
@@ -748,10 +761,10 @@ func TestTheDefaultSortServesTheBuildersOrderRatherThanReSortingIt(t *testing.T)
 	alpha, alphaLine := paneRowStartingWith(t, centre, "aws_alpha")
 	zulu, zuluLine := paneRowStartingWith(t, centre, "aws_zulu")
 	if alpha[2] != zulu[2] {
-		t.Fatalf("fixture assumption changed: UI totals are %q and %q, want them tied so the join's tie-break decides the order", alpha[2], zulu[2])
+		t.Fatalf("fixture assumption changed: res totals are %q and %q, want them tied so the join's tie-break decides the order", alpha[2], zulu[2])
 	}
 	if zuluLine >= alphaLine {
-		t.Errorf("aws_zulu (500ms of RPC) rendered on line %d, at or below aws_alpha (10ms) on line %d -- the table was re-sorted by UI total and broke the tie by name, discarding the join's own tie-break:\n%s", zuluLine, alphaLine, centre)
+		t.Errorf("aws_zulu (500ms of RPC) rendered on line %d, at or below aws_alpha (10ms) on line %d -- the table was re-sorted by res total and broke the tie by name, discarding the join's own tie-break:\n%s", zuluLine, alphaLine, centre)
 	}
 }
 
@@ -965,6 +978,12 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 					if c.kind != numericColumn {
 						continue
 					}
+					if tc.view == ViewTypes && (c.header == "RPC total" || c.header == "RPC max") && rw.numeric[3] == 0 {
+						if rw.cells[i] != "n/a" {
+							t.Errorf("unobserved RPC duration displayed as %q", rw.cells[i])
+						}
+						continue
+					}
 					// The two renderings the builders use: a duration
 					// through formatMs, a count through strconv.
 					if got := rw.cells[i]; got != formatMs(rw.numeric[i]) && got != strconv.FormatUint(rw.numeric[i], 10) {
@@ -1005,7 +1024,7 @@ func TestEveryDefaultSortColumnNamesTheOrderItsBuilderProduces(t *testing.T) {
 		rpc("A", "google", "google_vm", 20, 3),
 	}
 	// alpha: 1s of UI, 500ms of RPC. zulu: 3s of UI, 10ms of RPC. Ranking
-	// by UI total puts zulu first; by any RPC column it would be alpha.
+	// by res total puts zulu first; by any RPC column it would be alpha.
 	typeRPC := []span.Span{rpc("A", "aws", "alpha", 500, 0), rpc("A", "aws", "zulu", 10, 1)}
 	typeUI := []span.Span{
 		{Entry: 2, DurationMs: 1000, ResourceType: "alpha", Fidelity: span.FidelityUIReported},

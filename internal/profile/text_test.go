@@ -22,7 +22,7 @@ func TestTextProfileOpensExactObservationEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"aws_instance.a", "contained", "source: line 4", "source: line 5", "observed UI"} {
+	for _, want := range []string{"aws_instance.a", "contained", "source: line 4", "source: line 5", "observed resource"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in report:\n%s", want, got)
 		}
@@ -64,14 +64,14 @@ func TestTextProfileRendersUILowerBoundsAndObservedIdentity(t *testing.T) {
 	report := Report{
 		UI:        []Observation{{Span: span.Span{DurationMs: math.MaxUint32, DurationSaturated: true, RPC: "apply", ResourceType: "aws_instance", Address: "aws_instance.example", Provider: "aws", Fidelity: span.FidelityUIReported}, Source: &model.SourceLocation{StartLine: 24, EndLine: 24}}},
 		UIRanking: []int{0},
-		Types:     []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "aws_instance", UIResources: 1, UITotalMs: math.MaxUint32}, UILowerBound: true}},
+		Types:     []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "aws_instance", UIResources: 1, UITotalMs: math.MaxUint32, UILowerBound: true}}},
 	}
 	var out strings.Builder
 	if err := renderReport(&out, report, TextOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"≥4294967.3s", "resource: aws_instance.example (observed UI)", "source: line 24"} {
+	for _, want := range []string{"≥4294967.3s", "resource: aws_instance.example (observed resource)", "source: line 24"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
 		}

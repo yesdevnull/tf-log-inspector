@@ -1141,7 +1141,7 @@ func TestReportSubSecondResourceShowsDistinguishableDuration(t *testing.T) {
 // a trap for the next reader -- a value nobody reads is not a feature.
 func TestReportRendersUISlowestSpan(t *testing.T) {
 	out := render(t, build(t, threeResourceUIHookLog()))
-	if !strings.Contains(out, "UI-hook slowest span 8200 ms") {
+	if !strings.Contains(out, "resource slowest span 8200 ms") {
 		t.Errorf("report does not render UI-hook slowest span:\n%s", out)
 	}
 }

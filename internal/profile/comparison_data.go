@@ -23,12 +23,13 @@ func BuildComparison(before, after Report) (ComparisonReport, error) {
 }
 
 func comparisonInput(r Report) model.ComparisonInput {
-	in := model.ComparisonInput{RPC: make([]span.Span, len(r.RPC)), UI: make([]span.Span, len(r.UI))}
-	for i, observation := range r.RPC {
-		in.RPC[i] = observation.Span
+	return model.ComparisonInput{RPC: observationSpans(r.RPC), UI: observationSpans(r.UI)}
+}
+
+func observationSpans(observations []Observation) []span.Span {
+	spans := make([]span.Span, len(observations))
+	for i, observation := range observations {
+		spans[i] = observation.Span
 	}
-	for i, observation := range r.UI {
-		in.UI[i] = observation.Span
-	}
-	return in
+	return spans
 }

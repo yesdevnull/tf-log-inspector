@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
+	"github.com/yesdevnull/tf-log-inspector/internal/qualitytext"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
@@ -191,8 +192,8 @@ var providerColumns = []column{
 
 var typeColumns = []column{
 	{header: "resource type", kind: tailIdentifierColumn},
-	{header: "UI res.", kind: numericColumn},
-	{header: "UI total", kind: numericColumn},
+	{header: "res ops", kind: numericColumn},
+	{header: "res total", kind: numericColumn},
 	{header: "RPC calls", kind: numericColumn},
 	{header: "RPC total", kind: numericColumn},
 	{header: "RPC max", kind: numericColumn},
@@ -208,8 +209,9 @@ var callColumns = []column{
 var resourceColumns = []column{
 	{header: "address", kind: tailIdentifierColumn},
 	{header: "operations", kind: numericColumn},
-	{header: "UI total", kind: numericColumn},
-	{header: "UI max", kind: numericColumn},
+	{header: "res total", kind: numericColumn},
+	{header: "res max", kind: numericColumn},
+	{header: "sources", kind: numericColumn},
 	{header: "inferred RPCs", kind: numericColumn},
 	{header: "inferred total", kind: numericColumn},
 	{header: "overlap RPCs", kind: numericColumn},
@@ -492,24 +494,29 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
+		resourceTotal := durationTotalText(model.DurationTotal{TotalMs: r.UITotalMs, LowerBound: r.UILowerBound})
+		rpcTotal, rpcMax := "n/a", "n/a"
+		if r.RPCCalls > 0 {
+			rpcTotal, rpcMax = formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs))
+		}
 		rows[i] = rollupRow(
 			[]string{
 				r.ResourceType,
 				strconv.Itoa(r.UIResources),
-				formatMs(r.UITotalMs),
+				resourceTotal,
 				strconv.Itoa(r.RPCCalls),
-				formatMs(r.RPCTotalMs),
-				formatMs(uint64(r.RPCMaxMs)),
+				rpcTotal,
+				rpcMax,
 			},
 			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "resource type", value: r.ResourceType, kind: tailIdentifierColumn},
-					{label: "UI res.", value: strconv.Itoa(r.UIResources), kind: numericColumn},
-					{label: "UI total", value: formatMs(r.UITotalMs), kind: numericColumn},
+					{label: "res ops", value: strconv.Itoa(r.UIResources), kind: numericColumn},
+					{label: "res total", value: resourceTotal, kind: numericColumn},
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
-					{label: "RPC total", value: formatMs(r.RPCTotalMs), kind: numericColumn},
-					{label: "RPC max", value: formatMs(uint64(r.RPCMaxMs)), kind: numericColumn},
+					{label: "RPC total", value: rpcTotal, kind: numericColumn},
+					{label: "RPC max", value: rpcMax, kind: numericColumn},
 				},
 				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
 			},
@@ -778,6 +785,9 @@ func (m *Model) renderList(w, h int) string {
 	if len(m.log.RPCSpans) == 0 && len(m.log.UISpans) == 0 {
 		return m.fitCaptureGuidance(w, h)
 	}
+	if m.view == ViewCalls && len(m.log.RPCSpans) == 0 && !m.associatedCalls {
+		return renderResourceEmpty("No RPC timings in this capture.\nUse 3 Resources for operation timings.\nProvider RPC timings require TRACE logging.\nThis does not mean no provider calls occurred.", w, h)
+	}
 	empty := noRowsNote
 	if m.associatedCalls && (m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil) {
 		empty = "This does not establish that no provider calls occurred."
@@ -816,17 +826,31 @@ func (m *Model) renderList(w, h int) string {
 		}
 	}
 	rows := m.rows()
-	if len(rows) > 0 && len(preamble) > max(0, h-2) {
-		// Keep the selected row visible in short panes. The complete timing
-		// qualifications remain available in help and evidence.
-		preamble = preamble[:max(0, h-2)]
-	}
+	preamble = fitTableGuidance(preamble, w, h)
 	cols := t.cols
 	sortCol := m.activeSort()
 	if m.view == ViewTypes {
 		cols, rows, sortCol = visibleTypeColumns(cols, rows, sortCol, w)
 	}
 	return renderTable(preamble, cols, sortCol, rows, empty, m.selected, m.pane == PaneList, w, h)
+}
+
+// fitTableGuidance wraps complete paragraphs while reserving a header and row.
+// Short panes direct readers to evidence instead of clipping a qualification.
+func fitTableGuidance(paragraphs []string, w, h int) []string {
+	var lines []string
+	for _, paragraph := range paragraphs {
+		lines = append(lines, wrapToWidth(paragraph, w)...)
+	}
+	limit := max(0, h-2)
+	if len(lines) <= limit {
+		return lines
+	}
+	if limit == 0 {
+		return nil
+	}
+	lines = wrapToWidth("e evidence: timing details", w)
+	return lines[:min(limit, len(lines))]
 }
 
 // visibleTypeColumns drops non-sort measurement columns on narrow panes until
@@ -887,16 +911,14 @@ func (m *Model) fitCaptureGuidance(w, h int) string {
 	return fitCaptureGuidance(w, h)
 }
 
-// captureGuidance is what the centre pane shows for a log with no spans at
-// all: what such a log is missing, how to capture one that is not, and how
-// to check this file's structure. Every sentence is internal/diagnose's --
-// the EXTRACTION section's "nothing to profile" line, writeRPCCaptureHint's
-// two-gates explanation, and the HCP capture instruction from tfli's own
-// usage text -- rewrapped to 40 columns, which is narrower than the centre
-// pane at any supported terminal width.
+// captureGuidance distinguishes unsupported input from an absence of work
+// and explains which evidence can be profiled. Lines fit a 40-column pane.
 var captureGuidance = []string{
-	"This log contains no provider RPC",
-	"entries, so there is nothing to profile.",
+	"No supported timing observations.",
+	"Use CLI completion durations or",
+	"terraform.ui completion/refresh hooks",
+	"for resources, or provider TRACE",
+	"for RPC timings. Raw Log: press 6.",
 	"",
 	"Provider RPC entries are emitted only at",
 	"TRACE, so debug logging alone will not",
@@ -930,7 +952,7 @@ var captureGuidance = []string{
 // one height too short even for the mark -- a pane of one line -- still
 // leaves a finished sentence naming what this log is missing, with only the
 // remedy cut.
-const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE, then re-run."
+const shortCaptureGuidance = "No supported timing observations. Set TF_LOG_PROVIDER=TRACE and TF_LOG_SDK_PROTO=TRACE for RPC timings. Use CLI completion durations or terraform.ui completion/refresh hooks for resources. Raw Log: press 6."
 
 // fitCaptureGuidance is the capture guidance for a pane w columns wide and h
 // lines tall: the full text where it fits, one sentence where it does not,
@@ -943,6 +965,9 @@ const shortCaptureGuidance = "This log contains no provider RPC entries. Set TF_
 func fitCaptureGuidance(w, h int) string {
 	if h <= 0 {
 		return ""
+	}
+	if h == 1 {
+		return clipWidth(captureGuidance[0], w)
 	}
 	lines := captureGuidance
 	if h < len(lines) {
@@ -1014,18 +1039,18 @@ func wrapToWidth(s string, w int) []string {
 	return lines
 }
 
-// typesPreamble states the UI-hook resolution caveat above the types table,
-// but only when UI-hook figures are actually present to rank -- a log with
-// RPC spans only has nothing to caveat. Terraform rounds a resource's start
-// and end to the nearest second before subtracting them, so these figures
-// carry up to a second of error each; see the identical caveat in
-// internal/profile.Render's BY RESOURCE TYPE section, whose wording this
-// matches.
+// typesPreamble qualifies only the duration sources present in the selected
+// resource operations. Reported completions and refresh windows share a clock
+// but have different resolution and meaning.
 func typesPreamble(uiSpans []span.Span) []string {
 	if len(uiSpans) == 0 {
 		return nil
 	}
-	return []string{"UI-hook figures are sums of measurements rounded to whole seconds, +/- 1s each."}
+	var lines []string
+	for _, summary := range model.SummariseDurationSources(uiSpans) {
+		lines = append(lines, qualitytext.DurationSourceQualification(summary.Source))
+	}
+	return lines
 }
 
 // renderTable formats preamble lines followed by a header and data rows as a

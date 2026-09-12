@@ -23,7 +23,7 @@ type Observation struct {
 // records whether any UI duration contributing to the row was saturated.
 type TypeSummary struct {
 	model.TypeRow
-	UILowerBound bool
+	DurationSources []model.DurationSourceSummary
 }
 
 // Timeline contains analysis for the one admitted tier selected by the model.
@@ -106,7 +106,7 @@ func buildObservations(l *model.Log, spans []span.Span, attributions []attrib.At
 		if i < len(attributions) {
 			observations[i].Attribution = attributions[i]
 		}
-		if source, ok := l.SourceLocation(s.Entry); ok {
+		if source, ok := l.ObservationSource(s); ok {
 			sourceCopy := source
 			observations[i].Source = &sourceCopy
 		}
@@ -190,15 +190,15 @@ func compareSourceAndIndex(a, b Observation) int {
 }
 
 func buildTypeSummaries(rpcSpans, uiSpans []span.Span) []TypeSummary {
-	lowerBounds := make(map[string]bool)
+	byType := make(map[string][]span.Span)
 	for _, s := range uiSpans {
 		key := model.FacetKey(s.ResourceType)
-		lowerBounds[key] = lowerBounds[key] || s.DurationSaturated
+		byType[key] = append(byType[key], s)
 	}
 	rows := model.JoinByResourceType(rpcSpans, uiSpans)
 	out := make([]TypeSummary, len(rows))
 	for i, row := range rows {
-		out[i] = TypeSummary{TypeRow: row, UILowerBound: lowerBounds[row.ResourceType]}
+		out[i] = TypeSummary{TypeRow: row, DurationSources: model.SummariseDurationSources(byType[row.ResourceType])}
 	}
 	return out
 }

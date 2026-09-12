@@ -41,7 +41,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 		t.Fatalf("second decode: %v", err)
 	}
 	assertJSONKeys(t, "root", root, "schema_version", "kind", "tool_version", "duration_unit", "before", "after", "comparability", "sections", "qualifications")
-	assertJSONLiteral(t, root, "schema_version", "2")
+	assertJSONLiteral(t, root, "schema_version", "1")
 	assertJSONLiteral(t, root, "kind", `"comparison"`)
 	for side, wantName := range map[string]string{"before": "before.log", "after": "after.log"} {
 		capture := decodeJSONObject(t, root[side])
@@ -50,7 +50,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 		assertJSONKeys(t, side+" input", input, "basename", "bytes")
 		assertJSONLiteral(t, input, "basename", `"`+wantName+`"`)
 		assertJSONKeys(t, side+" tiers", decodeJSONObject(t, capture["tiers"]), "rpc", "ui")
-		assertJSONKeys(t, side+" quality", decodeJSONObject(t, capture["quality"]), "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction")
+		assertJSONKeys(t, side+" quality", decodeJSONObject(t, capture["quality"]), "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction", "duration_sources")
 		reconstruction := decodeJSONObject(t, decodeJSONObject(t, capture["quality"])["reconstruction"])
 		assertJSONKeys(t, side+" reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
 	}
@@ -62,7 +62,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	wants := []struct {
 		kind string
 		keys []string
-	}{{"rpc_providers", []string{"provider"}}, {"rpc_resource_types", []string{"resource_type"}}, {"rpc_methods", []string{"provider", "resource_type", "method"}}, {"ui_resource_types", []string{"resource_type"}}, {"ui_operations", []string{"address", "action"}}}
+	}{{"rpc_providers", []string{"provider"}}, {"rpc_resource_types", []string{"resource_type"}}, {"rpc_methods", []string{"provider", "resource_type", "method"}}, {"ui_resource_types", []string{"resource_type", "duration_source"}}, {"ui_operations", []string{"address", "action", "duration_source"}}}
 	if len(sections) != 5 {
 		t.Fatalf("sections=%d", len(sections))
 	}
@@ -90,7 +90,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	if err := json.Unmarshal(root["qualifications"], &qualifications); err != nil {
 		t.Fatal(err)
 	}
-	wantQualifications := []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
+	wantQualifications := []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_elapsed_duration_rounding", "refresh_windows_are_hook_measurements", "cli_elapsed_displayed_resolution", "resource_duration_sources_not_interchangeable", "observed_changes_are_not_causal", "added_removed_are_observation_presence", "independent_scrub_aliases_may_differ", "logging_configuration_unknown", "lower_bounds_do_not_define_timing_deltas"}
 	if !reflect.DeepEqual(qualifications, wantQualifications) {
 		t.Fatalf("qualifications = %#v, want %#v", qualifications, wantQualifications)
 	}
@@ -99,7 +99,7 @@ func TestComparisonJSONCompleteContract(t *testing.T) {
 	}
 }
 
-func TestComparisonJSONUsesProfileV2ReconstructionStates(t *testing.T) {
+func TestComparisonJSONUsesProfileReconstructionStates(t *testing.T) {
 	tests := []struct {
 		name          string
 		before, after model.ReconstructionQuality
@@ -117,7 +117,7 @@ func TestComparisonJSONUsesProfileV2ReconstructionStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			root := decodeJSONObject(t, out.Bytes())
-			assertJSONLiteral(t, root, "schema_version", "2")
+			assertJSONLiteral(t, root, "schema_version", "1")
 			for side, want := range map[string][]string{"before": tc.wantBefore, "after": tc.wantAfter} {
 				reconstruction := decodeJSONObject(t, decodeJSONObject(t, decodeJSONObject(t, root[side])["quality"])["reconstruction"])
 				assertJSONKeys(t, side+" reconstruction", reconstruction, "state", "responses", "diagnostics", "code")
@@ -358,7 +358,7 @@ func assertComparisonCaptureKeys(t *testing.T, name string, capture map[string]j
 		assertJSONKeys(t, name+" "+tierName+" tier", decodeJSONObject(t, raw), "duration_available", "records", "admitted", "rejected", "positioned", "excluded", "duration_ms", "positioned_ms", "excluded_ms", "duration_lower_bound", "clock_origin", "exclusions")
 	}
 	quality := decodeJSONObject(t, capture["quality"])
-	assertJSONKeys(t, name+" quality", quality, "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction")
+	assertJSONKeys(t, name+" quality", quality, "scope", "provider_entries", "structured_lines", "has_address_context", "issues", "attribution", "nameable_ms", "rpc_duration_ms", "nameable_share", "reconstruction", "duration_sources")
 	for _, issue := range decodeJSONArray(t, quality["issues"]) {
 		assertJSONKeys(t, name+" issue", issue, "stage", "code", "count", "first_entry")
 	}

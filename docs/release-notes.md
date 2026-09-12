@@ -32,11 +32,13 @@ the completed feature set; they do not announce a published release.
   measurements, before/after quality, exact grouping and qualified changes.
   Missing tiers and zero baselines remain unavailable where appropriate.
 
-## JSON v2 migration
+## Alpha JSON contract
 
-Both profile and comparison output now use `schema_version: 2`. Consumers that
-require version 1 must update before using these outputs. There is no v1 output
-switch or compatibility writer.
+Both profile and comparison output use `schema_version: 1` throughout the alpha, until v1 is tagged. Breaking changes update the existing contract directly, with no compatibility writer or export mode.
+
+Resource observations now include `duration_source`: structured reported completions (`ui_elapsed`), timestamped refresh hook windows (`refresh_window`), or plain-text CLI completions (`cli_elapsed`). Capture quality and resource/type aggregates expose counts and durations for each source. Refresh source links cover start through completion; CLI source links identify individual physical lines and retain unavailable timeline positions.
+
+Resource comparisons include source kind in their keys. When a source is absent from the other capture, its comparison remains unavailable rather than reporting a fabricated improvement. Sources present in both captures retain the ordinary added/removed group semantics.
 
 The reconstruction object has four mandatory fields in this order:
 `state`, `responses`, `diagnostics`, `code`.
@@ -48,14 +50,13 @@ The reconstruction object has four mandatory fields in this order:
 | `partial` | Positive count | Positive count | `reconstruction_partial` |
 | `failed` | `0` | Positive count | `reconstruction_failed` |
 
-The old `checked` state is replaced by `complete`; `partial` represents retained
-verified messages alongside reconstruction diagnostics. Diagnostic counts are
+The `partial` state represents retained verified messages alongside
+reconstruction diagnostics. Diagnostic counts are
 records, so ownership failures can produce more than one diagnostic. Ordinary
 CLI report generation remains lazy and exports `not_checked`.
 
-See the complete [profile JSON v2](profile-json-v2.md) and
-[comparison JSON v2](comparison-json-v2.md) contracts. The v1 documents remain
-historical references. Reports contain unmasked identifiers and source metadata;
+See the complete [profile JSON v1](profile-json-v1.md) and
+[comparison JSON v1](comparison-json-v1.md) contracts. Reports contain unmasked identifiers and source metadata;
 they are not anonymised outputs.
 
 ## Scope

@@ -241,9 +241,7 @@ func runDiagnose(path, outPath string, stdout io.Writer) error {
 	collector := diagnose.NewCollector(&comps)
 	sniffer := span.NewSniffer(&comps)
 	var builder span.ReportedBuilder
-	// UIHookBuilder costs nothing extra on an hclog log: it implements
-	// logfmt.StructuredSink, so Scan only ever calls it for structured-output
-	// lines, of which an hclog log has none.
+	// The same builder as model.Load admits structured and CLI resource timing.
 	var uiBuilder span.UIHookBuilder
 	// ContextCollector is the other logfmt.StructuredSink: it collects the
 	// address-attribution windows Build correlates against the RPC spans, so

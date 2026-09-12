@@ -96,6 +96,14 @@ type jsonUIObservation struct {
 	DurationMs         uint32       `json:"duration_ms"`
 	DurationLowerBound bool         `json:"duration_lower_bound"`
 	Position           jsonPosition `json:"position"`
+	DurationSource     string       `json:"duration_source"`
+}
+type jsonDurationSource struct {
+	DurationSource     string `json:"duration_source"`
+	Count              uint64 `json:"count"`
+	DurationMs         uint64 `json:"duration_ms"`
+	MaxMs              uint32 `json:"max_ms"`
+	DurationLowerBound bool   `json:"duration_lower_bound"`
 }
 type jsonAttribution struct {
 	Confidence string  `json:"confidence"`
@@ -113,6 +121,7 @@ type jsonQuality struct {
 	RPCDurationMs     uint64                  `json:"rpc_duration_ms"`
 	NameableShare     *float64                `json:"nameable_share"`
 	Reconstruction    jsonReconstruction      `json:"reconstruction"`
+	DurationSources   []jsonDurationSource    `json:"duration_sources"`
 }
 type jsonIssue struct {
 	Stage      string  `json:"stage"`
@@ -142,28 +151,31 @@ type jsonReconstruction struct {
 	Code        *string `json:"code"`
 }
 type jsonAggregates struct {
-	Providers     []jsonProvider     `json:"providers"`
-	ResourceTypes []jsonResourceType `json:"resource_types"`
-	Resources     []jsonResource     `json:"resources"`
-	UI            jsonTotal          `json:"ui"`
-	UnnamedUI     jsonTotal          `json:"unnamed_ui"`
-	RPCEvidence   jsonRPCEvidence    `json:"rpc_evidence"`
+	Providers       []jsonProvider       `json:"providers"`
+	ResourceTypes   []jsonResourceType   `json:"resource_types"`
+	Resources       []jsonResource       `json:"resources"`
+	UI              jsonTotal            `json:"ui"`
+	UnnamedUI       jsonTotal            `json:"unnamed_ui"`
+	RPCEvidence     jsonRPCEvidence      `json:"rpc_evidence"`
+	DurationSources []jsonDurationSource `json:"duration_sources"`
 }
 type jsonProvider struct {
 	Provider string    `json:"provider"`
 	RPC      jsonTotal `json:"rpc"`
 }
 type jsonResourceType struct {
-	ResourceType string    `json:"resource_type"`
-	RPC          jsonTotal `json:"rpc"`
-	UI           jsonTotal `json:"ui"`
+	ResourceType    string               `json:"resource_type"`
+	RPC             jsonTotal            `json:"rpc"`
+	UI              jsonTotal            `json:"ui"`
+	DurationSources []jsonDurationSource `json:"duration_sources"`
 }
 type jsonResource struct {
-	Address              string    `json:"address"`
-	UI                   jsonTotal `json:"ui"`
-	NamedRPC             jsonTotal `json:"named_rpc"`
-	OverlappingRPC       jsonTotal `json:"overlapping_rpc"`
-	UIObservationIndices []int     `json:"ui_observation_indices"`
+	Address              string               `json:"address"`
+	UI                   jsonTotal            `json:"ui"`
+	NamedRPC             jsonTotal            `json:"named_rpc"`
+	OverlappingRPC       jsonTotal            `json:"overlapping_rpc"`
+	UIObservationIndices []int                `json:"ui_observation_indices"`
+	DurationSources      []jsonDurationSource `json:"duration_sources"`
 }
 type jsonRPCEvidence struct {
 	Baseline     jsonTotal `json:"baseline"`
@@ -220,7 +232,7 @@ func buildJSONProfile(r Report, metadata JSONMetadata) (jsonProfile, error) {
 			return jsonProfile{}, err
 		}
 	}
-	d := jsonProfile{SchemaVersion: 2, Kind: "profile", ToolVersion: metadata.ToolVersion, Input: jsonInput{metadata.InputBasename, r.Bytes}, DurationUnit: "ms", RPCObservations: make([]jsonRPCObservation, 0, len(r.RPC)), UIObservations: make([]jsonUIObservation, 0, len(r.UI)), Qualifications: []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_duration_rounding", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}}
+	d := jsonProfile{SchemaVersion: 1, Kind: "profile", ToolVersion: metadata.ToolVersion, Input: jsonInput{metadata.InputBasename, r.Bytes}, DurationUnit: "ms", RPCObservations: make([]jsonRPCObservation, 0, len(r.RPC)), UIObservations: make([]jsonUIObservation, 0, len(r.UI)), Qualifications: []string{"unmasked_identifiers", "logging_affects_durations", "rpc_and_ui_measure_different_work", "ui_elapsed_duration_rounding", "refresh_windows_are_hook_measurements", "cli_elapsed_displayed_resolution", "resource_duration_sources_not_interchangeable", "observed_gaps_do_not_prove_idleness", "active_observation_does_not_prove_blocking"}}
 	d.Tiers = jsonTiers{tierJSON(r.Quality.RPC), tierJSON(r.Quality.UI)}
 	q, err := qualityJSON(r)
 	if err != nil {
@@ -238,7 +250,7 @@ func buildJSONProfile(r Report, metadata JSONMetadata) (jsonProfile, error) {
 		if err := validStrings(o.Span.Address, o.Span.RPC, o.Span.ResourceType); err != nil {
 			return jsonProfile{}, err
 		}
-		d.UIObservations = append(d.UIObservations, jsonUIObservation{o.Index, o.Span.Entry, sourceJSON(o.Source), o.Span.Address, o.Span.RPC, o.Span.ResourceType, o.Span.DurationMs, o.Span.DurationSaturated, positionJSON(o.Span)})
+		d.UIObservations = append(d.UIObservations, jsonUIObservation{o.Index, o.Span.Entry, sourceJSON(o.Source), o.Span.Address, o.Span.RPC, o.Span.ResourceType, o.Span.DurationMs, o.Span.DurationSaturated, positionJSON(o.Span), o.Span.DurationSource.String()})
 	}
 	a, err := aggregatesJSON(r)
 	if err != nil {
@@ -358,6 +370,7 @@ func rpcObservationJSON(o Observation, context bool) (jsonRPCObservation, error)
 func qualityJSON(r Report) (jsonQuality, error) {
 	q := r.Quality
 	o := jsonQuality{Scope: "whole_log", ProviderEntries: q.ProviderEntries, StructuredLines: q.StructuredLines, HasAddressContext: q.HasContext, Issues: make([]jsonIssue, 0, len(q.Issues)), NameableMs: q.NameableMs, RPCDurationMs: q.RPCDurationMs, NameableShare: copyFloat(q.NameableShare)}
+	o.DurationSources = durationSourcesJSON(observationSpans(r.UI))
 	for _, i := range q.Issues {
 		if err := validStrings(i.Stage, i.Code); err != nil {
 			return o, err
@@ -416,6 +429,14 @@ func reconstructionJSON(q model.ReconstructionQuality) (jsonReconstruction, erro
 }
 func aggregatesJSON(r Report) (jsonAggregates, error) {
 	o := jsonAggregates{Providers: make([]jsonProvider, 0, len(r.Providers)), ResourceTypes: make([]jsonResourceType, 0, len(r.Types)), Resources: make([]jsonResource, 0, len(r.Resources.Rows)), UI: totalJSON(r.Resources.UI), UnnamedUI: totalJSON(r.Resources.UnnamedUI)}
+	observations := observationSpans(r.UI)
+	o.DurationSources = durationSourcesJSON(observations)
+	byType, byAddress := make(map[string][]span.Span), make(map[string][]span.Span)
+	for _, observation := range observations {
+		resourceType := model.FacetKey(observation.ResourceType)
+		byType[resourceType] = append(byType[resourceType], observation)
+		byAddress[observation.Address] = append(byAddress[observation.Address], observation)
+	}
 	for _, p := range r.Providers {
 		if err := validStrings(p.Key); err != nil {
 			return o, err
@@ -426,7 +447,7 @@ func aggregatesJSON(r Report) (jsonAggregates, error) {
 		if err := validStrings(x.ResourceType); err != nil {
 			return o, err
 		}
-		o.ResourceTypes = append(o.ResourceTypes, jsonResourceType{x.ResourceType, jsonTotal{uint64(x.RPCCalls), x.RPCTotalMs, x.RPCMaxMs, false}, jsonTotal{uint64(x.UIResources), x.UITotalMs, x.UIMaxMs, x.UILowerBound}})
+		o.ResourceTypes = append(o.ResourceTypes, jsonResourceType{x.ResourceType, jsonTotal{uint64(x.RPCCalls), x.RPCTotalMs, x.RPCMaxMs, false}, jsonTotal{uint64(x.UIResources), x.UITotalMs, x.UIMaxMs, x.UILowerBound}, durationSourcesJSON(byType[x.ResourceType])})
 	}
 	for _, x := range r.Resources.Rows {
 		if err := validStrings(x.Address); err != nil {
@@ -436,12 +457,21 @@ func aggregatesJSON(r Report) (jsonAggregates, error) {
 		for _, op := range x.Operations {
 			idx = append(idx, op.UIIndex)
 		}
-		o.Resources = append(o.Resources, jsonResource{x.Address, totalJSON(x.UI), totalJSON(x.NamedRPC), totalJSON(x.OverlappingRPC), idx})
+		o.Resources = append(o.Resources, jsonResource{x.Address, totalJSON(x.UI), totalJSON(x.NamedRPC), totalJSON(x.OverlappingRPC), idx, durationSourcesJSON(byAddress[x.Address])})
 	}
 	e := r.Resources.Evidence
 	o.RPCEvidence = jsonRPCEvidence{totalJSON(e.Baseline), totalJSON(e.MissingType), totalJSON(e.NoContext), totalJSON(e.Contained), totalJSON(e.Likely), totalJSON(e.Overlapping), totalJSON(e.Ambiguous), totalJSON(e.Unattributed)}
 	return o, nil
 }
+func durationSourcesJSON(observations []span.Span) []jsonDurationSource {
+	summaries := model.SummariseDurationSources(observations)
+	rows := make([]jsonDurationSource, 0, len(summaries))
+	for _, summary := range summaries {
+		rows = append(rows, jsonDurationSource{summary.Source.String(), summary.Count, summary.DurationMs, summary.MaxMs, summary.DurationLowerBound})
+	}
+	return rows
+}
+
 func timelineJSON(r Report) (jsonTimeline, error) {
 	o := jsonTimeline{Status: "unavailable", WindowScope: "zero_to_latest_positioned_end", Exclusions: map[string]uint64{}, Intervals: []jsonInterval{}}
 	if r.Timeline.Tier == nil {

@@ -13,8 +13,8 @@ exports and raw-log comparisons use the same model calculations.
 
 Dan approved comparison of two raw logs with text or JSON output. JSON-profile
 imports and interactive comparison remain outside scope. Both JSON report kinds
-now use version 2 with explicit reconstruction states; the published
-[profile](../../profile-json-v2.md) and [comparison](../../comparison-json-v2.md)
+use alpha version 1 with explicit reconstruction states; the published
+[profile](../../profile-json-v1.md) and [comparison](../../comparison-json-v1.md)
 contracts define their exact fields and nullability.
 
 The implementation plans are retired after delivery. Their task history,
@@ -52,7 +52,7 @@ without relaxing the scrubber's acceptance rules.
 
 Dan approved the expansion to JSON profile export and CLI run comparison.
 The original application design remains a historical record; this document and
-the published v2 schemas describe the current investigation behaviour.
+the current JSON v1 contracts describe the investigation behaviour.
 
 ## Approaches considered
 
@@ -522,11 +522,11 @@ and JSON renderers consume that structure; neither parses the other's output.
 Keep presentation width, formatted duration strings and row truncation outside
 the calculation model.
 
-The current profile JSON v2 schema includes:
+The current profile JSON v1 schema includes:
 
 | Field group | Required meaning |
 | --- | --- |
-| Identity | `schema_version: 2`, `kind: "profile"`, tool version, input basename and byte size |
+| Identity | `schema_version: 1`, `kind: "profile"`, tool version, input basename and byte size |
 | Tiers | Duration availability, admitted/positioned/rejected counts, duration unit `ms`, clock origins when known |
 | Quality | Measured counters, attribution distribution, reconstruction status and qualifications |
 | RPC observations | Local source entry identity, physical line/byte reference, method, provider, type, admitted duration, nullable offsets, position-validity reason, clamping and attribution |
@@ -551,8 +551,8 @@ same tool version are reproducible.
 Schema versioning identifies the format; it does not authorise compatibility
 adapters or promises to preserve old schemas indefinitely. No JSON import or
 backward-compatibility layer is included. The published
-[profile JSON v2](../../profile-json-v2.md) and
-[comparison JSON v2](../../comparison-json-v2.md) documents define the exact
+[profile JSON v1](../../profile-json-v1.md) and
+[comparison JSON v1](../../comparison-json-v1.md) documents define the exact
 fields, ordering and validation, with matching encoder tests.
 
 ### Comparison behaviour
@@ -734,7 +734,7 @@ dependencies concealed inside the eight agreed areas for exploration.
 3. Explicit drill-down saves the parent selection and position for Esc.
    Numbered view changes end the history chain.
 4. JSON exports complete structured results; text alone has explicit list
-   limits. Both JSON report kinds use v2, without a v1 writer or version flag.
+   limits. Both JSON report kinds use v1 throughout the alpha, without a compatibility writer or version flag.
 5. Comparison accepts two raw logs and emits text or JSON. It does not produce
    a performance pass/fail verdict or assume equal logging configurations.
 6. Response recovery quarantines damaged streams without guessing a restart.
@@ -772,7 +772,7 @@ text and JSON retained the 35ms RPC baseline and respective 1000ms/3000ms UI
 totals; comparison capture objects matched independently generated profiles.
 Repeated UI operations retained distinct source entries and physical lines.
 The missing after-side RPC tier stayed unavailable, while the UI type total
-change was 2000ms. Both report kinds emitted one JSON v2 document with lazy
-reconstruction snapshots. Scrubbing `response-recovery.log` failed with only a
+change was 2000ms. Both report kinds retained lazy reconstruction snapshots.
+The current alpha contract uses version 1. Scrubbing `response-recovery.log` failed with only a
 structural diagnostic and left no output file. Complete CLI streams are retained
 locally under `/tmp/tfli-closeout-validation`.

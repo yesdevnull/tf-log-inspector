@@ -51,7 +51,7 @@ func TestComparisonTextLowerBoundsNullsAndUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"UNRANKED / UNAVAILABLE", "address=addr\\r  action=apply\\b", ">=1", ">=1.00", "timing deltas unavailable: lower bound", "count         1            2            +1          +100.00%", "total ms      >=1          2            n/a         n/a", "UI durations are rounded by up to one second per observation", "missing addresses cannot be matched"} {
+	for _, want := range []string{"UNRANKED / UNAVAILABLE", "address=addr\\r  action=apply\\b", ">=1", ">=1.00", "timing deltas unavailable: lower bound", "count         1            2            +1          +100.00%", "total ms      >=1          2            n/a         n/a", "ui_elapsed durations are rounded by up to one second per observation", "missing addresses cannot be matched"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}

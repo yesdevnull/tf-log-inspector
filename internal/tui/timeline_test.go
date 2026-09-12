@@ -388,7 +388,7 @@ func TestLaneLabelsNumberEachProviderIndependently(t *testing.T) {
 // whole set. These two calls never overlap, so packing on timing alone fits
 // both in one lane -- a row that belongs to neither provider, and that the
 // stall annotation could then only name after a provider neither of them
-// is. "waiting on aws/1" pointing at exactly one bar is the annotation's
+// is. "active in aws/1" pointing at exactly one bar is the annotation's
 // whole justification for naming lanes at all, so the packing has to keep
 // a lane nameable.
 func TestTimelineLanesPackEachProviderSeparately(t *testing.T) {
@@ -636,7 +636,7 @@ func TestFilteringOutEveryRPCSpanDoesNotSwitchTiers(t *testing.T) {
 	}
 
 	// Named selection obeys the same whole-log tier decision. This address
-	// has observed UI timing but no selected RPC, so falling back after
+	// has observed resource timing but no selected RPC, so falling back after
 	// selection would visibly replace an empty RPC timeline with UI timing.
 	l := testLog(t, "two-tier.log")
 	m = New(l, "two-tier.log")
@@ -1333,8 +1333,8 @@ func TestStallAnnotationNamesTheBlockingSpan(t *testing.T) {
 	if !strings.Contains(got, "concurrency 1 of 2") {
 		t.Fatalf("stallAnnotation says nothing about capacity going unused: %q", got)
 	}
-	if !strings.Contains(got, "waiting on") {
-		t.Errorf("stallAnnotation does not name what the unused capacity waited on: %q", got)
+	if !strings.Contains(got, "active in") {
+		t.Errorf("stallAnnotation does not name the observed active lane: %q", got)
 	}
 }
 
@@ -1374,7 +1374,7 @@ func longLabelStallModel(t *testing.T) Model {
 }
 
 // TestStallAnnotationNamesTheLaneAsTheLaneRowDrawsIt checks the annotation
-// clips a lane label exactly as the lane row does. "waiting on X" is the
+// clips a lane label exactly as the lane row does. "active in X" is the
 // annotation's whole justification for naming lanes rather than spans -- it
 // points at exactly one bar -- and it points at nothing if the bar's own
 // label column, capped at maxLaneLabelWidth, renders a different string.
@@ -1386,10 +1386,10 @@ func TestStallAnnotationNamesTheLaneAsTheLaneRowDrawsIt(t *testing.T) {
 	}
 
 	got := m.stallAnnotation(80)
-	if !strings.Contains(got, "waiting on …workspace/1") {
+	if !strings.Contains(got, "active in …workspace/1") {
 		t.Errorf("stallAnnotation = %q, want it to name the lane as the lane row draws it: …workspace/1", got)
 	}
-	if strings.Contains(got, "waiting on googleworkspace/1") {
+	if strings.Contains(got, "active in googleworkspace/1") {
 		t.Errorf("stallAnnotation = %q names a label no lane row shows", got)
 	}
 
@@ -1442,8 +1442,8 @@ func TestStallAnnotationReportsOneContinuousWaitAsOneStall(t *testing.T) {
 
 	got := m.stallAnnotation(80)
 	want := []string{
-		"waiting on aws/1, 3.3s–20.0s — concurrency 1 of 2",
-		"nothing running, 0s–3.0s — before any call",
+		"active in aws/1, 3.3s–20.0s — concurrency 1 of 2",
+		"no observed work, 0s–3.0s — before first",
 	}
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v (one continuous wait, longest first)", lines, want)
@@ -1497,9 +1497,9 @@ func everyKindOfWaitModel(t *testing.T) Model {
 func TestStallAnnotationNamesEachKindOfWaitDistinctly(t *testing.T) {
 	m := everyKindOfWaitModel(t)
 	want := []string{
-		"nothing running, 9.0s–20.0s — between calls",
-		"waiting on aws/1, 20.0s–30.0s — concurrency 1 of 2",
-		"nothing running, 0s–3.0s — before any call",
+		"no observed work, 9.0s–20.0s — gap",
+		"active in aws/1, 20.0s–30.0s — concurrency 1 of 2",
+		"no observed work, 0s–3.0s — before first",
 	}
 	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
@@ -1536,7 +1536,7 @@ func drainingLanesModel(t *testing.T) Model {
 // window whose depth falls and rises again.
 func TestAWaitWhoseDepthChangesReportsBothEnds(t *testing.T) {
 	m := drainingLanesModel(t)
-	want := []string{"waiting on aws/1, 20.0s–60.0s — concurrency 1–2 of 3"}
+	want := []string{"active in aws/1, 20.0s–60.0s — concurrency 1–2 of 3"}
 	if lines := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
 	}
@@ -1554,7 +1554,7 @@ func TestARangeClipsItsOwnTailAtTheCommonPaneWidth(t *testing.T) {
 	if n := lipgloss.Width(got); n > commonCentrePaneWidth {
 		t.Errorf("line %q is %d columns, want at most %d", got, n, commonCentrePaneWidth)
 	}
-	if want := "waiting on aws/1, 20.0s–60.0s"; !strings.HasPrefix(got, want) {
+	if want := "active in aws/1, 20.0s–60.0s"; !strings.HasPrefix(got, want) {
 		t.Errorf("stallAnnotation at %d columns = %q, which no longer opens on %q -- the lane and the window are what the ordering exists to keep", commonCentrePaneWidth, got, want)
 	}
 	// clipValueEnd's marker, not a height cut: this line was too WIDE, and
@@ -1590,7 +1590,7 @@ func TestALeadingWindowContainingACompletedCallIsNotTheLeadingGap(t *testing.T) 
 	if strings.Contains(got, beforeAnyCallClause) {
 		t.Errorf("stallAnnotation = %q, but a call completed at 500ms, inside the window it calls the gap before any call", got)
 	}
-	want := []string{"nothing running, 0s–3.0s" + betweenCallsClause}
+	want := []string{"no observed work, 0s–3.0s" + betweenCallsClause}
 	if lines := strings.Split(got, "\n"); !slices.Equal(lines, want) {
 		t.Errorf("stallAnnotation = %v, want %v", lines, want)
 	}
@@ -1653,8 +1653,8 @@ func TestALongWindowsPercentageDecidesWhichWaitsAreNamed(t *testing.T) {
 	}
 
 	want := []string{
-		"waiting on aws/1, 17.0s–200.0s — concurrency 1 of 2",
-		"waiting on aws/1, 2.0s–15.0s — concurrency 1 of 2",
+		"active in aws/1, 17.0s–200.0s — concurrency 1 of 2",
+		"active in aws/1, 2.0s–15.0s — concurrency 1 of 2",
 	}
 	if got := strings.Split(m.stallAnnotation(80), "\n"); !slices.Equal(got, want) {
 		t.Errorf("stallAnnotation = %v, want %v -- the 13s wait clears 5%% of the window and not 10%%", got, want)
@@ -1692,9 +1692,9 @@ func TestStallAnnotationShowsAtMostTheTopFewByDuration(t *testing.T) {
 	lines := strings.Split(got, "\n")
 
 	want := []string{
-		"waiting on aws/1, 2.0s–12.0s — concurrency 1 of 2",
-		"waiting on aws/1, 14.0s–22.0s — concurrency 1 of 2",
-		"waiting on aws/1, 24.0s–30.0s — concurrency 1 of 2",
+		"active in aws/1, 2.0s–12.0s — concurrency 1 of 2",
+		"active in aws/1, 14.0s–22.0s — concurrency 1 of 2",
+		"active in aws/1, 24.0s–30.0s — concurrency 1 of 2",
 		moreBelowMark,
 	}
 	if !slices.Equal(lines, want) {
@@ -2142,7 +2142,7 @@ func TestTheBusySummarySitsAboveTheStallList(t *testing.T) {
 // statement about the plan.
 //
 // timeline.log's google call runs 1.5s-3.5s. Ticking aws deletes the log's
-// one real finding and manufactures a window reporting "nothing running --
+// one real finding and manufactures a window reporting "no observed work --
 // between calls" over a stretch in which google was demonstrably working --
 // the clause this annotation reserves for "the time is not in the
 // providers, so tuning provider parallelism will not touch it". A reader
@@ -2300,7 +2300,7 @@ const commonCentrePaneWidth = 44
 // TestTheStallLineKeepsTheLaneNameAtTheCommonPaneWidth is why the wording
 // changed. The line ran to 59 columns with the lane name at its END, and
 // the end is what clipValueEnd cuts: at 44 columns it rendered as "…
-// waiting on aws…" and lost the one thing it names a lane FOR. Naming a
+// active in aws…" and lost the one thing it names a lane FOR. Naming a
 // lane a reader can go and find is the annotation's whole justification for
 // naming lanes rather than spans.
 func TestTheStallLineKeepsTheLaneNameAtTheCommonPaneWidth(t *testing.T) {
@@ -2313,7 +2313,7 @@ func TestTheStallLineKeepsTheLaneNameAtTheCommonPaneWidth(t *testing.T) {
 		{"a name longer than the label column", longLabelStallModel(t), "…workspace/1"},
 	} {
 		got := tc.m.stallAnnotation(commonCentrePaneWidth)
-		if !strings.Contains(got, "waiting on "+tc.label) {
+		if !strings.Contains(got, "active in "+tc.label) {
 			t.Errorf("%s: stallAnnotation at %d columns = %q, which no longer names the lane %q", tc.name, commonCentrePaneWidth, got, tc.label)
 		}
 		for _, line := range strings.Split(got, "\n") {
