@@ -33,3 +33,18 @@ small synthetic fixtures. A separate cleanup pass retained all 82 reviewed tests
 Validation uses `go test ./...`, `go test -race -count=1 ./...`, `go build ./...`,
 `golangci-lint run --timeout=5m`, coverage, formatting checks and signed-commit
 verification. Captures and generated reports remain outside the repository.
+
+## Viewing follow-up
+
+The September 12 viewing pass adds a capture summary independent of filename
+length, per-resource source labels, collapsed empty inferred-RPC details, and
+wrapped timing guidance. At short heights, evidence guidance preserves room for
+the selected row. Calls explains captures without RPC timings; associated-call
+views retain their selection-specific qualifications.
+
+All three supplied captures were opened in the terminal to check the summary,
+source labels and resource details. CLI Calls guidance was checked interactively.
+Updated resource goldens were inspected at 60, 70 and 160 columns, together with
+the raw styling diffs. Full tests, race tests, build, lint and coverage pass.
+Independent review found no defects; separate cleanup retained all nine tests
+added or modified in this pass. JSON contracts and extraction are unchanged.
