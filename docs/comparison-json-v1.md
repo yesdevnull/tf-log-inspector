@@ -5,7 +5,6 @@ This is the current alpha contract. Profile and comparison JSON keep `schema_ver
 Comparison JSON reports the observed differences between two complete profile
 captures. It contains no generated timestamp, absolute path, raw body,
 interned identifier, source observation array, or copied profile ranking list.
-Schema version 1 makes no compatibility promise for future versions.
 
 All fields are mandatory and use `snake_case`; field order is the order below.
 Empty arrays and objects are `[]` and `{}`. Unavailable values are `null`; a

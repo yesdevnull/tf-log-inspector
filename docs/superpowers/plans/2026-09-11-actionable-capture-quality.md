@@ -21,7 +21,7 @@
 - Strict scrubbing still refuses every reconstruction diagnostic. Viewing, checking or navigating a capture never changes scrub acceptance.
 - New prompts are modal: typed command letters are text. Esc cancels without changing the underlying investigation; Ctrl+C retains the quit behaviour.
 - Navigation frames own their mutable state. Returning restores filters, selection identity, searches, raw position and timeline state exactly, subject only to viewport clamping after terminal resize.
-- Running is a transient TUI state, not a new reconstruction state in JSON v2.
+- Running is a transient TUI state, not a new reconstruction state in JSON v1.
 - Ordinary CLI reporting remains lazy. No new CLI validation mode is introduced.
 - No export or scrub output is produced by checking responses.
 - Use `/Users/dan/.codex/bin/codex-git` for Git operations and signed commits. Stop on signing failure. Use sanitised fixtures; never copy private captures.
@@ -383,7 +383,7 @@ No selected action means a no-op. Never close the panel before the navigation pr
 
 Exercise Check responses with a command held pending, repeated Enter, panel close, opening `r`, resizing, command completion, response close and reopening quality. Verify one inspection command, completion counts, active-request identity, no unexpected modal reopening and responsive quit. Execute the real commands; do not substitute fake results for the reconstruction integration cases. Deliver saved real messages out of order to test request guards.
 
-Use `testdata/response-recovery.log` and existing ambiguous/malformed synthetic fixtures to verify content-free diagnostic rows and verified recovered bodies. Run existing strict-scrub rejection tests on those captures; checking must not make a diagnostic-bearing capture acceptable. Profile and JSON tests must retain their current lazy states and v2 contracts. Add no export action or CLI flag.
+Use `testdata/response-recovery.log` and existing ambiguous/malformed synthetic fixtures to verify content-free diagnostic rows and verified recovered bodies. Run existing strict-scrub rejection tests on those captures; checking must not make a diagnostic-bearing capture acceptable. Profile and JSON tests must retain their current lazy states and v1 contracts. Add no export action or CLI flag.
 
 Update help and README to describe selecting quality actions/records, first-example jumps, pending response checks, cached results and Esc closing without cancellation. Make the quality navigation line `Esc/i close  ↑↓ select  PgUp/PgDn page`; put `Enter open/check  q quit` in the action row. Check the full composed workbench at 60/100/160 columns and short heights, not only `footer()` in isolation. Preserve current parent raw/timeline hints on return.
 
