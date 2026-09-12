@@ -494,6 +494,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
+		resourceTotal := durationTotalText(model.DurationTotal{TotalMs: r.UITotalMs, LowerBound: r.UILowerBound})
 		rpcTotal, rpcMax := "n/a", "n/a"
 		if r.RPCCalls > 0 {
 			rpcTotal, rpcMax = formatMs(r.RPCTotalMs), formatMs(uint64(r.RPCMaxMs))
@@ -502,7 +503,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 			[]string{
 				r.ResourceType,
 				strconv.Itoa(r.UIResources),
-				formatMs(r.UITotalMs),
+				resourceTotal,
 				strconv.Itoa(r.RPCCalls),
 				rpcTotal,
 				rpcMax,
@@ -512,7 +513,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				aggregate: []detailField{
 					{label: "resource type", value: r.ResourceType, kind: tailIdentifierColumn},
 					{label: "res ops", value: strconv.Itoa(r.UIResources), kind: numericColumn},
-					{label: "res total", value: formatMs(r.UITotalMs), kind: numericColumn},
+					{label: "res total", value: resourceTotal, kind: numericColumn},
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
 					{label: "RPC total", value: rpcTotal, kind: numericColumn},
 					{label: "RPC max", value: rpcMax, kind: numericColumn},

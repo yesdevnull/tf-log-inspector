@@ -64,7 +64,7 @@ func TestTextProfileRendersUILowerBoundsAndObservedIdentity(t *testing.T) {
 	report := Report{
 		UI:        []Observation{{Span: span.Span{DurationMs: math.MaxUint32, DurationSaturated: true, RPC: "apply", ResourceType: "aws_instance", Address: "aws_instance.example", Provider: "aws", Fidelity: span.FidelityUIReported}, Source: &model.SourceLocation{StartLine: 24, EndLine: 24}}},
 		UIRanking: []int{0},
-		Types:     []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "aws_instance", UIResources: 1, UITotalMs: math.MaxUint32}, UILowerBound: true}},
+		Types:     []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "aws_instance", UIResources: 1, UITotalMs: math.MaxUint32, UILowerBound: true}}},
 	}
 	var out strings.Builder
 	if err := renderReport(&out, report, TextOptions{}); err != nil {

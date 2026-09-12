@@ -33,7 +33,7 @@ func TestJSONProjectionMapsCompleteReportContract(t *testing.T) {
 		RPC:        []Observation{{Index: 3, Span: span.Span{Entry: 8, StartMs: 0, EndMs: 25, DurationMs: 25, StartClamped: true, TimestampStatus: logfmt.TimestampValid, RPC: "Méthod", Provider: "provider.a", ResourceType: "type_a"}, Source: &model.SourceLocation{Entry: 8, StartLine: 10, EndLine: 12, StartByte: 100, EndByte: 190}, Attribution: attrib.Attribution{Confidence: attrib.Likely, Address: "module.x.resource.a", Candidates: 2}}},
 		UI:         []Observation{{Index: 4, Span: span.Span{Entry: 9, DurationMs: 1000, DurationSaturated: true, TimestampStatus: logfmt.TimestampMissing, Address: "resource.ui", RPC: "create", ResourceType: "type_ui"}}},
 		Providers:  []model.Bucket{{Key: "provider.z", Count: 2, TotalMs: 200, MaxMs: 120}, {Key: "provider.a", Count: 2, TotalMs: 200, MaxMs: 100}},
-		Types:      []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "type_b", UIResources: 2, UITotalMs: 2200, UIMaxMs: 1200, RPCCalls: 3, RPCTotalMs: 330, RPCMaxMs: 130}, UILowerBound: true}},
+		Types:      []TypeSummary{{TypeRow: model.TypeRow{ResourceType: "type_b", UIResources: 2, UITotalMs: 2200, UIMaxMs: 1200, RPCCalls: 3, RPCTotalMs: 330, RPCMaxMs: 130, UILowerBound: true}}},
 		Resources: model.ResourceProjection{
 			Rows: []model.ResourceRow{{Address: "resource.ui", Operations: []model.ResourceOperation{{UIIndex: 4}, {UIIndex: 1}}, UI: total(2, 2200, 1200, true), NamedRPC: total(3, 330, 130, false), OverlappingRPC: total(1, 30, 30, false)}},
 			UI:   total(4, 4000, 1200, true), UnnamedUI: total(1, 800, 800, false),

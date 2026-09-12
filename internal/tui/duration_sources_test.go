@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -9,6 +10,50 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
+
+func TestTypeTotalsRetainSelectedDurationLowerBounds(t *testing.T) {
+	for _, source := range []span.DurationSource{span.SourceUIElapsed, span.SourceRefreshWindow, span.SourceCLIElapsed} {
+		m := New(&model.Log{UISpans: []span.Span{
+			{Address: "aws_instance.large", ResourceType: "aws_instance", DurationMs: math.MaxUint32, DurationSaturated: true, DurationSource: source},
+			{Address: "aws_instance.exact", ResourceType: "aws_instance", DurationMs: 1000, DurationSource: source},
+		}}, "bounds.log")
+		m.setView(ViewTypes)
+		rows := m.rows()
+		if !strings.HasPrefix(rows[0].cells[2], "≥") {
+			t.Errorf("%s type total lacks lower bound: %v", source, rows[0].cells)
+		}
+		if !strings.Contains(detailBody(t, m, "GROUP DETAIL", 80, 30), "≥") {
+			t.Errorf("%s detail total lacks lower bound", source)
+		}
+		m.resourceSelection.Addresses = map[string]bool{"aws_instance.exact": true}
+		m.invalidateRows()
+		if got := m.rows()[0].cells[2]; got != "1.0s" {
+			t.Errorf("%s filtered exact total = %q", source, got)
+		}
+	}
+}
+
+func TestTimelineTitleDescribesAllSelectedSources(t *testing.T) {
+	for _, sources := range [][]span.DurationSource{
+		{span.SourceUIElapsed, span.SourceRefreshWindow},
+		{span.SourceRefreshWindow, span.SourceUIElapsed},
+		{span.SourceCLIElapsed, span.SourceRefreshWindow},
+	} {
+		l := &model.Log{}
+		for i, source := range sources {
+			l.UISpans = append(l.UISpans, span.Span{Address: []string{"aws_instance.a", "aws_instance.b"}[i], DurationSource: source})
+		}
+		m := New(l, "mixed.log")
+		if got := m.timelineTitle(); got != "TIMELINE (resource, mixed sources)" {
+			t.Errorf("sources %v title = %q", sources, got)
+		}
+		m.resourceSelection.Addresses = map[string]bool{"aws_instance.b": true}
+		m.invalidateRows()
+		if got := m.timelineTitle(); strings.Contains(got, "mixed") {
+			t.Errorf("filtered title retained excluded source: %s", got)
+		}
+	}
+}
 
 func TestResourceDurationSourcesQualifyDetailsAndAggregates(t *testing.T) {
 	m := newOperationTestModel()
