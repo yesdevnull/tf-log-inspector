@@ -92,23 +92,28 @@ func (m *Model) filteredTimelineTiming() (timelineTier, model.TimingSelection) {
 	}
 }
 
-// timelineTitle names the pane after the tier timelineSpans has chosen for
-// the log. The UI tier is stated explicitly as whole-second resolution --
-// Terraform's UI hooks round a resource's start and end to the nearest
-// second before the log ever sees them -- so a reader does not carry RPC's
-// millisecond precision over to bars that do not have it.
+// timelineTitle qualifies the selected tier without assigning one source's
+// resolution or positioning limits to observations from another source.
 func (m *Model) timelineTitle() string {
 	switch tier, _ := m.timelineSpans(); tier {
 	case tierRPC:
 		return "TIMELINE (rpc)"
 	case tierUI:
-		for _, s := range m.selectedUISpans() {
-			if s.DurationSource == span.SourceRefreshWindow {
-				return "TIMELINE (ui, refresh windows)"
+		selected := m.selectedUISpans()
+		if len(selected) == 0 {
+			return "TIMELINE (resource)"
+		}
+		source := selected[0].DurationSource
+		for _, s := range selected[1:] {
+			if s.DurationSource != source {
+				return "TIMELINE (resource, mixed sources)"
 			}
-			if s.DurationSource == span.SourceCLIElapsed {
-				return "TIMELINE (CLI positions unavailable)"
-			}
+		}
+		switch source {
+		case span.SourceRefreshWindow:
+			return "TIMELINE (ui, refresh windows)"
+		case span.SourceCLIElapsed:
+			return "TIMELINE (CLI positions unavailable)"
 		}
 		return "TIMELINE (ui, whole seconds)"
 	default:

@@ -18,9 +18,10 @@ import (
 type TypeRow struct {
 	ResourceType string
 
-	UIResources int
-	UITotalMs   uint64
-	UIMaxMs     uint32
+	UIResources  int
+	UITotalMs    uint64
+	UIMaxMs      uint32
+	UILowerBound bool
 
 	RPCCalls   int
 	RPCTotalMs uint64
@@ -58,6 +59,7 @@ func JoinByResourceType(rpcSpans, uiSpans []span.Span) []TypeRow {
 		r := get(s.ResourceType)
 		r.UIResources++
 		r.UITotalMs += uint64(s.DurationMs)
+		r.UILowerBound = r.UILowerBound || s.DurationSaturated
 		if s.DurationMs > r.UIMaxMs {
 			r.UIMaxMs = s.DurationMs
 		}
