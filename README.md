@@ -132,6 +132,13 @@ without observations display as `n/a` in the resource-type tables; measured
 zero durations remain zero. Timeline activity and gaps describe the selected
 observations and do not establish waiting or Terraform idleness.
 
+A compact summary beneath the filename shows resource-operation counts and
+whether RPC timings are present. CLI-only captures also identify missing
+timestamps. The Resources table labels timing sources as `UI`, `refresh`, `CLI`,
+or a combination. Empty inferred-RPC sections are omitted from resource details;
+Calls explains when the capture has no RPC timings. Timing guidance wraps in
+narrow panes, with `e` evidence providing full details in short panes.
+
 Resource timings identify three duration sources: `ui_elapsed` for reported
 structured completion durations, `refresh_window` for timestamp-derived
 `refresh_start`/`refresh_complete` windows, and `cli_elapsed` for plain-text CLI

@@ -57,7 +57,11 @@ func (m *Model) workbenchView() string {
 		lines = append(lines, clipWidth(navigation, w))
 	}
 	if h >= 8 {
-		lines = append(lines, "")
+		summary := ""
+		if len(m.log.UISpans) > 0 {
+			summary = clipWidth(styles.note.Render(m.captureSummary()), w)
+		}
+		lines = append(lines, summary)
 	}
 	if paneH := workbenchPaneHeight(h); paneH > 0 {
 		panes := strings.Split(m.renderPanes(w, paneH), "\n")

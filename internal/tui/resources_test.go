@@ -87,13 +87,13 @@ func TestResourcesRPCOnlyExplainsObservedRankingUnavailable(t *testing.T) {
 	}
 }
 
-func TestResourcesNameSeparateUIAndRPCScopes(t *testing.T) {
+func TestResourcesKeepScopeDetailsInEvidence(t *testing.T) {
 	m := New(&model.Log{UISpans: []span.Span{{Address: "aws_instance.a", ResourceType: "aws_instance"}}}, "ui.log")
 	m.setView(ViewResources)
-	got := m.renderResources(180, 20)
+	got := m.resourceEvidenceText()
 	for _, want := range []string{
-		"Scopes: UI type/resource/module; RPC provider/type/method/resource/module.",
-		"Inferred RPC evidence is partial",
+		"UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply.",
+		"RPC evidence is inferred and partial.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("resources missing %q:\n%s", want, got)
@@ -133,7 +133,7 @@ func TestResourcesKeepAddressAndObservedMeasurementsAtOrdinaryWidth(t *testing.T
 	m := New(&model.Log{UISpans: []span.Span{{Address: "aws_instance.accounting", DurationMs: 1200, ResourceType: "aws_instance"}}}, "ui.log")
 	m.setView(ViewResources)
 	got := unstyled(m.renderResources(46, 20))
-	for _, want := range []string{"accounting", "operations", "res total", "res max"} {
+	for _, want := range []string{"accounting", "ops", "total", "max", "sources", "UI"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("46-column resources lost %q:\n%s", want, got)
 		}
