@@ -84,6 +84,36 @@ func TestResourceEventCLISummaryPreservesObservedZeros(t *testing.T) {
 	}
 }
 
+func TestCLIOutcomesDistinguishProviderPayloadFromRunnerOutput(t *testing.T) {
+	const output = "  # aws_instance.example will be created\nPlan: 12 to add, 0 to change, 0 to destroy.\nNo changes. Your infrastructure matches the configuration.\n"
+	for _, tc := range []struct {
+		component  string
+		wantEvents int
+	}{
+		{"provider.example", 0},
+		{"runner", 3},
+	} {
+		t.Run(tc.component, func(t *testing.T) {
+			l := loadResponseLog(t, "2026-09-14T00:00:11.000Z [DEBUG] "+tc.component+": output:\n"+output)
+			if len(l.Events) != tc.wantEvents {
+				t.Fatalf("events=%d, want %d", len(l.Events), tc.wantEvents)
+			}
+			if tc.wantEvents == 0 {
+				if len(l.Outcomes.PlannedChanges) != 0 || len(l.Outcomes.Summaries) != 0 {
+					t.Fatal("provider payload admitted as plan evidence")
+				}
+				return
+			}
+			if len(l.Outcomes.PlannedChanges) != 1 || len(l.Outcomes.Summaries) != 2 || l.Outcomes.PlannedChanges[0].Location.StartLine != 2 {
+				t.Fatalf("runner outcomes lost: %+v", l.Outcomes)
+			}
+			if s := l.Outcomes.Summaries[0]; s.Location.StartLine != 3 || s.Summary.Add == nil || *s.Summary.Add != 12 {
+				t.Fatalf("runner summary lost counts or source: %+v", s)
+			}
+		})
+	}
+}
+
 func TestCLIResourceCompletionClosesOnlyItsExactAddress(t *testing.T) {
 	l := loadResponseLog(t, "module.m[\"a:b\"].aws_instance.a: Creating...\r\nmodule.m[\"a:b\"].aws_instance.a: Still creating... [10s elapsed]\r\naws_instance.a: Creating...\r\nmodule.m[\"a:b\"].aws_instance.a: Creation complete after 11s")
 	if len(l.Events) != 4 || len(l.Incomplete) != 1 || l.Incomplete[0].Start.Address != "aws_instance.a" || l.Events[3].Location.EndByte != uint64(len(l.Data)) {
