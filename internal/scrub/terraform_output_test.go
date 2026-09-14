@@ -29,6 +29,38 @@ func TestTerraformOutputPreservesIDField(t *testing.T) {
 	}
 }
 
+func TestTerraformOutputPreservesColouredIDDelimiter(t *testing.T) {
+	for _, suffix := range []string{"\x1b[0m", "\x1b[0m\x1b[1m", "\x1b[0m extra=name"} {
+		input := "\x1b[0m\x1b[1mdata.aws_instance.example: Refreshing state... [id=private-instance]" + suffix + "\n" + `{"id":"private-instance"}` + "\n"
+		got, err := Scrub([]byte(input), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(got.Data), "\n")
+		var fields map[string]string
+		if err := json.Unmarshal([]byte(lines[1]), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["id"] == "private-instance" || !strings.Contains(lines[0], "[id="+fields["id"]+"]\x1b[0m") {
+			t.Fatalf("colour suffix consumed delimiter or broke ID linkage: %q", got.Data)
+		}
+	}
+}
+
+func TestTerraformOutputScrubsColouredResourceAddresses(t *testing.T) {
+	for _, address := range []string{"aws_instance.private_label", "data.aws_instance.private_label", "module.private_module.aws_instance.private_label"} {
+		input := "\x1b[0m\x1b[1m" + address + ": Creating...\x1b[0m\n"
+		got, err := Scrub([]byte(input), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := string(got.Data)
+		if strings.Contains(output, "private_") || !strings.Contains(output, "aws_instance.") || !strings.HasPrefix(output, "\x1b[0m\x1b[1m") || !strings.HasSuffix(output, ": Creating...\x1b[0m\n") {
+			t.Fatalf("coloured address leaked or changed syntax: %q", output)
+		}
+	}
+}
+
 func TestTerraformOutputIDValues(t *testing.T) {
 	for _, tc := range []struct {
 		name, value, logged string
