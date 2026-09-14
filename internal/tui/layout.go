@@ -515,6 +515,7 @@ const sortHint = "s sort"
 // The width is different in kind from focus: it decides what is DRAWN, and
 // a pane that is not drawn is not somewhere the reader can look.
 func (m *Model) actionKeys(w int) string {
+	eventHints := []string{"v events", "p outcomes", "u incomplete"}
 	keys := []string{"⇥ pane"}
 	if m.view == ViewTimeline && m.pane == PaneList && !m.facetOverlayShowing(w) {
 		keys = append(keys, "t tier")
@@ -563,6 +564,15 @@ func (m *Model) actionKeys(w int) string {
 			keys = append(keys, scopeHint)
 		}
 		keys = append(keys, "g line", "/ search", esc, quitHint)
+		if len(m.log.Events) > 0 {
+			required := append([]string{"g line", "/ search", esc, quitHint}, eventHints...)
+			if m.raw.scope != nil {
+				required = append(required, scopeHint)
+			}
+			if lipgloss.Width(strings.Join(required, hintSep)) <= w {
+				keys = append(keys, eventHints...)
+			}
+		}
 		for lipgloss.Width(strings.Join(keys, hintSep)) > w {
 			removed := false
 			for _, secondary := range []string{"⇥ pane", "↔ scroll", "r response"} {
@@ -629,11 +639,10 @@ func (m *Model) actionKeys(w int) string {
 		}
 	}
 	if len(m.log.Events) > 0 {
-		extra := []string{"v events", "p outcomes", "u incomplete"}
 		if len(m.log.UISpans) == 0 && len(m.log.RPCSpans) == 0 {
-			return strings.Join(append(extra, esc, quitHint), hintSep)
+			return strings.Join(append(eventHints, esc, quitHint), hintSep)
 		}
-		candidate := append(append([]string(nil), keys...), extra...)
+		candidate := append(append([]string(nil), keys...), eventHints...)
 		if lipgloss.Width(strings.Join(candidate, hintSep)) <= w {
 			keys = candidate
 		}

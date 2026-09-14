@@ -964,7 +964,11 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 		{ViewCalls, '4', "provider-rpc.log"},
 	} {
 		t.Run(viewTitle(tc.view), func(t *testing.T) {
-			m := update(t, New(testLog(t, tc.fixture), "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+			l := testLog(t, tc.fixture)
+			if tc.view == ViewTypes {
+				l.UISpans = append(l.UISpans, fractionalMeanSpans()...)
+			}
+			m := update(t, New(l, "x.log"), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
 			cols := tables[tc.view].cols
 			rows := m.rows()
 			if len(rows) == 0 {
@@ -990,14 +994,23 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 						}
 						continue
 					}
-					// The two renderings the builders use: a duration
-					// through formatMs, a count through strconv.
 					if c.header == "res mean" {
-						if rw.cells[i] != formatMs(rw.numeric[i]/1000) {
-							t.Errorf("mean has incorrect sort precision: %v", rw)
+						// Hand-calculated from two-tier.log and fractionalMeanSpans.
+						want := map[string]struct {
+							text   string
+							micros uint64
+						}{
+							"aws_instance": {"2.5s", 2500000},
+							"local_file":   {"1.0s", 1000000},
+							"alpha":        {"1.2ms", 1250},
+							"zulu":         {"1.5ms", 1500},
+						}[rw.cells[0]]
+						if rw.cells[i] != want.text || rw.numeric[i] != want.micros {
+							t.Errorf("mean = %q (%d µs), want %q (%d µs)", rw.cells[i], rw.numeric[i], want.text, want.micros)
 						}
 						continue
 					}
+					// Other durations use formatMs; counts use strconv.
 					if got := rw.cells[i]; got != formatMs(rw.numeric[i]) && got != strconv.FormatUint(rw.numeric[i], 10) {
 						t.Errorf("row %d column %q shows %q, which is neither rendering of the %d recorded beside it -- the number is in the wrong slot", r, c.header, got, rw.numeric[i])
 					}
