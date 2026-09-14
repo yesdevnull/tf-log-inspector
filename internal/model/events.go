@@ -86,10 +86,12 @@ func (l *Log) indexEvents() {
 		if !found {
 			continue
 		}
-		// A lifecycle-looking line owned by a timestamped entry may be a
-		// provider response body. Independent CLI entries remain inspectable.
-		if owner := l.Entries[position.Entry]; e.Source == "cli" && lifecycleEvent(e.Kind) && owner.Timestamped && owner.Level != logfmt.LevelUnknown {
-			continue
+		// Provider payloads can resemble lifecycle and plan output. Runner
+		// headers may own genuine CLI summaries, so preserve those outcomes.
+		if owner := l.Entries[position.Entry]; e.Source == "cli" && owner.Timestamped && owner.Level != logfmt.LevelUnknown {
+			if lifecycleEvent(e.Kind) || strings.HasPrefix(l.Comps.Lookup(owner.Comp), "provider.") {
+				continue
+			}
 		}
 		e.Location = SourceLocation{Entry: position.Entry, StartByte: start, EndByte: end, StartLine: uint64(i + 1), EndLine: uint64(i + 1)}
 		candidates = append(candidates, e)
