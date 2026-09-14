@@ -10,8 +10,11 @@ import (
 
 // ResourceSelection allows exact addresses and module subtrees independently.
 type ResourceSelection struct {
-	Addresses map[string]bool
-	Modules   map[string]bool
+	Addresses    map[string]bool
+	Modules      map[string]bool
+	Sources      map[string]bool
+	Actions      map[string]bool
+	ExactModules map[ResourceModule]bool
 }
 
 // Membership distinguishes a known exclusion from unavailable identity.
@@ -26,6 +29,9 @@ const (
 // Match intersects independent dimensions; a definite exclusion wins over
 // unavailable metadata. Nil dimensions pass even when identity is unavailable.
 func (s ResourceSelection) Match(address string, module ResourceModule) Membership {
+	if s.ExactModules != nil && !s.ExactModules[module] {
+		return MembershipOther
+	}
 	addressMatch := MembershipSelected
 	if s.Addresses != nil {
 		addressMatch = MembershipOther
@@ -117,7 +123,7 @@ type ResourceProjection struct {
 // base-filtered input before named selection, while UI has only type and named
 // filters. Rows rank observed UI durations, independently of RPC measurements.
 func SelectResources(l *Log, index ResourceIndex, base Filter, named ResourceSelection) ResourceProjection {
-	result := ResourceProjection{Selection: SelectionEvidence{Active: named.Addresses != nil || named.Modules != nil}}
+	result := ResourceProjection{Selection: SelectionEvidence{Active: named.Addresses != nil || named.Modules != nil || named.ExactModules != nil}}
 	if l == nil {
 		return result
 	}
@@ -126,7 +132,7 @@ func SelectResources(l *Log, index ResourceIndex, base Filter, named ResourceSel
 	uiBase := Filter{Types: base.Types}
 	for _, op := range index.Operations {
 		s := l.UISpans[op.UIIndex]
-		if !uiBase.MatchSpan(s) || named.Match(s.Address, op.Module) != MembershipSelected {
+		if !uiBase.MatchSpan(s) || !named.MatchObservation(s) || named.Match(s.Address, op.Module) != MembershipSelected {
 			continue
 		}
 		result.UIIndices = append(result.UIIndices, op.UIIndex)
@@ -195,6 +201,13 @@ func SelectResources(l *Log, index ResourceIndex, base Filter, named ResourceSel
 		return result.Rows[i].Address < result.Rows[j].Address
 	})
 	return result
+}
+
+// MatchObservation filters resource duration provenance and lifecycle action.
+// RPC methods are a separate dimension and do not pass through this predicate.
+func (s ResourceSelection) MatchObservation(observation span.Span) bool {
+	return (s.Sources == nil || s.Sources[observation.DurationSource.String()]) &&
+		(s.Actions == nil || s.Actions[FacetKey(observation.RPC)])
 }
 
 func (e *NamedEvidence) add(s span.Span, confidence attrib.Confidence) {

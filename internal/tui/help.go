@@ -70,6 +70,7 @@ var helpGroups = func() []helpGroup {
 			{keys: "r", what: "open reconstructed response; r or Esc returns"},
 			{keys: "g", what: "go to a physical source line"},
 			{keys: "c", what: "open inferred calls from resource operations"},
+			{keys: "m", what: "toggle exact module rankings in Resources"},
 			{keys: "↑ ↓ j k", what: "scroll the reconstructed response"},
 			{keys: "↵ ⏎ Enter", what: "open selected provider/type or call"},
 			{keys: "s", what: "sort by the next column, in the table views"},
@@ -86,6 +87,8 @@ var helpGroups = func() []helpGroup {
 		{title: "EVERYWHERE", entries: []helpEntry{
 			{keys: "⇥ Tab", what: "move focus between panes"},
 			{keys: "i", what: "open quality; select, Enter checks/jumps; i or Esc closes"},
+			{keys: "v / p / u", what: "event history / outcomes / incomplete operations"},
+			{keys: "Enter r", what: "event panels: source / resource history; Esc returns"},
 			{keys: "e", what: "open resource evidence; e or Esc returns"},
 			{keys: "?", what: "open or close this help (Esc closes it too)"},
 			{keys: "↑ ↓ j k", what: "scroll help; PgUp/PgDn move a page"},

@@ -33,8 +33,25 @@ func (m *Model) resourceRows() []row {
 			spanIdx:  noSpanIdx,
 			resource: r,
 		}
+		rows[i].cells = append(rows[i].cells, durationMeanText(r.UI))
+		rows[i].numeric = append(rows[i].numeric, uint64(r.UI.MeanMs()*1000))
 	}
 	return rows
+}
+
+func durationMeanText(d model.DurationTotal) string {
+	if d.Count == 0 {
+		return "n/a"
+	}
+	prefix := ""
+	if d.LowerBound {
+		prefix = "≥"
+	}
+	mean := d.MeanMs()
+	if mean < 1000 && mean != float64(uint64(mean)) {
+		return prefix + strconv.FormatFloat(mean, 'f', 1, 64) + "ms"
+	}
+	return prefix + formatMs(uint64(mean))
 }
 
 func durationTotalText(d model.DurationTotal) string {
@@ -61,6 +78,9 @@ func durationMaxText(d model.DurationTotal) string {
 }
 
 func (m *Model) renderResources(w, h int) string {
+	if m.moduleRanking {
+		return m.renderModules(w, h)
+	}
 	if m.resourceOperations {
 		return m.renderResourceOperations(w, h)
 	}
@@ -100,8 +120,22 @@ func (m *Model) renderResources(w, h int) string {
 		return renderResourceEmpty(empty, w, h)
 	}
 	preamble = fitTableGuidance(preamble, w, h)
+	if w < 60 && m.activeSort() == 9 {
+		cols, selected := selectTableColumns(resourceColumns, rows, []int{0, 1, 2, 9, 4})
+		cols[1].header, cols[2].header, cols[3].header = "ops", "total", "mean"
+		return renderTable(preamble, cols, 3, selected, empty, m.selected, m.pane == PaneList, w, h)
+	}
 	cols, rows := visibleResourceColumns(resourceColumns, rows, w)
-	return renderTable(preamble, cols, m.activeSort(), rows, empty, m.selected, m.pane == PaneList, w, h)
+	sortCol := -1
+	for i, col := range cols {
+		if col.header == resourceColumns[m.activeSort()].header {
+			sortCol = i
+		}
+	}
+	if w < 60 && m.activeSort() < 5 {
+		sortCol = m.activeSort()
+	}
+	return renderTable(preamble, cols, sortCol, rows, empty, m.selected, m.pane == PaneList, w, h)
 }
 
 func renderResourceEmpty(message string, w, h int) string {
@@ -121,6 +155,26 @@ func renderResourceEmpty(message string, w, h int) string {
 // visibleResourceColumns keeps the observed identity and measurements usable
 // before admitting the supplementary inferred RPC pairs.
 func visibleResourceColumns(cols []column, rows []row, w int) ([]column, []row) {
+	// The mean sits beside observed measurements without changing their sort IDs.
+	if w >= 60 && len(cols) == 10 {
+		order := []int{0, 1, 2, 3, 9, 4}
+		natural := columnWidths(headerCells(cols, 2), rows)
+		for _, pair := range [][]int{{5, 6}, {7, 8}} {
+			candidate := append(append([]int(nil), order...), pair...)
+			reserved := 2 * (len(candidate) - 1)
+			for _, index := range candidate[1:] {
+				reserved += natural[index]
+			}
+			if w-reserved < 12 {
+				break
+			}
+			order = candidate
+		}
+		return selectTableColumns(cols, rows, order)
+	}
+	if len(cols) == 10 {
+		cols, rows = selectTableColumns(cols, rows, []int{0, 1, 2, 3, 4, 5, 6, 7, 8})
+	}
 	cols = append([]column(nil), cols...)
 	if w < 60 {
 		cols[1].header, cols[2].header, cols[3].header = "ops", "total", "max"
@@ -152,6 +206,7 @@ func resourceDetailSections(r *model.ResourceRow, w int) []paneSection {
 		fmt.Sprintf("operations: %d", r.UI.Count),
 		"observed resource total: " + durationTotalText(r.UI),
 		"observed resource max: " + durationMaxText(r.UI),
+		"observed resource mean: " + durationMeanText(r.UI),
 	}
 	if r.NamedRPC.Count > 0 {
 		fields = append(fields, fmt.Sprintf("inferred Contained/Likely RPCs: %d, %s", r.NamedRPC.Count, rpcEvidenceDuration(r.NamedRPC)))

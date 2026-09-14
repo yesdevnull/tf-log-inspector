@@ -16,6 +16,56 @@ type DurationTotal struct {
 	LowerBound bool
 }
 
+// MeanMs is the arithmetic mean of observed durations, zero for no observations.
+// A saturated observation makes this a lower bound, as recorded by LowerBound.
+func (d DurationTotal) MeanMs() float64 {
+	if d.Count == 0 {
+		return 0
+	}
+	return float64(d.TotalMs) / float64(d.Count)
+}
+
+// ModuleRow groups operations by their exact module instance, including root
+// (Known with an empty path) and unavailable module evidence (not Known).
+type ModuleRow struct {
+	Module  ResourceModule
+	UI      DurationTotal
+	Sources map[span.DurationSource]DurationTotal
+}
+
+// GroupResourcesByModule ranks the selected observations without counting
+// parent modules again or adding overlapping RPC durations.
+func GroupResourcesByModule(l *Log, index ResourceIndex, projection ResourceProjection) []ModuleRow {
+	groups := make(map[ResourceModule]*ModuleRow)
+	for _, i := range projection.UIIndices {
+		s := l.UISpans[i]
+		module := index.Operations[i].Module
+		group := groups[module]
+		if group == nil {
+			group = &ModuleRow{Module: module, Sources: make(map[span.DurationSource]DurationTotal)}
+			groups[module] = group
+		}
+		group.UI.add(s)
+		source := group.Sources[s.DurationSource]
+		source.add(s)
+		group.Sources[s.DurationSource] = source
+	}
+	rows := make([]ModuleRow, 0, len(groups))
+	for _, group := range groups {
+		rows = append(rows, *group)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].UI.TotalMs != rows[j].UI.TotalMs {
+			return rows[i].UI.TotalMs > rows[j].UI.TotalMs
+		}
+		if rows[i].Module.Known != rows[j].Module.Known {
+			return rows[i].Module.Known
+		}
+		return rows[i].Module.Path < rows[j].Module.Path
+	})
+	return rows
+}
+
 func (d *DurationTotal) add(s span.Span) {
 	d.Count++
 	d.TotalMs += uint64(s.DurationMs)

@@ -12,11 +12,11 @@
 [2m│[0m [x] …pute_instance  1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   8ms                 [2m│[0m
 [2m│[0m [1;36mRESOURCES[0m             [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mresource types[0m        [2m│[0m
 [2m│[0m [1;36mMODULE SUBTREES[0m       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   1                   [2m│[0m
-[2m│[0m [1;36mLEVELS[0m                [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mRPC methods[0m           [2m│[0m
-[2m│[0m [x] TRACE           2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   1                   [2m│[0m
-[2m│[0m [x] UNKNOWN         1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
-[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mslowest call[0m          [2m│[0m
-[2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   ApplyResourceChange [2m│[0m
+[2m│[0m [1;36mDURATION SOURCES[0m      [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mRPC methods[0m           [2m│[0m
+[2m│[0m [1;36mLIFECYCLE ACTIONS[0m     [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   1                   [2m│[0m
+[2m│[0m [1;36mLEVELS[0m                [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
+[2m│[0m [x] TRACE           2 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m [2;36mslowest call[0m          [2m│[0m
+[2m│[0m [x] UNKNOWN         1 [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m   ApplyResourceChange [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m
 [2m│[0m                       [2m│[0m[2m [0m[36m│[0m                                              [36m│[0m[2m [0m[2m│[0m                       [2m│[0m

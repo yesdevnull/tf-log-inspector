@@ -37,4 +37,4 @@
 [36m│[0m                                                          [36m│[0m
 [36m╰──────────────────────────────────────────────────────────╯[0m
 [2mDurations measured under logging; rankings approximate.[0m
-[36m⇥[0m pane  [36me[0m evidence  [36m↵[0m operations  [36mEsc[0m clear  [36mq[0m quit
+[36m⇥[0m pane  [36me[0m evidence  [36mm[0m modules  [36mEsc[0m clear  [36mq[0m quit

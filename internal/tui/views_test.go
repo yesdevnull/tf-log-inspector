@@ -978,6 +978,12 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 					if c.kind != numericColumn {
 						continue
 					}
+					if tc.view == ViewTypes && c.header == "res mean" && rw.numeric[1] == 0 {
+						if rw.cells[i] != "n/a" {
+							t.Errorf("unobserved mean displayed as %q", rw.cells[i])
+						}
+						continue
+					}
 					if tc.view == ViewTypes && (c.header == "RPC total" || c.header == "RPC max") && rw.numeric[3] == 0 {
 						if rw.cells[i] != "n/a" {
 							t.Errorf("unobserved RPC duration displayed as %q", rw.cells[i])
@@ -986,6 +992,12 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 					}
 					// The two renderings the builders use: a duration
 					// through formatMs, a count through strconv.
+					if c.header == "res mean" {
+						if rw.cells[i] != formatMs(rw.numeric[i]/1000) {
+							t.Errorf("mean has incorrect sort precision: %v", rw)
+						}
+						continue
+					}
 					if got := rw.cells[i]; got != formatMs(rw.numeric[i]) && got != strconv.FormatUint(rw.numeric[i], 10) {
 						t.Errorf("row %d column %q shows %q, which is neither rendering of the %d recorded beside it -- the number is in the wrong slot", r, c.header, got, rw.numeric[i])
 					}

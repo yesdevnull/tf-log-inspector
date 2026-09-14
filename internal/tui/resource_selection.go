@@ -9,10 +9,29 @@ import (
 // consumer until a filter or named selection changes.
 func (m *Model) selectedResources() model.ResourceProjection {
 	if !m.resourceProjectionCached {
-		m.resourceProjection = model.SelectResources(m.log, m.resourceIndex, m.filter(), m.resourceSelection)
+		selection := m.resourceSelection
+		selection.Sources = intersectSelection(selection.Sources, m.allowedFacetValues(dimSource))
+		selection.Actions = intersectSelection(selection.Actions, m.allowedFacetValues(dimAction))
+		m.resourceProjection = model.SelectResources(m.log, m.resourceIndex, m.filter(), selection)
 		m.resourceProjectionCached = true
 	}
 	return m.resourceProjection
+}
+
+func intersectSelection(a, b map[string]bool) map[string]bool {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	result := map[string]bool{}
+	for key, selected := range a {
+		if selected && b[key] {
+			result[key] = true
+		}
+	}
+	return result
 }
 
 // selectedRPCSpans materialises the projected RPC tier in source order.

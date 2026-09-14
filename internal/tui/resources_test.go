@@ -67,7 +67,7 @@ func TestResourcesRenderObservedQualificationsAndSafeAddress(t *testing.T) {
 func TestResourcesSortOnlyUsesObservedColumns(t *testing.T) {
 	m := New(&model.Log{}, "empty.log")
 	m.setView(ViewResources)
-	want := []int{3, 0, 1, 2}
+	want := []int{3, 9, 0, 1, 2}
 	for _, col := range want {
 		m.cycleSort()
 		if got := m.sortCol[ViewResources]; got != col {

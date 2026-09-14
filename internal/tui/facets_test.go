@@ -642,7 +642,7 @@ func TestUntickingAFacetValueHidesExactlyItsAdvertisedCount(t *testing.T) {
 	all := len(base.rows())
 	var sawNone bool
 	for _, f := range facets {
-		if f.Name == dimLevel || namedFacetDimension(f.Name) {
+		if f.Name == dimLevel || f.Name == dimSource || f.Name == dimAction || namedFacetDimension(f.Name) {
 			continue
 		}
 		if len(f.Values) == 0 {

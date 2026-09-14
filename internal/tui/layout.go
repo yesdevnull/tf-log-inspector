@@ -264,6 +264,9 @@ func header(m *Model) string {
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer(w int) string {
+	if m.events.open {
+		return eventPanelFooter(w)
+	}
 	if m.response.open {
 		return m.responseFooter(w)
 	}
@@ -383,6 +386,9 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // independently, because a 60-column terminal cannot show 62 columns of
 // action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
+	if m.events.open {
+		return eventPanelFooter(w)
+	}
 	if m.quality.open {
 		return clipWidth("i close", w) + "\n" + clipWidth(quitHint, w)
 	}
@@ -522,6 +528,13 @@ func (m *Model) actionKeys(w int) string {
 	if m.view == ViewResources && m.resourceOperations {
 		keys = append(keys, "c calls")
 	}
+	if m.view == ViewResources && !m.resourceOperations {
+		label := "m modules"
+		if m.moduleRanking {
+			label = "m resources"
+		}
+		keys = append(keys, label)
+	}
 	if m.view == ViewRawLog && !m.facetOverlayShowing(w) {
 		keys = append(keys, "↔ scroll")
 	}
@@ -613,6 +626,16 @@ func (m *Model) actionKeys(w int) string {
 			if !removed {
 				break
 			}
+		}
+	}
+	if len(m.log.Events) > 0 {
+		extra := []string{"v events", "p outcomes", "u incomplete"}
+		if len(m.log.UISpans) == 0 && len(m.log.RPCSpans) == 0 {
+			return strings.Join(append(extra, esc, quitHint), hintSep)
+		}
+		candidate := append(append([]string(nil), keys...), extra...)
+		if lipgloss.Width(strings.Join(candidate, hintSep)) <= w {
+			keys = candidate
 		}
 	}
 	return strings.Join(keys, hintSep)
@@ -736,6 +759,9 @@ func (m *Model) renderPanes(w, h int) string {
 	// it, so the frame's arithmetic is stated once here rather than at each
 	// of the five sites that would otherwise each have to subtract.
 	bodyH := paneBodyHeight(h)
+	if m.events.open {
+		return framePanes(h, pane{title: m.eventPanelTitle(), content: m.renderEventPanel(panelContentWidth(w), bodyH), width: w})
+	}
 	if m.quality.open {
 		return framePanes(h, pane{title: qualityTitle, content: m.renderQuality(panelContentWidth(w), bodyH), width: w})
 	}
@@ -949,6 +975,9 @@ func (m *Model) centreTitle() string {
 	}
 	if m.view == ViewResources && m.resourceOperations {
 		return "OBSERVED RESOURCE OPERATIONS"
+	}
+	if m.view == ViewResources && m.moduleRanking {
+		return "OBSERVED MODULE RANKINGS"
 	}
 	return viewTitle(m.view)
 }
