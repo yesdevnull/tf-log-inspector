@@ -70,6 +70,9 @@ func rpcEvidenceDuration(d model.DurationTotal) string {
 }
 
 func durationMaxText(d model.DurationTotal) string {
+	if d.Count == 0 {
+		return "n/a"
+	}
 	prefix := ""
 	if d.LowerBound {
 		prefix = "≥"

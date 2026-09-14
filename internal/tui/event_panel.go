@@ -91,6 +91,16 @@ func (m *Model) renderEventPanel(w, h int) string {
 		}
 	}
 	v.SetContent(strings.Join(lines, "\n"))
+	v.SetYOffset(v.YOffset)
+	if len(actions) > 0 {
+		a := actions[m.events.selected]
+		// Preserve paging within a long record that still overlaps the viewport.
+		if a.end <= v.YOffset {
+			v.SetYOffset(a.start)
+		} else if a.start >= v.YOffset+v.Height {
+			v.SetYOffset(a.start - v.Height + 1)
+		}
+	}
 	return v.View()
 }
 

@@ -11,6 +11,34 @@ import (
 	"github.com/yesdevnull/tf-log-inspector/internal/span"
 )
 
+func TestTypeResourceMaximumDistinguishesMissingAndObservedZero(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		ui        []span.Span
+		selection model.ResourceSelection
+		want      string
+	}{
+		{name: "missing", want: "n/a"},
+		{name: "source excludes observations", ui: []span.Span{{ResourceType: "aws_instance", DurationMs: 1000}}, selection: model.ResourceSelection{Sources: map[string]bool{"cli_elapsed": true}}, want: "n/a"},
+		{name: "action excludes observations", ui: []span.Span{{ResourceType: "aws_instance", RPC: "create", DurationMs: 1000}}, selection: model.ResourceSelection{Actions: map[string]bool{"delete": true}}, want: "n/a"},
+		{name: "observed zero", ui: []span.Span{{ResourceType: "aws_instance"}}, want: "0s"},
+		{name: "saturated", ui: []span.Span{{ResourceType: "aws_instance", DurationMs: math.MaxUint32, DurationSaturated: true}}, want: "≥4294967.3s"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New(&model.Log{RPCSpans: []span.Span{{ResourceType: "aws_instance", DurationMs: 1000}}, UISpans: tt.ui}, "max.log")
+			m.setView(ViewTypes)
+			m.resourceSelection = tt.selection
+			m.invalidateRows()
+			if got := m.rows()[0].cells[7]; got != tt.want {
+				t.Errorf("table resource maximum = %q, want %q", got, tt.want)
+			}
+			if got := detailBody(t, m, rollupDetailTitle, 50, 30); !strings.Contains(got, "res max\n  "+tt.want+"\n") {
+				t.Errorf("detail resource maximum missing %q:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestTypeTotalsRetainSelectedDurationLowerBounds(t *testing.T) {
 	for _, source := range []span.DurationSource{span.SourceUIElapsed, span.SourceRefreshWindow, span.SourceCLIElapsed} {
 		m := New(&model.Log{UISpans: []span.Span{
