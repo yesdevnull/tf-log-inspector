@@ -664,6 +664,18 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 	if !strings.Contains(v.text[start:end], ".") {
 		return
 	}
+	// Styling separates address tokens but is not part of their names. Keep
+	// discovery offsets aligned with the original bytes used for replacement.
+	addressText := v.text
+	if styles := terminalStyle.FindAllStringIndex(addressText, -1); len(styles) > 0 {
+		plain := []byte(addressText)
+		for _, style := range styles {
+			for i := style[0]; i < style[1]; i++ {
+				plain[i] = ' '
+			}
+		}
+		addressText = string(plain)
+	}
 	var complete region
 	flush := func() {
 		if complete.end > complete.start && !exactRegion(v.addresses, complete.start, complete.end) {
@@ -671,7 +683,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 		}
 	}
 	for pos := start; pos < end; {
-		m := addressMatch(v.text[pos:end])
+		m := addressMatch(addressText[pos:end])
 		if m == nil {
 			break
 		}
@@ -687,7 +699,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 			continue
 		}
 		if m[0] > start {
-			previous, _ := utf8.DecodeLastRuneInString(v.text[:m[0]])
+			previous, _ := utf8.DecodeLastRuneInString(addressText[:m[0]])
 			if word(previous) {
 				continue
 			}

@@ -598,8 +598,11 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 	}
 }
 
+var terminalStyle = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+
 // Field delimiters precede whitespace, another group, or the end of the
-// record. Brackets inside opaque IDs and IPv6 authorities need not balance.
+// record, possibly separated by terminal styling. Brackets inside opaque IDs
+// and IPv6 authorities need not balance.
 func bracketedFieldEnd(text string, start int) int {
 	for end := start; end < len(text) && text[end] != '\r' && text[end] != '\n'; end++ {
 		if text[end] == '"' {
@@ -608,8 +611,18 @@ func bracketedFieldEnd(text string, start int) int {
 				continue
 			}
 		}
-		if text[end] == ']' && (end+1 == len(text) || space(text[end+1]) || text[end+1] == '[') {
-			return end
+		if text[end] == ']' {
+			next := end + 1
+			for next < len(text) && text[next] == '\x1b' {
+				style := terminalStyle.FindStringIndex(text[next:])
+				if style == nil || style[0] != 0 {
+					break
+				}
+				next += style[1]
+			}
+			if next == len(text) || space(text[next]) || text[next] == '[' {
+				return end
+			}
 		}
 	}
 	return -1
