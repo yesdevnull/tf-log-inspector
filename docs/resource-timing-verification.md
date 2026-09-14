@@ -48,3 +48,37 @@ Updated resource goldens were inspected at 60, 70 and 160 columns, together with
 the raw styling diffs. Full tests, race tests, build, lint and coverage pass.
 Independent review found no defects; separate cleanup retained all nine tests
 added or modified in this pass. JSON contracts and extraction are unchanged.
+
+## Event inspection and timing scope
+
+The September 14 pass adds source/action timing filters, exact-module rankings,
+observed means, resource event history, plan outcomes and incomplete-operation
+evidence. Event source links retain physical file order; CLI events have no
+invented clock. Incomplete operations never enter completed timing rankings.
+
+An independent inventory reconciled the supplied captures with the event index:
+
+| Capture | Starts | Progress | Completions | Drift | Planned resource entries | Incomplete |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Slow structured plan | 652 | 645 | 652 | 11 | 0 | 0 |
+| Normal structured plan | 652 | 0 | 652 | 12 | 0 | 0 |
+| Normal CLI plan | 863 | 0 | 350 | 0 | 53 | 0 |
+
+The structured summaries explicitly report zero additions, changes and removals.
+The CLI summary reports 52 additions and zero changes/removals; its 53 resource
+entries include one deferred read. Missing event categories remain unavailable
+evidence, rather than proving that no activity occurred. The CLI's 513 refresh
+starts do not promise completion markers and are excluded from incomplete work.
+
+Checks against all three captures covered the new panels at 60, 100 and 160
+columns, initial Resources selection, exact-module drill-down and Escape return.
+Synthetic navigation tests cover source jumps, nested resource histories,
+ambiguous starts, missing counts, observed zeroes and lower-bound means.
+
+The CLI capture also exposed missing closing ID brackets. Synthetic reproduction
+confirmed two ANSI-related scrubber defects: a trailing colour reset could be
+consumed with the ID, and a leading style could hide a resource label from
+discovery. Regression tests preserve terminal syntax and alias linkage while
+masking identifiers. Adjacent colour-separated credential fields are checked as
+a separate privacy boundary. The event parser can read previously affected
+refresh lines without interpreting their truncated identifier suffixes.
