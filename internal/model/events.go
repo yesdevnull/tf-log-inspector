@@ -31,6 +31,7 @@ const (
 type ResourceEvent struct {
 	Kind                                       EventKind
 	Address, Action, Message, Severity, Source string
+	DeposedKey                                 string
 	Timestamp                                  time.Time
 	Location                                   SourceLocation
 	Summary                                    *ChangeSummary
@@ -85,6 +86,11 @@ func (l *Log) indexEvents() {
 		if !found {
 			continue
 		}
+		// A lifecycle-looking line owned by a timestamped entry may be a
+		// provider response body. Independent CLI entries remain inspectable.
+		if owner := l.Entries[position.Entry]; e.Source == "cli" && lifecycleEvent(e.Kind) && owner.Timestamped && owner.Level != logfmt.LevelUnknown {
+			continue
+		}
 		e.Location = SourceLocation{Entry: position.Entry, StartByte: start, EndByte: end, StartLine: uint64(i + 1), EndLine: uint64(i + 1)}
 		candidates = append(candidates, e)
 		if e.Source == "ui" && lifecycleEvent(e.Kind) {
@@ -94,7 +100,7 @@ func (l *Log) indexEvents() {
 	for _, e := range candidates {
 		// Mixed captures can contain a second rendering of the same lifecycle.
 		// The structured stream is authoritative, matching timing admission.
-		if e.Source == "cli" && lifecycleEvent(e.Kind) && (structuredLifecycle || !l.Stats.FirstTS.IsZero()) {
+		if e.Source == "cli" && lifecycleEvent(e.Kind) && structuredLifecycle {
 			continue
 		}
 		l.Events = append(l.Events, e)
@@ -206,7 +212,9 @@ func structuredEvent(line string) (ResourceEvent, bool) {
 // establish the event; opaque bracket payloads do not contribute evidence.
 var cliLifecyclePattern = regexp.MustCompile(`^((?:[^"[:space:]]|"(?:[^"\\]|\\.)*")+): (Reading|Creating|Modifying|Destroying|Refreshing state|Still reading|Still creating|Still modifying|Still destroying)\.\.\.(?: \[.*)?$`)
 
-var cliPlanSummaryPattern = regexp.MustCompile(`^Plan: ([0-9]+) to add, ([0-9]+) to change, ([0-9]+) to destroy\.$`)
+var cliPlanSummaryPattern = regexp.MustCompile(`^Plan: (?:([0-9]+) to import, )?([0-9]+) to add, ([0-9]+) to change, ([0-9]+) to destroy\.(?: Actions: ([0-9]+) to invoke\.)?$`)
+
+var cliDeposedPattern = regexp.MustCompile(`^((?:[^"[:space:]]|"(?:[^"\\]|\\.)*")+) \(deposed object ([0-9a-f]{8})\): `)
 
 var cliPlannedChangePattern = regexp.MustCompile(`^[ \t]*# (.+) (will be created|will be updated in-place|will be destroyed|must be replaced|will be read during apply)$`)
 
@@ -224,17 +232,24 @@ func cliEvent(line string) (ResourceEvent, bool) {
 		return e, true
 	}
 	if parts := cliPlanSummaryPattern.FindStringSubmatch(line); parts != nil {
-		counts := [3]uint64{}
+		counts := [5]*uint64{}
 		for i := range counts {
+			if parts[i+1] == "" {
+				continue
+			}
 			n, err := strconv.ParseUint(parts[i+1], 10, 64)
 			if err != nil {
 				return ResourceEvent{}, false
 			}
-			counts[i] = n
+			counts[i] = &n
 		}
 		e.Kind = EventChangeSummary
-		e.Summary = &ChangeSummary{Operation: "plan", Add: &counts[0], Change: &counts[1], Remove: &counts[2]}
+		e.Summary = &ChangeSummary{Operation: "plan", Import: counts[0], Add: counts[1], Change: counts[2], Remove: counts[3], ActionInvocation: counts[4]}
 		return e, true
+	}
+	if parts := cliDeposedPattern.FindStringSubmatch(line); parts != nil {
+		e.DeposedKey = parts[2]
+		line = parts[1] + ": " + line[len(parts[0]):]
 	}
 	address, action, _, complete := logfmt.CLICompletionParts(line)
 	if complete {
@@ -265,7 +280,7 @@ func incompleteOperations(events []ResourceEvent) []IncompleteOperation {
 		if !lifecycleEvent(e.Kind) || (e.Source == "cli" && e.Action == "refresh") {
 			continue
 		}
-		key := fmt.Sprintf("%s\x00%s\x00%s", e.Source, e.Address, e.Action)
+		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", e.Source, e.Address, e.Action, e.DeposedKey)
 		pending := open[key]
 		switch e.Kind {
 		case EventStart:
@@ -279,7 +294,20 @@ func incompleteOperations(events []ResourceEvent) []IncompleteOperation {
 			}
 			open[key] = pending
 		case EventProgress:
-			if len(pending) == 1 && !operations[pending[0]].Ambiguous {
+			// CLI progress omits deposed identity, so it cannot name an
+			// owner while any deposed object for this operation is open.
+			deposedOpen := false
+			if e.Source == "cli" && e.DeposedKey == "" {
+				for _, indices := range open {
+					for _, i := range indices {
+						start := operations[i].Start
+						if start.Source == e.Source && start.Address == e.Address && start.Action == e.Action && start.DeposedKey != "" {
+							deposedOpen = true
+						}
+					}
+				}
+			}
+			if len(pending) == 1 && !operations[pending[0]].Ambiguous && !deposedOpen {
 				progress := e
 				operations[pending[0]].LastProgress = &progress
 			}

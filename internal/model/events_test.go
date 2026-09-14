@@ -136,3 +136,60 @@ func TestCLIRefreshRetainsScrubbedTruncatedID(t *testing.T) {
 		t.Fatalf("events=%+v incomplete=%+v", l.Events, l.Incomplete)
 	}
 }
+
+func TestCLIHistorySurvivesUnrelatedTimestampFooter(t *testing.T) {
+	l := loadResponseLog(t, "aws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\n2026-09-14T00:00:11.000Z [INFO] runner: stopping\n")
+	if len(l.Events) != 2 || len(l.Incomplete) != 1 || l.Incomplete[0].LastProgress == nil {
+		t.Fatalf("events=%+v incomplete=%+v", l.Events, l.Incomplete)
+	}
+	provider := loadResponseLog(t, "2026-09-14T00:00:11.000Z [DEBUG] provider.example: response body:\naws_instance.a: Creating...\naws_instance.a: Creation complete after 1s\n")
+	if len(provider.Events) != 0 {
+		t.Fatalf("provider body became lifecycle: %+v", provider.Events)
+	}
+}
+
+func TestCLIExtendedPlanSummaryPreservesOptionalCounts(t *testing.T) {
+	for _, tc := range []struct {
+		line                 string
+		imports, invocations bool
+	}{
+		{"Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.", true, false},
+		{"Plan: 0 to add, 0 to change, 0 to destroy. Actions: 1 to invoke.", false, true},
+		{"Plan: 1 to import, 0 to add, 0 to change, 0 to destroy. Actions: 1 to invoke.", true, true},
+	} {
+		l := loadResponseLog(t, tc.line+"\n")
+		if len(l.Outcomes.Summaries) != 1 {
+			t.Fatalf("summary missing for %q", tc.line)
+		}
+		s := l.Outcomes.Summaries[0].Summary
+		if s.Add == nil || *s.Add != 0 || (s.Import != nil) != tc.imports || (s.ActionInvocation != nil) != tc.invocations {
+			t.Fatalf("summary=%+v", s)
+		}
+		if s.Import != nil && *s.Import != 1 {
+			t.Fatalf("import=%d", *s.Import)
+		}
+		if s.ActionInvocation != nil && *s.ActionInvocation != 1 {
+			t.Fatalf("invocations=%d", *s.ActionInvocation)
+		}
+	}
+	l := loadResponseLog(t, "Plan: 18446744073709551616 to import, 0 to add, 0 to change, 0 to destroy.\n")
+	if len(l.Outcomes.Summaries) != 0 {
+		t.Fatalf("overflow admitted: %+v", l.Outcomes)
+	}
+}
+
+func TestCLIDeposedOperationsKeepDistinctIdentity(t *testing.T) {
+	input := "aws_instance.a (deposed object abc12345): Destroying... [id=old]\naws_instance.a (deposed object def67890): Destroying... [id=older]\naws_instance.a: Destroying... [id=current]\naws_instance.a: Still destroying... [10s elapsed]\naws_instance.a (deposed object abc12345): Destruction complete after 11s\n"
+	l := loadResponseLog(t, input)
+	if len(l.Events) != 5 || len(l.Incomplete) != 2 {
+		t.Fatalf("events=%+v incomplete=%+v", l.Events, l.Incomplete)
+	}
+	if l.Incomplete[0].Start.DeposedKey != "def67890" || l.Incomplete[1].Start.DeposedKey != "" {
+		t.Fatalf("incorrect deposed pairing: %+v", l.Incomplete)
+	}
+	for _, op := range l.Incomplete {
+		if op.Ambiguous || op.LastProgress != nil || op.Start.Address != "aws_instance.a" {
+			t.Fatalf("guessed progress ownership: %+v", op)
+		}
+	}
+}
