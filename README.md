@@ -148,6 +148,21 @@ hooks or timestamped provider/core entries; mixed captures suppress CLI
 candidates to avoid double-counting. CLI operations retain their displayed
 duration resolution and physical source lines, but have no timeline positions.
 
+Use `v` to inspect the selected resource's event history, or the whole capture
+when no resource row is selected. Events stay in physical file order, including
+starts, progress, completions and diagnostics. CLI events have source lines but
+no invented timestamps. `Enter` opens the selected event's source; `Esc` returns
+to the panel and then to the investigation.
+
+`p` opens whole-capture plan outcomes, keeping observed drift separate from
+planned changes. Explicit zero summary counts remain zero; absent counts and
+missing summaries remain unavailable. `u` shows starts without an unambiguous
+observed ending and their last attributable progress. These entries are evidence
+of an incomplete capture or lifecycle, not proof of a hung operation, and do not
+enter completed duration rankings. Ordinary CLI refresh messages do not promise
+a completion marker and are excluded from this list. From either panel, `r`
+opens the selected resource's event history.
+
 The top tab bar highlights the active view; its number keys switch views.
 `Tab` moves the arrow and accented panel border to the pane receiving keyboard
 input. The filter title counts hidden values. Raw Log uses the available width
@@ -178,7 +193,7 @@ changing the active view, filters, scope or search.
 
 Key `3` opens Resources, which groups exact Terraform addresses and ranks them
 by summed observed resource duration. Repeated completions of one address count
-as separate operations. Totals and maxima include all admitted duration sources;
+as separate operations. Totals, means and maxima include selected duration sources;
 only `ui_elapsed` carries the whole-second rounding qualification. Saturated
 durations remain lower bounds. Operation totals can overlap and are not run
 elapsed time. The associated RPC counts and time are inferred, partial
@@ -189,8 +204,16 @@ operation's source and `c` opens inferred calls for the current resource
 selection. Those calls are not assigned to an individual resource operation. `Esc`
 returns through each parent; a numbered view starts a new navigation path.
 
-Resource type, exact-resource and module-subtree selections apply to resource
-operations. RPC evidence also uses provider and RPC-method selections; those
+In Resources, `m` switches between exact-resource and exact-module rankings.
+Module instance keys stay distinct, with separate root and unavailable buckets.
+`Enter` on a module opens its scoped resources; `Esc` restores the ranking.
+Means use completed observations and retain lower-bound qualifications. A module
+total can include overlapping work and is not that module's elapsed time.
+
+Resource type, exact-resource, module-subtree, duration-source and lifecycle-action
+selections apply to resource operations. Source and action selections follow the
+resource timings across Resources, Types, Timeline and evidence. RPC evidence
+also uses provider and RPC-method selections; those
 two filters do not imply a provider or method for resource operations. In the facet
 pane, `/` narrows the visible resource or module choices without changing the
 result set. Use `Space` to toggle a choice or `o` to select it alone. Module
