@@ -24,7 +24,28 @@ const (
 	dimLevel    = "level"
 	dimResource = "resource"
 	dimModule   = "module subtree"
+	dimSource   = "duration source"
+	dimAction   = "lifecycle action"
 )
+
+func observationFacets(spans []span.Span) []model.Facet {
+	result := []model.Facet{{Name: dimSource}, {Name: dimAction}}
+	for i := range result {
+		counts := map[string]int{}
+		for _, s := range spans {
+			value := s.DurationSource.String()
+			if i == 1 {
+				value = model.FacetKey(s.RPC)
+			}
+			counts[value]++
+		}
+		for value, count := range counts {
+			result[i].Values = append(result[i].Values, model.FacetValue{Value: value, Count: count})
+		}
+		sort.Slice(result[i].Values, func(a, b int) bool { return result[i].Values[a].Value < result[i].Values[b].Value })
+	}
+	return result
+}
 
 // levelFacet builds the level dimension from the log's ENTRIES rather than
 // its spans. A level is an attribute of a log line: a span is assembled
@@ -411,7 +432,7 @@ func (m *Model) setFacetExclusions(dim string, excluded map[string]bool) {
 // dimension (see toggleFacetValue), and this must stay true whatever a
 // later caller does with the map.
 func (m Model) filterActive() bool {
-	if m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil {
+	if m.resourceSelection.Addresses != nil || m.resourceSelection.Modules != nil || m.resourceSelection.ExactModules != nil || m.resourceSelection.Sources != nil || m.resourceSelection.Actions != nil {
 		return true
 	}
 	for _, values := range m.excludedFacets {
@@ -425,7 +446,7 @@ func (m Model) filterActive() bool {
 // clearFilters re-ticks every facet value, restoring every view to the
 // unfiltered log. Esc is bound to this per the spec's key table.
 func (m *Model) clearFilters() {
-	if len(m.excludedFacets) == 0 && m.resourceSelection.Addresses == nil && m.resourceSelection.Modules == nil {
+	if !m.filterActive() {
 		return
 	}
 	m.excludedFacets = nil

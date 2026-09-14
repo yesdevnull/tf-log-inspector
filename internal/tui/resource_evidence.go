@@ -108,6 +108,12 @@ func (m *Model) resourceEvidenceText() string {
 	fmt.Fprintf(&b, "  providers (RPC only): %s\n", selectedValues(f.Providers))
 	fmt.Fprintf(&b, "  resource types (RPC and UI): %s\n", selectedValues(f.Types))
 	fmt.Fprintf(&b, "  RPC methods (RPC only): %s\n", selectedValues(f.RPCs))
+	if selected := intersectSelection(m.resourceSelection.Sources, m.allowedFacetValues(dimSource)); selected != nil {
+		fmt.Fprintf(&b, "  duration sources (resource only): %s\n", selectedValues(selected))
+	}
+	if selected := intersectSelection(m.resourceSelection.Actions, m.allowedFacetValues(dimAction)); selected != nil {
+		fmt.Fprintf(&b, "  lifecycle actions (resource only): %s\n", selectedValues(selected))
+	}
 	fmt.Fprintf(&b, "  exact addresses: %s\n", selectedValues(m.resourceSelection.Addresses))
 	fmt.Fprintf(&b, "  module subtrees: %s\n", selectedModuleValues(m.resourceSelection.Modules))
 
@@ -122,7 +128,7 @@ func (m *Model) resourceEvidenceText() string {
 	writeEvidenceTotalWithNoun(&b, "selected UI", p.UI, "operation", "operations")
 	writeEvidenceTotalWithNoun(&b, "unnamed UI", p.UnnamedUI, "operation", "operations")
 	m.writeUIQualifications(&b, p.UI, p.UIIndices, "Selected resource total is a lower bound (≥).")
-	b.WriteString("  UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply.\n")
+	b.WriteString("  UI scope uses resource type plus exact address/module selection; provider and RPC method do not apply. Duration source and lifecycle action additionally filter resource observations.\n")
 
 	b.WriteString("\nPRESELECTION RESOURCE EVIDENCE\n")
 	writeEvidenceTotal(&b, "baseline", p.Evidence.Baseline)

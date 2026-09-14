@@ -30,10 +30,13 @@ type navigationFrame struct {
 	raw                rawLogState
 	timeline           timelineState
 	resourceOperations bool
+	moduleRanking      bool
+	moduleSort         int
 	operationSort      int
 	associatedCalls    bool
 	associatedCallSort int
 	quality            qualityNavigationState
+	events             eventPanelState
 }
 
 func cloneExclusions(src map[string]map[string]bool) map[string]map[string]bool {
@@ -70,15 +73,19 @@ func (m *Model) captureNavigation() navigationFrame {
 		viewSelected:   m.viewSelected,
 		excludedFacets: cloneExclusions(m.excludedFacets),
 		resourceSelection: model.ResourceSelection{
-			Addresses: maps.Clone(m.resourceSelection.Addresses),
-			Modules:   maps.Clone(m.resourceSelection.Modules),
+			Addresses:    maps.Clone(m.resourceSelection.Addresses),
+			Modules:      maps.Clone(m.resourceSelection.Modules),
+			Sources:      maps.Clone(m.resourceSelection.Sources),
+			Actions:      maps.Clone(m.resourceSelection.Actions),
+			ExactModules: maps.Clone(m.resourceSelection.ExactModules),
 		},
 		facetCursor: m.facetCursor, facetDimension: m.facetSearch.dimension,
 		facetQuery: m.facetSearch.query, showFacetOverlay: m.showFacetOverlay,
 		raw: cloneRawState(m.raw), timeline: m.timeline,
 		resourceOperations: m.resourceOperations, operationSort: m.operationSort,
+		moduleRanking: m.moduleRanking, moduleSort: m.moduleSort,
 		associatedCalls: m.associatedCalls, associatedCallSort: m.associatedCallSort,
-		quality: m.captureQualityNavigation(),
+		quality: m.captureQualityNavigation(), events: m.events,
 	}
 }
 
@@ -87,8 +94,11 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.viewSelected = frame.viewSelected
 	m.excludedFacets = cloneExclusions(frame.excludedFacets)
 	m.resourceSelection = model.ResourceSelection{
-		Addresses: maps.Clone(frame.resourceSelection.Addresses),
-		Modules:   maps.Clone(frame.resourceSelection.Modules),
+		Addresses:    maps.Clone(frame.resourceSelection.Addresses),
+		Modules:      maps.Clone(frame.resourceSelection.Modules),
+		Sources:      maps.Clone(frame.resourceSelection.Sources),
+		Actions:      maps.Clone(frame.resourceSelection.Actions),
+		ExactModules: maps.Clone(frame.resourceSelection.ExactModules),
 	}
 	m.facetCursor = frame.facetCursor
 	m.facetSearch.dimension = frame.facetDimension
@@ -100,6 +110,8 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.facetSearch.input.CursorEnd()
 	m.showFacetOverlay = frame.showFacetOverlay
 	m.resourceOperations = frame.resourceOperations
+	m.moduleRanking = frame.moduleRanking
+	m.moduleSort = frame.moduleSort
 	m.operationSort = frame.operationSort
 	m.associatedCalls = frame.associatedCalls
 	m.associatedCallSort = frame.associatedCallSort
@@ -118,6 +130,7 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.reconcileRawCursor()
 	m.keepFocusOnADrawnPane()
 	m.restoreQualityNavigation(frame.quality)
+	m.events = frame.events
 }
 
 func (m *Model) captureQualityNavigation() qualityNavigationState {

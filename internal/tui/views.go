@@ -37,6 +37,7 @@ type row struct {
 	// string comparison has. The builders hold the raw figure already, so
 	// they record it here rather than leaving the sort to parse a rendered
 	// duration back into one.
+	// Means use microseconds for sorting so sub-millisecond differences survive.
 	numeric []uint64
 	// spanIdx is the index into m.log.RPCSpans that this row represents, or
 	// noSpanIdx when the row is a rollup rather than a single span. The raw
@@ -53,6 +54,7 @@ type row struct {
 	// restated at each site; isCall is the one question anything asks of it.
 	rollup   *rollupDetail
 	resource *model.ResourceRow
+	module   *model.ModuleRow
 }
 
 // callRow builds the row standing for ONE span: its display cells, and the
@@ -197,6 +199,8 @@ var typeColumns = []column{
 	{header: "RPC calls", kind: numericColumn},
 	{header: "RPC total", kind: numericColumn},
 	{header: "RPC max", kind: numericColumn},
+	{header: "res mean", kind: numericColumn},
+	{header: "res max", kind: numericColumn},
 }
 
 var callColumns = []column{
@@ -216,6 +220,7 @@ var resourceColumns = []column{
 	{header: "inferred total", kind: numericColumn},
 	{header: "overlap RPCs", kind: numericColumn},
 	{header: "overlap total", kind: numericColumn},
+	{header: "res mean", kind: numericColumn},
 }
 
 var operationColumns = []column{
@@ -231,6 +236,9 @@ var associatedCallColumns = append(append([]column(nil), callColumns...), column
 var associatedCallTable = tableBinding{cols: associatedCallColumns, defaultCol: 0}
 
 func (m *Model) activeTable() (tableBinding, bool) {
+	if m.view == ViewResources && m.moduleRanking {
+		return tableBinding{cols: moduleColumns, defaultCol: 2}, true
+	}
 	if m.view == ViewResources && m.resourceOperations {
 		return operationTable, true
 	}
@@ -242,6 +250,9 @@ func (m *Model) activeTable() (tableBinding, bool) {
 }
 
 func (m *Model) activeSort() int {
+	if m.view == ViewResources && m.moduleRanking {
+		return m.moduleSort
+	}
 	if m.view == ViewResources && m.resourceOperations {
 		return m.operationSort
 	}
@@ -252,6 +263,10 @@ func (m *Model) activeSort() int {
 }
 
 func (m *Model) setActiveSort(col int) {
+	if m.view == ViewResources && m.moduleRanking {
+		m.moduleSort = col
+		return
+	}
 	if m.view == ViewResources && m.resourceOperations {
 		m.operationSort = col
 		return
@@ -328,7 +343,9 @@ func (m *Model) rows() []row {
 			r = callRowsForIndices(m.log.RPCSpans, indices)
 		}
 	case ViewResources:
-		if m.resourceOperations {
+		if m.moduleRanking {
+			r = m.moduleRows()
+		} else if m.resourceOperations {
 			r = m.operationRows()
 		} else {
 			r = m.resourceRows()
@@ -494,6 +511,7 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 	groups := groupRPCSpans(rpcSpans, func(s span.Span) string { return s.ResourceType })
 	rows := make([]row, len(joined))
 	for i, r := range joined {
+		observed := model.DurationTotal{Count: uint64(r.UIResources), TotalMs: r.UITotalMs, MaxMs: r.UIMaxMs, LowerBound: r.UILowerBound}
 		resourceTotal := durationTotalText(model.DurationTotal{TotalMs: r.UITotalMs, LowerBound: r.UILowerBound})
 		rpcTotal, rpcMax := "n/a", "n/a"
 		if r.RPCCalls > 0 {
@@ -507,8 +525,10 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 				strconv.Itoa(r.RPCCalls),
 				rpcTotal,
 				rpcMax,
+				durationMeanText(observed),
+				durationMaxText(observed),
 			},
-			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs)},
+			[]uint64{0, uint64(r.UIResources), r.UITotalMs, uint64(r.RPCCalls), r.RPCTotalMs, uint64(r.RPCMaxMs), uint64(observed.MeanMs() * 1000), uint64(observed.MaxMs)},
 			&rollupDetail{
 				aggregate: []detailField{
 					{label: "resource type", value: r.ResourceType, kind: tailIdentifierColumn},
@@ -517,6 +537,8 @@ func typeRows(rpcSpans, uiSpans []span.Span) []row {
 					{label: "RPC calls", value: strconv.Itoa(r.RPCCalls), kind: numericColumn},
 					{label: "RPC total", value: rpcTotal, kind: numericColumn},
 					{label: "RPC max", value: rpcMax, kind: numericColumn},
+					{label: "res mean", value: durationMeanText(observed), kind: numericColumn},
+					{label: "res max", value: durationMaxText(observed), kind: numericColumn},
 				},
 				slowest: groups[model.FacetKey(r.ResourceType)].slowestOf(),
 			},
@@ -856,6 +878,9 @@ func fitTableGuidance(paragraphs []string, w, h int) []string {
 // visibleTypeColumns drops non-sort measurement columns on narrow panes until
 // the resource type retains enough width to identify the selected route.
 func visibleTypeColumns(cols []column, rows []row, sortCol, w int) ([]column, []row, int) {
+	if w < 100 && len(cols) == 8 && sortCol < 6 {
+		cols, rows = selectTableColumns(cols, rows, []int{0, 1, 2, 3, 4, 5})
+	}
 	indices := make([]int, len(cols))
 	for i := range indices {
 		indices[i] = i

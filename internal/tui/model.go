@@ -122,6 +122,7 @@ type Model struct {
 	inspection            responseInspectionState
 	nextResponseRequestID uint64
 	quality               qualityState
+	events                eventPanelState
 	log                   *model.Log
 	name                  string
 
@@ -137,6 +138,8 @@ type Model struct {
 	pane               Pane
 	selected           int
 	resourceOperations bool
+	moduleRanking      bool
+	moduleSort         int
 	operationSort      int
 	associatedCalls    bool
 	associatedCallSort int
@@ -335,6 +338,7 @@ func New(l *model.Log, path string) Model {
 	facets := model.FacetsForSpans(l.RPCSpans)
 	mergeUIResourceTypes(facets, l.UISpans)
 	facets = append(facets, resourceFacets(resourceIndex)...)
+	facets = append(facets, observationFacets(l.UISpans)...)
 	facets = append(facets, levelFacet(l.Entries))
 	m := Model{
 		log:           l,
@@ -485,6 +489,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.events.open {
+			return m.handleEventPanelKey(msg)
+		}
 		if m.quality.open {
 			return m.handleQualityKey(msg)
 		}
@@ -548,6 +555,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// route shares its predicate with enterHint, so the footer and
 			// the key handler cannot disagree.
 			if m.pane == PaneList {
+				if m.openModuleResources() {
+					break
+				}
 				if m.openAggregate() {
 					break
 				}
@@ -565,6 +575,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			if m.pane == PaneList {
 				m.openAssociatedCalls()
+			}
+		case "m":
+			if m.view == ViewResources && !m.resourceOperations && m.pane == PaneList {
+				m.moduleRanking = !m.moduleRanking
+				m.moduleSort = 2
+				m.selected = 0
+				m.invalidateRows()
 			}
 		case "t":
 			if m.view == ViewTimeline && m.pane == PaneList {
@@ -639,6 +656,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 			m.helpViewport = viewport.Model{}
+		case "v", "p", "u":
+			m.openEventPanel(msg.String())
 		case "i":
 			m.openQuality()
 		case "e":
@@ -720,8 +739,8 @@ func (m *Model) cycleSort() {
 	if !ok {
 		return
 	}
-	if m.view == ViewResources && !m.resourceOperations {
-		observedColumns := [...]int{2, 3, 0, 1}
+	if m.view == ViewResources && !m.resourceOperations && !m.moduleRanking {
+		observedColumns := [...]int{2, 3, 9, 0, 1}
 		for i, col := range observedColumns {
 			if m.activeSort() == col {
 				m.setActiveSort(observedColumns[(i+1)%len(observedColumns)])
@@ -790,6 +809,7 @@ func (m *Model) setView(v View) {
 	m.history = nil
 	m.raw.scope = nil
 	m.resourceOperations = false
+	m.moduleRanking = false
 	m.associatedCalls = false
 	m.changeView(v)
 }

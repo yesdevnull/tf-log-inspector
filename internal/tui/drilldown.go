@@ -90,6 +90,11 @@ func (m *Model) aggregateTarget() (View, string, string, bool) {
 // selection. It shares aggregateTarget and jumpTarget with the key handler,
 // so the footer cannot advertise a route Enter would refuse.
 func (m *Model) enterHint() string {
+	if m.view == ViewResources && m.moduleRanking {
+		if r, ok := m.selectedRow(); ok && r.module != nil {
+			return "↵ resources"
+		}
+	}
 	view, _, _, ok := m.aggregateTarget()
 	if ok {
 		if view == ViewCalls {
