@@ -82,3 +82,9 @@ discovery. Regression tests preserve terminal syntax and alias linkage while
 masking identifiers. Adjacent colour-separated credential fields are checked as
 a separate privacy boundary. The event parser can read previously affected
 refresh lines without interpreting their truncated identifier suffixes.
+
+Independent review also verified CLI import/action-invocation summaries, deposed
+object identities, independent lifecycle history around unrelated timestamps,
+and persistent exact-module scope labels. All findings were resolved and
+rechecked. Separate test cleanup retained all 35 touched tests. Full tests with
+coverage and race detection, build, lint, formatting and module checks pass.
