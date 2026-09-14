@@ -1,12 +1,58 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestEventPanelResizeKeepsSelectionVisibleAndSourceReturn(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: 160, Height: 12}} {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
+			var input strings.Builder
+			for i := range 25 {
+				fmt.Fprintf(&input, "aws_instance.resource_with_long_name_%d: Creating...\n", i)
+			}
+			m := New(eventCapture(t, input.String()), "events.log")
+			m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+			m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+			for range 10 {
+				m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			}
+			m.View()
+			m.Update(size)
+			if got := ansi.Strip(m.View()); !strings.Contains(got, "> start") {
+				t.Errorf("selected event hidden after resize:\n%s", got)
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if m.view != ViewRawLog || m.raw.topLine != 10 {
+				t.Fatalf("selected source = view %v line %d, want raw line 10", m.view, m.raw.topLine)
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			if got := ansi.Strip(m.View()); !strings.Contains(got, "> start") || m.events.selected != 10 {
+				t.Errorf("source return lost visible selection:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestEventPanelPagingWithinLongRecordPreservesOffset(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance."+strings.Repeat("long_name_", 100)+": Creating...\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 12})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	before := m.View()
+	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	offset := m.events.viewport.YOffset
+	if offset == 0 {
+		t.Fatal("page down did not scroll within the record")
+	}
+	if after := m.View(); after == before || m.events.viewport.YOffset != offset {
+		t.Fatal("render reset paging within the selected record")
+	}
+}
 
 func TestEventPanelWithoutTimingsJumpsAndReturnsToProgress(t *testing.T) {
 	l := eventCapture(t, "heading\naws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\n")

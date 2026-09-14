@@ -978,9 +978,9 @@ func TestEveryNumericCellRendersTheNumberRecordedBesideIt(t *testing.T) {
 					if c.kind != numericColumn {
 						continue
 					}
-					if tc.view == ViewTypes && c.header == "res mean" && rw.numeric[1] == 0 {
+					if tc.view == ViewTypes && (c.header == "res mean" || c.header == "res max") && rw.numeric[1] == 0 {
 						if rw.cells[i] != "n/a" {
-							t.Errorf("unobserved mean displayed as %q", rw.cells[i])
+							t.Errorf("unobserved %s displayed as %q", c.header, rw.cells[i])
 						}
 						continue
 					}

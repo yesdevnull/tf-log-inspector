@@ -1639,7 +1639,7 @@ func TestTypesDetailPaneDescribesAnRPCOnlyType(t *testing.T) {
 		"res mean",
 		"  n/a",
 		"res max",
-		"  0s",
+		"  n/a",
 		"",
 		"slowest call",
 		"  ApplyResourceChange",
