@@ -61,6 +61,18 @@ func TestTerraformOutputScrubsColouredResourceAddresses(t *testing.T) {
 	}
 }
 
+func TestBracketedFieldsSeparatedByColourDoNotHideCredentials(t *testing.T) {
+	for _, suffix := range []string{"[token=private-secret]", " token=private-secret", "\x1b[1m[token=private-secret]"} {
+		got, err := Scrub([]byte("message [id=private-instance]\x1b[0m"+suffix+"\n"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(got.Data), "private-") || !strings.Contains(string(got.Data), "secret_") || !strings.Contains(string(got.Data), "]\x1b[0m") {
+			t.Fatalf("coloured field boundary hid credential or lost delimiter: %q", got.Data)
+		}
+	}
+}
+
 func TestTerraformOutputIDValues(t *testing.T) {
 	for _, tc := range []struct {
 		name, value, logged string
