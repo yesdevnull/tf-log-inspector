@@ -141,3 +141,33 @@ func TestEventInspectionHintsAndSelectedTimingResource(t *testing.T) {
 		}
 	}
 }
+
+func TestRawLogEventHintsPreserveNavigationWithinWidth(t *testing.T) {
+	for _, input := range []string{
+		"aws_instance.a: Creating...\n",
+		"aws_instance.a: Creating...\naws_instance.a: Creation complete after 1s\n",
+	} {
+		for _, width := range []int{60, 100, 160} {
+			m := New(eventCapture(t, input), "events.log")
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			m.setView(ViewRawLog)
+			lines := strings.Split(m.footerText(width), "\n")
+			actions := lines[len(lines)-1]
+			for _, hint := range []string{"g line", "/ search", "Esc clear", "q quit"} {
+				if !strings.Contains(actions, hint) {
+					t.Errorf("width %d lost %q: %s", width, hint, actions)
+				}
+			}
+			if width >= 100 {
+				for _, hint := range []string{"v events", "p outcomes", "u incomplete"} {
+					if !strings.Contains(actions, hint) {
+						t.Errorf("width %d lost %q: %s", width, hint, actions)
+					}
+				}
+			}
+			if got := ansi.StringWidth(m.actionKeys(width)); got > width {
+				t.Errorf("action hints occupy %d columns at width %d", got, width)
+			}
+		}
+	}
+}

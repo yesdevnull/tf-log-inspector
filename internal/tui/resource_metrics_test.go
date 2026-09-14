@@ -84,6 +84,38 @@ func TestNarrowResourceMeanSortRemainsVisible(t *testing.T) {
 	}
 }
 
+// The lower mean has the higher total, so mean sorting must change the order.
+func fractionalMeanSpans() []span.Span {
+	return []span.Span{
+		{Address: "alpha.a", ResourceType: "alpha", DurationMs: 1},
+		{Address: "alpha.b", ResourceType: "alpha", DurationMs: 1},
+		{Address: "alpha.c", ResourceType: "alpha", DurationMs: 1},
+		{Address: "alpha.d", ResourceType: "alpha", DurationMs: 2},
+		{Address: "zulu.a", ResourceType: "zulu", DurationMs: 1},
+		{Address: "zulu.b", ResourceType: "zulu", DurationMs: 2},
+	}
+}
+
+func TestTypeMeanSortPreservesFractionalMilliseconds(t *testing.T) {
+	m := New(&model.Log{UISpans: fractionalMeanSpans()}, "means.log")
+	m.setView(ViewTypes)
+	m.setActiveSort(6)
+	m.invalidateRows()
+	rows := m.rows()
+	for i, want := range []struct {
+		name, mean string
+		micros     uint64
+	}{{"zulu", "1.5ms", 1500}, {"alpha", "1.2ms", 1250}} {
+		if rows[i].cells[0] != want.name || rows[i].cells[6] != want.mean || rows[i].numeric[6] != want.micros {
+			t.Errorf("row %d = %+v, want %+v", i, rows[i], want)
+		}
+	}
+	got := m.renderList(160, 20)
+	if !strings.Contains(got, "1.5ms") || !strings.Contains(got, "1.2ms") || strings.Index(got, "zulu") > strings.Index(got, "alpha") {
+		t.Fatalf("fractional mean ranking missing: %s", got)
+	}
+}
+
 func TestModuleDrilldownScopeRemainsVisibleAfterChangingView(t *testing.T) {
 	for _, tc := range []struct{ address, label string }{
 		{"module.a.aws_instance.x", "module.a"},
