@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,25 @@ func moduleLabel(module model.ResourceModule) string {
 		return "(root module)"
 	}
 	return module.Path
+}
+
+// exactModuleScope labels the independent exact-instance filter, which can
+// remain active after leaving module rankings or hiding the facet pane.
+func (m *Model) exactModuleScope() string {
+	if m.resourceSelection.ExactModules == nil {
+		return ""
+	}
+	var labels []string
+	for module, selected := range m.resourceSelection.ExactModules {
+		if selected {
+			labels = append(labels, logfmt.DisplayText(moduleLabel(module)))
+		}
+	}
+	sort.Strings(labels)
+	if len(labels) == 0 {
+		return "exact modules: none"
+	}
+	return "exact modules: " + strings.Join(labels, ", ")
 }
 
 func (m *Model) moduleRows() []row {

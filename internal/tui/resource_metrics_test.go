@@ -83,3 +83,37 @@ func TestNarrowResourceMeanSortRemainsVisible(t *testing.T) {
 		t.Fatalf("narrow selected mean lost: %s", got)
 	}
 }
+
+func TestModuleDrilldownScopeRemainsVisibleAfterChangingView(t *testing.T) {
+	for _, tc := range []struct{ address, label string }{
+		{"module.a.aws_instance.x", "module.a"},
+		{"aws_instance.x", "(root module)"},
+		{"invalid", "(module unavailable)"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			m := New(&model.Log{UISpans: []span.Span{
+				{Address: tc.address, ResourceType: "aws_instance", DurationMs: 2000},
+				{Address: "module.b.aws_instance.y", ResourceType: "aws_instance", DurationMs: 1000},
+			}}, "scope.log")
+			m.setView(ViewResources)
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+			if m.selectedResources().UI.Count != 1 {
+				t.Fatal("module scope was lost")
+			}
+			want := "exact modules: " + tc.label
+			if got := m.resourceEvidenceText(); !strings.Contains(got, want) {
+				t.Errorf("hidden evidence scope %q: %s", want, got)
+			}
+			m = update(t, m, tea.WindowSizeMsg{Width: 60, Height: 30})
+			if got := m.View(); !strings.Contains(got, want) {
+				t.Errorf("hidden scope with facets collapsed: %s", got)
+			}
+			m = update(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+			if m.selectedResources().UI.Count != 2 || strings.Contains(m.captureSummary(), "exact modules:") {
+				t.Fatal("clearing filters left stale exact scope")
+			}
+		})
+	}
+}

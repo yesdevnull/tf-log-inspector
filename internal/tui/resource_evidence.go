@@ -116,6 +116,9 @@ func (m *Model) resourceEvidenceText() string {
 	}
 	fmt.Fprintf(&b, "  exact addresses: %s\n", selectedValues(m.resourceSelection.Addresses))
 	fmt.Fprintf(&b, "  module subtrees: %s\n", selectedModuleValues(m.resourceSelection.Modules))
+	if scope := m.exactModuleScope(); scope != "" {
+		fmt.Fprintf(&b, "  %s\n", scope)
+	}
 
 	b.WriteString("\nSELECTED RPC PARTITION\n")
 	writeEvidenceTotal(&b, "baseline", p.Selection.Baseline)
