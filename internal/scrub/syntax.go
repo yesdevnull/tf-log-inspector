@@ -428,6 +428,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		}
 	}
 	bodyStart := providerJSONStart(v.text)
+	fieldText := maskTerminalStyles(v.text)
 	for i, bracketEnd := 0, -1; i < len(v.text); {
 		if bracketEnd >= 0 && i >= bracketEnd {
 			bracketEnd = -1
@@ -452,8 +453,8 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 		}
 		// Masked provider bodies can contain long whitespace runs. Consume
 		// each run once instead of searching its remaining suffix per byte.
-		if space(v.text[i]) {
-			i = skipSpace(v.text, i)
+		if space(fieldText[i]) {
+			i = skipSpace(fieldText, i)
 			continue
 		}
 		if v.text[i] == '"' {
@@ -468,7 +469,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 			i = end
 			continue
 		}
-		if i > 0 && !space(v.text[i-1]) && !(v.text[i] == '[' && v.text[i-1] == ']') {
+		if i > 0 && !space(fieldText[i-1]) && !(v.text[i] == '[' && fieldText[i-1] == ']') {
 			i++
 			continue
 		}
@@ -599,6 +600,21 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 }
 
 var terminalStyle = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+
+// Discovery treats styling as a token boundary without moving source offsets.
+func maskTerminalStyles(text string) string {
+	styles := terminalStyle.FindAllStringIndex(text, -1)
+	if len(styles) == 0 {
+		return text
+	}
+	plain := []byte(text)
+	for _, style := range styles {
+		for i := style[0]; i < style[1]; i++ {
+			plain[i] = ' '
+		}
+	}
+	return string(plain)
+}
 
 // Field delimiters precede whitespace, another group, or the end of the
 // record, possibly separated by terminal styling. Brackets inside opaque IDs

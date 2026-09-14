@@ -666,16 +666,7 @@ func (s *session) discoverAddresses(v *view, start, end int, known bool) {
 	}
 	// Styling separates address tokens but is not part of their names. Keep
 	// discovery offsets aligned with the original bytes used for replacement.
-	addressText := v.text
-	if styles := terminalStyle.FindAllStringIndex(addressText, -1); len(styles) > 0 {
-		plain := []byte(addressText)
-		for _, style := range styles {
-			for i := style[0]; i < style[1]; i++ {
-				plain[i] = ' '
-			}
-		}
-		addressText = string(plain)
-	}
+	addressText := maskTerminalStyles(v.text)
 	var complete region
 	flush := func() {
 		if complete.end > complete.start && !exactRegion(v.addresses, complete.start, complete.end) {
