@@ -61,6 +61,10 @@ type Log struct {
 	// HasAddressContext.
 	Contexts []attrib.Context
 	Attribs  []attrib.Attribution
+
+	Events     []ResourceEvent
+	Outcomes   OutcomeEvidence
+	Incomplete []IncompleteOperation
 }
 
 // entryIndex retains every entry Scan emits. It deliberately ignores msg and
@@ -166,6 +170,7 @@ func LoadFile(f *os.File) (*Log, error) {
 		ComponentOverflow: componentOverflow,
 		RequestIDOverflow: requestIDOverflow,
 	})
+	result.indexEvents()
 	return result, nil
 }
 
