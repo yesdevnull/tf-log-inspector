@@ -164,6 +164,20 @@ func TestBracketedFieldsDoNotHideCredentials(t *testing.T) {
 	}
 }
 
+func TestColouredAssignmentsInsideBracketedIDsDiscoverCredentials(t *testing.T) {
+	for _, separator := range []string{" \x1b[0m", "\x1b[0m ", "\x1b[0m", " \x1b[0m\x1b[1m"} {
+		input := "Earlier private-secret\nmessage [id=private-instance" + separator + "token=private-secret]\n"
+		got, err := Scrub([]byte(input), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := string(got.Data)
+		if strings.Contains(output, "private-secret") || strings.Contains(output, "private-instance") || !strings.Contains(output, separator+"token=secret_") || !strings.HasSuffix(output, "]\n") {
+			t.Fatalf("coloured assignment hid credential or changed syntax: %q", output)
+		}
+	}
+}
+
 func TestBracketedIDEndsBeforeOtherGroups(t *testing.T) {
 	for _, suffix := range []string{" blah [thing]", "[token=private-secret]", " [message=thing token=private-secret] [name=private-name]"} {
 		t.Run(suffix, func(t *testing.T) {

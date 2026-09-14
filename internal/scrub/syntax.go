@@ -550,7 +550,7 @@ func (s *session) parseView(v *view, metadata, lifecycle bool) {
 				}
 				end := valueStart
 				for end < len(v.text) && end != bracketEnd && (!space(v.text[end]) || key == "id" && end < bracketEnd) {
-					if space(v.text[end]) && (end == valueStart || !space(v.text[end-1])) && assignmentAhead(v.text, end) {
+					if space(fieldText[end]) && (end == valueStart || !space(fieldText[end-1])) && assignmentAhead(fieldText, end) {
 						break
 					}
 					if v.text[end] == '"' {

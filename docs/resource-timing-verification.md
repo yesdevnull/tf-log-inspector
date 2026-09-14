@@ -86,5 +86,6 @@ refresh lines without interpreting their truncated identifier suffixes.
 Independent review also verified CLI import/action-invocation summaries, deposed
 object identities, independent lifecycle history around unrelated timestamps,
 and persistent exact-module scope labels. All findings were resolved and
-rechecked. Separate test cleanup retained all 35 touched tests. Full tests with
+rechecked. Separate test cleanup retained all touched tests, including the
+subsequent peer-review regressions. Full tests with
 coverage and race detection, build, lint, formatting and module checks pass.
