@@ -245,5 +245,8 @@ func (m *Model) captureSummary() string {
 	if cliOnly {
 		text += " · no timestamps"
 	}
+	if scope := m.exactModuleScope(); scope != "" {
+		text = scope + " · " + text
+	}
 	return text
 }
