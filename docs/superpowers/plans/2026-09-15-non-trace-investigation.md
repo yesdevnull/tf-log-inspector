@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, standard testing, existing Bubble Tea and Lip Gloss dependencies.
 
-**Spec:** Dan approved the five recommendations in this conversation: event search/filtering, collapsed progress, diagnostics, observed milestones, and investigation exports. Export entry point is being clarified before its task begins.
+**Spec:** Dan approved the five recommendations in this conversation: event search/filtering, collapsed progress, diagnostics, observed milestones, and investigation exports. Implement a CLI report plus a TUI export of the current investigation, as recommended in the optional preference question and subsequent stated assumption.
 
 ## Global Constraints
 
@@ -52,7 +52,7 @@
 
 **Interfaces:** Consume Task 1 projections and existing measured timing rows. Report metadata records input basename and explicit selected scope, query and facets. Event filters do not silently masquerade as timing filters. JSON uses explicit snake_case DTOs and `schema_version: 1`.
 
-- [ ] Resolve the requested export entry point from Dan's answer before beginning dependent implementation.
+- [ ] Add `--investigate` for CLI reports; `--format markdown` (also the default text rendering for this mode) or `--format json`. Existing profile/comparison formats remain text/json. In the TUI, an export prompt selects Markdown or JSON and a destination; use a currently unbound key and expose it in help.
 - [ ] Write failing tests with a real sanitised log containing timings, planned changes, a summary with missing counts, and an incomplete operation. Assert Markdown/JSON retain source references, observed zero versus missing, and untimestamped CLI evidence. Capture and assert output failures and invalid flags.
 - [ ] Implement a shared report builder with scoped timings, events/outcomes, incomplete evidence, diagnostics and milestones. Markdown uses escaped literal log text; JSON retains original evidence safely encoded. Include the current investigation selection when exporting from TUI.
 - [ ] Integrate CLI report dispatch using existing input/output protection. If TUI export is selected, provide a filename prompt, clear format selection and success/error feedback; prevent overwriting the input and existing files. Handle cancellation without writing.
