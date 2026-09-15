@@ -54,4 +54,8 @@ TUI export was also exercised at 60 columns against the actual captures: a progr
 
 ## Validation
 
-At implementation commit `1ac0963`, `go test -race ./...`, `go build ./...` and `golangci-lint run --timeout=5m` all passed. Each implementation task received an independent review and a separate test-cleanup pass. The narrow footer was re-rendered after correction and retains complete Esc, help and quit hints.
+At implementation commit `ca66927`, `go test -race ./...`, `go build ./...` and `golangci-lint run --timeout=5m` all passed. Each implementation task received an independent review and a separate test-cleanup pass. The narrow footer was re-rendered after correction and retains complete Esc, help and quit hints.
+
+Whole-branch review drove further regressions for diagnostic continuations crossing into provider-owned entries and for Markdown evidence fidelity. The corrected renderer includes explicit resource/action identity, duration provenance, labelled clock origins, nanosecond timestamps and intact quote entities. Both actual-capture verifiers and the TUI export workflows passed again after these corrections; the sanitised Markdown report was also regenerated and inspected.
+
+The scoped final re-review confirmed all four findings resolved with no new findings. A separate cleanup pass retained all final regressions; focused coverage measured 97.1% for `internal/model` and 89.8% for `internal/investigation`.
