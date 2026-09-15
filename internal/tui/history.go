@@ -63,6 +63,15 @@ func cloneRawState(src rawLogState) rawLogState {
 	return dst
 }
 
+func cloneEventPanelState(src eventPanelState) eventPanelState {
+	dst := src
+	dst.expanded = maps.Clone(src.expanded)
+	dst.input = newSearchInput()
+	dst.input.SetValue(src.query)
+	dst.input.SetCursor(src.input.Position())
+	return dst
+}
+
 func (m *Model) captureNavigation() navigationFrame {
 	if m.view == ViewTimeline {
 		m.rememberTimelineSelection()
@@ -85,7 +94,7 @@ func (m *Model) captureNavigation() navigationFrame {
 		resourceOperations: m.resourceOperations, operationSort: m.operationSort,
 		moduleRanking: m.moduleRanking, moduleSort: m.moduleSort,
 		associatedCalls: m.associatedCalls, associatedCallSort: m.associatedCallSort,
-		quality: m.captureQualityNavigation(), events: m.events,
+		quality: m.captureQualityNavigation(), events: cloneEventPanelState(m.events),
 	}
 }
 
@@ -130,7 +139,7 @@ func (m *Model) restoreNavigation(frame navigationFrame) {
 	m.reconcileRawCursor()
 	m.keepFocusOnADrawnPane()
 	m.restoreQualityNavigation(frame.quality)
-	m.events = frame.events
+	m.events = cloneEventPanelState(frame.events)
 }
 
 func (m *Model) captureQualityNavigation() qualityNavigationState {

@@ -265,6 +265,9 @@ func header(m *Model) string {
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer(w int) string {
 	if m.events.open {
+		if m.events.editing {
+			return clipWidth("/"+logfmt.DisplayText(m.events.query), w)
+		}
 		return eventPanelFooter(w)
 	}
 	if m.response.open {
@@ -516,6 +519,7 @@ const sortHint = "s sort"
 // a pane that is not drawn is not somewhere the reader can look.
 func (m *Model) actionKeys(w int) string {
 	eventHints := []string{"v events", "p outcomes", "u incomplete"}
+	allEventHints := append(append([]string(nil), eventHints...), "d diagnostics", "M milestones")
 	keys := []string{"⇥ pane"}
 	if m.view == ViewTimeline && m.pane == PaneList && !m.facetOverlayShowing(w) {
 		keys = append(keys, "t tier")
@@ -569,7 +573,9 @@ func (m *Model) actionKeys(w int) string {
 			if m.raw.scope != nil {
 				required = append(required, scopeHint)
 			}
-			if lipgloss.Width(strings.Join(required, hintSep)) <= w {
+			if lipgloss.Width(strings.Join(append(required, "d diagnostics", "M milestones"), hintSep)) <= w {
+				keys = append(keys, allEventHints...)
+			} else if lipgloss.Width(strings.Join(required, hintSep)) <= w {
 				keys = append(keys, eventHints...)
 			}
 		}
@@ -640,9 +646,13 @@ func (m *Model) actionKeys(w int) string {
 	}
 	if len(m.log.Events) > 0 {
 		if len(m.log.UISpans) == 0 && len(m.log.RPCSpans) == 0 {
+			candidate := append(append([]string(nil), allEventHints...), esc, quitHint)
+			if lipgloss.Width(strings.Join(candidate, hintSep)) <= w {
+				return strings.Join(candidate, hintSep)
+			}
 			return strings.Join(append(eventHints, esc, quitHint), hintSep)
 		}
-		candidate := append(append([]string(nil), keys...), eventHints...)
+		candidate := append(append([]string(nil), keys...), allEventHints...)
 		if lipgloss.Width(strings.Join(candidate, hintSep)) <= w {
 			keys = candidate
 		}

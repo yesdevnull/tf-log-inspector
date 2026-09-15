@@ -656,7 +656,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 			m.helpViewport = viewport.Model{}
-		case "v", "p", "u":
+		case "v", "p", "u", "d", "M":
 			m.openEventPanel(msg.String())
 		case "i":
 			m.openQuality()
