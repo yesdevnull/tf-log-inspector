@@ -5,6 +5,7 @@ import (
 	"html"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -34,26 +35,26 @@ func RenderMarkdown(w io.Writer, report Report) error {
 		b.WriteString("No timing evidence in this scope.\n")
 	}
 	for _, row := range report.Timings {
-		clock := "clock unavailable"
+		clock := "unavailable"
 		if row.ClockOrigin != nil {
-			clock = row.ClockOrigin.Format("2006-01-02T15:04:05.000Z07:00")
+			clock = row.ClockOrigin.Format(time.RFC3339Nano)
 		}
 		location := "source unavailable"
 		if row.Location != nil {
 			location = source(*row.Location)
 		}
-		fmt.Fprintf(&b, "- %s %s %s: %d ms; %s; %s; %s\n", markdown(row.Tier), markdown(value(row.Address)), markdown(value(row.Action)), row.DurationMs, markdown(row.Qualification), location, clock)
+		fmt.Fprintf(&b, "- %s %s %s: %d ms; %s; duration source: %s; %s; clock origin: %s\n", markdown(row.Tier), markdown(value(row.Address)), markdown(value(row.Action)), row.DurationMs, markdown(row.Qualification), markdown(evidenceValue(row.Source)), location, clock)
 	}
 	b.WriteString("\n## Events and outcomes\n\n")
 	if len(report.Events) == 0 {
 		b.WriteString("No event evidence in this scope.\n")
 	}
 	for _, event := range report.Events {
-		clock := "clock unavailable"
+		clock := "unavailable"
 		if !event.Timestamp.IsZero() {
-			clock = event.Timestamp.Format("2006-01-02T15:04:05.000Z07:00")
+			clock = event.Timestamp.Format(time.RFC3339Nano)
 		}
-		fmt.Fprintf(&b, "- %s; %s; %s: %s", markdown(string(event.Kind)), source(event.Location), clock, markdown(event.Message))
+		fmt.Fprintf(&b, "- %s; %s; timestamp: %s; %s", markdown(string(event.Kind)), source(event.Location), clock, eventIdentity(event))
 		if event.Summary != nil {
 			fmt.Fprintf(&b, "; add: %s; change: %s; remove: %s; import: %s; action invocation: %s", count(event.Summary.Add), count(event.Summary.Change), count(event.Summary.Remove), count(event.Summary.Import), count(event.Summary.ActionInvocation))
 		}
@@ -61,13 +62,13 @@ func RenderMarkdown(w io.Writer, report Report) error {
 	}
 	fmt.Fprintf(&b, "\n## Incomplete operations\n\n%d selected incomplete operation(s). Missing completion evidence does not prove a hang.\n", len(report.Incomplete))
 	for _, operation := range report.Incomplete {
-		fmt.Fprintf(&b, "- start: %s; %s", source(operation.Start.Location), markdown(operation.Start.Message))
+		fmt.Fprintf(&b, "- start: %s; %s", source(operation.Start.Location), eventIdentity(operation.Start))
 		if operation.Ambiguous {
 			b.WriteString("; ambiguous repeated starts")
 		}
 		b.WriteByte('\n')
 		if operation.LastProgress != nil {
-			fmt.Fprintf(&b, "  last progress: %s; %s\n", source(operation.LastProgress.Location), markdown(operation.LastProgress.Message))
+			fmt.Fprintf(&b, "  last progress: %s; %s\n", source(operation.LastProgress.Location), eventIdentity(*operation.LastProgress))
 		} else {
 			b.WriteString("  last progress: unavailable\n")
 		}
@@ -102,8 +103,18 @@ func value(text string) string {
 	}
 	return text
 }
+func evidenceValue(text string) string {
+	if text == "" {
+		return "unavailable"
+	}
+	return text
+}
+func eventIdentity(event model.ResourceEvent) string {
+	return fmt.Sprintf("address: %s; action: %s; source: %s; severity: %s; deposed key: %s; message: %s",
+		markdown(evidenceValue(event.Address)), markdown(evidenceValue(event.Action)), markdown(evidenceValue(event.Source)),
+		markdown(evidenceValue(event.Severity)), markdown(evidenceValue(event.DeposedKey)), markdown(event.Message))
+}
 func markdown(text string) string {
-	text = html.EscapeString(logfmt.DisplayText(text))
 	r := strings.NewReplacer("\\", "\\\\", "`", "\\`", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "(", "\\(", ")", "\\)", "#", "\\#", "!", "\\!")
-	return r.Replace(text)
+	return html.EscapeString(r.Replace(logfmt.DisplayText(text)))
 }

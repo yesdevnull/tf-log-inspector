@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
@@ -33,7 +34,7 @@ func TestReportPreservesScopeMissingValuesSourcesAndOriginalEvidence(t *testing.
 		t.Fatal(err)
 	}
 	text := markdown.String()
-	for _, want := range []string{"capture.log", "lines 1-2", "clock unavailable", "0 ms", "change: 0", "add: unavailable", "\\`hostile\\`", "&lt;b&gt;x&lt;/b&gt;", "\\[link\\]\\(bad\\)", "selected source: lines 1-1"} {
+	for _, want := range []string{"capture.log", "lines 1-2", "clock origin: unavailable", "0 ms", "change: 0", "add: unavailable", "\\`hostile\\`", "&lt;b&gt;x&lt;/b&gt;", "\\[link\\]\\(bad\\)", "selected source: lines 1-1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Markdown missing %q:\n%s", want, text)
 		}
@@ -73,6 +74,46 @@ func TestReportPreservesScopeMissingValuesSourcesAndOriginalEvidence(t *testing.
 	}
 	if len(document["incomplete_operations"].([]any)) != 1 || len(document["milestones"].([]any)) != 2 {
 		t.Fatalf("JSON omitted report sections: %#v", document)
+	}
+}
+
+func TestMarkdownRetainsEvidenceIdentityProvenanceAndPreciseClocks(t *testing.T) {
+	clockOrigin := time.Date(2026, 9, 15, 0, 0, 0, 123456789, time.UTC)
+	eventTime := time.Date(2026, 9, 15, 0, 0, 0, 223456789, time.UTC)
+	start := model.ResourceEvent{
+		Kind: model.EventStart, Address: `module.example["quoted"].aws_instance.main`, Action: "create",
+		Message: "owner's `message`", Severity: "info", Source: "ui", DeposedKey: "deadbeef", Timestamp: eventTime,
+		Location: model.SourceLocation{Entry: 2, StartByte: 20, EndByte: 30, StartLine: 3, EndLine: 3},
+	}
+	progress := start
+	progress.Kind = model.EventProgress
+	progress.Location = model.SourceLocation{Entry: 3, StartByte: 30, EndByte: 40, StartLine: 4, EndLine: 4}
+	report := Report{
+		Metadata:   Metadata{InputBasename: "capture.log"},
+		Timings:    []Timing{{Tier: "resource", Address: start.Address, Action: "create", Source: "ui_elapsed", Qualification: "observed duration", DurationMs: 100, ClockOrigin: &clockOrigin, Location: &start.Location}},
+		Events:     []model.ResourceEvent{start},
+		Incomplete: []model.IncompleteOperation{{Start: start, LastProgress: &progress}},
+	}
+
+	var rendered bytes.Buffer
+	if err := RenderMarkdown(&rendered, report); err != nil {
+		t.Fatal(err)
+	}
+	text := rendered.String()
+	for _, want := range []string{
+		"duration source: ui\\_elapsed",
+		"clock origin: 2026-09-15T00:00:00.123456789Z",
+		"timestamp: 2026-09-15T00:00:00.223456789Z",
+		"address: module.example\\[&#34;quoted&#34;\\].aws\\_instance.main",
+		"action: create", "source: ui", "severity: info", "deposed key: deadbeef",
+		"owner&#39;s \\`message\\`",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Markdown missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `&\#34;`) || strings.Contains(text, `&\#39;`) {
+		t.Fatalf("Markdown damaged generated quote entities:\n%s", text)
 	}
 }
 
