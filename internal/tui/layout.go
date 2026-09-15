@@ -271,7 +271,7 @@ func (m *Model) footer(w int) string {
 		if m.events.editing {
 			return clipWidth("/"+logfmt.DisplayText(m.events.query), w)
 		}
-		return eventPanelFooter(w)
+		return m.eventPanelFooter(w)
 	}
 	if m.response.open {
 		return m.responseFooter(w)
@@ -393,7 +393,7 @@ func (m *Model) keyHints(w int) string {
 		return clipWidth(helpCloseHint, w) + "\n" + clipWidth(quitHint, w)
 	}
 	if m.events.open {
-		return eventPanelFooter(w)
+		return m.eventPanelFooter(w)
 	}
 	if m.quality.open {
 		return clipWidth("i close", w) + "\n" + clipWidth(quitHint, w)

@@ -173,7 +173,9 @@ available for a source jump.
 
 Within any event, outcome, incomplete, diagnostic or milestone panel, `/`
 searches literal text, `f` cycles event kinds, and `s` cycles severity. These
-filters narrow event evidence independently of the timing facets. `?` opens
+filters narrow event evidence independently of the timing facets. Expanded
+groups and exports contain only matching observations; clear the filters to
+see all original observations. `?` opens
 the full key guide and `Esc` returns to the panel. Press `x`,
 then `m` for Markdown or `j` for JSON, enter a destination and press `Enter` to
 export that exact investigation. `Esc` cancels without writing. TUI exports

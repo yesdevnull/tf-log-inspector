@@ -268,9 +268,19 @@ func (m *Model) selectedEventPanelAction() (qualityActionRow, bool) {
 	return actions[m.events.selected], true
 }
 
-func eventPanelFooter(w int) string {
+func (m *Model) eventPanelFooter(w int) string {
+	if m.events.export.open {
+		if m.events.export.format == "" {
+			return clipWidth("Export format", w) + "\n" + wholeHints(w, []string{"m Markdown", "j JSON"}, "Esc cancel")
+		}
+		return clipWidth("Export destination", w) + "\n" + wholeHints(w, []string{"Enter export"}, "Esc cancel")
+	}
 	required := "? help" + hintSep + "q quit"
-	first := wholeHints(w, []string{"Esc close", "↑↓ select", "PgUp/PgDn page"}, required)
+	escape := "Esc close"
+	if m.events.parent {
+		escape = "Esc return"
+	}
+	first := wholeHints(w, []string{escape, "↑↓ select", "PgUp/PgDn page"}, required)
 	second := wholeHints(w, []string{"/ search", "f kind", "s severity", "x export", "Space expand", "Enter source", "r resource events"}, required)
 	return first + "\n" + second
 }

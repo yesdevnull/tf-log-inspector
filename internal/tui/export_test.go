@@ -66,6 +66,32 @@ func TestEventPanelExportsCurrentFilteredSelection(t *testing.T) {
 	}
 }
 
+func TestProgressExportMatchesFilteredPanelEvidence(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\naws_instance.a: Still creating... [20s elapsed]\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.openEventPanel("v")
+	typeEventQuery(&m, "10s elapsed")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if frame := unstyled(m.View()); !strings.Contains(frame, "10s elapsed") || strings.Contains(frame, "20s elapsed") || !strings.Contains(frame, "1/3 matching evidence") {
+		t.Fatalf("expanded group does not match query:\n%s", frame)
+	}
+	report := m.currentInvestigationReport()
+	if report.Scope.Query != "10s elapsed" || len(report.Events) != 1 || report.Events[0].Location.StartLine != 2 {
+		t.Fatalf("export does not match filtered panel: %+v", report)
+	}
+	m.Update(testKey("/"))
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if frame := unstyled(m.View()); !strings.Contains(frame, "10s elapsed") || !strings.Contains(frame, "20s elapsed") || !strings.Contains(frame, "3/3 matching evidence") {
+		t.Fatalf("clearing query did not restore observations:\n%s", frame)
+	}
+	report = m.currentInvestigationReport()
+	if report.Scope.Query != "" || len(report.Events) != 3 {
+		t.Fatalf("clearing query did not restore exported evidence: %+v", report)
+	}
+}
+
 func TestEventPanelExportCancelsAndRefusesExistingDestination(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "existing.md")
 	if err := os.WriteFile(destination, []byte("keep"), 0o600); err != nil {
@@ -97,9 +123,47 @@ func TestEventPanelExportCancelsAndRefusesExistingDestination(t *testing.T) {
 }
 
 func TestEventPanelFooterKeepsWholeEssentialHintsAtSixtyColumns(t *testing.T) {
-	footer := eventPanelFooter(60)
+	m := New(&model.Log{}, "input.log")
+	m.openEventPanel("v")
+	footer := m.footer(60)
 	if !strings.Contains(footer, "Esc close") || !strings.Contains(footer, "? help") || !strings.Contains(footer, "q quit") || strings.Contains(footer, " r ") {
 		t.Fatalf("unsafe clipped footer:\n%s", footer)
+	}
+}
+
+func TestEventExportHintsFollowModalInput(t *testing.T) {
+	m := New(&model.Log{}, "input.log")
+	m.openEventPanel("v")
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	m.Update(testKey("x"))
+	for _, want := range []string{"m Markdown", "j JSON", "Esc cancel"} {
+		if frame := unstyled(m.View()); !strings.Contains(frame, want) {
+			t.Errorf("format prompt missing %q:\n%s", want, frame)
+		}
+	}
+	for _, hint := range []string{"x export", "/ search", "f kind", "s severity", "Space expand", "↑↓ select", "Esc close", "? help", "q quit"} {
+		if frame := unstyled(m.View()); strings.Contains(frame, hint) {
+			t.Errorf("export format prompt advertises inactive %q:\n%s", hint, frame)
+		}
+	}
+	m.Update(testKey("j"))
+	m.Update(testKey("x/f?sq"))
+	if got := m.events.export.input.Value(); got != "x/f?sq" {
+		t.Fatalf("destination keys were treated as panel commands: %q", got)
+	}
+	for _, want := range []string{"Enter export", "Esc cancel"} {
+		if frame := unstyled(m.View()); !strings.Contains(frame, want) {
+			t.Errorf("destination prompt missing %q:\n%s", want, frame)
+		}
+	}
+	for _, hint := range []string{"m Markdown", "j JSON", "x export", "/ search", "? help", "q quit"} {
+		if frame := unstyled(m.View()); strings.Contains(frame, hint) {
+			t.Errorf("destination prompt advertises inactive %q:\n%s", hint, frame)
+		}
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if frame := unstyled(m.View()); !strings.Contains(frame, "x export") || !strings.Contains(frame, "Esc close") {
+		t.Fatalf("cancel did not restore panel controls:\n%s", frame)
 	}
 }
 

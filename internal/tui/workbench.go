@@ -50,7 +50,7 @@ func (m *Model) workbenchView() string {
 		} else if m.response.open {
 			navigation = m.responseNavigationHint()
 		} else if m.events.open {
-			navigation = strings.Split(eventPanelFooter(w), "\n")[0]
+			navigation = strings.Split(m.eventPanelFooter(w), "\n")[0]
 		} else if m.quality.open {
 			navigation = qualityNavigation
 		} else if m.showResourceEvidence {

@@ -225,9 +225,15 @@ func TestEventPanelSelectedResourceIsExactAndOutcomeResourceReturns(t *testing.T
 	if !strings.Contains(got, "Event history: aws_instance.a") || strings.Contains(got, "aws_instance.ab") {
 		t.Fatalf("resource history scope: %s", got)
 	}
+	if footer := m.footer(60); !strings.Contains(footer, "Esc return") || strings.Contains(footer, "Esc close") {
+		t.Fatalf("nested history footer misrepresents Esc: %s", footer)
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !strings.Contains(ansi.Strip(m.View()), "Outcomes (whole capture)") {
 		t.Fatal("resource jump lost outcome parent")
+	}
+	if footer := m.footer(60); !strings.Contains(footer, "Esc close") {
+		t.Fatalf("parent panel footer lost close action: %s", footer)
 	}
 }
 
