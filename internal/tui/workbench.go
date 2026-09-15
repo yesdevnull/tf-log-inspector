@@ -80,6 +80,8 @@ func (m *Model) workbenchView() string {
 		switch {
 		case m.response.open:
 			status = m.responseTitle()
+		case m.showHelp:
+			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.events.open:
 			status = m.eventPanelTitle()
 		case m.quality.open:
@@ -87,8 +89,6 @@ func (m *Model) workbenchView() string {
 			if m.quality.notice != "" {
 				status = m.quality.notice
 			}
-		case m.showHelp:
-			status = "↑↓ scroll  PgUp/PgDn page  ?/Esc close help"
 		case m.showResourceEvidence:
 			status = resourceEvidenceTitle
 		case m.timelineNoticeVisible(w):

@@ -98,8 +98,28 @@ func TestEventPanelExportCancelsAndRefusesExistingDestination(t *testing.T) {
 
 func TestEventPanelFooterKeepsWholeEssentialHintsAtSixtyColumns(t *testing.T) {
 	footer := eventPanelFooter(60)
-	if !strings.Contains(footer, "Esc close") || !strings.Contains(footer, "q quit") || strings.Contains(footer, " r ") {
+	if !strings.Contains(footer, "Esc close") || !strings.Contains(footer, "? help") || !strings.Contains(footer, "q quit") || strings.Contains(footer, " r ") {
 		t.Fatalf("unsafe clipped footer:\n%s", footer)
+	}
+}
+
+func TestNarrowEventPanelHelpShowsOmittedActionsAndRestoresState(t *testing.T) {
+	m := New(&model.Log{Events: []model.ResourceEvent{{Kind: model.EventStart, Address: "aws_instance.a", Location: model.SourceLocation{StartLine: 4}}}}, "input.log")
+	m.openEventPanel("v")
+	m.events.query = "instance"
+	m.events.kind = model.EventStart
+	m.events.selected = 0
+	m.events.expanded["progress-group:2"] = true
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 50})
+	before := m.events
+	m.Update(testKey("?"))
+	frame := unstyled(m.View())
+	if !m.showHelp || !m.events.open || !strings.Contains(frame, "Keys") || !strings.Contains(frame, "Enter r") {
+		t.Fatalf("event-panel help did not expose omitted actions:\n%s", frame)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.showHelp || !m.events.open || m.events.query != before.query || m.events.kind != before.kind || m.events.selected != before.selected || !m.events.expanded["progress-group:2"] {
+		t.Fatalf("closing help did not restore event panel state: before=%+v after=%+v", before, m.events)
 	}
 }
 

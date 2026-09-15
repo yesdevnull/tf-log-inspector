@@ -119,7 +119,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	if modeCount > 1 {
-		return errors.New("pass only one of --diagnose, --profile, --scrub, or --compare")
+		return errors.New("pass only one of --diagnose, --profile, --investigate, --scrub, or --compare")
 	}
 	if valuesSet && !*doScrub {
 		return errors.New("--scrub-values applies only to --scrub")
@@ -172,7 +172,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// looks exactly like a report written somewhere the user was not
 		// watching, which is how people lose work.
 		if *outPath != "" {
-			return errors.New("-o applies only to --diagnose, --profile, --scrub, or --compare")
+			return errors.New("-o applies only to --diagnose, --profile, --investigate, --scrub, or --compare")
 		}
 		return runTUI(fs.Arg(0))
 	}

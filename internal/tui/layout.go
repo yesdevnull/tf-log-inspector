@@ -264,6 +264,9 @@ func header(m *Model) string {
 // log: jumpToSpan refuses the jump precisely so the view does NOT change,
 // leaving the report beneath the table the user pressed Enter over.
 func (m *Model) footer(w int) string {
+	if m.showHelp {
+		return m.renderKeyHints(w)
+	}
 	if m.events.open {
 		if m.events.editing {
 			return clipWidth("/"+logfmt.DisplayText(m.events.query), w)
@@ -286,9 +289,6 @@ func (m *Model) footer(w int) string {
 	// all. That is the trap
 	// View's own comment says the footer exists to prevent, and the reason
 	// renderHelp is allowed to cut without a mark.
-	if m.showHelp {
-		return m.renderKeyHints(w)
-	}
 	if m.showResourceEvidence {
 		return clipWidth(resourceEvidenceNavigation, w) + "\n" + clipWidth(quitHint, w)
 	}
@@ -389,6 +389,9 @@ const jumpBlockedNote = "target entry hidden by the active filter -- Esc clears 
 // independently, because a 60-column terminal cannot show 62 columns of
 // action keys however they are arranged.
 func (m *Model) keyHints(w int) string {
+	if m.showHelp {
+		return clipWidth(helpCloseHint, w) + "\n" + clipWidth(quitHint, w)
+	}
 	if m.events.open {
 		return eventPanelFooter(w)
 	}
@@ -408,9 +411,6 @@ func (m *Model) keyHints(w int) string {
 	// It is not a loss of guidance either. Everything the footer would have
 	// abbreviated is spelled out in the pane above it, so what is left to
 	// say is how to leave.
-	if m.showHelp {
-		return clipWidth(helpCloseHint, w) + "\n" + clipWidth(quitHint, w)
-	}
 	return ansi.Strip(m.navigation(w)) + "\n" + ansi.Strip(m.actionHelp(w))
 }
 
@@ -778,14 +778,14 @@ func (m *Model) renderPanes(w, h int) string {
 	// it, so the frame's arithmetic is stated once here rather than at each
 	// of the five sites that would otherwise each have to subtract.
 	bodyH := paneBodyHeight(h)
+	if m.showHelp {
+		return framePanes(h, pane{title: helpTitle, content: m.renderWorkbenchHelp(panelContentWidth(w), bodyH), width: w})
+	}
 	if m.events.open {
 		return framePanes(h, pane{title: m.eventPanelTitle(), content: m.renderEventPanel(panelContentWidth(w), bodyH), width: w})
 	}
 	if m.quality.open {
 		return framePanes(h, pane{title: qualityTitle, content: m.renderQuality(panelContentWidth(w), bodyH), width: w})
-	}
-	if m.showHelp {
-		return framePanes(h, pane{title: helpTitle, content: m.renderWorkbenchHelp(panelContentWidth(w), bodyH), width: w})
 	}
 	if m.showResourceEvidence {
 		return framePanes(h, pane{title: resourceEvidenceTitle, content: m.renderResourceEvidence(panelContentWidth(w), bodyH), width: w})

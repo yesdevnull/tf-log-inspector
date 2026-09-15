@@ -249,6 +249,9 @@ func (m *Model) handleEventPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.events.selected = 0
 	case "x":
 		m.beginEventExport()
+	case "?":
+		m.showHelp = true
+		m.helpViewport = viewport.Model{}
 	}
 	return m, nil
 }
@@ -266,8 +269,9 @@ func (m *Model) selectedEventPanelAction() (qualityActionRow, bool) {
 }
 
 func eventPanelFooter(w int) string {
-	first := wholeHints(w, []string{"Esc close", "↑↓ select", "PgUp/PgDn page"}, "q quit")
-	second := wholeHints(w, []string{"/ search", "f kind", "s severity", "x export", "Space expand", "Enter source", "r resource events"}, "q quit")
+	required := "? help" + hintSep + "q quit"
+	first := wholeHints(w, []string{"Esc close", "↑↓ select", "PgUp/PgDn page"}, required)
+	second := wholeHints(w, []string{"/ search", "f kind", "s severity", "x export", "Space expand", "Enter source", "r resource events"}, required)
 	return first + "\n" + second
 }
 
