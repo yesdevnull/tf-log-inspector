@@ -62,11 +62,13 @@ func TestProgressCollapseExpandsToReachEveryMatchingSource(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if m.events.selected != 1 {
+		t.Fatalf("expansion moved away from selected group: %d", m.events.selected)
+	}
 	got = ansi.Strip(m.View())
 	if !strings.Contains(got, "10s elapsed") || !strings.Contains(got, "20s elapsed") {
 		t.Fatalf("expanded group omits source evidence: %s", got)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.raw.topLine != 1 {

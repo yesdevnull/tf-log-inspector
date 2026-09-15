@@ -214,8 +214,16 @@ func (l *Log) cliDiagnosticOwnsLine(startEntry uint32, line uint64) bool {
 }
 
 func independentCLIEvent(line string) bool {
-	if cliDiagnosticOpeningRule(line) || strings.HasPrefix(line, "Warning: ") || strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "{") {
+	if cliDiagnosticOpeningRule(line) || strings.HasPrefix(line, "Warning: ") || strings.HasPrefix(line, "Error: ") {
 		return true
+	}
+	if strings.HasPrefix(line, "{") {
+		var envelope struct {
+			Level string `json:"@level"`
+		}
+		if json.Unmarshal([]byte(line), &envelope) == nil && envelope.Level != "" {
+			return true
+		}
 	}
 	_, ok := cliEvent(line)
 	return ok

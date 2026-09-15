@@ -23,17 +23,25 @@ func newSearchInput() textinput.Model {
 
 // searchPrompt scrolls the editable text to keep the cursor within the footer.
 func (m Model) searchPrompt(w int) string {
-	if w < 2 {
-		return clipWidth("/", w)
-	}
-	input := newSearchInput()
-	input.Width = max(1, w-2)
-	input.SetValue(logfmt.DisplayText(m.raw.query))
-	if m.raw.input.Value() == m.raw.query {
-		input.SetCursor(m.raw.input.Position())
-	} else {
+	input := m.raw.input
+	if input.Value() != m.raw.query {
+		input = newSearchInput()
+		input.SetValue(logfmt.DisplayText(m.raw.query))
 		input.CursorEnd()
 	}
+	return inputPrompt(input, w, "/")
+}
+
+func inputPrompt(editor textinput.Model, w int, prompt string) string {
+	if w < 2 {
+		return clipWidth(prompt, w)
+	}
+	input := newSearchInput()
+	input.Prompt = prompt
+	input.SetValue(logfmt.DisplayText(editor.Value()))
+	input.SetCursor(editor.Position())
+	input.Width = max(1, w-len(prompt)-1)
+	input.SetCursor(editor.Position())
 	return clipWidth(input.View(), w)
 }
 

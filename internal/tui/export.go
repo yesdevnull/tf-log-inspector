@@ -111,8 +111,8 @@ func (m *Model) timingScopeDescription() string {
 	appendValues("resource type", base.Types)
 	appendValues("address", m.resourceSelection.Addresses)
 	appendValues("module subtree", m.resourceSelection.Modules)
-	appendValues("duration source", m.resourceSelection.Sources)
-	appendValues("lifecycle action", m.resourceSelection.Actions)
+	appendValues("duration source", intersectSelection(m.resourceSelection.Sources, m.allowedFacetValues(dimSource)))
+	appendValues("lifecycle action", intersectSelection(m.resourceSelection.Actions, m.allowedFacetValues(dimAction)))
 	if m.resourceSelection.ExactModules != nil {
 		values := make(map[string]bool)
 		for module, selected := range m.resourceSelection.ExactModules {

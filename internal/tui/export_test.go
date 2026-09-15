@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,3 +189,115 @@ func TestNarrowEventPanelHelpShowsOmittedActionsAndRestoresState(t *testing.T) {
 }
 
 func testKey(value string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)} }
+
+func TestInvestigationExportDescribesEffectiveTimingFacets(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		actions map[string]bool
+		want    string
+		count   int
+	}{
+		{"facet", nil, "lifecycle action=create", 1},
+		{"intersection", map[string]bool{"create": true, "delete": true}, "lifecycle action=create", 1},
+		{"empty intersection", map[string]bool{"delete": true}, "lifecycle action=(none)", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(eventCapture(t, "aws_instance.a: Creation complete after 1s\naws_instance.b: Destruction complete after 2s\n"), "events.log")
+			m.excludedFacets = map[string]map[string]bool{dimAction: {"delete": true}, dimSource: {"refresh_window": true}}
+			m.resourceSelection.Actions = tc.actions
+			m.openEventPanel("v")
+			report := m.currentInvestigationReport()
+			if len(report.Timings) != tc.count || !strings.Contains(report.TimingScope, tc.want) || !strings.Contains(report.TimingScope, "duration source=cli_elapsed") {
+				t.Fatalf("timings=%d scope=%q", len(report.Timings), report.TimingScope)
+			}
+		})
+	}
+}
+
+func TestEventExportPreservesInvestigationPosition(t *testing.T) {
+	for _, finish := range []string{"cancel", "export"} {
+		t.Run(finish, func(t *testing.T) {
+			var capture strings.Builder
+			for i := range 20 {
+				fmt.Fprintf(&capture, "aws_instance.r%d: Creating...\n", i)
+			}
+			m := New(eventCapture(t, capture.String()), "events.log")
+			m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+			m.openEventPanel("v")
+			for range 10 {
+				m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			}
+			m.View()
+			selected, offset := m.events.selected, m.events.viewport.YOffset
+			_, actions := m.eventPanelContent(m.events.viewport.Width)
+			selectedRow := actions[selected].start - offset
+			m.Update(testKey("x"))
+			m.View()
+			if finish == "cancel" {
+				m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			} else {
+				m.Update(testKey("j"))
+				m.Update(testKey(filepath.Join(t.TempDir(), "report.json")))
+				m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			}
+			m.View()
+			_, actions = m.eventPanelContent(m.events.viewport.Width)
+			if m.events.selected != selected || actions[selected].start-m.events.viewport.YOffset != selectedRow {
+				t.Fatalf("selected event or screen row changed: selection=%d offset=%d", m.events.selected, m.events.viewport.YOffset)
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if m.raw.topLine != 10 {
+				t.Fatalf("source jump = %d, want 10", m.raw.topLine)
+			}
+		})
+	}
+}
+
+func TestEventExportInterruptsBothStages(t *testing.T) {
+	for _, format := range []string{"", "j"} {
+		t.Run("format="+format, func(t *testing.T) {
+			m := New(&model.Log{}, "events.log")
+			m.openEventPanel("v")
+			m.Update(testKey("x"))
+			if format != "" {
+				m.Update(testKey(format))
+			}
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+			if !m.quitting || cmd == nil {
+				t.Fatal("Ctrl+C did not quit")
+			}
+			if _, ok := cmd().(tea.QuitMsg); !ok {
+				t.Fatal("missing quit message")
+			}
+		})
+	}
+}
+
+func TestInvestigationInputsShowCursorAndLongTail(t *testing.T) {
+	for _, mode := range []string{"search", "destination"} {
+		t.Run(mode, func(t *testing.T) {
+			m := New(&model.Log{}, "events.log")
+			m.Update(tea.WindowSizeMsg{Width: 60, Height: 12})
+			m.openEventPanel("v")
+			if mode == "search" {
+				m.Update(testKey("/"))
+			} else {
+				m.Update(testKey("x"))
+				m.Update(testKey("j"))
+			}
+			m.Update(testKey(strings.Repeat("abc", 100) + "TAIL.json"))
+			before := m.View()
+			if !strings.Contains(unstyled(before), "TAIL.json") {
+				t.Error("input tail is not visible")
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyHome})
+			if before == m.View() {
+				t.Error("Home moves an invisible caret")
+			}
+			m.Update(testKey("START"))
+			if !strings.Contains(unstyled(m.View()), "START") {
+				t.Error("insertion at caret is not visible")
+			}
+		})
+	}
+}

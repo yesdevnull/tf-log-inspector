@@ -66,7 +66,7 @@ func (m *Model) eventPanelRecords() []qualityRecord {
 	if m.events.export.open {
 		prompt := "Export current investigation: m Markdown · j JSON · Esc cancel"
 		if m.events.export.format != "" {
-			prompt = "Destination (Enter writes, Esc cancels): " + logfmt.DisplayText(m.events.export.input.Value())
+			prompt = "Enter an export destination below."
 		}
 		if m.events.export.notice != "" {
 			prompt = logfmt.DisplayText(m.events.export.notice) + "\n" + prompt
@@ -130,6 +130,11 @@ func (m *Model) renderEventPanel(w, h int) string {
 		return ""
 	}
 	lines, actions := m.eventPanelContent(w)
+	if m.events.export.open {
+		prompt := viewport.New(w, h)
+		prompt.SetContent(strings.Join(lines, "\n"))
+		return prompt.View()
+	}
 	v := &m.events.viewport
 	v.Width, v.Height = w, h
 	m.events.selected = min(max(0, m.events.selected), max(0, len(actions)-1))
@@ -158,6 +163,10 @@ func (m *Model) renderEventPanel(w, h int) string {
 }
 
 func (m *Model) handleEventPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		m.quitting = true
+		return m, tea.Quit
+	}
 	if m.events.export.open {
 		m.handleEventExportKey(msg)
 		return m, nil
@@ -238,7 +247,6 @@ func (m *Model) handleEventPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			key := actions[m.events.selected].id.kind
 			if strings.HasPrefix(key, "progress-group:") || strings.HasPrefix(key, "diagnostic-group:") {
 				m.events.expanded[key] = !m.events.expanded[key]
-				m.events.selected = 0
 			}
 		}
 	case "f":
@@ -273,7 +281,7 @@ func (m *Model) eventPanelFooter(w int) string {
 		if m.events.export.format == "" {
 			return clipWidth("Export format", w) + "\n" + wholeHints(w, []string{"m Markdown", "j JSON"}, "Esc cancel")
 		}
-		return clipWidth("Export destination", w) + "\n" + wholeHints(w, []string{"Enter export"}, "Esc cancel")
+		return wholeHints(w, []string{"Enter export"}, "Esc cancel") + "\n" + inputPrompt(m.events.export.input, w, "Destination: ")
 	}
 	required := "? help" + hintSep + "q quit"
 	escape := "Esc close"

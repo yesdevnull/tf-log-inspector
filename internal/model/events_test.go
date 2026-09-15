@@ -25,6 +25,21 @@ func TestResourceEventsKeepPhysicalSourceAndUnfinishedProgress(t *testing.T) {
 	}
 }
 
+func TestUnboxedDiagnosticRetainsJSONBodyBeforeStructuredOutput(t *testing.T) {
+	input := "Error: API rejected request\n\nResponse body:\n{\"code\":\"AccessDenied\",\"message\":\"Missing permission\"}\nContact the administrator.\n{\"@level\":\"info\",\"type\":\"version\",\"@message\":\"Terraform version\"}\n{\"@level\":\"info\",\"type\":\"change_summary\",\"changes\":{\"add\":0}}\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %+v", l.Outcomes.Diagnostics)
+	}
+	diagnostic := l.Outcomes.Diagnostics[0]
+	if !strings.Contains(diagnostic.Message, `"code":"AccessDenied"`) || !strings.Contains(diagnostic.Message, "Contact the administrator.") || diagnostic.Location.EndLine != 5 {
+		t.Fatalf("diagnostic lost body or consumed structured output: %+v", diagnostic)
+	}
+	if len(l.Outcomes.Summaries) != 1 {
+		t.Fatal("independent summary was swallowed")
+	}
+}
+
 func TestCLIDiagnosticBlockRetainsOriginalSourceRange(t *testing.T) {
 	input := "\x1b[33m╷\x1b[0m\n\x1b[33m│ Warning: Deprecated setting\x1b[0m\n│\n│   with aws_instance.example,\n│   on main.tf line 3, in resource \"aws_instance\" \"example\":\n│    3: legacy = true\n│\n│ Use the replacement setting.\n╵\naws_instance.example: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
 	l := loadResponseLog(t, input)

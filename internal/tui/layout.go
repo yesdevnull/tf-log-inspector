@@ -269,7 +269,7 @@ func (m *Model) footer(w int) string {
 	}
 	if m.events.open {
 		if m.events.editing {
-			return clipWidth("/"+logfmt.DisplayText(m.events.query), w)
+			return inputPrompt(m.events.input, w, "/")
 		}
 		return m.eventPanelFooter(w)
 	}
