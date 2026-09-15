@@ -131,7 +131,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return errors.New("--limit must be non-negative")
 	}
 	if formatSet && !*doProfile && !*doCompare && !*doInvestigate {
-		return errors.New("--format applies only to --profile or --compare")
+		return errors.New("--format applies only to --profile, --compare, or --investigate")
 	}
 	if *doInvestigate {
 		if !formatSet {

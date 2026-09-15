@@ -544,9 +544,9 @@ func TestProfileFormatValidationPrecedesFileAccess(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--format=text"}, "--format applies only to --profile or --compare"},
-		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile or --compare"},
-		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile or --compare"},
+		{[]string{"--format=text"}, "--format applies only to --profile, --compare, or --investigate"},
+		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile, --compare, or --investigate"},
+		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile, --compare, or --investigate"},
 		{[]string{"--profile", "--format=yaml"}, "--format must be text or json"},
 		{[]string{"--profile", "--format="}, "--format must be text or json"},
 		{[]string{"--profile", "--format=JSON"}, "--format must be text or json"},
@@ -585,7 +585,7 @@ func TestProfileFormatRepeatedFlagsUseLastValueAndRetainPresence(t *testing.T) {
 	}
 
 	err := run([]string{"--format=json", "--format=text", "missing.log"}, io.Discard, io.Discard)
-	if err == nil || err.Error() != "--format applies only to --profile or --compare" {
+	if err == nil || err.Error() != "--format applies only to --profile, --compare, or --investigate" {
 		t.Fatalf("explicit repeated format outside profile: %v", err)
 	}
 }

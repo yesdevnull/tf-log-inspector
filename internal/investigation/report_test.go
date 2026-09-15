@@ -34,7 +34,7 @@ func TestReportPreservesScopeMissingValuesSourcesAndOriginalEvidence(t *testing.
 		t.Fatal(err)
 	}
 	text := markdown.String()
-	for _, want := range []string{"capture.log", "lines 1-2", "clock origin: unavailable", "0 ms", "change: 0", "add: unavailable", "\\`hostile\\`", "&lt;b&gt;x&lt;/b&gt;", "\\[link\\]\\(bad\\)", "selected source: lines 1-1"} {
+	for _, want := range []string{"capture.log", "tool version: test", "lines 1-2", "clock origin: unavailable", "0 ms", "change: 0", "add: unavailable", "\\`hostile\\`", "&lt;b&gt;x&lt;/b&gt;", "\\[link\\]\\(bad\\)", "selected source: lines 1-1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("Markdown missing %q:\n%s", want, text)
 		}

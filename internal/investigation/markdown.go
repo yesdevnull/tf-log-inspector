@@ -14,6 +14,7 @@ import (
 func RenderMarkdown(w io.Writer, report Report) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Terraform investigation: %s\n\n", markdown(report.Metadata.InputBasename))
+	fmt.Fprintf(&b, "- tool version: %s\n", markdown(value(report.Metadata.ToolVersion)))
 	fmt.Fprintf(&b, "- panel: %s\n- timing scope: %s\n- event scope: %s\n", markdown(value(report.Scope.Panel)), markdown(value(report.TimingScope)), markdown(value(report.EventScope)))
 	if report.Scope.Query != "" {
 		fmt.Fprintf(&b, "- query: %s\n", markdown(report.Scope.Query))
