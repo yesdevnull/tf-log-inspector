@@ -65,7 +65,13 @@ func (l *Log) indexEvents() {
 	structuredLifecycle := false
 	var candidates []ResourceEvent
 	starts := l.indexSourceLines()
-	for i, start := range starts {
+	for i := 0; i < len(starts); i++ {
+		start := starts[i]
+		if diagnostic, next, ok := l.cliDiagnosticAt(starts, i); ok {
+			candidates = append(candidates, diagnostic)
+			i = next - 1
+			continue
+		}
 		end := uint64(len(l.Data))
 		if i+1 < len(starts) {
 			end = starts[i+1]
@@ -118,6 +124,98 @@ func (l *Log) indexEvents() {
 		}
 	}
 	l.Incomplete = incompleteOperations(l.Events)
+}
+
+func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, bool) {
+	line := l.cleanSourceLine(starts, index)
+	start := index
+	boxed := line == "╷" || strings.HasSuffix(line, ": ╷")
+	if boxed {
+		position, ok := l.SourcePosition(uint64(start + 1))
+		if !ok || l.providerOwnsCLI(position.Entry) {
+			return ResourceEvent{}, index, false
+		}
+		if index+1 >= len(starts) {
+			return ResourceEvent{}, index, false
+		}
+		index++
+		line = strings.TrimPrefix(l.cleanSourceLine(starts, index), "│ ")
+	}
+	severity := ""
+	switch {
+	case strings.HasPrefix(line, "Warning: "):
+		severity = "warning"
+	case strings.HasPrefix(line, "Error: "):
+		severity = "error"
+	default:
+		return ResourceEvent{}, index, false
+	}
+	position, ok := l.SourcePosition(uint64(start + 1))
+	if !ok || l.providerOwnsCLI(position.Entry) {
+		return ResourceEvent{}, index, false
+	}
+
+	end := index + 1
+	for end < len(starts) {
+		clean := l.cleanSourceLine(starts, end)
+		plain := strings.TrimPrefix(clean, "│ ")
+		if boxed {
+			end++
+			if clean == "╵" {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(plain, "Warning: ") || strings.HasPrefix(plain, "Error: ") || strings.HasPrefix(clean, "{") {
+			break
+		}
+		if _, event := cliEvent(clean); event {
+			break
+		}
+		end++
+	}
+	address := ""
+	var messageLines []string
+	for i := index; i < end; i++ {
+		clean := l.cleanSourceLine(starts, i)
+		plain := strings.TrimSpace(strings.TrimPrefix(clean, "│"))
+		if strings.HasPrefix(plain, "with ") && strings.HasSuffix(plain, ",") {
+			candidate := strings.TrimSuffix(strings.TrimPrefix(plain, "with "), ",")
+			if _, valid := resourceaddr.Parse(candidate); valid {
+				address = candidate
+			}
+		}
+		if plain != "" && plain != "╷" && plain != "╵" {
+			messageLines = append(messageLines, plain)
+		}
+	}
+	if address == "" {
+		return ResourceEvent{}, index, false
+	}
+	endByte := uint64(len(l.Data))
+	if end < len(starts) {
+		endByte = starts[end]
+	}
+	return ResourceEvent{
+		Kind: EventDiagnostic, Address: address, Severity: severity, Source: "cli",
+		Message:  strings.Join(messageLines, "\n"),
+		Location: SourceLocation{Entry: position.Entry, StartByte: starts[start], EndByte: endByte, StartLine: uint64(start + 1), EndLine: uint64(end)},
+	}, end, true
+}
+
+func (l *Log) cleanSourceLine(starts []uint64, index int) string {
+	end := uint64(len(l.Data))
+	if index+1 < len(starts) {
+		end = starts[index+1]
+	}
+	line := strings.TrimRight(string(l.Data[starts[index]:end]), "\r\n")
+	line, _ = logfmt.StripANSI(line, nil)
+	return line
+}
+
+func (l *Log) providerOwnsCLI(entry uint32) bool {
+	owner := l.Entries[entry]
+	return owner.Timestamped && owner.Level != logfmt.LevelUnknown && strings.HasPrefix(l.Comps.Lookup(owner.Comp), "provider.")
 }
 
 func lifecycleEvent(kind EventKind) bool {

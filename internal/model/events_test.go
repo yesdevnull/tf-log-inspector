@@ -25,6 +25,61 @@ func TestResourceEventsKeepPhysicalSourceAndUnfinishedProgress(t *testing.T) {
 	}
 }
 
+func TestCLIDiagnosticBlockRetainsOriginalSourceRange(t *testing.T) {
+	input := "\x1b[33m╷\x1b[0m\n\x1b[33m│ Warning: Deprecated setting\x1b[0m\n│\n│   with aws_instance.example,\n│   on main.tf line 3, in resource \"aws_instance\" \"example\":\n│    3: legacy = true\n│\n│ Use the replacement setting.\n╵\naws_instance.example: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	got := l.Outcomes.Diagnostics[0]
+	if got.Address != "aws_instance.example" || got.Severity != "warning" || got.Source != "cli" {
+		t.Fatalf("diagnostic identity = %#v", got)
+	}
+	if got.Location.StartLine != 1 || got.Location.EndLine != 9 || got.Location.StartByte != 0 || got.Location.EndByte != uint64(strings.Index(input, "aws_instance.example: Creating...")) {
+		t.Fatalf("diagnostic source = %#v", got.Location)
+	}
+	if !strings.Contains(got.Message, "Deprecated setting") || !strings.Contains(got.Message, "Use the replacement setting.") {
+		t.Fatalf("diagnostic message = %q", got.Message)
+	}
+	if len(l.Events) != 3 || l.Events[1].Kind != EventStart || l.Events[2].Kind != EventChangeSummary {
+		t.Fatalf("adjacent evidence swallowed: %#v", l.Events)
+	}
+}
+
+func TestCLIDiagnosticBlockStartsAtRunnerOwnedOpeningRule(t *testing.T) {
+	input := "\x1b[33m2026-09-14T00:00:11.000Z [INFO] runner: ╷\x1b[0m\n│ Warning: Runner warning\n│\n│   with aws_instance.example,\n│ Detail\n╵\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 1 || l.Outcomes.Diagnostics[0].Location.StartLine != 1 || l.Outcomes.Diagnostics[0].Location.EndLine != 6 {
+		t.Fatalf("runner diagnostic = %#v", l.Outcomes.Diagnostics)
+	}
+}
+
+func TestCLIDiagnosticRejectsProviderOwnedLookalike(t *testing.T) {
+	input := "2026-09-14T00:00:11.000Z [DEBUG] provider.example: ╷\n│ Warning: Provider payload\n│\n│   with aws_instance.fake,\n│ Provider detail\n╵\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 0 {
+		t.Fatalf("provider diagnostic admitted: %#v", l.Outcomes.Diagnostics)
+	}
+}
+
+func TestUnboxedAdjacentDiagnosticsStopBeforeOtherEvidence(t *testing.T) {
+	input := "Warning: First warning\n\n  with aws_instance.first,\n  on first.tf line 1:\n\nfirst detail\nError: Second problem\n\n  with aws_instance.second,\n\nsecond detail\naws_instance.second: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	first, second := l.Outcomes.Diagnostics[0], l.Outcomes.Diagnostics[1]
+	if first.Location.StartLine != 1 || first.Location.EndLine != 6 || first.Address != "aws_instance.first" || first.Severity != "warning" {
+		t.Fatalf("first diagnostic = %#v", first)
+	}
+	if second.Location.StartLine != 7 || second.Location.EndLine != 11 || second.Address != "aws_instance.second" || second.Severity != "error" {
+		t.Fatalf("second diagnostic = %#v", second)
+	}
+	if len(l.Events) != 4 || l.Events[2].Kind != EventStart || l.Events[3].Kind != EventChangeSummary {
+		t.Fatalf("adjacent evidence swallowed: %#v", l.Events)
+	}
+}
+
 func TestResourceEventsDoNotGuessRepeatedStarts(t *testing.T) {
 	l := loadResponseLog(t, "aws_instance.a: Creating...\naws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\naws_instance.a: Creation complete after 12s\naws_instance.b: Read complete after 0s\n")
 	if len(l.Events) != 5 || len(l.Incomplete) != 2 || len(l.UISpans) != 2 {
