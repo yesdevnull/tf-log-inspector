@@ -129,7 +129,7 @@ func (l *Log) indexEvents() {
 func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, bool) {
 	line := l.cleanSourceLine(starts, index)
 	start := index
-	boxed := line == "╷" || strings.HasSuffix(line, ": ╷")
+	boxed := cliDiagnosticOpeningRule(line)
 	if boxed {
 		position, ok := l.SourcePosition(uint64(start + 1))
 		if !ok || l.providerOwnsCLI(position.Entry) {
@@ -158,7 +158,6 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 	end := index + 1
 	for end < len(starts) {
 		clean := l.cleanSourceLine(starts, end)
-		plain := strings.TrimPrefix(clean, "│ ")
 		if boxed {
 			if clean == "╵" {
 				end++
@@ -170,10 +169,7 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 			end++
 			continue
 		}
-		if strings.HasPrefix(plain, "Warning: ") || strings.HasPrefix(plain, "Error: ") || strings.HasPrefix(clean, "{") {
-			break
-		}
-		if _, event := cliEvent(clean); event {
+		if independentCLIEvent(clean) {
 			break
 		}
 		end++
@@ -205,11 +201,15 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 }
 
 func independentCLIEvent(line string) bool {
-	if line == "╷" || strings.HasPrefix(line, "Warning: ") || strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "{") {
+	if cliDiagnosticOpeningRule(line) || strings.HasPrefix(line, "Warning: ") || strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "{") {
 		return true
 	}
 	_, ok := cliEvent(line)
 	return ok
+}
+
+func cliDiagnosticOpeningRule(line string) bool {
+	return line == "╷" || strings.HasSuffix(line, ": ╷")
 }
 
 func (l *Log) cleanSourceLine(starts []uint64, index int) string {

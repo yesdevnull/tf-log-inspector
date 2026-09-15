@@ -70,7 +70,7 @@ func TestCLIDiagnosticsRetainAddresslessEvidence(t *testing.T) {
 }
 
 func TestUnterminatedBoxedDiagnosticStopsBeforeIndependentEvidence(t *testing.T) {
-	input := "╷\n│ Warning: Truncated warning\n│\n│   with aws_instance.warning,\n│ Detail without a closing rule\naws_instance.lifecycle: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n{\"@level\":\"info\",\"type\":\"resource_drift\",\"change\":{\"resource\":{\"addr\":\"aws_instance.drift\"},\"action\":\"update\"}}\nError: Later diagnostic\n\n  with aws_instance.later,\n\nlater detail\n"
+	input := "╷\n│ Warning: Truncated warning\n│\n│   with aws_instance.warning,\n│ Detail without a closing rule\naws_instance.lifecycle: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n{\"@level\":\"info\",\"type\":\"resource_drift\",\"change\":{\"resource\":{\"addr\":\"aws_instance.drift\"},\"action\":\"update\"}}\n2026-09-14T00:00:11.000Z [INFO] runner: ╷\n│ Error: Later diagnostic\n│\n│   with aws_instance.later,\n│ later detail\n╵\n"
 	l := loadResponseLog(t, input)
 	if len(l.Events) != 5 {
 		t.Fatalf("events = %#v", l.Events)
@@ -84,8 +84,36 @@ func TestUnterminatedBoxedDiagnosticStopsBeforeIndependentEvidence(t *testing.T)
 	if got := l.Events[0].Location; got.StartLine != 1 || got.EndLine != 5 {
 		t.Fatalf("truncated diagnostic source = %#v", got)
 	}
-	if got := l.Events[4].Location; got.StartLine != 9 || got.EndLine != 13 {
+	if got := l.Events[4].Location; got.StartLine != 9 || got.EndLine != 14 {
 		t.Fatalf("later diagnostic source = %#v", got)
+	}
+}
+
+func TestUnterminatedBoxedDiagnosticStopsBeforeRunnerOwnedDiagnostic(t *testing.T) {
+	input := "╷\n│ Warning: Truncated warning\n│\n│ first detail\n2026-09-14T00:00:11.000Z [INFO] runner: ╷\n│ Error: Later diagnostic\n│\n│   with aws_instance.later,\n│ later detail\n╵\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	if got := l.Outcomes.Diagnostics[0].Location; got.StartLine != 1 || got.EndLine != 4 {
+		t.Fatalf("truncated diagnostic source = %#v", got)
+	}
+	if got := l.Outcomes.Diagnostics[1].Location; got.StartLine != 5 || got.EndLine != 10 {
+		t.Fatalf("runner diagnostic source = %#v", got)
+	}
+}
+
+func TestUnboxedDiagnosticStopsBeforeRunnerOwnedBoxedDiagnostic(t *testing.T) {
+	input := "Warning: First warning\nfirst detail\n2026-09-14T00:00:11.000Z [INFO] runner: ╷\n│ Error: Later diagnostic\n│\n│ later detail\n╵\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	if got := l.Outcomes.Diagnostics[0].Location; got.StartLine != 1 || got.EndLine != 2 {
+		t.Fatalf("unboxed diagnostic source = %#v", got)
+	}
+	if got := l.Outcomes.Diagnostics[1].Location; got.StartLine != 3 || got.EndLine != 7 {
+		t.Fatalf("runner diagnostic source = %#v", got)
 	}
 }
 
