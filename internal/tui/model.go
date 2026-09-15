@@ -125,6 +125,7 @@ type Model struct {
 	events                eventPanelState
 	log                   *model.Log
 	name                  string
+	toolVersion           string
 
 	// resourceIndex belongs to log for the Model's entire lifetime. The
 	// projection is the one shared selection for every timing consumer and
@@ -331,6 +332,11 @@ type facetCursor struct {
 // Captures with RPC timings open on Calls; UI-only captures open on
 // Resources so the first screen shows the evidence available in the log.
 func New(l *model.Log, path string) Model {
+	return NewWithVersion(l, path, "dev")
+}
+
+// NewWithVersion builds a model whose exported reports identify the running tool.
+func NewWithVersion(l *model.Log, path, toolVersion string) Model {
 	// The level dimension goes last, after the span dimensions
 	// FacetsForSpans builds: it is the one dimension drawn from entries
 	// rather than spans, and it filters only the raw log.
@@ -343,6 +349,7 @@ func New(l *model.Log, path string) Model {
 	m := Model{
 		log:           l,
 		name:          filepath.Base(path),
+		toolVersion:   toolVersion,
 		view:          ViewCalls,
 		pane:          PaneList,
 		facets:        facets,
@@ -957,9 +964,9 @@ var _ tea.Model = (*Model)(nil)
 // compile. The assertion above states that invariant, so restoring a value
 // receiver on View or Update breaks the build here rather than quietly
 // re-splitting the model in two.
-func Run(l *model.Log, path string) error {
+func Run(l *model.Log, path, toolVersion string) error {
 	applyColourPreference()
-	m := New(l, path)
+	m := NewWithVersion(l, path, toolVersion)
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err

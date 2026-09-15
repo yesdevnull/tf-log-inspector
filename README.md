@@ -116,6 +116,8 @@ These are development builds; version-tag publishing is not configured.
     tfli --profile -o profile.txt plan.log
     tfli --profile --format json run.log
     tfli --profile --format json -o profile.json run.log
+    tfli --investigate plan.log
+    tfli --investigate --format json -o investigation.json plan.log
     tfli --compare [--format text] [--limit N] [-o comparison.txt] before.log after.log
     tfli --compare --format json [-o comparison.json] before.log after.log
     tfli --scrub -o sanitised.log plan.log
@@ -162,6 +164,19 @@ of an incomplete capture or lifecycle, not proof of a hung operation, and do not
 enter completed duration rankings. Ordinary CLI refresh messages do not promise
 a completion marker and are excluded from this list. From either panel, `r`
 opens the selected resource's event history.
+
+Within any event, outcome, incomplete, diagnostic or milestone panel, `/`, `f`
+and `s` narrow event evidence independently of the timing facets. Press `x`,
+then `m` for Markdown or `j` for JSON, enter a destination and press `Enter` to
+export that exact investigation. `Esc` cancels without writing. TUI exports
+refuse existing destinations, including the input file and its aliases. The
+report records the panel, query, event facets, selected source reference, and
+the separate timing selection.
+
+The command-line `--investigate` mode exports the whole capture. Markdown is the
+default; `--format json` emits the [investigation JSON v1 contract](docs/investigation-json-v1.md).
+Both forms contain unmasked resource addresses and observed log evidence, so
+review them before sharing.
 
 The top tab bar highlights the active view; its number keys switch views.
 `Tab` moves the arrow and accented panel border to the pane receiving keyboard

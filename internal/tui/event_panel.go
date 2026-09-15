@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 )
@@ -26,6 +27,7 @@ type eventPanelState struct {
 	kind          model.EventKind
 	severity      string
 	expanded      map[string]bool
+	export        eventExportState
 }
 
 func (m *Model) openEventPanel(mode string) {
@@ -61,6 +63,16 @@ func (m *Model) eventPanelTitle() string {
 }
 
 func (m *Model) eventPanelRecords() []qualityRecord {
+	if m.events.export.open {
+		prompt := "Export current investigation: m Markdown · j JSON · Esc cancel"
+		if m.events.export.format != "" {
+			prompt = "Destination (Enter writes, Esc cancels): " + logfmt.DisplayText(m.events.export.input.Value())
+		}
+		if m.events.export.notice != "" {
+			prompt = logfmt.DisplayText(m.events.export.notice) + "\n" + prompt
+		}
+		return []qualityRecord{{text: prompt}}
+	}
 	var records []qualityRecord
 	filter := m.eventPanelFilter()
 	switch m.events.mode {
@@ -94,6 +106,9 @@ func (m *Model) eventPanelRecords() []qualityRecord {
 		status += " Filters: " + strings.Join(active, "; ")
 	}
 	records = append([]qualityRecord{{text: status}}, records...)
+	if m.events.export.notice != "" {
+		records = append([]qualityRecord{{text: logfmt.DisplayText(m.events.export.notice)}}, records...)
+	}
 	for i := range records {
 		if records[i].id.kind != "" {
 			records[i].id.index = i
@@ -143,6 +158,10 @@ func (m *Model) renderEventPanel(w, h int) string {
 }
 
 func (m *Model) handleEventPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.events.export.open {
+		m.handleEventExportKey(msg)
+		return m, nil
+	}
 	if m.events.editing {
 		m.handleEventSearchKey(msg)
 		if m.quitting {
@@ -228,6 +247,8 @@ func (m *Model) handleEventPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.events.severity = nextEventSeverity(m.events.severity)
 		m.events.selected = 0
+	case "x":
+		m.beginEventExport()
 	}
 	return m, nil
 }
@@ -245,7 +266,27 @@ func (m *Model) selectedEventPanelAction() (qualityActionRow, bool) {
 }
 
 func eventPanelFooter(w int) string {
-	return clipWidth("Esc return/close  ↑↓ select  PgUp/PgDn page", w) + "\n" + clipWidth("/ search  f kind  s severity  Space expand  Enter source  r resource events  q quit", w)
+	first := wholeHints(w, []string{"Esc close", "↑↓ select", "PgUp/PgDn page"}, "q quit")
+	second := wholeHints(w, []string{"/ search", "f kind", "s severity", "x export", "Space expand", "Enter source", "r resource events"}, "q quit")
+	return first + "\n" + second
+}
+
+func wholeHints(w int, hints []string, required string) string {
+	line := ""
+	for _, hint := range hints {
+		candidate := hint
+		if line != "" {
+			candidate = line + hintSep + hint
+		}
+		if lipgloss.Width(candidate+hintSep+required) > w {
+			break
+		}
+		line = candidate
+	}
+	if line != "" {
+		line += hintSep
+	}
+	return line + required
 }
 
 func (m *Model) handleEventSearchKey(msg tea.KeyMsg) {
