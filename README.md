@@ -151,10 +151,10 @@ candidates to avoid double-counting. CLI operations retain their displayed
 duration resolution and physical source lines, but have no timeline positions.
 
 Use `v` to inspect the selected resource's event history, or the whole capture
-when no resource row is selected. Events stay in physical file order, including
-starts, progress, completions and diagnostics. CLI events have source lines but
-no invented timestamps. `Enter` opens the selected event's source; `Esc` returns
-to the panel and then to the investigation.
+when no resource row is selected. History covers starts, progress, completions
+and diagnostics, retaining their original physical source locations. CLI events
+have source lines but no invented timestamps. `Enter` opens the selected event's
+source; `Esc` returns to the panel and then to the investigation.
 
 `p` opens whole-capture plan outcomes, keeping observed drift separate from
 planned changes. Explicit zero summary counts remain zero; absent counts and
@@ -165,8 +165,16 @@ enter completed duration rankings. Ordinary CLI refresh messages do not promise
 a completion marker and are excluded from this list. From either panel, `r`
 opens the selected resource's event history.
 
-Within any event, outcome, incomplete, diagnostic or milestone panel, `/`, `f`
-and `s` narrow event evidence independently of the timing facets. Press `x`,
+`d` opens grouped diagnostics, including plain CLI warnings and errors. `M`
+opens milestones for observed activity and summaries; these do not imply
+exclusive execution phases. Progress and repeated diagnostics appear in compact
+groups. Space expands the selected group to make each original observation
+available for a source jump.
+
+Within any event, outcome, incomplete, diagnostic or milestone panel, `/`
+searches literal text, `f` cycles event kinds, and `s` cycles severity. These
+filters narrow event evidence independently of the timing facets. `?` opens
+the full key guide and `Esc` returns to the panel. Press `x`,
 then `m` for Markdown or `j` for JSON, enter a destination and press `Enter` to
 export that exact investigation. `Esc` cancels without writing. TUI exports
 refuse existing destinations, including the input file and its aliases. The
