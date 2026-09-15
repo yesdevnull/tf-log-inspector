@@ -129,16 +129,19 @@ func (l *Log) indexEvents() {
 func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, bool) {
 	line := l.cleanSourceLine(starts, index)
 	start := index
+	startPosition, ok := l.SourcePosition(uint64(start + 1))
+	if !ok || l.providerOwnsCLI(startPosition.Entry) {
+		return ResourceEvent{}, index, false
+	}
 	boxed := cliDiagnosticOpeningRule(line)
 	if boxed {
-		position, ok := l.SourcePosition(uint64(start + 1))
-		if !ok || l.providerOwnsCLI(position.Entry) {
-			return ResourceEvent{}, index, false
-		}
 		if index+1 >= len(starts) {
 			return ResourceEvent{}, index, false
 		}
 		index++
+		if !l.cliDiagnosticOwnsLine(startPosition.Entry, uint64(index+1)) {
+			return ResourceEvent{}, start, false
+		}
 		line = strings.TrimPrefix(l.cleanSourceLine(starts, index), "│ ")
 	}
 	severity := ""
@@ -150,13 +153,11 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 	default:
 		return ResourceEvent{}, index, false
 	}
-	position, ok := l.SourcePosition(uint64(start + 1))
-	if !ok || l.providerOwnsCLI(position.Entry) {
-		return ResourceEvent{}, index, false
-	}
-
 	end := index + 1
 	for end < len(starts) {
+		if !l.cliDiagnosticOwnsLine(startPosition.Entry, uint64(end+1)) {
+			break
+		}
 		clean := l.cleanSourceLine(starts, end)
 		if boxed {
 			if clean == "╵" {
@@ -196,8 +197,20 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 	return ResourceEvent{
 		Kind: EventDiagnostic, Address: address, Severity: severity, Source: "cli",
 		Message:  strings.Join(messageLines, "\n"),
-		Location: SourceLocation{Entry: position.Entry, StartByte: starts[start], EndByte: endByte, StartLine: uint64(start + 1), EndLine: uint64(end)},
+		Location: SourceLocation{Entry: startPosition.Entry, StartByte: starts[start], EndByte: endByte, StartLine: uint64(start + 1), EndLine: uint64(end)},
 	}, end, true
+}
+
+func (l *Log) cliDiagnosticOwnsLine(startEntry uint32, line uint64) bool {
+	position, ok := l.SourcePosition(line)
+	if !ok {
+		return false
+	}
+	if position.Entry == startEntry {
+		return true
+	}
+	owner := l.Entries[position.Entry]
+	return !owner.Timestamped || owner.Level == logfmt.LevelUnknown
 }
 
 func independentCLIEvent(line string) bool {

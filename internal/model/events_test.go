@@ -125,6 +125,36 @@ func TestCLIDiagnosticRejectsProviderOwnedLookalike(t *testing.T) {
 	}
 }
 
+func TestUnboxedDiagnosticStopsBeforeProviderOwnedEntry(t *testing.T) {
+	input := "Warning: Real CLI warning\nCLI detail\n2026-09-14T00:00:11.000Z [DEBUG] provider.example: response body:\n  with aws_instance.fake,\nprovider-only payload\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	got := l.Outcomes.Diagnostics[0]
+	if got.Address != "" || got.Message != "Warning: Real CLI warning\nCLI detail" {
+		t.Fatalf("provider entry contributed diagnostic evidence: %#v", got)
+	}
+	if got.Location.StartLine != 1 || got.Location.EndLine != 2 || got.Location.EndByte != uint64(strings.Index(input, "2026-09-14")) {
+		t.Fatalf("diagnostic source = %#v", got.Location)
+	}
+}
+
+func TestUnterminatedBoxedDiagnosticStopsBeforeProviderOwnedEntry(t *testing.T) {
+	input := "╷\n│ Warning: Truncated CLI warning\n│ CLI detail\n2026-09-14T00:00:11.000Z [DEBUG] provider.example: response body:\n│   with aws_instance.fake,\n╵\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	got := l.Outcomes.Diagnostics[0]
+	if got.Address != "" || got.Message != "Warning: Truncated CLI warning\nCLI detail" {
+		t.Fatalf("provider entry contributed diagnostic evidence: %#v", got)
+	}
+	if got.Location.StartLine != 1 || got.Location.EndLine != 3 || got.Location.EndByte != uint64(strings.Index(input, "2026-09-14")) {
+		t.Fatalf("diagnostic source = %#v", got.Location)
+	}
+}
+
 func TestUnboxedAdjacentDiagnosticsStopBeforeOtherEvidence(t *testing.T) {
 	input := "Warning: First warning\n\n  with aws_instance.first,\n  on first.tf line 1:\n\nfirst detail\nError: Second problem\n\n  with aws_instance.second,\n\nsecond detail\naws_instance.second: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
 	l := loadResponseLog(t, input)
