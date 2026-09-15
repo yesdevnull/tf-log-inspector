@@ -180,9 +180,13 @@ func eventPanelEvidenceCounts(l *model.Log, mode string, filter model.EventFilte
 			}
 		}
 	case "d":
-		if filter.Kind == "" {
-			filter.Kind = model.EventDiagnostic
+		var diagnostics []model.ResourceEvent
+		for _, event := range events {
+			if event.Kind == model.EventDiagnostic {
+				diagnostics = append(diagnostics, event)
+			}
 		}
+		events = diagnostics
 	case "M":
 		events = nil
 		for _, milestone := range model.InvestigationMilestones(l.Events) {

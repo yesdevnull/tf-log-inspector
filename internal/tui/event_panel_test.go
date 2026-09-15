@@ -87,6 +87,24 @@ func TestDiagnosticsPanelGroupsAndExpandsOccurrences(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsPanelCountsOnlyDiagnosticEvidence(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Creation complete after 1s\nWarning: unsafe value\n\n  with aws_instance.a,\n  on main.tf line 1, in resource \"aws_instance\" \"a\":\n   1: resource x\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "1/1 matching evidence") {
+		t.Fatalf("unfiltered diagnostic count includes other event kinds: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := ansi.Strip(m.View())
+	if !strings.Contains(got, "0/1 matching evidence") || !strings.Contains(got, "No matching event evidence") {
+		t.Fatalf("non-diagnostic kind contradicts visible diagnostic records: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view == ViewRawLog {
+		t.Fatal("empty diagnostic result jumped through a stale action")
+	}
+}
+
 func TestMilestonePanelIsReachableFromRawLogAndExplainsOverlap(t *testing.T) {
 	m := New(eventCapture(t, "aws_instance.a: Refreshing state... [id=x]\nPlan: 1 to add, 0 to change, 0 to destroy.\n"), "events.log")
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
