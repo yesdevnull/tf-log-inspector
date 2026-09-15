@@ -160,10 +160,14 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 		clean := l.cleanSourceLine(starts, end)
 		plain := strings.TrimPrefix(clean, "│ ")
 		if boxed {
-			end++
 			if clean == "╵" {
+				end++
 				break
 			}
+			if independentCLIEvent(clean) {
+				break
+			}
+			end++
 			continue
 		}
 		if strings.HasPrefix(plain, "Warning: ") || strings.HasPrefix(plain, "Error: ") || strings.HasPrefix(clean, "{") {
@@ -189,9 +193,6 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 			messageLines = append(messageLines, plain)
 		}
 	}
-	if address == "" {
-		return ResourceEvent{}, index, false
-	}
 	endByte := uint64(len(l.Data))
 	if end < len(starts) {
 		endByte = starts[end]
@@ -201,6 +202,14 @@ func (l *Log) cliDiagnosticAt(starts []uint64, index int) (ResourceEvent, int, b
 		Message:  strings.Join(messageLines, "\n"),
 		Location: SourceLocation{Entry: position.Entry, StartByte: starts[start], EndByte: endByte, StartLine: uint64(start + 1), EndLine: uint64(end)},
 	}, end, true
+}
+
+func independentCLIEvent(line string) bool {
+	if line == "╷" || strings.HasPrefix(line, "Warning: ") || strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "{") {
+		return true
+	}
+	_, ok := cliEvent(line)
+	return ok
 }
 
 func (l *Log) cleanSourceLine(starts []uint64, index int) string {

@@ -54,6 +54,41 @@ func TestCLIDiagnosticBlockStartsAtRunnerOwnedOpeningRule(t *testing.T) {
 	}
 }
 
+func TestCLIDiagnosticsRetainAddresslessEvidence(t *testing.T) {
+	input := "╷\n│ Warning: General warning\n│\n│ Applies to the whole configuration.\n╵\nError: General error\n\nApplies to the whole run.\n"
+	l := loadResponseLog(t, input)
+	if len(l.Outcomes.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v", l.Outcomes.Diagnostics)
+	}
+	boxed, unboxed := l.Outcomes.Diagnostics[0], l.Outcomes.Diagnostics[1]
+	if boxed.Address != "" || boxed.Severity != "warning" || boxed.Location.StartLine != 1 || boxed.Location.EndLine != 5 {
+		t.Fatalf("boxed diagnostic = %#v", boxed)
+	}
+	if unboxed.Address != "" || unboxed.Severity != "error" || unboxed.Location.StartLine != 6 || unboxed.Location.EndLine != 8 {
+		t.Fatalf("unboxed diagnostic = %#v", unboxed)
+	}
+}
+
+func TestUnterminatedBoxedDiagnosticStopsBeforeIndependentEvidence(t *testing.T) {
+	input := "╷\n│ Warning: Truncated warning\n│\n│   with aws_instance.warning,\n│ Detail without a closing rule\naws_instance.lifecycle: Creating...\nPlan: 1 to add, 0 to change, 0 to destroy.\n{\"@level\":\"info\",\"type\":\"resource_drift\",\"change\":{\"resource\":{\"addr\":\"aws_instance.drift\"},\"action\":\"update\"}}\nError: Later diagnostic\n\n  with aws_instance.later,\n\nlater detail\n"
+	l := loadResponseLog(t, input)
+	if len(l.Events) != 5 {
+		t.Fatalf("events = %#v", l.Events)
+	}
+	wantKinds := []EventKind{EventDiagnostic, EventStart, EventChangeSummary, EventDrift, EventDiagnostic}
+	for i, want := range wantKinds {
+		if l.Events[i].Kind != want {
+			t.Errorf("event %d kind = %q, want %q", i, l.Events[i].Kind, want)
+		}
+	}
+	if got := l.Events[0].Location; got.StartLine != 1 || got.EndLine != 5 {
+		t.Fatalf("truncated diagnostic source = %#v", got)
+	}
+	if got := l.Events[4].Location; got.StartLine != 9 || got.EndLine != 13 {
+		t.Fatalf("later diagnostic source = %#v", got)
+	}
+}
+
 func TestCLIDiagnosticRejectsProviderOwnedLookalike(t *testing.T) {
 	input := "2026-09-14T00:00:11.000Z [DEBUG] provider.example: ╷\n│ Warning: Provider payload\n│\n│   with aws_instance.fake,\n│ Provider detail\n╵\n"
 	l := loadResponseLog(t, input)

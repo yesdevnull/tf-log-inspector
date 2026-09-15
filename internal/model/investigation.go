@@ -46,7 +46,7 @@ func FilterEvents(events []ResourceEvent, filter EventFilter) []ResourceEvent {
 }
 
 func eventMatches(event ResourceEvent, filter EventFilter) bool {
-	if filter.Address != "" && !strings.EqualFold(event.Address, filter.Address) {
+	if filter.Address != "" && event.Address != filter.Address {
 		return false
 	}
 	if filter.Kind != "" && event.Kind != filter.Kind {

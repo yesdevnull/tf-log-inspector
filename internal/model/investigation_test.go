@@ -21,6 +21,17 @@ func TestInvestigationFilterCombinesCriteriaAndSearchesLiteralFields(t *testing.
 	}
 }
 
+func TestInvestigationFilterMatchesExactAddressCase(t *testing.T) {
+	events := []ResourceEvent{
+		{Kind: EventProgress, Address: `aws_instance.example["Prod"]`},
+		{Kind: EventProgress, Address: `aws_instance.example["prod"]`},
+	}
+	got := FilterEvents(events, EventFilter{Address: `aws_instance.example["Prod"]`})
+	if !reflect.DeepEqual(got, events[:1]) {
+		t.Fatalf("FilterEvents() = %#v, want %#v", got, events[:1])
+	}
+}
+
 func TestProgressGroupsDoNotCrossOperationBoundaries(t *testing.T) {
 	events := []ResourceEvent{
 		eventAt(EventStart, "aws_instance.a", "Creating...", 1),
