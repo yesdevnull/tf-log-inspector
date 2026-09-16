@@ -217,12 +217,12 @@ func resourceDetailSections(r *model.ResourceRow, w int) []paneSection {
 	if r.OverlappingRPC.Count > 0 {
 		fields = append(fields, fmt.Sprintf("inferred Overlapping RPCs: %d, %s", r.OverlappingRPC.Count, rpcEvidenceDuration(r.OverlappingRPC)))
 	}
-	fields = append(fields, "Duration sources and qualifications: e evidence.")
 	var lines paneSection
 	for _, field := range fields {
 		lines = append(lines, strings.Split(ansi.Wrap(field, max(1, w), ""), "\n")...)
 	}
-	return []paneSection{lines}
+	hint := append(paneSection{""}, strings.Split(ansi.Wrap("Press e to inspect duration sources and qualifications.", max(1, w), ""), "\n")...)
+	return []paneSection{lines, hint}
 }
 
 // captureSummary is separate from the filename so long paths cannot hide evidence.
