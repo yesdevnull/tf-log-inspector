@@ -9,6 +9,141 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func typeEventQuery(m *Model, query string) {
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	for _, r := range query {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+}
+
+func TestEventSearchAppliesLiteralQueryAndCancelRestoresIt(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\naws_instance.b: Creating...\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	typeEventQuery(&m, "[10s")
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "/[10s") {
+		t.Fatalf("search prompt does not preserve literal text: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "1/3 matching evidence") || strings.Contains(got, "aws_instance.b") {
+		t.Fatalf("applied event search: %s", got)
+	}
+	typeEventQuery(&m, "discard")
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.events.query != "[10s" || m.events.editing {
+		t.Fatalf("cancelled query = %q, editing %t", m.events.query, m.events.editing)
+	}
+}
+
+func TestEventFilterCombinesKindSeverityAndEmptyMatchCannotJump(t *testing.T) {
+	l := eventCapture(t, "Warning: unsafe value\n\n  with aws_instance.a,\n  on main.tf line 1, in resource \"aws_instance\" \"a\":\n   1: resource x\n")
+	m := New(l, "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.openEventPanel("v")
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "0/1 matching evidence") {
+		t.Fatalf("combined facets did not yield an empty result: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view == ViewRawLog {
+		t.Fatal("empty filtered result jumped to stale source")
+	}
+}
+
+func TestProgressCollapseExpandsToReachEveryMatchingSource(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\naws_instance.a: Still creating... [20s elapsed]\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.openEventPanel("v")
+	got := ansi.Strip(m.View())
+	if !strings.Contains(got, "2 progress observations") || strings.Contains(got, "10s elapsed") {
+		t.Fatalf("progress group is not compact by default: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if m.events.selected != 1 {
+		t.Fatalf("expansion moved away from selected group: %d", m.events.selected)
+	}
+	got = ansi.Strip(m.View())
+	if !strings.Contains(got, "10s elapsed") || !strings.Contains(got, "20s elapsed") {
+		t.Fatalf("expanded group omits source evidence: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.raw.topLine != 1 {
+		t.Fatalf("expanded member source top = %d, want line index 1", m.raw.topLine)
+	}
+}
+
+func TestDiagnosticsPanelGroupsAndExpandsOccurrences(t *testing.T) {
+	m := New(eventCapture(t, "Warning: unsafe value\n\n  with aws_instance.a,\n  on main.tf line 1, in resource \"aws_instance\" \"a\":\n   1: resource x\nWarning: unsafe value\n\n  with aws_instance.a,\n  on main.tf line 1, in resource \"aws_instance\" \"a\":\n   1: resource x\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "Diagnostics") || !strings.Contains(got, "2 occurrences") {
+		t.Fatalf("diagnostic grouping absent: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "line 1") || !strings.Contains(got, "line 6") {
+		t.Fatalf("diagnostic occurrences not expanded: %s", got)
+	}
+}
+
+func TestDiagnosticsPanelCountsOnlyDiagnosticEvidence(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Creation complete after 1s\nWarning: unsafe value\n\n  with aws_instance.a,\n  on main.tf line 1, in resource \"aws_instance\" \"a\":\n   1: resource x\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "1/1 matching evidence") {
+		t.Fatalf("unfiltered diagnostic count includes other event kinds: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := ansi.Strip(m.View())
+	if !strings.Contains(got, "0/1 matching evidence") || !strings.Contains(got, "No matching event evidence") {
+		t.Fatalf("non-diagnostic kind contradicts visible diagnostic records: %s", got)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.view == ViewRawLog {
+		t.Fatal("empty diagnostic result jumped through a stale action")
+	}
+}
+
+func TestMilestonePanelIsReachableFromRawLogAndExplainsOverlap(t *testing.T) {
+	m := New(eventCapture(t, "aws_instance.a: Refreshing state... [id=x]\nPlan: 1 to add, 0 to change, 0 to destroy.\n"), "events.log")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m.setView(ViewRawLog)
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'M'}})
+	got := ansi.Strip(m.View())
+	if !strings.Contains(got, "Milestones") || !strings.Contains(got, "Observed activity can overlap") {
+		t.Fatalf("milestones unavailable from Raw Log: %s", got)
+	}
+}
+
+func TestEventSearchExpansionAndSourceReturnSurviveResize(t *testing.T) {
+	for _, width := range []int{60, 100, 160} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := New(eventCapture(t, "aws_instance.a: Creating...\naws_instance.a: Still creating... [10s elapsed]\naws_instance.a: Still creating... [20s elapsed]\n"), "events.log")
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			m.openEventPanel("v")
+			typeEventQuery(&m, "[10s")
+			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m.Update(tea.KeyMsg{Type: tea.KeySpace})
+			m.Update(tea.WindowSizeMsg{Width: 160, Height: 12})
+			m.Update(tea.KeyMsg{Type: tea.KeyDown})
+			m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if m.view != ViewRawLog || m.raw.topLine != 1 {
+				t.Fatalf("source jump = view %v line %d", m.view, m.raw.topLine)
+			}
+			m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+			if !m.events.expanded["progress-group:0"] || m.events.query != "[10s" || m.events.selected != 1 {
+				t.Fatalf("restored state: query %q selected %d expanded %#v", m.events.query, m.events.selected, m.events.expanded)
+			}
+			if got := ansi.Strip(m.View()); !strings.Contains(got, "1/3 matching evidence") || !strings.Contains(got, "10s elapsed") {
+				t.Fatalf("restored panel: %s", got)
+			}
+		})
+	}
+}
+
 func TestEventPanelResizeKeepsSelectionVisibleAndSourceReturn(t *testing.T) {
 	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: 160, Height: 12}} {
 		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
@@ -92,9 +227,15 @@ func TestEventPanelSelectedResourceIsExactAndOutcomeResourceReturns(t *testing.T
 	if !strings.Contains(got, "Event history: aws_instance.a") || strings.Contains(got, "aws_instance.ab") {
 		t.Fatalf("resource history scope: %s", got)
 	}
+	if footer := m.footer(60); !strings.Contains(footer, "Esc return") || strings.Contains(footer, "Esc close") {
+		t.Fatalf("nested history footer misrepresents Esc: %s", footer)
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !strings.Contains(ansi.Strip(m.View()), "Outcomes (whole capture)") {
 		t.Fatal("resource jump lost outcome parent")
+	}
+	if footer := m.footer(60); !strings.Contains(footer, "Esc close") {
+		t.Fatalf("parent panel footer lost close action: %s", footer)
 	}
 }
 

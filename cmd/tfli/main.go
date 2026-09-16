@@ -23,6 +23,7 @@ import (
 
 	"github.com/yesdevnull/tf-log-inspector/internal/attrib"
 	"github.com/yesdevnull/tf-log-inspector/internal/diagnose"
+	"github.com/yesdevnull/tf-log-inspector/internal/investigation"
 	"github.com/yesdevnull/tf-log-inspector/internal/logfmt"
 	"github.com/yesdevnull/tf-log-inspector/internal/model"
 	"github.com/yesdevnull/tf-log-inspector/internal/profile"
@@ -44,21 +45,23 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("tfli", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		doDiagnose = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked; review before sharing)")
-		doProfile  = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
-		doScrub    = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
-		doCompare  = fs.Bool("compare", false, "compare two raw logs")
-		format     = fs.String("format", "text", "profile or comparison output format: text or json")
-		limit      = fs.Int("limit", profile.DefaultLimit, "maximum rows per text report list (0 means all)")
-		valuesPath = fs.String("scrub-values", "", "additional literal identifying values, one per line")
-		outPath    = fs.String("o", "", "write the selected report or scrubbed log to this file")
-		showVer    = fs.Bool("version", false, "print the version and exit")
+		doDiagnose    = fs.Bool("diagnose", false, "report the log's structure and exit (output is masked; review before sharing)")
+		doProfile     = fs.Bool("profile", false, "rank resource types and calls by time (output is NOT masked)")
+		doScrub       = fs.Bool("scrub", false, "write a log with consistent fake identifying values")
+		doCompare     = fs.Bool("compare", false, "compare two raw logs")
+		doInvestigate = fs.Bool("investigate", false, "export observed investigation evidence")
+		format        = fs.String("format", "text", "profile or comparison output format: text or json; investigation: markdown or json")
+		limit         = fs.Int("limit", profile.DefaultLimit, "maximum rows per text report list (0 means all)")
+		valuesPath    = fs.String("scrub-values", "", "additional literal identifying values, one per line")
+		outPath       = fs.String("o", "", "write the selected report or scrubbed log to this file")
+		showVer       = fs.Bool("version", false, "print the version and exit")
 	)
 	usage := func() {
 		// Usage is best-effort, matching flag.PrintDefaults' error handling.
 		_, _ = fmt.Fprintf(stderr, "Usage: tfli <logfile>                                  open the interface\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --diagnose [-o report.txt] <logfile>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --profile [--format text] [--limit N] [-o report.txt] <logfile>\n")
+		_, _ = fmt.Fprintf(stderr, "       tfli --investigate [--format markdown|json] [-o investigation.md] <logfile>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --compare [--format text] [--limit N] [-o comparison.txt] <before.log> <after.log>\n")
 		_, _ = fmt.Fprintf(stderr, "       tfli --scrub [--scrub-values values.txt] -o sanitised.log <logfile>\n\n")
 		_, _ = fmt.Fprintf(stderr, "Analyse a Terraform TF_LOG file. For an HCP Terraform workspace,\n")
@@ -110,13 +113,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	})
 	modeCount := 0
-	for _, selected := range []bool{*doDiagnose, *doProfile, *doScrub, *doCompare} {
+	for _, selected := range []bool{*doDiagnose, *doProfile, *doScrub, *doCompare, *doInvestigate} {
 		if selected {
 			modeCount++
 		}
 	}
 	if modeCount > 1 {
-		return errors.New("pass only one of --diagnose, --profile, --scrub, or --compare")
+		return errors.New("pass only one of --diagnose, --profile, --investigate, --scrub, or --compare")
 	}
 	if valuesSet && !*doScrub {
 		return errors.New("--scrub-values applies only to --scrub")
@@ -127,10 +130,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *limit < 0 {
 		return errors.New("--limit must be non-negative")
 	}
-	if formatSet && !*doProfile && !*doCompare {
-		return errors.New("--format applies only to --profile or --compare")
+	if formatSet && !*doProfile && !*doCompare && !*doInvestigate {
+		return errors.New("--format applies only to --profile, --compare, or --investigate")
 	}
-	if *format != "text" && *format != "json" {
+	if *doInvestigate {
+		if !formatSet {
+			*format = "markdown"
+		}
+		if *format != "markdown" && *format != "json" {
+			return errors.New("--format must be markdown or json for --investigate")
+		}
+	} else if *format != "text" && *format != "json" {
 		return errors.New("--format must be text or json")
 	}
 	if *format == "json" && limitSet {
@@ -154,16 +164,45 @@ func run(args []string, stdout, stderr io.Writer) error {
 		})
 	case *doDiagnose:
 		return runDiagnose(fs.Arg(0), *outPath, stdout)
+	case *doInvestigate:
+		return runInvestigation(fs.Arg(0), *outPath, stdout, *format)
 	default:
 		// The interface writes no report, so -o names a file that would never
 		// be created. Accepting the flag and opening the interface anyway
 		// looks exactly like a report written somewhere the user was not
 		// watching, which is how people lose work.
 		if *outPath != "" {
-			return errors.New("-o applies only to --diagnose, --profile, --scrub, or --compare")
+			return errors.New("-o applies only to --diagnose, --profile, --investigate, --scrub, or --compare")
 		}
 		return runTUI(fs.Arg(0))
 	}
+}
+
+func runInvestigation(path, outPath string, stdout io.Writer, format string) error {
+	f, log, err := loadReportInput(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	selection := investigation.Selection{Scope: investigation.Scope{Panel: "whole capture"}, TimingScope: "whole capture", EventScope: "whole capture"}
+	selection.RPCIndices = makeIndices(len(log.RPCSpans))
+	selection.UIIndices = makeIndices(len(log.UISpans))
+	selection.EventIndices = makeIndices(len(log.Events))
+	report := investigation.Build(log, investigation.Metadata{ToolVersion: version, InputBasename: filepath.Base(path)}, selection)
+	return writeReport(stdout, []*os.File{f}, outPath, func(w io.Writer) error {
+		if format == "json" {
+			return investigation.RenderJSON(w, report)
+		}
+		return investigation.RenderMarkdown(w, report)
+	})
+}
+
+func makeIndices(length int) []int {
+	indices := make([]int, length)
+	for i := range indices {
+		indices[i] = i
+	}
+	return indices
 }
 
 // writeReport sends render's output to outPath if set, otherwise to stdout.
@@ -335,5 +374,5 @@ func runTUI(path string) error {
 	if err != nil {
 		return err
 	}
-	return runTUIFunc(l, path)
+	return runTUIFunc(l, path, version)
 }

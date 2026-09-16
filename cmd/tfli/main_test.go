@@ -41,6 +41,37 @@ func TestRunReportsOutputWriteFailures(t *testing.T) {
 	}
 }
 
+func TestInvestigateWritesMarkdownAndJSONReports(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "mixed-hcp.log")
+	for _, tc := range []struct{ format, contains string }{{"markdown", "# Terraform investigation:"}, {"json", `"kind": "investigation"`}} {
+		t.Run(tc.format, func(t *testing.T) {
+			var stdout bytes.Buffer
+			if err := run([]string{"--investigate", "--format=" + tc.format, path}, &stdout, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String(), tc.contains) || !strings.Contains(stdout.String(), "mixed-hcp.log") {
+				t.Fatalf("report missing contract:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+func TestInvestigateRejectsModeAndFormatConflicts(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "mixed-hcp.log")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--investigate", "--profile", path}, "pass only one of"},
+		{[]string{"--investigate", "--format=text", path}, "--format must be markdown or json for --investigate"},
+		{[]string{"--investigate", "--limit=1", path}, "--limit applies only to --profile or --compare"},
+	} {
+		if err := run(tc.args, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("run(%q) = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
 func TestCommandDiagnosticsCannotControlTheTerminal(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tfli")
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
@@ -239,9 +270,10 @@ func TestRunWithNoModeReachesTheTUIPath(t *testing.T) {
 	original := runTUIFunc
 	t.Cleanup(func() { runTUIFunc = original })
 
-	var gotPath string
-	runTUIFunc = func(l *model.Log, path string) error {
+	var gotPath, gotVersion string
+	runTUIFunc = func(l *model.Log, path, toolVersion string) error {
 		gotPath = path
+		gotVersion = toolVersion
 		return nil
 	}
 
@@ -252,6 +284,9 @@ func TestRunWithNoModeReachesTheTUIPath(t *testing.T) {
 	}
 	if gotPath != logPath {
 		t.Errorf("runTUIFunc called with path %q, want %q", gotPath, logPath)
+	}
+	if gotVersion != version {
+		t.Errorf("runTUIFunc version = %q, want %q", gotVersion, version)
 	}
 }
 
@@ -509,9 +544,9 @@ func TestProfileFormatValidationPrecedesFileAccess(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--format=text"}, "--format applies only to --profile or --compare"},
-		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile or --compare"},
-		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile or --compare"},
+		{[]string{"--format=text"}, "--format applies only to --profile, --compare, or --investigate"},
+		{[]string{"--diagnose", "--format=json"}, "--format applies only to --profile, --compare, or --investigate"},
+		{[]string{"--scrub", "--format=text"}, "--format applies only to --profile, --compare, or --investigate"},
 		{[]string{"--profile", "--format=yaml"}, "--format must be text or json"},
 		{[]string{"--profile", "--format="}, "--format must be text or json"},
 		{[]string{"--profile", "--format=JSON"}, "--format must be text or json"},
@@ -550,7 +585,7 @@ func TestProfileFormatRepeatedFlagsUseLastValueAndRetainPresence(t *testing.T) {
 	}
 
 	err := run([]string{"--format=json", "--format=text", "missing.log"}, io.Discard, io.Discard)
-	if err == nil || err.Error() != "--format applies only to --profile or --compare" {
+	if err == nil || err.Error() != "--format applies only to --profile, --compare, or --investigate" {
 		t.Fatalf("explicit repeated format outside profile: %v", err)
 	}
 }
@@ -673,6 +708,8 @@ func TestReportsPreserveTheirInputFileIncludingJSON(t *testing.T) {
 		{name: "diagnose", args: []string{"--diagnose"}},
 		{name: "profile text", args: []string{"--profile"}},
 		{name: "profile JSON", args: []string{"--profile", "--format=json"}},
+		{name: "investigation Markdown", args: []string{"--investigate"}},
+		{name: "investigation JSON", args: []string{"--investigate", "--format=json"}},
 	} {
 		for _, alias := range []string{"same path", "hard link", "symbolic link"} {
 			t.Run(mode.name+"/"+alias, func(t *testing.T) {
@@ -716,6 +753,19 @@ func TestReportsPreserveTheirInputFileIncludingJSON(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestInvestigatePropagatesOutputFailure(t *testing.T) {
+	err := run([]string{"--investigate", filepath.Join("..", "..", "testdata", "mixed-hcp.log")}, investigationErrorWriter{}, io.Discard)
+	if err == nil || err.Error() != "investigation output failed" {
+		t.Fatalf("output error = %v", err)
+	}
+}
+
+type investigationErrorWriter struct{}
+
+func (investigationErrorWriter) Write([]byte) (int, error) {
+	return 0, errors.New("investigation output failed")
 }
 
 // The -o file is the one artefact meant to leave the machine, so a failure
@@ -797,7 +847,7 @@ func TestOWithoutAModeFlagIsRejected(t *testing.T) {
 	original := runTUIFunc
 	t.Cleanup(func() { runTUIFunc = original })
 	opened := false
-	runTUIFunc = func(l *model.Log, path string) error {
+	runTUIFunc = func(l *model.Log, path, toolVersion string) error {
 		opened = true
 		return nil
 	}
@@ -811,7 +861,7 @@ func TestOWithoutAModeFlagIsRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "-o") {
 		t.Errorf("error does not name the flag it refused: %v", err)
 	}
-	for _, mode := range []string{"--diagnose", "--profile", "--scrub"} {
+	for _, mode := range []string{"--diagnose", "--profile", "--investigate", "--scrub"} {
 		if !strings.Contains(err.Error(), mode) {
 			t.Errorf("error does not name supported output mode %s: %v", mode, err)
 		}

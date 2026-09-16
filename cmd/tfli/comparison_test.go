@@ -66,9 +66,9 @@ func TestCompareValidationPrecedesInputAndOutputAccess(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"diagnose conflict", []string{"--compare", "--diagnose"}, "pass only one of --diagnose, --profile, --scrub, or --compare"},
-		{"profile conflict", []string{"--compare", "--profile"}, "pass only one of --diagnose, --profile, --scrub, or --compare"},
-		{"scrub conflict", []string{"--compare", "--scrub"}, "pass only one of --diagnose, --profile, --scrub, or --compare"},
+		{"diagnose conflict", []string{"--compare", "--diagnose"}, "pass only one of --diagnose, --profile, --investigate, --scrub, or --compare"},
+		{"profile conflict", []string{"--compare", "--profile"}, "pass only one of --diagnose, --profile, --investigate, --scrub, or --compare"},
+		{"scrub conflict", []string{"--compare", "--scrub"}, "pass only one of --diagnose, --profile, --investigate, --scrub, or --compare"},
 		{"scrub values", []string{"--compare", "--scrub-values=values.txt"}, "--scrub-values applies only to --scrub"},
 		{"negative limit", []string{"--compare", "--limit=-1"}, "--limit must be non-negative"},
 		{"empty format", []string{"--compare", "--format="}, "--format must be text or json"},

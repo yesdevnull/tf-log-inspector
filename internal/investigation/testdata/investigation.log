@@ -1,0 +1,10 @@
+{"@level":"info","@timestamp":"2026-09-15T00:00:00.123456789Z","type":"apply_start","hook":{"resource":{"addr":"aws_instance.zero"},"action":"create"}}
+{"@level":"info","@timestamp":"2026-09-15T00:00:00.223456789Z","type":"apply_complete","hook":{"resource":{"addr":"aws_instance.zero"},"action":"create","elapsed_seconds":0}}
+{"@level":"info","type":"planned_change","change":{"resource":{"addr":"aws_instance.pending"},"action":"create"}}
+{"@level":"info","type":"change_summary","changes":{"change":0,"operation":"plan"}}
+{"@level":"info","type":"apply_start","hook":{"resource":{"addr":"aws_instance.pending"},"action":"create"}}
+Warning: literal `code` <tag> [label](target)
+
+  with aws_instance.pending,
+
+No completion was captured.

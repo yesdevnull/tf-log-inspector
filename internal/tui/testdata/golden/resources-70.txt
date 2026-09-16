@@ -14,10 +14,10 @@
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m max: 2.0s           [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m observed resource   [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m mean: 1.5s          [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m Duration sources    [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m and qualifications: [2m│[0m
-[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m e evidence.         [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m Press e to inspect  [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m duration sources    [2m│[0m
+[36m│[0m                                            [36m│[0m[2m [0m[2m│[0m and qualifications. [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m
 [36m│[0m                                            [36m│[0m[2m [0m[2m│[0m                     [2m│[0m

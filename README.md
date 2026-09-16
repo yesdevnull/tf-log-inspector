@@ -116,6 +116,8 @@ These are development builds; version-tag publishing is not configured.
     tfli --profile -o profile.txt plan.log
     tfli --profile --format json run.log
     tfli --profile --format json -o profile.json run.log
+    tfli --investigate plan.log
+    tfli --investigate --format json -o investigation.json plan.log
     tfli --compare [--format text] [--limit N] [-o comparison.txt] before.log after.log
     tfli --compare --format json [-o comparison.json] before.log after.log
     tfli --scrub -o sanitised.log plan.log
@@ -149,10 +151,10 @@ candidates to avoid double-counting. CLI operations retain their displayed
 duration resolution and physical source lines, but have no timeline positions.
 
 Use `v` to inspect the selected resource's event history, or the whole capture
-when no resource row is selected. Events stay in physical file order, including
-starts, progress, completions and diagnostics. CLI events have source lines but
-no invented timestamps. `Enter` opens the selected event's source; `Esc` returns
-to the panel and then to the investigation.
+when no resource row is selected. History covers starts, progress, completions
+and diagnostics, retaining their original physical source locations. CLI events
+have source lines but no invented timestamps. `Enter` opens the selected event's
+source; `Esc` returns to the panel and then to the investigation.
 
 `p` opens whole-capture plan outcomes, keeping observed drift separate from
 planned changes. Explicit zero summary counts remain zero; absent counts and
@@ -162,6 +164,30 @@ of an incomplete capture or lifecycle, not proof of a hung operation, and do not
 enter completed duration rankings. Ordinary CLI refresh messages do not promise
 a completion marker and are excluded from this list. From either panel, `r`
 opens the selected resource's event history.
+
+`d` opens grouped diagnostics, including plain CLI warnings and errors. `M`
+opens milestones for observed activity and summaries; these do not imply
+exclusive execution phases. Progress and repeated diagnostics appear in compact
+groups. Space expands the selected group to make each original observation
+available for a source jump.
+
+Within any event, outcome, incomplete, diagnostic or milestone panel, `/`
+searches literal text, `f` cycles event kinds, and `s` cycles severity. These
+filters narrow event evidence independently of the timing facets. Expanded
+groups and the exported event list contain only matching observations; clear
+the filters to see all original observations. Separate incomplete-operation
+summaries retain operation context. `?` opens
+the full key guide and `Esc` returns to the panel. Press `x`,
+then `m` for Markdown or `j` for JSON, enter a destination and press `Enter` to
+export that exact investigation. `Esc` cancels without writing. TUI exports
+refuse existing destinations, including the input file and its aliases. The
+report records the panel, query, event facets, selected source reference, and
+the separate timing selection.
+
+The command-line `--investigate` mode exports the whole capture. Markdown is the
+default; `--format json` emits the [investigation JSON v1 contract](docs/investigation-json-v1.md).
+Both forms contain unmasked resource addresses and observed log evidence, so
+review them before sharing.
 
 The top tab bar highlights the active view; its number keys switch views.
 `Tab` moves the arrow and accented panel border to the pane receiving keyboard
